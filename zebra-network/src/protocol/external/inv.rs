@@ -1,6 +1,9 @@
 //! Inventory items for the Zcash network protocol.
 
-use std::io::{Read, Write};
+use std::{
+    cmp::min,
+    io::{Read, Write},
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -176,11 +179,20 @@ impl ZcashDeserialize for InventoryHash {
 /// The minimum serialized size of an [`InventoryHash`].
 pub(crate) const MIN_INV_HASH_SIZE: usize = 36;
 
+/// The maximum number of transaction inventory items in a network message.
+/// We also use this limit for block inventory, because it is typically much smaller.
+///
+/// Same as `MAX_INV_SZ` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/net.h#L50>
+pub const MAX_TX_INV_IN_MESSAGE: u64 = 50_000;
+
 impl TrustedPreallocate for InventoryHash {
     fn max_allocation() -> u64 {
         // An Inventory hash takes at least 36 bytes, and we reserve at least one byte for the
         // Vector length so we can never receive more than ((MAX_PROTOCOL_MESSAGE_LEN - 1) / 36) in
         // a single message
-        ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_INV_HASH_SIZE) as u64
+        let message_size_limit = ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_INV_HASH_SIZE) as u64;
+
+        min(message_size_limit, MAX_TX_INV_IN_MESSAGE)
     }
 }

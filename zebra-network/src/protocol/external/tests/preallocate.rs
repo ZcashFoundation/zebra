@@ -1,6 +1,6 @@
 //! Tests for trusted preallocation during deserialization.
 
-use std::env;
+use std::{cmp::min, env};
 
 use proptest::prelude::*;
 
@@ -16,7 +16,7 @@ use crate::{
     meta_addr::MetaAddr,
     protocol::external::{
         addr::{AddrV1, AddrV2, ADDR_V1_SIZE, ADDR_V2_MIN_SIZE},
-        inv::InventoryHash,
+        inv::{InventoryHash, MAX_TX_INV_IN_MESSAGE},
     },
 };
 
@@ -63,7 +63,10 @@ proptest! {
         // Check that our smallest_disallowed_vec is only one item larger than the limit
         prop_assert!(((smallest_disallowed_vec.len() - 1) as u64) == InventoryHash::max_allocation());
         // Check that our smallest_disallowed_vec is too big to fit in a Zcash message.
-        prop_assert!(smallest_disallowed_serialized.len() > MAX_PROTOCOL_MESSAGE_LEN);
+        //
+        // Special case: Zcash has a slightly smaller limit for transaction invs,
+        // so we use it for all invs.
+        prop_assert!(smallest_disallowed_serialized.len() > min(MAX_PROTOCOL_MESSAGE_LEN, usize::try_from(MAX_TX_INV_IN_MESSAGE).expect("fits in usize")));
 
         // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
         smallest_disallowed_vec.pop();

@@ -120,11 +120,28 @@ pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
     Ok(vec)
 }
 
+/// `zcash_deserialize_external_count`, specialised for [`String`].
+/// The external count is in bytes. (Not UTF-8 characters.)
+///
+/// This allows us to optimize the inner loop into a single call to `read_exact()`.
+///
+/// This function has a `zcash_` prefix to alert the reader that the
+/// serialization in use is consensus-critical serialization, rather than
+/// some other kind of serialization.
+pub fn zcash_deserialize_string_external_count<R: io::Read>(
+    external_byte_count: usize,
+    reader: R,
+) -> Result<String, SerializationError> {
+    let bytes = zcash_deserialize_bytes_external_count(external_byte_count, reader)?;
+
+    String::from_utf8(bytes).map_err(|_| SerializationError::Parse("invalid utf-8"))
+}
+
 /// Read a Bitcoin-encoded UTF-8 string.
 impl ZcashDeserialize for String {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        let bytes: Vec<_> = Vec::zcash_deserialize(reader)?;
-        String::from_utf8(bytes).map_err(|_| SerializationError::Parse("invalid utf-8"))
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        zcash_deserialize_string_external_count(byte_count.into(), reader)
     }
 }
 

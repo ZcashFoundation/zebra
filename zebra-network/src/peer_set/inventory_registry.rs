@@ -3,14 +3,13 @@
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
 
 use std::{
-    collections::HashMap,
-    convert::TryInto,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use futures::{FutureExt, Stream, StreamExt};
+use indexmap::IndexMap;
 use tokio::{
     sync::broadcast,
     time::{self, Instant},
@@ -34,6 +33,40 @@ pub mod update;
 
 #[cfg(test)]
 mod tests;
+
+/// The maximum number of inventory hashes we will track from a single peer.
+///
+/// # Security
+///
+/// This limits known memory denial of service attacks like <https://invdos.net/> to a total of:
+/// ```text
+/// 1000 inventory * 2 maps * 32-64 bytes per inventory = less than 1 MB
+/// 1000 inventory * 70 peers * 2 maps * 6-18 bytes per address = up to 3 MB
+/// ```
+///
+/// Since the inventory registry is an efficiency optimisation, which falls back to a
+/// random peer, we only need to track a small number of hashes for available inventory.
+///
+/// But we want to be able to track a significant amount of missing inventory,
+/// to limit queries for globally missing inventory.
+//
+// TODO: split this into available (25) and missing (1000 or more?)
+pub const MAX_INV_PER_MAP: usize = 1000;
+
+/// The maximum number of peers we will track inventory for.
+///
+/// # Security
+///
+/// This limits known memory denial of service attacks. See [`MAX_INV_PER_MAP`] for details.
+///
+/// Since the inventory registry is an efficiency optimisation, which falls back to a
+/// random peer, we only need to track a small number of peers per inv for available inventory.
+///
+/// But we want to be able to track missing inventory for almost all our peers,
+/// so we only query a few peers for inventory that is genuinely missing from the network.
+//
+// TODO: split this into available (25) and missing (70)
+pub const MAX_PEERS_PER_INV: usize = 70;
 
 /// A peer inventory status, which tracks a hash for both available and missing inventory.
 pub type InventoryStatus<T> = InventoryResponse<T, T>;
@@ -59,10 +92,12 @@ type InventoryMarker = InventoryStatus<()>;
 pub struct InventoryRegistry {
     /// Map tracking the latest inventory status from the current interval
     /// period.
-    current: HashMap<InventoryHash, HashMap<SocketAddr, InventoryMarker>>,
+    //
+    // TODO: split maps into available and missing, so we can limit them separately.
+    current: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
 
     /// Map tracking inventory statuses from the previous interval period.
-    prev: HashMap<InventoryHash, HashMap<SocketAddr, InventoryMarker>>,
+    prev: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -99,7 +134,17 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+
+        // # Security
+        //
+        // Don't send more hashes than we're going to store.
+        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
+        //
+        //  This limits known memory denial of service attacks to:
+        // `1000 hashes * 200 peers/channel capacity * 32-64 bytes = up to 12 MB`
+        hashes.truncate(MAX_INV_PER_MAP);
+
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Available((hashes, peer)))
@@ -110,7 +155,14 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+
+        // # Security
+        //
+        // Don't send more hashes than we're going to store.
+        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
+        hashes.truncate(MAX_INV_PER_MAP);
+
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Missing((hashes, peer)))
@@ -149,8 +201,15 @@ impl InventoryRegistry {
 
         // Don't do an immediate rotation, current and prev are already empty.
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
-        // SECURITY: if the rotation time is late, delay future rotations by the same amount
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        // # Security
+        //
+        // If the rotation time is late, execute as many ticks as needed to catch up.
+        // This is a tradeoff between memory usage and quickly accessing remote data
+        // under heavy load. Bursting prioritises lower memory usage.
+        //
+        // Skipping or delaying could keep peer inventory in memory for a longer time,
+        // further increasing memory load or delays due to virtual memory swapping.
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Burst);
 
         Self {
             current: Default::default(),
@@ -206,6 +265,17 @@ impl InventoryRegistry {
             .is_some()
     }
 
+    /// Returns an iterator over peer inventory status hashes.
+    ///
+    /// Yields current statuses first, then previously rotated statuses.
+    /// This can include multiple statuses for the same hash.
+    #[allow(dead_code)]
+    pub fn status_hashes(
+        &self,
+    ) -> impl Iterator<Item = (&InventoryHash, &IndexMap<SocketAddr, InventoryMarker>)> {
+        self.current.iter().chain(self.prev.iter())
+    }
+
     /// Returns a future that polls once for new registry updates.
     #[allow(dead_code)]
     pub fn update(&mut self) -> Update {
@@ -219,8 +289,19 @@ impl InventoryRegistry {
     /// - rotates HashMaps based on interval events
     /// - drains the inv_stream channel and registers all advertised inventory
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
-        // Correctness: Registers the current task for wakeup when the timer next becomes ready.
-        while Pin::new(&mut self.interval).poll_next(cx).is_ready() {
+        // # Correctness
+        //
+        // Registers the current task for wakeup when the timer next becomes ready.
+        //
+        // # Security
+        //
+        // Only rotate one inventory per peer request, to give the next inventory
+        // time to gather some peer advertisements. This is a tradeoff between
+        // memory usage and quickly accessing remote data under heavy load.
+        //
+        // This prevents a burst edge case where all inventory is emptied after
+        // two interval ticks are delayed.
+        if Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
         }
 
@@ -274,13 +355,13 @@ impl InventoryRegistry {
                 "unexpected inventory type: {inv:?} from peer: {addr:?}",
             );
 
-            let current = self.current.entry(inv).or_default();
+            let hash_peers = self.current.entry(inv).or_default();
 
             // # Security
             //
             // Prefer `missing` over `advertised`, so malicious peers can't reset their own entries,
             // and funnel multiple failing requests to themselves.
-            if let Some(old_status) = current.get(&addr) {
+            if let Some(old_status) = hash_peers.get(&addr) {
                 if old_status.is_missing() && new_status.is_available() {
                     debug!(?new_status, ?old_status, ?addr, ?inv, "skipping new status");
                     continue;
@@ -295,7 +376,8 @@ impl InventoryRegistry {
                 );
             }
 
-            let replaced_status = current.insert(addr, new_status);
+            let replaced_status = hash_peers.insert(addr, new_status);
+
             debug!(
                 ?new_status,
                 ?replaced_status,
@@ -303,6 +385,28 @@ impl InventoryRegistry {
                 ?inv,
                 "inserted new status"
             );
+
+            // # Security
+            //
+            // Limit the number of stored peers per hash, removing the oldest entries,
+            // because newer entries are likely to be more relevant.
+            //
+            // TODO: do random or weighted random eviction instead?
+            if hash_peers.len() > MAX_PEERS_PER_INV {
+                // Performance: `MAX_PEERS_PER_INV` is small, so O(n) performance is acceptable.
+                hash_peers.shift_remove_index(0);
+            }
+
+            // # Security
+            //
+            // Limit the number of stored inventory hashes, removing the oldest entries,
+            // because newer entries are likely to be more relevant.
+            //
+            // TODO: do random or weighted random eviction instead?
+            if self.current.len() > MAX_INV_PER_MAP {
+                // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+                self.current.shift_remove_index(0);
+            }
         }
     }
 
