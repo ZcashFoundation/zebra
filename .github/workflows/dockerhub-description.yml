@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@v3.1.2
+        uses: peter-evans/dockerhub-description@v3.3.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
