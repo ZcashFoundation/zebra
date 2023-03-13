@@ -49,7 +49,6 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]

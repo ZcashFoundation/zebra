@@ -7,7 +7,6 @@ use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, long_pol
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]
@@ -30,7 +29,6 @@ impl Default for GetBlockTemplateRequestMode {
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]
@@ -74,7 +72,6 @@ pub enum GetBlockTemplateCapability {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]

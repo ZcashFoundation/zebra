@@ -23,7 +23,6 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]
@@ -129,7 +128,6 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]

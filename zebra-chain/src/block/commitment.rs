@@ -154,7 +154,6 @@ impl Commitment {
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]
@@ -256,7 +255,6 @@ impl FromHex for ChainHistoryMmrRootHash {
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]

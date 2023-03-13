@@ -1006,7 +1006,6 @@ impl TrustedPreallocate for transparent::Output {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]

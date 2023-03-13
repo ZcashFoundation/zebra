@@ -12,7 +12,6 @@ use zebra_script::CachedFfiTransaction;
 #[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes))
 )]

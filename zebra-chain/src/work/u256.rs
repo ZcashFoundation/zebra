@@ -10,7 +10,6 @@ use uint::construct_uint;
 construct_uint! {
     #[cfg_attr(
         feature = "rkyv-serialization",
-        repr(C),
         derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
         archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
     )]

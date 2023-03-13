@@ -36,7 +36,6 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[serde(bound = "C: Constraint + Clone")]
 #[cfg_attr(
     feature = "rkyv-serialization",
-    repr(C),
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
     archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
 )]
