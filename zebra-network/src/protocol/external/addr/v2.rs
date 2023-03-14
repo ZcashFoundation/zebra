@@ -15,8 +15,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
 use zebra_chain::serialization::{
-    CompactSize64, DateTime32, SerializationError, TrustedPreallocate, ZcashDeserialize,
-    ZcashDeserializeInto,
+    zcash_deserialize_bytes_external_count, CompactSize64, DateTime32, SerializationError,
+    TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
 };
 
 use crate::{
@@ -282,18 +282,21 @@ impl ZcashDeserialize for AddrV2 {
         // See the list of reserved network IDs in ZIP 155.
         let network_id = reader.read_u8()?;
 
-        // > CompactSize      The length in bytes of addr.
-        // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
-        let addr: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
-
-        // > uint16  Network port. If not relevant for the network this MUST be 0.
-        let port = reader.read_u16::<BigEndian>()?;
-
-        if addr.len() > MAX_ADDR_V2_ADDR_SIZE {
+        // > CompactSize  The length in bytes of addr.
+        let max_size = MAX_ADDR_V2_ADDR_SIZE as u64; // `MAX_ADDR_V2_ADDR_SIZE` fits in `u64`.
+        let addr_len: CompactSize64 = (&mut reader).zcash_deserialize_into()?;
+        if addr_len > CompactSize64::from(max_size) {
             return Err(SerializationError::Parse(
                 "addr field longer than MAX_ADDR_V2_ADDR_SIZE in addrv2 message",
             ));
         }
+
+        // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
+        let addr: Vec<u8> =
+            zcash_deserialize_bytes_external_count(u64::from(addr_len) as usize, &mut reader)?;
+
+        // > uint16  Network port. If not relevant for the network this MUST be 0.
+        let port = reader.read_u16::<BigEndian>()?;
 
         let ip = if network_id == ADDR_V2_IPV4_NETWORK_ID {
             AddrV2::ip_addr_from_bytes::<ADDR_V2_IPV4_ADDR_SIZE>(addr)?
