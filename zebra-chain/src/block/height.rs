@@ -192,13 +192,12 @@ fn operator_tests() {
     assert_eq!(None, Height(i32::MAX as u32) - -1);
     assert_eq!(None, Height(u32::MAX) - -1);
 
-    // Sub<Height> panics on out of range errors
-    assert_eq!(1, Height(2) - Height(1));
-    assert_eq!(0, Height(1) - Height(1));
-    assert_eq!(-1, Height(0) - Height(1));
-    assert_eq!(-5, Height(2) - Height(7));
-    assert_eq!(Height::MAX_AS_U32 as i32, Height::MAX - Height(0));
-    assert_eq!(1, Height::MAX - Height(Height::MAX_AS_U32 - 1));
-    assert_eq!(-1, Height(Height::MAX_AS_U32 - 1) - Height::MAX);
-    assert_eq!(-(Height::MAX_AS_U32 as i32), Height(0) - Height::MAX);
+    assert_eq!(1, (Height(2) - Height(1)).unwrap().0);
+    assert_eq!(0, (Height(1) - Height(1)).unwrap().0);
+    assert_eq!(None, Height(0) - Height(1));
+    assert_eq!(None, Height(2) - Height(7));
+    assert_eq!(Height::MAX, (Height::MAX - Height(0)).unwrap());
+    assert_eq!(1, (Height::MAX - Height(Height::MAX_AS_U32 - 1)).unwrap().0);
+    assert_eq!(None, Height(Height::MAX_AS_U32 - 1) - Height::MAX);
+    assert_eq!(None, Height(0) - Height::MAX);
 }
