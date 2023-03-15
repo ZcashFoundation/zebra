@@ -1082,21 +1082,18 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let response = if is_block_queued {
-                        Some(BlockLocation::Queue)
-                    } else {
+                    let response = is_block_queued.then_some(BlockLocation::Queue).or_else(|| {
                         read::contains(
                             &read_service.latest_non_finalized_state(),
                             &read_service.db,
                             hash,
                         )
-                    }
-                    .into();
+                    });
 
                     // The work is done in the future.
                     timer.finish(module_path!(), line!(), "Request::Contains");
 
-                    Ok(response)
+                    Ok(Response::BlockLocation(response))
                 }
                 .boxed()
             }

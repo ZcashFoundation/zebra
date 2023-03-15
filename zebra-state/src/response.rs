@@ -90,12 +90,6 @@ pub enum BlockLocation {
     Queue,
 }
 
-impl From<Option<BlockLocation>> for Response {
-    fn from(block_location: Option<BlockLocation>) -> Self {
-        Self::BlockLocation(block_location)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s
