@@ -154,14 +154,14 @@ where
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::Depth(hash))
+                .call(zs::Request::Contains(hash))
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {
-                zs::Response::Depth(Some(depth)) => {
-                    return Err(BlockError::AlreadyInChain(hash, depth).into())
+                zs::Response::BlockLocation(Some(location)) => {
+                    return Err(BlockError::AlreadyInChain(hash, location).into())
                 }
-                zs::Response::Depth(None) => {}
+                zs::Response::BlockLocation(None) => {}
                 _ => unreachable!("wrong response to Request::Depth"),
             }
 

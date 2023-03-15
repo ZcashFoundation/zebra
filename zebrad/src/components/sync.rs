@@ -1057,21 +1057,17 @@ where
 
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
-    ///
-    /// TODO BUG: check if the hash is in any chain (#862)
-    /// Depth only checks the main chain.
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
             .ready()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Depth(hash))
+            .call(zebra_state::Request::Contains(hash))
             .await
             .map_err(|e| eyre!(e))?
         {
-            zs::Response::Depth(Some(_)) => Ok(true),
-            zs::Response::Depth(None) => Ok(false),
+            zs::Response::BlockLocation(loc) => Ok(loc.is_some()),
             _ => unreachable!("wrong response to depth request"),
         }
     }
