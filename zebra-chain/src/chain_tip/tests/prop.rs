@@ -72,7 +72,7 @@ fn estimate_time_difference(
 ) -> Duration {
     let spacing_seconds = active_network_upgrade.target_spacing().num_seconds();
 
-    let height_difference = i64::from(end_height - start_height);
+    let height_difference = (end_height - start_height).map_or(0, |height| height.0.into());
 
     Duration::seconds(height_difference * spacing_seconds)
 }

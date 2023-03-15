@@ -173,7 +173,7 @@ where
         || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
     {
         tracing::info!(
-            estimated_distance_to_chain_tip,
+            ?estimated_distance_to_chain_tip,
             ?local_tip_height,
             "Zebra has not synced to the chain tip. \
              Hint: check your network connection, clock, and time zone settings."
@@ -183,7 +183,7 @@ where
             code: NOT_SYNCED_ERROR_CODE,
             message: format!(
                 "Zebra has not synced to the chain tip, \
-                 estimated distance: {estimated_distance_to_chain_tip}, \
+                 estimated distance: {estimated_distance_to_chain_tip:?}, \
                  local tip: {local_tip_height:?}. \
                  Hint: check your network connection, clock, and time zone settings."
             ),

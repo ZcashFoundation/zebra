@@ -25,15 +25,28 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
         .activation_height(network)
         .expect("blossom activation height should be available");
 
-    if height < SLOW_START_SHIFT {
+    let slow_start_shift_diff = height - SLOW_START_SHIFT;
+    let slow_start_shift_diff = slow_start_shift_diff.unwrap_or_else(|| {
         unreachable!(
             "unsupported block height: checkpoints should handle blocks below {:?}",
             SLOW_START_SHIFT
         )
-    } else if height < blossom_height {
-        let pre_blossom_height: u32 = (height - SLOW_START_SHIFT)
-            .try_into()
-            .expect("height is above slow start, and the difference fits in u32");
+    });
+
+    if let Some(post_blossom_height) = height - blossom_height {
+        // The Blossom height is way above `SLOW_START_SHIFT`.
+        let pre_blossom_height = (blossom_height - SLOW_START_SHIFT)
+            .expect("Blossom height must be above SlowStartShift.")
+            .0;
+        let scaled_pre_blossom_height = pre_blossom_height * BLOSSOM_POW_TARGET_SPACING_RATIO;
+
+        let halving_shift =
+            (scaled_pre_blossom_height + post_blossom_height.0) / POST_BLOSSOM_HALVING_INTERVAL.0;
+
+        // Some far-future shifts can be more than 63 bits
+        1u64.checked_shl(halving_shift)
+    } else {
+        let pre_blossom_height = slow_start_shift_diff.0;
         let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL.0;
 
         let halving_div = 1u64
@@ -41,21 +54,6 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
             .expect("pre-blossom heights produce small shifts");
 
         Some(halving_div)
-    } else {
-        let pre_blossom_height: u32 = (blossom_height - SLOW_START_SHIFT)
-            .try_into()
-            .expect("blossom height is above slow start, and the difference fits in u32");
-        let scaled_pre_blossom_height = pre_blossom_height * BLOSSOM_POW_TARGET_SPACING_RATIO;
-
-        let post_blossom_height: u32 = (height - blossom_height)
-            .try_into()
-            .expect("height is above blossom, and the difference fits in u32");
-
-        let halving_shift =
-            (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL.0;
-
-        // Some far-future shifts can be more than 63 bits
-        1u64.checked_shl(halving_shift)
     }
 }
 
