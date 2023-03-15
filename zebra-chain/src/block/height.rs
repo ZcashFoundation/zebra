@@ -83,18 +83,19 @@ impl Add<Height> for Height {
 }
 
 impl Sub<Height> for Height {
-    type Output = i32;
+    type Output = Option<Height>;
 
-    /// Panics if the inputs or result are outside the valid i32 range.
-    fn sub(self, rhs: Height) -> i32 {
-        // We construct heights from integers without any checks,
-        // so the inputs or result could be out of range.
-        let lhs = i32::try_from(self.0)
-            .expect("out of range input `self`: inputs should be valid Heights");
-        let rhs =
-            i32::try_from(rhs.0).expect("out of range input `rhs`: inputs should be valid Heights");
-        lhs.checked_sub(rhs)
-            .expect("out of range result: valid input heights should yield a valid result")
+    fn sub(self, rhs: Height) -> Self::Output {
+        // Perform the subtraction.
+        let result = self.0.checked_sub(rhs.0)?;
+        let height = Height(result);
+
+        // Check the bounds.
+        if Height::MIN <= height && height <= Height::MAX {
+            Some(height)
+        } else {
+            None
+        }
     }
 }
 
