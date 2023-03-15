@@ -420,6 +420,12 @@ impl Chain {
         self.height_by_hash.get(&hash).cloned()
     }
 
+    /// Returns true is the chain contains the given block hash.
+    /// Returns false otherwise.
+    pub fn contains(&self, hash: &block::Hash) -> bool {
+        self.height_by_hash.contains_key(hash)
+    }
+
     /// Returns the non-finalized tip block height and hash.
     pub fn non_finalized_tip(&self) -> (Height, block::Hash) {
         (

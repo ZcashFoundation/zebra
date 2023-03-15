@@ -52,6 +52,7 @@ use crate::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
         MAX_LEGACY_CHAIN_BLOCKS,
     },
+    response::BlockLocation,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -162,7 +163,7 @@ pub(crate) struct StateService {
 
     /// A set of non-finalized block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
-    sent_non_finalized_block_hashes: SentHashes,
+    sent_blocks: SentHashes,
 
     /// If an invalid block is sent on `finalized_block_write_sender`
     /// or `non_finalized_block_write_sender`,
@@ -408,7 +409,7 @@ impl StateService {
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
             finalized_block_write_sender: Some(finalized_block_write_sender),
             last_sent_finalized_block_hash,
-            sent_non_finalized_block_hashes: SentHashes::default(),
+            sent_blocks: SentHashes::default(),
             invalid_block_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
@@ -468,13 +469,6 @@ impl StateService {
         let queued_prev_hash = finalized.block.header.previous_block_hash;
         let queued_height = finalized.height;
 
-        // If we're close to the final checkpoint, make the block's UTXOs available for
-        // full verification of non-finalized blocks, even when it is in the channel.
-        if self.is_close_to_final_checkpoint(queued_height) {
-            self.sent_non_finalized_block_hashes
-                .add_finalized(&finalized)
-        }
-
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (finalized, rsp_tx);
 
@@ -491,6 +485,10 @@ impl StateService {
             }
 
             self.drain_queue_and_commit_finalized();
+
+            if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
+                self.sent_blocks.prune_by_height(finalized_tip_height);
+            }
         } else {
             // We've finished committing finalized blocks, so drop any repeated queued blocks,
             // and return an error.
@@ -564,9 +562,20 @@ impl StateService {
             .queued_finalized_blocks
             .remove(&self.last_sent_finalized_block_hash)
         {
-            let last_sent_finalized_block_height = queued_block.0.height;
+            let (finalized, _) = &queued_block;
+            let &FinalizedBlock { hash, height, .. } = finalized;
 
-            self.last_sent_finalized_block_hash = queued_block.0.hash;
+            self.last_sent_finalized_block_hash = hash;
+
+            // If we're close to the final checkpoint, make the block's UTXOs available for
+            // full verification of non-finalized blocks, even when it is in the channel.
+            // If we're not close to the final checkpoint, add the hash for checking if
+            // a block is present in a queue when called with `Request::Contains`.
+            if self.is_close_to_final_checkpoint(height) {
+                self.sent_blocks.add_finalized(finalized)
+            } else {
+                self.sent_blocks.add_finalized_hash(hash, height);
+            }
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
@@ -585,10 +594,7 @@ impl StateService {
                         "block commit task exited. Is Zebra shutting down?",
                     );
                 } else {
-                    metrics::gauge!(
-                        "state.checkpoint.sent.block.height",
-                        last_sent_finalized_block_height.0 as f64,
-                    );
+                    metrics::gauge!("state.checkpoint.sent.block.height", height.0 as f64,);
                 };
             }
         }
@@ -643,10 +649,7 @@ impl StateService {
         tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self
-            .sent_non_finalized_block_hashes
-            .contains(&prepared.hash)
-        {
+        if self.sent_blocks.contains(&prepared.hash) {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err(
                 "block has already been sent to be committed to the state".into(),
@@ -724,8 +727,7 @@ impl StateService {
             self.queued_non_finalized_blocks
                 .prune_by_height(finalized_tip_height);
 
-            self.sent_non_finalized_block_hashes
-                .prune_by_height(finalized_tip_height);
+            self.sent_blocks.prune_by_height(finalized_tip_height);
         }
 
         rsp_rx
@@ -733,8 +735,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.sent_non_finalized_block_hashes.contains(hash)
-            || &self.read_service.db.finalized_tip_hash() == hash
+        self.sent_blocks.contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
     }
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
@@ -764,7 +765,7 @@ impl StateService {
                 for queued_child in queued_children {
                     let (PreparedBlock { hash, .. }, _) = queued_child;
 
-                    self.sent_non_finalized_block_hashes.add(&queued_child.0);
+                    self.sent_blocks.add(&queued_child.0);
                     let send_result = non_finalized_block_write_sender.send(queued_child);
 
                     if let Err(SendError(queued)) = send_result {
@@ -785,7 +786,7 @@ impl StateService {
                 }
             }
 
-            self.sent_non_finalized_block_hashes.finish_batch();
+            self.sent_blocks.finish_batch();
         };
     }
 
@@ -806,6 +807,14 @@ impl StateService {
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
+    }
+
+    /// Returns true if the block hash is queued or has been sent to be validated and committed.
+    /// Returns false otherwise.
+    fn is_block_queued(&self, hash: &block::Hash) -> bool {
+        self.queued_non_finalized_blocks.contains(hash)
+            || self.queued_finalized_blocks.contains_key(hash)
+            || self.sent_blocks.contains(hash)
     }
 }
 
@@ -1011,7 +1020,7 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
-                if let Some(utxo) = self.sent_non_finalized_block_hashes.utxo(&outpoint) {
+                if let Some(utxo) = self.sent_blocks.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
@@ -1059,6 +1068,35 @@ impl Service<Request> for StateService {
                     timer.finish(module_path!(), line!(), "AwaitUtxo/waiting");
 
                     response_fut.await
+                }
+                .boxed()
+            }
+
+            // Used by sync, inbound, and block verifier to check if a block is already in the state
+            // before downloading or validating it.
+            Request::Contains(hash) => {
+                let timer = CodeTimer::start();
+
+                let is_block_queued = self.is_block_queued(&hash);
+
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let response = if is_block_queued {
+                        Some(BlockLocation::Queue)
+                    } else {
+                        read::contains(
+                            &read_service.latest_non_finalized_state(),
+                            &read_service.db,
+                            hash,
+                        )
+                    }
+                    .into();
+
+                    // The work is done in the future.
+                    timer.finish(module_path!(), line!(), "Request::Contains");
+
+                    Ok(response)
                 }
                 .boxed()
             }

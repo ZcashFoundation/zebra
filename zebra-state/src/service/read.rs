@@ -34,8 +34,8 @@ pub use block::{
     any_utxo, block, block_header, transaction, transaction_hashes_for_block, unspent_utxo, utxo,
 };
 pub use find::{
-    best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
-    hash_by_height, height_by_hash, next_median_time_past, tip, tip_height,
+    best_tip, block_locator, chain_contains_hash, contains, depth, find_chain_hashes,
+    find_chain_headers, hash_by_height, height_by_hash, next_median_time_past, tip, tip_height,
 };
 pub use tree::{orchard_tree, sapling_tree};
 

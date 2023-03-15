@@ -69,9 +69,31 @@ pub enum Response {
     /// specified block hash.
     BlockHash(Option<block::Hash>),
 
+    /// Response to [`Request::Contains`].
+    BlockLocation(Option<BlockLocation>),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`](Request::CheckBlockProposalValidity)
     ValidBlockProposal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// An enum of block stores in the state where a block hash could be found.
+pub enum BlockLocation {
+    /// Block is in the best chain.
+    BestChain,
+
+    /// Block is in a side chain.
+    SideChain,
+
+    /// Block is queued to be validated and committed.
+    Queue,
+}
+
+impl From<Option<BlockLocation>> for Response {
+    fn from(block_location: Option<BlockLocation>) -> Self {
+        Self::BlockLocation(block_location)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
