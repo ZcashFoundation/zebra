@@ -1148,7 +1148,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(Height(0)));
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -1251,7 +1251,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mempool.expect_no_requests().await;
 
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(Height(200)));
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(None)
         .await
@@ -1264,7 +1264,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mock_sync_status.set_is_close_to_tip(false);
 
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(Height(0)));
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(None)
         .await
@@ -1275,7 +1275,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         ErrorCode::ServerError(-10)
     );
 
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(Height(200)));
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(None)
         .await
@@ -1543,7 +1543,7 @@ async fn rpc_getdifficulty() {
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(Height(0)));
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(

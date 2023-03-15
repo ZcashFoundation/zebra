@@ -12,7 +12,7 @@ use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
-    block::Hash,
+    block::{self, Hash},
     chain_sync_status::MockSyncStatus,
     chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
@@ -123,7 +123,7 @@ pub async fn test_responses<State, ReadState>(
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(block::Height(0)));
 
     let mock_address_book =
         MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(SocketAddr::new(
