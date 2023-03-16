@@ -7,7 +7,9 @@
 //! Example usage:
 //!
 //! (from the root directory of the Zebra repo)
+//! ```console
 //! GITHUB_TOKEN={valid_github_access_token} search-todos
+//! ```
 //!
 //! Example output:
 //!
