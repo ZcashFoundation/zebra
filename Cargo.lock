@@ -5943,6 +5943,8 @@ version = "1.0.0-beta.21"
 dependencies = [
  "color-eyre",
  "hex",
+ "regex",
+ "reqwest",
  "serde_json",
  "structopt",
  "thiserror",

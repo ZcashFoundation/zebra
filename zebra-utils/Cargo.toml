@@ -16,8 +16,15 @@ name = "block-template-to-proposal"
 path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
+[[bin]]
+name = "search-todos"
+path = "src/bin/search-todos/main.rs"
+required-features = ["search-todos"]
+
 [features]
 default = []
+
+search-todos = ["regex", "reqwest/blocking"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -40,6 +47,10 @@ serde_json = "1.0.94"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.16"
 thiserror = "1.0.40"
+
+# These crates are needed for the search-todos binary
+regex = { version = "1.7.1", optional = true }
+reqwest =  { version = "0.11.14", features = ["blocking"], optional = true }
 
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }
