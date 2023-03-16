@@ -13,7 +13,7 @@
 //!
 //! Example output:
 //!
-//! > Found 3 posssible issue refs, checking Github issue statuses..
+//! > Found 3 possible issue refs, checking Github issue statuses..
 //! >
 //! > --------------------------------------
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:130:57
@@ -31,9 +31,10 @@
 
 use std::{
     env,
+    ffi::OsStr,
     fs::{self, File},
     io::{self, BufRead},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use color_eyre::eyre::Result;
@@ -47,6 +48,15 @@ use zebra_utils::init_tracing;
 
 const GITHUB_TOKEN_ENV_KEY: &str = "GITHUB_TOKEN";
 
+const VALID_EXTENSIONS: [&str; 4] = ["rs", "yml", "yaml", "toml"];
+
+fn check_file_ext_and_path(ext: &OsStr, path: &Path) -> bool {
+    VALID_EXTENSIONS
+        .into_iter()
+        .any(|valid_extension| valid_extension == ext)
+        && !path.starts_with("/target/")
+}
+
 fn search_directory(path: &PathBuf) -> Result<Vec<PathBuf>> {
     Ok(fs::read_dir(path)?
         .filter_map(|entry| {
@@ -56,7 +66,7 @@ fn search_directory(path: &PathBuf) -> Result<Vec<PathBuf>> {
                 search_directory(&path).ok()
             } else if path.is_file() {
                 match path.extension() {
-                    Some(ext) if ext == "rs" && !path.starts_with("/target/") => Some(vec![path]),
+                    Some(ext) if check_file_ext_and_path(ext, &path) => Some(vec![path]),
                     _ => None,
                 }
             } else {
@@ -119,7 +129,9 @@ fn main() -> Result<()> {
 
     let num_possible_issue_refs = possible_issue_refs.len();
 
-    println!("\nFound {num_possible_issue_refs} posssible issue refs, checking Github issue statuses..\n");
+    println!(
+        "\nFound {num_possible_issue_refs} possible issue refs, checking Github issue statuses..\n"
+    );
 
     // check if issues are closed
 
@@ -142,7 +154,7 @@ fn main() -> Result<()> {
     let mut auth_value = HeaderValue::from_str(&format!("Bearer {github_token}"))?;
     let accept_value = HeaderValue::from_static("application/vnd.github+json");
     let github_api_version_value = HeaderValue::from_static("2022-11-28");
-    let user_agent_value = HeaderValue::from_static("search-todos");
+    let user_agent_value = HeaderValue::from_static("search-issue-refs");
 
     auth_value.set_sensitive(true);
 
