@@ -112,6 +112,7 @@ pub mod application;
 pub mod commands;
 pub mod components;
 pub mod config;
+pub mod constants;
 pub mod prelude;
 
 #[cfg(feature = "sentry")]
