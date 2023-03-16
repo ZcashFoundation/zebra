@@ -30,7 +30,7 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -62,7 +62,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
 
@@ -113,7 +113,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
 
@@ -154,7 +154,7 @@ jobs:
       RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
 
@@ -182,7 +182,7 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
       - uses: reviewdog/action-actionlint@v1.36.0
         with:
           level: warning
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
       - uses: plettich/action-codespell@master
         with:
           github_token: ${{ secrets.github_token }}
