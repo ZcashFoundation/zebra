@@ -2,7 +2,7 @@
 //!
 //! Requires a Github access token.
 //!
-//! See https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token
+//! See <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token>
 //!
 //! Example usage:
 //!
