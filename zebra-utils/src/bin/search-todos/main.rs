@@ -11,7 +11,7 @@
 //!
 //! Example output:
 //!
-//! > Found 2 posssible issue refs, checking Github issue statuses..
+//! > Found 3 posssible issue refs, checking Github issue statuses..
 //! >
 //! > --------------------------------------
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:130:57
@@ -25,7 +25,7 @@
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:445:61
 //! > https://github.com/ZcashFoundation/zebra/issues/1140
 //! >
-//! > Found 2 references to closed issues.
+//! > Found 3 references to closed issues.
 
 use std::{
     env,
