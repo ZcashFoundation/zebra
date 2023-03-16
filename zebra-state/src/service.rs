@@ -894,13 +894,12 @@ impl Service<Request> for StateService {
     #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
+        let timer = CodeTimer::start();
 
         match req {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             Request::CommitBlock(prepared) => {
-                let timer = CodeTimer::start();
-
                 self.assert_block_can_be_validated(&prepared);
 
                 self.pending_utxos
@@ -948,8 +947,6 @@ impl Service<Request> for StateService {
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
             Request::CommitFinalizedBlock(finalized) => {
-                let timer = CodeTimer::start();
-
                 // # Consensus
                 //
                 // A non-finalized block verification could have called AwaitUtxo
@@ -995,8 +992,6 @@ impl Service<Request> for StateService {
             // Uses pending_utxos and queued_non_finalized_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
             Request::AwaitUtxo(outpoint) => {
-                let timer = CodeTimer::start();
-
                 // Prepare the AwaitUtxo future from PendingUxtos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 // Only instrument `response_fut`, the ReadStateService already
@@ -1151,12 +1146,11 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
+        let timer = CodeTimer::start();
 
         match req {
             // Used by the StateService.
             ReadRequest::Tip => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1180,8 +1174,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1205,8 +1197,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::BestChainNextMedianTimePast => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1234,8 +1224,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the get_block (raw) RPC and the StateService.
             ReadRequest::Block(hash_or_height) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1263,8 +1251,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1288,8 +1274,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the getblock (verbose) RPC.
             ReadRequest::TransactionIdsForBlock(hash_or_height) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1322,8 +1306,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::UnspentBestChainUtxo(outpoint) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1351,8 +1333,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Manually used by the StateService to implement part of AwaitUtxo.
             ReadRequest::AnyChainUtxo(outpoint) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1376,8 +1356,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::BlockLocator => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1403,8 +1381,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1434,8 +1410,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::FindBlockHeaders { known_blocks, stop } => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1469,8 +1443,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::SaplingTree(hash_or_height) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1497,8 +1469,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::OrchardTree(hash_or_height) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1526,8 +1496,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1558,8 +1526,6 @@ impl Service<ReadRequest> for ReadStateService {
                 addresses,
                 height_range,
             } => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1594,8 +1560,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_address_utxos RPC.
             ReadRequest::UtxosByAddresses(addresses) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1623,8 +1587,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 let span = Span::current();
@@ -1664,8 +1626,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the get_block and get_block_hash RPCs.
             ReadRequest::BestChainBlockHash(height) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1697,8 +1657,6 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by get_block_template RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
                 let latest_non_finalized_state = self.latest_non_finalized_state();
 
@@ -1739,8 +1697,6 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { num_blocks, height } => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1794,8 +1750,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(prepared) => {
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
