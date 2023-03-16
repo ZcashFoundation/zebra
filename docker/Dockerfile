@@ -79,13 +79,9 @@ ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
 ARG CHECKPOINT_SYNC
 ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 
-# Build zebrad with getblocktemplate-rpcs feature
-ARG WITH_MINING_RPCS
-ENV EXTRA_FEATURES ${WITH_MINING_RPCS:+",getblocktemplate-rpcs"}
-
-# Build zebra tests with lightwalletd-grpc-tests feature
-ARG WITH_LIGHTWALLETD_TESTS=${WITH_MINING_RPCS:-true}
-ENV EXTRA_TEST_FEATURES ${WITH_LIGHTWALLETD_TESTS:+",lightwalletd-grpc-tests"}
+# Build zebrad with these features
+ARG FEATURES
+ARG TEST_FEATURES="lightwalletd-grpc-tests"
 
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
@@ -108,10 +104,10 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # This is the caching Docker layer for Rust!
 #
 # TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features sentry${EXTRA_TEST_FEATURES}${EXTRA_FEATURES} --workspace --recipe-path recipe.json
+RUN cargo chef cook --release --features "sentry ${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
 COPY . .
-RUN cargo test --locked --release --features ${EXTRA_TEST_FEATURES:1}${EXTRA_FEATURES} --workspace --no-run
+RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 
 COPY ./docker/entrypoint.sh /
@@ -126,11 +122,11 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
-RUN cargo chef cook --release --features sentry${EXTRA_FEATURES} --recipe-path recipe.json
+RUN cargo chef cook --release --features "sentry ${FEATURES}" --recipe-path recipe.json
 
 COPY . .
 # Build zebra
-RUN cargo build --locked --release --features sentry${EXTRA_FEATURES} --package zebrad --bin zebrad
+RUN cargo build --locked --release --features "sentry ${FEATURES}" --package zebrad --bin zebrad
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #

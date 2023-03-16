@@ -45,7 +45,8 @@ jobs:
       tag_suffix: .experimental
       network: Testnet
       rpc_port: '18232'
-      with_mining_rpcs: true
+      features: "getblocktemplate-rpcs"
+      test_features: ""
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'

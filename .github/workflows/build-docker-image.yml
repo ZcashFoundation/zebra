@@ -37,9 +37,12 @@ on:
         required: false
         type: string
         default: info
-      with_mining_rpcs:
+      features:
         required: false
-        type: boolean
+        type: string
+      test_features: 
+        required: false
+        type: string
       rpc_port: 
         required: false
         type: string
@@ -158,7 +161,8 @@ jobs:
             ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
-            WITH_MINING_RPCS=${{ inputs.with_mining_rpcs }}
+            FEATURES=${{ inputs.features }}
+            TEST_FEATURES=${{ inputs.test_features }}
             RPC_PORT=${{ inputs.rpc_port }}
           push: true
           # To improve build speeds, for each branch we push an additional image to the registry,
