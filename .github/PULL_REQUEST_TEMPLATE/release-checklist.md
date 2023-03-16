@@ -114,6 +114,14 @@ From "Keep a Changelog":
 
 </details>
 
+## Release hardcoded constants
+
+Zebra has release information needed to know if a version is too old. Please update [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/constants.rs):
+
+- [ ] `RELEASE_NAME` (required) - Replace with the new release name here, for example `Zebra 1.0.0-rc.5`.
+- [ ] `RELEASE_DATE` (required) - Replace with the estimated date where the release will be created, for example `2023-02-23 00:00:00 +00:00`
+- [ ] `RELEASE_DURATION_DAYS` (optional) - Replace if you want the release to be valid for a different numbers of days into the future.
+
 ## Create the Release
 
 ### Create the Release PR
@@ -121,7 +129,7 @@ From "Keep a Changelog":
 After you have the version increments, the updated checkpoints and the updated changelog:
 
 - [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
-- [ ] Push the version increments and the updated changelog into a branch
+- [ ] Push the version increments, the updated changelog and the release constants into a branch
       (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
