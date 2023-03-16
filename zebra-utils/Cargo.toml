@@ -17,14 +17,14 @@ path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
 [[bin]]
-name = "search-todos"
-path = "src/bin/search-todos/main.rs"
-required-features = ["search-todos"]
+name = "search-issue-refs"
+path = "src/bin/search-issue-refs/main.rs"
+required-features = ["search-issue-refs"]
 
 [features]
 default = []
 
-search-todos = ["regex", "reqwest/blocking"]
+search-issue-refs = ["regex", "reqwest/blocking"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 

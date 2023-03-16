@@ -1,4 +1,4 @@
-//! Searches local directory for issue references near TODO comments.
+//! Searches local directory for references to issues that are closed.
 //!
 //! Requires a Github access token.
 //!
@@ -8,7 +8,7 @@
 //!
 //! (from the root directory of the Zebra repo)
 //! ```console
-//! GITHUB_TOKEN={valid_github_access_token} search-todos
+//! GITHUB_TOKEN={valid_github_access_token} search-issue-refs
 //! ```
 //!
 //! Example output:
@@ -17,15 +17,15 @@
 //! >
 //! > --------------------------------------
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:130:57
-//! > https://github.com/ZcashFoundation/zebra/issues/1140
+//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
 //! >
 //! > --------------------------------------
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:157:51
-//! > https://github.com/ZcashFoundation/zebra/issues/1140
+//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
 //! >
 //! > --------------------------------------
 //! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:445:61
-//! > https://github.com/ZcashFoundation/zebra/issues/1140
+//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
 //! >
 //! > Found 3 references to closed issues.
 
@@ -83,7 +83,7 @@ struct PossibleIssueRef {
     id: String,
 }
 
-/// Process entry point for `search-todos`
+/// Process entry point for `search-issue-refs`
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 fn main() -> Result<()> {
     init_tracing();
