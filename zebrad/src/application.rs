@@ -420,6 +420,7 @@ impl Application for ZebradApp {
 
             info!(config_path = ?command.config_path(), config = ?cfg_ref, "loaded zebrad config");
         }
+
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
         // short commit hash, and the unique part of the network name.
