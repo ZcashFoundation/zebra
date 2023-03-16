@@ -91,7 +91,8 @@ fn main() -> Result<()> {
 
     let file_paths = search_directory(&".".into())?;
 
-    let issue_regex = Regex::new(r"#\d{4}").unwrap();
+    let issue_regex =
+        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)\d{4}").unwrap();
 
     let mut possible_issue_refs: Vec<PossibleIssueRef> = vec![];
 
@@ -103,11 +104,14 @@ fn main() -> Result<()> {
             let line = line?;
 
             possible_issue_refs.extend(issue_regex.find_iter(&line).map(|potential_issue_ref| {
+                let matching_text = potential_issue_ref.as_str();
+                let id = matching_text[matching_text.len() - 4..].to_string();
+
                 PossibleIssueRef {
                     file_path: file_path.clone(),
                     line_number: line_idx + 1,
-                    column: potential_issue_ref.start(),
-                    id: potential_issue_ref.as_str()[1..].to_string(),
+                    column: potential_issue_ref.start() + 1,
+                    id,
                 }
             }))
         }
