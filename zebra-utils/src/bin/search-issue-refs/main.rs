@@ -40,10 +40,11 @@ use std::{
 use color_eyre::eyre::Result;
 use regex::Regex;
 use reqwest::{
-    blocking::ClientBuilder,
     header::{self, HeaderMap, HeaderValue},
+    ClientBuilder,
 };
 
+use tokio::task::JoinSet;
 use zebra_utils::init_tracing;
 
 const GITHUB_TOKEN_ENV_KEY: &str = "GITHUB_TOKEN";
@@ -95,7 +96,8 @@ struct PossibleIssueRef {
 
 /// Process entry point for `search-issue-refs`
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     init_tracing();
     color_eyre::install()?;
 
@@ -133,7 +135,7 @@ fn main() -> Result<()> {
         "\nFound {num_possible_issue_refs} possible issue refs, checking Github issue statuses..\n"
     );
 
-    // check if issues are closed
+    // check if issues are closed on Github
 
     let github_token = match env::vars().find(|(key, _)| key == GITHUB_TOKEN_ENV_KEY) {
         Some((_, github_token)) => github_token,
@@ -165,30 +167,49 @@ fn main() -> Result<()> {
 
     let client = ClientBuilder::new().default_headers(headers).build()?;
 
-    possible_issue_refs.retain(|possible_issue_ref| {
-        client
+    let mut github_api_requests = JoinSet::new();
+    let mut num_possible_issue_refs = 0;
+
+    for possible_issue_ref in possible_issue_refs {
+        let request = client
             .get(github_issue_api_url(&possible_issue_ref.id))
-            .send()
-            .ok()
-            .and_then(|response| response.text().ok())
-            .and_then(|response_text| serde_json::from_str(&response_text).ok())
-            .map(|response_json: serde_json::Value| {
-                serde_json::Value::Null != response_json["closed_at"]
-            })
-            .unwrap_or(false)
-    });
+            .send();
+        github_api_requests.spawn(async move { (request.await, possible_issue_ref) });
+    }
 
-    let num_possible_issue_refs = possible_issue_refs.len();
+    while let Some(res) = github_api_requests.join_next().await {
+        let (
+            res,
+            PossibleIssueRef {
+                file_path,
+                line_number,
+                column,
+                id,
+            },
+        ) = if let Ok((Ok(res), issue_ref)) = res {
+            (res, issue_ref)
+        } else {
+            println!("warning: no response from github api");
+            continue;
+        };
 
-    for PossibleIssueRef {
-        file_path,
-        line_number,
-        column,
-        id,
-        ..
-    } in &possible_issue_refs
-    {
-        let github_url = github_issue_url(id);
+        let Ok(text) = res.text().await else {
+            println!("warning: failed to get text from response");
+            continue;
+        };
+
+        let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
+            println!("warning: failed to get 'closed_at' field from response");
+            continue;
+        };
+
+        if json["closed_at"] == serde_json::Value::Null {
+            continue;
+        };
+
+        num_possible_issue_refs += 1;
+
+        let github_url = github_issue_url(&id);
         let file_path = file_path
             .to_str()
             .expect("paths from read_dir should be valid unicode");
