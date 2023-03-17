@@ -410,6 +410,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5dd14596c0e5b954530d0e6f1fd99b89c03e313aa2086e8da4303701a09e1cf"
 
 [[package]]
+name = "bitflags-serde-legacy"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfecf9fa72400de980120c09d7027140daa6541292245ff61a4ad3b89771680e"
+dependencies = [
+ "bitflags 2.0.1",
+ "serde",
+]
+
+[[package]]
 name = "bitvec"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5679,6 +5689,7 @@ name = "zebra-chain"
 version = "1.0.0-beta.21"
 dependencies = [
  "bitflags 2.0.1",
+ "bitflags-serde-legacy",
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",

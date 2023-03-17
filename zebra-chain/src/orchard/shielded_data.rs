@@ -223,7 +223,7 @@ bitflags! {
     ///
     /// ([`bitflags`](https://docs.rs/bitflags/1.2.1/bitflags/index.html) restricts its values to the
     /// set of valid flags)
-    #[derive(Deserialize, Serialize)]
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     pub struct Flags: u8 {
         /// Enable spending non-zero valued Orchard notes.
         ///
@@ -231,6 +231,22 @@ bitflags! {
         const ENABLE_SPENDS = 0b00000001;
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
+    }
+}
+
+// Deriving `serde::Serialize` to the `Flags` struct will not work anymore in bitflag v2,
+// this is a manual implementation using `bitflags_serde_legacy` crate.
+impl serde::Serialize for Flags {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        bitflags_serde_legacy::serialize(self, "Flags", serializer)
+    }
+}
+
+// Deriving `serde::Deserialize` to the `Flags` struct will not work anymore in bitflag v2,
+// this is a manual implementation using `bitflags_serde_legacy` crate.
+impl<'de> serde::Deserialize<'de> for Flags {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        bitflags_serde_legacy::deserialize("Flags", deserializer)
     }
 }
 
