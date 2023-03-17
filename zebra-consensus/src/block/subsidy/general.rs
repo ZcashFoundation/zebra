@@ -30,7 +30,7 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
             "unsupported block height: checkpoints should handle blocks below {:?}",
             SLOW_START_SHIFT
         )
-    });
+    };
 
     if let Some(post_blossom_height) = height - blossom_height {
         // The Blossom height is way above `SLOW_START_SHIFT`.
