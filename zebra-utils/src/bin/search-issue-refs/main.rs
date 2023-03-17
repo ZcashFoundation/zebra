@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
         };
 
         let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
-            println!("warning: failed to get 'closed_at' field from response");
+            println!("warning: failed to get serde_json::Value from response");
             continue;
         };
 
