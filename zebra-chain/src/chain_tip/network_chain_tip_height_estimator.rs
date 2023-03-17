@@ -87,9 +87,10 @@ impl NetworkChainTipHeightEstimator {
     /// The amount of blocks advanced is then used to extrapolate the amount to advance the
     /// `current_block_time`.
     fn estimate_up_to(&mut self, max_height: block::Height) {
-        let remaining_blocks = i64::from(max_height - self.current_height);
+        let remaining_blocks = max_height - self.current_height;
 
-        if remaining_blocks > 0 {
+        if let Some(remaining_blocks) = remaining_blocks {
+            let remaining_blocks = i64::from(remaining_blocks.0);
             let target_spacing_seconds = self.current_target_spacing.num_seconds();
             let time_to_activation = Duration::seconds(remaining_blocks * target_spacing_seconds);
 
