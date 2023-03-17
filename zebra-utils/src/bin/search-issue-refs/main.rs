@@ -178,17 +178,15 @@ async fn main() -> Result<()> {
     }
 
     while let Some(res) = github_api_requests.join_next().await {
-        let (
-            res,
+        let Ok((
+            Ok(res),
             PossibleIssueRef {
                 file_path,
                 line_number,
                 column,
                 id,
             },
-        ) = if let Ok((Ok(res), issue_ref)) = res {
-            (res, issue_ref)
-        } else {
+        )) = res else {
             println!("warning: no response from github api");
             continue;
         };
