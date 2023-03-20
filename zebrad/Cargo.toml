@@ -132,7 +132,7 @@ tracing = "0.1.37"
 
 metrics = "0.20.1"
 
-dirs = "4.0.0"
+dirs = "5.0.0"
 atty = "0.2.14"
 
 num-integer = "0.1.45"
