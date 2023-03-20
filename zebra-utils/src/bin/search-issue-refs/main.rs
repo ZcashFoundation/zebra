@@ -106,8 +106,9 @@ async fn main() -> Result<()> {
 
     let file_paths = search_directory(&".".into())?;
 
+    // Zebra's github issue numbers could be up to 4 digits
     let issue_regex =
-        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,6})").unwrap();
+        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,4})").unwrap();
 
     let mut possible_issue_refs: Vec<PossibleIssueRef> = vec![];
 
@@ -122,7 +123,6 @@ async fn main() -> Result<()> {
                 let potential_issue_ref = captures.get(2).expect("matches should have 2 captures");
                 let matching_text = potential_issue_ref.as_str();
 
-                println!("{matching_text}");
                 let id =
                     matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..].to_string();
 
