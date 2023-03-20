@@ -1,4 +1,4 @@
-//! Searches local directory for references to issues that are closed.
+//! Recursively searches local directory for references to issues that are closed.
 //!
 //! Requires a Github access token.
 //!
@@ -34,7 +34,7 @@ use std::{
     ffi::OsStr,
     fs::{self, File},
     io::{self, BufRead},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use color_eyre::eyre::Result;
@@ -51,14 +51,17 @@ const GITHUB_TOKEN_ENV_KEY: &str = "GITHUB_TOKEN";
 
 const VALID_EXTENSIONS: [&str; 4] = ["rs", "yml", "yaml", "toml"];
 
-fn check_file_ext_and_path(ext: &OsStr, path: &Path) -> bool {
+fn check_file_ext(ext: &OsStr) -> bool {
     VALID_EXTENSIONS
         .into_iter()
         .any(|valid_extension| valid_extension == ext)
-        && !path.starts_with("/target/")
 }
 
 fn search_directory(path: &PathBuf) -> Result<Vec<PathBuf>> {
+    if path.starts_with("/target/") {
+        return Ok(vec![]);
+    }
+
     Ok(fs::read_dir(path)?
         .filter_map(|entry| {
             let path = entry.ok()?.path();
@@ -67,7 +70,7 @@ fn search_directory(path: &PathBuf) -> Result<Vec<PathBuf>> {
                 search_directory(&path).ok()
             } else if path.is_file() {
                 match path.extension() {
-                    Some(ext) if check_file_ext_and_path(ext, &path) => Some(vec![path]),
+                    Some(ext) if check_file_ext(ext) => Some(vec![path]),
                     _ => None,
                 }
             } else {
@@ -104,7 +107,7 @@ async fn main() -> Result<()> {
     let file_paths = search_directory(&".".into())?;
 
     let issue_regex =
-        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)\d{4}").unwrap();
+        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,6})").unwrap();
 
     let mut possible_issue_refs: Vec<PossibleIssueRef> = vec![];
 
@@ -115,9 +118,13 @@ async fn main() -> Result<()> {
         for (line_idx, line) in lines.into_iter().enumerate() {
             let line = line?;
 
-            possible_issue_refs.extend(issue_regex.find_iter(&line).map(|potential_issue_ref| {
+            possible_issue_refs.extend(issue_regex.captures_iter(&line).map(|captures| {
+                let potential_issue_ref = captures.get(2).expect("matches should have 2 captures");
                 let matching_text = potential_issue_ref.as_str();
-                let id = matching_text[matching_text.len() - 4..].to_string();
+
+                println!("{matching_text}");
+                let id =
+                    matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..].to_string();
 
                 PossibleIssueRef {
                     file_path: file_path.clone(),
@@ -179,7 +186,7 @@ async fn main() -> Result<()> {
 
     while let Some(res) = github_api_requests.join_next().await {
         let Ok((
-            Ok(res),
+            res,
             PossibleIssueRef {
                 file_path,
                 line_number,
@@ -187,17 +194,22 @@ async fn main() -> Result<()> {
                 id,
             },
         )) = res else {
-            println!("warning: no response from github api");
+            println!("warning: failed to join api request thread/task");
+            continue;
+        };
+
+        let Ok(res) = res else {
+            println!("warning: no response from github api about issue #{id}");
             continue;
         };
 
         let Ok(text) = res.text().await else {
-            println!("warning: failed to get text from response");
+            println!("warning: failed to get text from response about issue #{id}");
             continue;
         };
 
         let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
-            println!("warning: failed to get serde_json::Value from response");
+            println!("warning: failed to get serde_json::Value from response for issue #{id}");
             continue;
         };
 
