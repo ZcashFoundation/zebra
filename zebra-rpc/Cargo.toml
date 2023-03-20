@@ -75,7 +75,7 @@ insta = { version = "1.28.0", features = ["redactions", "json", "ron"] }
 
 proptest = "0.10.1"
 
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 tokio = { version = "1.26.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

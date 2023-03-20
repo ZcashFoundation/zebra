@@ -44,7 +44,7 @@ rlimit = "0.9.1"
 rocksdb = { version = "0.20.1", default_features = false, features = ["lz4"] }
 serde = { version = "1.0.156", features = ["serde_derive"] }
 tempfile = "3.4.0"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 
 rayon = "1.7.0"
 tokio = { version = "1.26.0", features = ["sync", "tracing"] }
