@@ -149,8 +149,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -231,8 +231,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -301,8 +301,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -472,8 +472,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -608,8 +608,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -655,8 +655,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -727,8 +727,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -794,8 +794,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -863,8 +863,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -932,8 +932,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1002,8 +1002,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1071,8 +1071,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1140,8 +1140,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1209,8 +1209,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1278,8 +1278,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1346,8 +1346,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1411,8 +1411,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1483,8 +1483,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1581,8 +1581,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v1.0.0
         with:
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -1756,8 +1756,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v1.0.0
         with:
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0

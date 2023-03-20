@@ -102,8 +102,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/771011584009/locations/global/workloadIdentityPools/zfnd-bootstrap/providers/zfnd-bootstrap-github'
-          service_account: '${{ vars.GCP_ARTIFACTS_SA }}@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
           token_format: 'access_token'
           # Some builds might take over an hour, and Google's default lifetime duration for
           # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
