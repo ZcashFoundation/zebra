@@ -162,7 +162,7 @@ where
                     return Err(BlockError::AlreadyInState(hash, location).into())
                 }
                 zs::Response::KnownBlock(None) => {}
-                _ => unreachable!("wrong response to Request::Depth"),
+                _ => unreachable!("wrong response to Request::KnownBlock"),
             }
 
             tracing::trace!("performing block checks");
