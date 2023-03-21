@@ -164,7 +164,7 @@ jobs:
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
       # TODO: validate how to use variable/conditional values for Testnet
-      network: $${ vars.ZCASH_NETWORK }}
+      network: ${{ vars.ZCASH_NETWORK }}
       checkpoint_sync: true
       rust_backtrace: full
       rust_lib_backtrace: full
