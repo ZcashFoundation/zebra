@@ -22,7 +22,7 @@ Or jump straight to [the exact commands for updating the lists](https://github.c
 
 ### Use the `zebra-checkpoints` utility
 
-`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized (Mainnet or Testnet) instance of `zebrad` or `zcashd` to get the most recent hashes.
+`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized (Mainnet or Testnet) instance of `zebrad` or `zcashd` to get the most recent hashes. Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://github.com/ZcashFoundation/zebra/blob/c0849ad8cb3aefe927e1735e586ce3c72d96d16c/zebra-rpc/src/config.rs#L29).
 
 First, [build the `zebra-checkpoints` binary](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#zebra-checkpoints).
 
