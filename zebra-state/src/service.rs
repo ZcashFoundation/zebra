@@ -161,7 +161,7 @@ pub(crate) struct StateService {
     // - remove block hashes once their heights are strictly less than the finalized tip
     last_sent_finalized_block_hash: block::Hash,
 
-    /// A set of non-finalized block hashes that have been sent to the block write task.
+    /// A set of block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     sent_blocks: SentHashes,
 
