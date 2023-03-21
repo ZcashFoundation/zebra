@@ -1068,7 +1068,7 @@ where
             .map_err(|e| eyre!(e))?
         {
             zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
-            _ => unreachable!("wrong response to depth request"),
+            _ => unreachable!("wrong response to known block request"),
         }
     }
 

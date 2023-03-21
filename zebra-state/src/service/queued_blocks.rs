@@ -220,7 +220,7 @@ impl QueuedBlocks {
 
     /// Returns true if QueuedBlocks contains a block with the given hash.
     /// Returns false otherwise.
-    pub fn contains(&self, hash: &block::Hash) -> bool {
+    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
         self.blocks.contains_key(hash)
     }
 }
