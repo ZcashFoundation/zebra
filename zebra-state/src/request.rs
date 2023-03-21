@@ -641,7 +641,7 @@ impl Request {
             }
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
-            Request::Contains(_) => "contains",
+            Request::KnownBlock(_) => "known_block",
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
@@ -955,7 +955,7 @@ impl TryFrom<Request> for ReadRequest {
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
                      and handle pending UTXOs"),
 
-            Request::Contains(_) => Err("ReadService does not track queued blocks"),
+            Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(prepared) => {

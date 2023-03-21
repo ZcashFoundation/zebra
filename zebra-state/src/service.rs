@@ -570,7 +570,7 @@ impl StateService {
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // full verification of non-finalized blocks, even when it is in the channel.
             // If we're not close to the final checkpoint, add the hash for checking if
-            // a block is present in a queue when called with `Request::Contains`.
+            // a block is present in a queue when called with `Request::KnownBlock`.
             if self.is_close_to_final_checkpoint(height) {
                 self.sent_blocks.add_finalized(finalized)
             } else {
@@ -1074,7 +1074,7 @@ impl Service<Request> for StateService {
 
             // Used by sync, inbound, and block verifier to check if a block is already in the state
             // before downloading or validating it.
-            Request::Contains(hash) => {
+            Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
 
                 let is_block_queued = self.is_block_queued(&hash);
@@ -1091,7 +1091,7 @@ impl Service<Request> for StateService {
                     });
 
                     // The work is done in the future.
-                    timer.finish(module_path!(), line!(), "Request::Contains");
+                    timer.finish(module_path!(), line!(), "Request::KnownBlock");
 
                     Ok(Response::BlockLocation(response))
                 }
