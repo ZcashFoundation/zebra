@@ -880,7 +880,7 @@ where
                 mempool::Response::Transactions(unmined_transactions) => {
                     if !unmined_transactions.is_empty() {
                         let tx = unmined_transactions[0].transaction.clone();
-                        return Ok(GetRawTransaction::from_transaction(tx, None, None, verbose));
+                        return Ok(GetRawTransaction::from_transaction(tx, None, 0, verbose));
                     }
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
@@ -907,12 +907,14 @@ where
                     // The transaction request only checks the best chain, so it's okay
                     // to get the transaction depth by subtracting the transaction height
                     // from the best chain tip height just before the transaction request.
-                    let depth = best_tip_height.map(|tip_height| (tip_height.0 - height.0));
+                    let depth = best_tip_height
+                        .map(|tip_height| (tip_height.0 - height.0))
+                        .unwrap_or(0);
 
                     Ok(GetRawTransaction::from_transaction(
                         tx,
                         Some(height),
-                        depth.map(|depth| depth + 1),
+                        depth + 1,
                         verbose,
                     ))
                 }
@@ -1445,9 +1447,8 @@ pub enum GetRawTransaction {
         /// not applicable.
         height: i32,
         /// The confirmations of the block that contains the transaction,
-        /// or None if the transaction is in the mempool.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        confirmations: Option<u32>,
+        /// or 0 if the transaction is in the mempool.
+        confirmations: u32,
     },
 }
 
@@ -1499,7 +1500,7 @@ impl GetRawTransaction {
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
-        confirmations: Option<u32>,
+        confirmations: u32,
         verbose: bool,
     ) -> Self {
         if verbose {

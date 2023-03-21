@@ -455,9 +455,6 @@ async fn rpc_getrawtransaction() {
             assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             assert_eq!(height, block_idx as i32);
 
-            let confirmations =
-                confirmations.expect("getrawtransaction should return confirmations field");
-
             let depth_response = read_state
                 .clone()
                 .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
