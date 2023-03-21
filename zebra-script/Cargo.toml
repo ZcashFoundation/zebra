@@ -12,7 +12,7 @@ zcash_script = "0.1.11"
 
 zebra-chain = { path = "../zebra-chain" }
 
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 displaydoc = "0.2.3"
 
 [dev-dependencies]

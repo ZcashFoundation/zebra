@@ -53,7 +53,7 @@ pub use disk_db::{DiskWriteBatch, WriteDisk};
 ///
 /// This is different from `NonFinalizedState::clone()`,
 /// which returns an independent copy of the chains.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FinalizedState {
     // Configuration
     //
@@ -78,14 +78,36 @@ pub struct FinalizedState {
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
     pub db: ZebraDb,
+
+    #[cfg(feature = "elasticsearch")]
+    /// The elasticsearch handle.
+    pub elastic_db: Option<elasticsearch::Elasticsearch>,
+
+    #[cfg(feature = "elasticsearch")]
+    /// A collection of blocks to be sent to elasticsearch as a bulk.
+    pub elastic_blocks: Vec<String>,
 }
 
 impl FinalizedState {
     /// Returns an on-disk database instance for `config` and `network`.
     /// If there is no existing database, creates a new database on disk.
-    pub fn new(config: &Config, network: Network) -> Self {
+    pub fn new(
+        config: &Config,
+        network: Network,
+        #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
+    ) -> Self {
         let db = ZebraDb::new(config, network);
 
+        #[cfg(feature = "elasticsearch")]
+        let new_state = Self {
+            network,
+            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            db,
+            elastic_db,
+            elastic_blocks: vec![],
+        };
+
+        #[cfg(not(feature = "elasticsearch"))]
         let new_state = Self {
             network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
@@ -290,6 +312,9 @@ impl FinalizedState {
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
 
+        #[cfg(feature = "elasticsearch")]
+        let finalized_block = finalized.block.clone();
+
         let result = self.db.write_block(
             finalized,
             history_tree,
@@ -298,27 +323,100 @@ impl FinalizedState {
             source,
         );
 
-        // TODO: move the stop height check to the syncer (#3442)
-        if result.is_ok() && self.is_at_stop_height(finalized_height) {
-            tracing::info!(
-                height = ?finalized_height,
-                hash = ?finalized_hash,
-                block_source = ?source,
-                "stopping at configured height, flushing database to disk"
-            );
+        if result.is_ok() {
+            // Save blocks to elasticsearch if the feature is enabled.
+            #[cfg(feature = "elasticsearch")]
+            self.elasticsearch(&finalized_block);
 
-            // We're just about to do a forced exit, so it's ok to do a forced db shutdown
-            self.db.shutdown(true);
+            // TODO: move the stop height check to the syncer (#3442)
+            if self.is_at_stop_height(finalized_height) {
+                tracing::info!(
+                    height = ?finalized_height,
+                    hash = ?finalized_hash,
+                    block_source = ?source,
+                    "stopping at configured height, flushing database to disk"
+                );
 
-            // Drops tracing log output that's hasn't already been written to stdout
-            // since this exits before calling drop on the WorkerGuard for the logger thread.
-            // This is okay for now because this is test-only code
-            //
-            // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
-            Self::exit_process();
+                // We're just about to do a forced exit, so it's ok to do a forced db shutdown
+                self.db.shutdown(true);
+
+                // Drops tracing log output that's hasn't already been written to stdout
+                // since this exits before calling drop on the WorkerGuard for the logger thread.
+                // This is okay for now because this is test-only code
+                //
+                // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
+                Self::exit_process();
+            }
         }
 
         result
+    }
+
+    #[cfg(feature = "elasticsearch")]
+    /// Store finalized blocks into an elasticsearch database.
+    ///
+    /// We use the elasticsearch bulk api to index multiple blocks at a time while we are
+    /// synchronizing the chain, when we get close to tip we index blocks one by one.
+    pub fn elasticsearch(&mut self, block: &Arc<block::Block>) {
+        if let Some(client) = self.elastic_db.clone() {
+            let block_time = block.header.time.timestamp();
+            let local_time = chrono::Utc::now().timestamp();
+
+            const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+            const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
+            const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
+
+            // If we are close to the tip index one block per bulk call.
+            let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
+            if local_time - block_time < CLOSE_TO_TIP_SECONDS {
+                blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
+            }
+
+            // Insert the operation line.
+            let height_number = block.coinbase_height().unwrap_or(block::Height(0)).0;
+            self.elastic_blocks.push(
+                serde_json::json!({
+                    "index": {
+                        "_id": height_number.to_string().as_str()
+                    }
+                })
+                .to_string(),
+            );
+
+            // Insert the block itself.
+            self.elastic_blocks
+                .push(serde_json::json!(block).to_string());
+
+            // We are in bulk time, insert to ES all we have.
+            if self.elastic_blocks.len() >= blocks_size_to_dump {
+                let rt = tokio::runtime::Runtime::new()
+                    .expect("runtime creation for elasticsearch should not fail.");
+                let blocks = self.elastic_blocks.clone();
+                let network = self.network;
+
+                rt.block_on(async move {
+                    let response = client
+                        .bulk(elasticsearch::BulkParts::Index(
+                            format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
+                        ))
+                        .body(blocks)
+                        .send()
+                        .await
+                        .expect("ES Request should never fail");
+
+                    // Make sure no errors ever.
+                    let response_body = response
+                        .json::<serde_json::Value>()
+                        .await
+                        .expect("ES response parsing to a json_body should never fail");
+                    let errors = response_body["errors"].as_bool().unwrap_or(true);
+                    assert!(!errors, "{}", format!("ES error: {response_body}"));
+                });
+
+                // clean the block storage.
+                self.elastic_blocks.clear();
+            }
+        }
     }
 
     /// Stop the process if `block_height` is greater than or equal to the
