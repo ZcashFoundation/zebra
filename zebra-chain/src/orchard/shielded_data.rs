@@ -234,16 +234,22 @@ bitflags! {
     }
 }
 
-// Deriving `serde::Serialize` to the `Flags` struct will not work anymore in bitflag v2,
-// this is a manual implementation using `bitflags_serde_legacy` crate.
+// We use the `bitflags 2.x` library to implement [`Flags`]. The
+// `2.x` version of the library uses a different serialization
+// format compared to `1.x`.
+// This manual implementation uses the `bitflags_serde_legacy` crate
+// to serialize `Flags` as `bitflags 1.x` would.
 impl serde::Serialize for Flags {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         bitflags_serde_legacy::serialize(self, "Flags", serializer)
     }
 }
 
-// Deriving `serde::Deserialize` to the `Flags` struct will not work anymore in bitflag v2,
-// this is a manual implementation using `bitflags_serde_legacy` crate.
+// We use the `bitflags 2.x` library to implement [`Flags`]. The
+// `2.x` version of the library uses a different deserialization
+// format compared to `1.x`.
+// This manual implementation uses the `bitflags_serde_legacy` crate
+// to deserialize `Flags` as `bitflags 1.x` would.
 impl<'de> serde::Deserialize<'de> for Flags {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         bitflags_serde_legacy::deserialize("Flags", deserializer)
