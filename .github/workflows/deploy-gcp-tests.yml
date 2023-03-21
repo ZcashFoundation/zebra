@@ -91,7 +91,7 @@ env:
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   # what kind of Google Cloud instance we want to launch
-  ZONE: us-central1-a
+  ZONE: us-central1-f
   MACHINE_TYPE: c2d-standard-16
   # How many previous log lines we show at the start of each new log job.
   # Increase this number if some log lines are skipped between jobs
@@ -115,7 +115,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -208,7 +208,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -273,7 +273,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -449,7 +449,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -585,7 +585,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -632,7 +632,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -704,7 +704,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -771,7 +771,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -840,7 +840,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -909,7 +909,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -979,7 +979,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1048,7 +1048,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1117,7 +1117,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1186,7 +1186,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1255,7 +1255,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1323,7 +1323,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1388,7 +1388,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1460,7 +1460,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1542,7 +1542,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1745,7 +1745,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.3.0
+      - uses: actions/checkout@v3.4.0
         with:
           persist-credentials: false
           fetch-depth: '2'

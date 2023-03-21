@@ -28,7 +28,7 @@ rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
 regex = "1.7.1"
 serde = { version = "1.0.156", features = ["serde_derive"] }
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 
 futures = "0.3.27"
 tokio = { version = "1.26.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
@@ -58,7 +58,7 @@ proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
 tokio = { version = "1.26.0", features = ["full", "tracing", "test-util"] }
-toml = "0.7.2"
+toml = "0.7.3"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
