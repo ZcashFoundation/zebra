@@ -148,7 +148,7 @@ fn request_genesis_is_rate_limited() {
                 // Track the call
                 state_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
                 // Respond with `None`
-                future::ok(zebra_state::Response::BlockLocation(None))
+                future::ok(zebra_state::Response::KnownBlock(None))
             }
             _ => unreachable!("no other request is allowed"),
         }

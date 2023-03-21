@@ -70,7 +70,7 @@ pub enum Response {
     BlockHash(Option<block::Hash>),
 
     /// Response to [`Request::KnownBlock`].
-    BlockLocation(Option<BlockLocation>),
+    KnownBlock(Option<KnownBlock>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`](Request::CheckBlockProposalValidity)
@@ -79,7 +79,7 @@ pub enum Response {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum of block stores in the state where a block hash could be found.
-pub enum BlockLocation {
+pub enum KnownBlock {
     /// Block is in the best chain.
     BestChain,
 
