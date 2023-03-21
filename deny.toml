@@ -97,20 +97,8 @@ skip-tree = [
 
     # Elasticsearch dependencies
 
-    # wait for elasticsearch to update.
-    { name = "base64", version = "=0.11.0" },
-    # wait for elasticsearch to update.
-    { name = "darling", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "darling_core", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "darling_macro", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "rustc_version", version = "=0.2.3" },
-    # wait for elasticsearch to update.
-    { name = "serde_with", version = "=1.14.0" },
-    # wait for elasticsearch to update.
-    { name = "serde_with_macros", version = "=1.5.2" },
+    # wait for elasticsearch to update base64, darling, rustc_version, serde_with
+    { name = "elasticsearch", version = "=8.5.0-alpha.1" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
