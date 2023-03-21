@@ -86,7 +86,7 @@ pub enum BlockLocation {
     /// Block is in a side chain.
     SideChain,
 
-    /// Block is queued to be validated and committed.
+    /// Block is queued to be validated and committed, or rejected and dropped.
     Queue,
 }
 
