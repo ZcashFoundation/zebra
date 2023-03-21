@@ -42,6 +42,7 @@ on:
         type: string
       test_features: 
         required: false
+        default: "lightwalletd-grpc-tests"
         type: string
       rpc_port: 
         required: false
