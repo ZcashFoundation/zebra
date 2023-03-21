@@ -78,7 +78,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -100,7 +100,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis again
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(Some(
             zs::BlockLocation::BestChain,
@@ -129,7 +129,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for the first unknown block (block 1)
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -150,11 +150,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
     state_service
-        .expect_request(zs::Request::Contains(block2_hash))
+        .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -307,7 +307,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -329,7 +329,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis again
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(Some(
             zs::BlockLocation::BestChain,
@@ -360,7 +360,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for the first unknown block (block 1)
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -381,11 +381,11 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
     state_service
-        .expect_request(zs::Request::Contains(block2_hash))
+        .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -524,7 +524,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -591,7 +591,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -613,7 +613,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis again
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(Some(
             zs::BlockLocation::BestChain,
@@ -643,7 +643,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for the first unknown block (block 982k)
     state_service
-        .expect_request(zs::Request::Contains(block982k_hash))
+        .expect_request(zs::Request::KnownBlock(block982k_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -664,15 +664,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for all non-tip blocks (blocks 982k, 1, 2) in response order
     state_service
-        .expect_request(zs::Request::Contains(block982k_hash))
+        .expect_request(zs::Request::KnownBlock(block982k_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
     state_service
-        .expect_request(zs::Request::Contains(block2_hash))
+        .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -754,7 +754,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -776,7 +776,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for genesis again
     state_service
-        .expect_request(zs::Request::Contains(block0_hash))
+        .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
         .respond(zs::Response::BlockLocation(Some(
             zs::BlockLocation::BestChain,
@@ -805,7 +805,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for the first unknown block (block 1)
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 
@@ -826,11 +826,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
-        .expect_request(zs::Request::Contains(block1_hash))
+        .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
     state_service
-        .expect_request(zs::Request::Contains(block2_hash))
+        .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
         .respond(zs::Response::BlockLocation(None));
 

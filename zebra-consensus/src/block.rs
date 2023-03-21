@@ -154,7 +154,7 @@ where
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::Contains(hash))
+                .call(zs::Request::KnownBlock(hash))
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {

@@ -69,7 +69,7 @@ pub enum Response {
     /// specified block hash.
     BlockHash(Option<block::Hash>),
 
-    /// Response to [`Request::Contains`].
+    /// Response to [`Request::KnownBlock`].
     BlockLocation(Option<BlockLocation>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]

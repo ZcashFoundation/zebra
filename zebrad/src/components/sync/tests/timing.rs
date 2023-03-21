@@ -144,7 +144,7 @@ fn request_genesis_is_rate_limited() {
     // panic in any other type of request.
     let state_service = tower::service_fn(move |request| {
         match request {
-            zebra_state::Request::Contains(_) => {
+            zebra_state::Request::KnownBlock(_) => {
                 // Track the call
                 state_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
                 // Respond with `None`

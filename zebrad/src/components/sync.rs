@@ -1063,7 +1063,7 @@ where
             .ready()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Contains(hash))
+            .call(zebra_state::Request::KnownBlock(hash))
             .await
             .map_err(|e| eyre!(e))?
         {
