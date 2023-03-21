@@ -607,11 +607,12 @@ pub enum Request {
     /// * [`Response::BlockHash(None)`](Response::BlockHash) otherwise.
     BestChainBlockHash(block::Height),
 
-    /// Checks if a block is present anywhere in the state service; Looks up hash in block stores.
+    /// Checks if a block is present anywhere in the state service.
+    /// Looks up `hash` in block queues as well as the finalized chain and all non-finalized chains.
     ///
     /// Returns [`Response::BlockLocation(Some(Location))`](Response::BlockLocation) if the block is in the best state service.
     /// Returns [`Response::BlockLocation(None)`](Response::BlockLocation) otherwise.
-    Contains(block::Hash),
+    KnownBlock(block::Hash),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
