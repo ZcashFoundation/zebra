@@ -422,7 +422,7 @@ impl Chain {
 
     /// Returns true is the chain contains the given block hash.
     /// Returns false otherwise.
-    pub fn contains(&self, hash: &block::Hash) -> bool {
+    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
         self.height_by_hash.contains_key(hash)
     }
 
