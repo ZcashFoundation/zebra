@@ -80,7 +80,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Block 0 is fetched and committed to the state
     peer_set
@@ -102,9 +102,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(Some(
-            zs::BlockLocation::BestChain,
-        )));
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
 
     // ChainSync::obtain_tips
 
@@ -131,7 +129,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -152,11 +150,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
     state_service
         .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -309,7 +307,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Block 0 is fetched and committed to the state
     peer_set
@@ -331,9 +329,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(Some(
-            zs::BlockLocation::BestChain,
-        )));
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
 
     // ChainSync::obtain_tips
 
@@ -362,7 +358,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -383,11 +379,11 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
     state_service
         .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -526,7 +522,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Block 0 is fetched, but the peer returns a much higher block.
     // (Mismatching hashes are usually ignored by the network service,
@@ -593,7 +589,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Block 0 is fetched and committed to the state
     peer_set
@@ -615,9 +611,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(Some(
-            zs::BlockLocation::BestChain,
-        )));
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
 
     // ChainSync::obtain_tips
 
@@ -645,7 +639,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block982k_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -666,15 +660,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block982k_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
     state_service
         .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Blocks 982k, 1, 2 are fetched in order, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
@@ -756,7 +750,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Block 0 is fetched and committed to the state
     peer_set
@@ -778,9 +772,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block0_hash))
         .await
-        .respond(zs::Response::BlockLocation(Some(
-            zs::BlockLocation::BestChain,
-        )));
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
 
     // ChainSync::obtain_tips
 
@@ -807,7 +799,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -828,11 +820,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     state_service
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
     state_service
         .expect_request(zs::Request::KnownBlock(block2_hash))
         .await
-        .respond(zs::Response::BlockLocation(None));
+        .respond(zs::Response::KnownBlock(None));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set

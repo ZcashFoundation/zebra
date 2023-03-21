@@ -243,8 +243,8 @@ where
         let fut = async move {
             // Check if the block is already in the state.
             match state.oneshot(zs::Request::KnownBlock(hash)).await {
-                Ok(zs::Response::BlockLocation(None)) => Ok(()),
-                Ok(zs::Response::BlockLocation(Some(_))) => Err("already present".into()),
+                Ok(zs::Response::KnownBlock(None)) => Ok(()),
+                Ok(zs::Response::KnownBlock(Some(_))) => Err("already present".into()),
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(e),
             }?;

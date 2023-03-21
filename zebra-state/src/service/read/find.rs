@@ -32,7 +32,7 @@ use crate::{
         non_finalized_state::{Chain, NonFinalizedState},
         read::{self, block::block_header, FINALIZED_STATE_QUERY_RETRIES},
     },
-    BlockLocation, BoxError,
+    BoxError, KnownBlock,
 };
 
 #[cfg(test)]
@@ -107,7 +107,7 @@ pub fn contains(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     hash: block::Hash,
-) -> Option<BlockLocation> {
+) -> Option<KnownBlock> {
     let mut chains_iter = non_finalized_state.chain_set.iter().rev();
     let is_hash_in_chain = |chain: &Arc<Chain>| chain.contains(&hash);
 
@@ -115,9 +115,9 @@ pub fn contains(
     let best_chain = chains_iter.next();
 
     match best_chain.map(is_hash_in_chain) {
-        Some(true) => Some(BlockLocation::BestChain),
-        Some(false) if chains_iter.any(is_hash_in_chain) => Some(BlockLocation::SideChain),
-        Some(false) | None if db.contains_hash(hash) => Some(BlockLocation::BestChain),
+        Some(true) => Some(KnownBlock::BestChain),
+        Some(false) if chains_iter.any(is_hash_in_chain) => Some(KnownBlock::SideChain),
+        Some(false) | None if db.contains_hash(hash) => Some(KnownBlock::BestChain),
         Some(false) | None => None,
     }
 }

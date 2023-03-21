@@ -610,8 +610,8 @@ pub enum Request {
     /// Checks if a block is present anywhere in the state service.
     /// Looks up `hash` in block queues as well as the finalized chain and all non-finalized chains.
     ///
-    /// Returns [`Response::BlockLocation(Some(Location))`](Response::BlockLocation) if the block is in the best state service.
-    /// Returns [`Response::BlockLocation(None)`](Response::BlockLocation) otherwise.
+    /// Returns [`Response::KnownBlock(Some(Location))`](Response::KnownBlock) if the block is in the best state service.
+    /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
     #[cfg(feature = "getblocktemplate-rpcs")]

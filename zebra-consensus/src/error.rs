@@ -246,7 +246,7 @@ pub enum BlockError {
     DuplicateTransaction,
 
     #[error("block {0:?} is already in the chain at depth {1:?}")]
-    AlreadyInChain(zebra_chain::block::Hash, zebra_state::BlockLocation),
+    AlreadyInChain(zebra_chain::block::Hash, zebra_state::KnownBlock),
 
     #[error("invalid block {0:?}: missing block height")]
     MissingHeight(zebra_chain::block::Hash),
