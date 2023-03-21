@@ -129,7 +129,11 @@ async fn main() -> Result<()> {
                 PossibleIssueRef {
                     file_path: file_path.clone(),
                     line_number: line_idx + 1,
-                    column: potential_issue_ref.start() + 1,
+                    column: captures
+                        .get(1)
+                        .expect("matches should have 2 captures")
+                        .start()
+                        + 1,
                     id,
                 }
             }))
