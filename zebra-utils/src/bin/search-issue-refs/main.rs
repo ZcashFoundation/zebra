@@ -202,18 +202,24 @@ async fn main() -> Result<()> {
             continue;
         };
 
+        let file_path = file_path
+            .to_str()
+            .expect("paths from read_dir should be valid unicode");
+
+        let ref_location = format!("{file_path}:{line_number}:{column}");
+
         let Ok(res) = res else {
-            println!("warning: no response from github api about issue #{id}");
+            println!("warning: no response from github api about issue #{id}, {ref_location}");
             continue;
         };
 
         let Ok(text) = res.text().await else {
-            println!("warning: failed to get text from response about issue #{id}");
+            println!("warning: failed to get text from response about issue #{id}, {ref_location}");
             continue;
         };
 
         let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
-            println!("warning: failed to get serde_json::Value from response for issue #{id}");
+            println!("warning: failed to get serde_json::Value from response for issue #{id}, {ref_location}");
             continue;
         };
 
@@ -224,12 +230,9 @@ async fn main() -> Result<()> {
         num_possible_issue_refs += 1;
 
         let github_url = github_issue_url(&id);
-        let file_path = file_path
-            .to_str()
-            .expect("paths from read_dir should be valid unicode");
 
         println!("\n--------------------------------------");
-        println!("Found reference to closed issue #{id}: {file_path}:{line_number}:{column}");
+        println!("Found reference to closed issue #{id}: {ref_location}");
         println!("{github_url}");
     }
 
