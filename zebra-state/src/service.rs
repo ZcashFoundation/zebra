@@ -1082,13 +1082,12 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let response = is_block_queued.then_some(KnownBlock::Queue).or_else(|| {
-                        read::contains(
-                            &read_service.latest_non_finalized_state(),
-                            &read_service.db,
-                            hash,
-                        )
-                    });
+                    let response = read::non_finalized_state_contains_hash(
+                        &read_service.latest_non_finalized_state(),
+                        hash,
+                    )
+                    .or(is_block_queued.then_some(KnownBlock::Queue))
+                    .or_else(|| read::finalized_state_contains_hash(&read_service.db, hash));
 
                     // The work is done in the future.
                     timer.finish(module_path!(), line!(), "Request::KnownBlock");
