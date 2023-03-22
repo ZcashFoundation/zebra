@@ -67,11 +67,17 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
         for transaction in &block.transactions {
             let transaction_cases = vec![(
-                ReadRequest::Transaction(transaction.hash()),
-                Ok(ReadResponse::Transaction(Some((
-                    transaction.clone(),
-                    block.coinbase_height().unwrap(),
-                )))),
+                ReadRequest::Transaction {
+                    hash: transaction.hash(),
+                    should_return_confirmations: false,
+                },
+                Ok(ReadResponse::Transaction {
+                    transaction_and_height: Some((
+                        transaction.clone(),
+                        block.coinbase_height().unwrap(),
+                    )),
+                    confirmations: None,
+                }),
             )];
 
             let transaction_cases = Transcript::from(transaction_cases);
@@ -90,8 +96,14 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
 
     vec![
         (
-            ReadRequest::Transaction(transaction::Hash([0; 32])),
-            Ok(ReadResponse::Transaction(None)),
+            ReadRequest::Transaction {
+                hash: transaction::Hash([0; 32]),
+                should_return_confirmations: false,
+            },
+            Ok(ReadResponse::Transaction {
+                transaction_and_height: None,
+                confirmations: None,
+            }),
         ),
         (
             ReadRequest::Block(block.hash().into()),

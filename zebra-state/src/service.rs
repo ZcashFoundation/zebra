@@ -1269,21 +1269,39 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // For the get_raw_transaction RPC and the StateService.
-            ReadRequest::Transaction(hash) => {
+            ReadRequest::Transaction {
+                hash,
+                should_return_confirmations,
+            } => {
                 let state = self.clone();
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let transaction_and_height = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::transaction(non_finalized_state.best_chain(), &state.db, hash)
-                            });
+                        let latest_best_chain = state.latest_best_chain();
+
+                        let transaction_and_height =
+                            read::transaction(latest_best_chain.as_ref(), &state.db, hash);
+
+                        let confirmations = should_return_confirmations
+                            .then(|| {
+                                transaction_and_height.as_ref().and_then(|(_tx, height)| {
+                                    latest_best_chain
+                                        .map(|latest_best_chain| {
+                                            latest_best_chain.non_finalized_tip_height()
+                                        })
+                                        .or_else(|| state.db.finalized_tip_height())
+                                        .map(|tip_height| 1 + tip_height.0 - height.0)
+                                })
+                            })
+                            .flatten();
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
 
-                        Ok(ReadResponse::Transaction(transaction_and_height))
+                        Ok(ReadResponse::Transaction {
+                            transaction_and_height,
+                            confirmations,
+                        })
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))

@@ -258,8 +258,8 @@ proptest! {
 
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set.clone()));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(None);
+            let expected_request = ReadRequest::Transaction { hash: transaction.hash(), should_return_confirmations: false } ;
+            let response = ReadResponse::Transaction { transaction_and_height: None, confirmations: None };
 
             read_state
                 .expect_request(expected_request)
@@ -291,8 +291,8 @@ proptest! {
             // check the state again
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(Some((Arc::new(transaction), Height(1))));
+            let expected_request = ReadRequest::Transaction { hash: transaction.hash(), should_return_confirmations: false } ;
+            let response = ReadResponse::Transaction { transaction_and_height: Some((Arc::new(transaction), Height(1))), confirmations: None };
 
             read_state
                 .expect_request(expected_request)

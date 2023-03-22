@@ -287,11 +287,18 @@ impl Runner {
         let mut response = HashSet::new();
 
         for t in transactions {
-            let request = ReadRequest::Transaction(t.mined_id());
+            let request = ReadRequest::Transaction {
+                hash: t.mined_id(),
+                should_return_confirmations: false,
+            };
 
             // ignore any error coming from the state
             let state_response = state.clone().oneshot(request).await;
-            if let Ok(ReadResponse::Transaction(Some(tx))) = state_response {
+            if let Ok(ReadResponse::Transaction {
+                transaction_and_height: Some(tx),
+                confirmations: _,
+            }) = state_response
+            {
                 response.insert(tx.0.unmined_id());
             }
         }

@@ -828,8 +828,8 @@ proptest! {
                 .respond(response);
 
             // the runner will also query the state again for the transaction
-            let expected_request = zebra_state::ReadRequest::Transaction(transaction_hash);
-            let response = zebra_state::ReadResponse::Transaction(None);
+            let expected_request = zebra_state::ReadRequest::Transaction { hash: transaction_hash, should_return_confirmations: false } ;
+            let response = zebra_state::ReadResponse::Transaction { transaction_and_height: None, confirmations: None };
 
             state
                 .expect_request(expected_request)
@@ -923,12 +923,12 @@ proptest! {
 
             // the runner will also query the state again for each transaction
             for _tx in txs.clone() {
-                let response = zebra_state::ReadResponse::Transaction(None);
+                let response = zebra_state::ReadResponse::Transaction { transaction_and_height: None, confirmations: None };
 
                 // we use `expect_request_that` because we can't guarantee the state request order
                 state
                     .expect_request_that(|request| {
-                        matches!(request, zebra_state::ReadRequest::Transaction(_))
+                        matches!(request, zebra_state::ReadRequest::Transaction { .. })
                     })
                     .await?
                     .respond(response);

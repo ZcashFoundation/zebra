@@ -105,7 +105,13 @@ pub enum ReadResponse {
     Block(Option<Arc<Block>>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
-    Transaction(Option<(Arc<Transaction>, block::Height)>),
+    Transaction {
+        /// The transaction and its height.
+        transaction_and_height: Option<(Arc<Transaction>, block::Height)>,
+
+        /// depth of block + 1 (only returned if `should_return_confirmations` is true)
+        confirmations: Option<u32>,
+    },
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
     /// with an list of transaction hashes in block order,
@@ -227,8 +233,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
-            ReadResponse::Transaction(tx_and_height) => {
-                Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
+            ReadResponse::Transaction { transaction_and_height, confirmations: _ } => {
+                Ok(Response::Transaction(transaction_and_height.map(|(tx, _height)| tx)))
             }
             ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
 

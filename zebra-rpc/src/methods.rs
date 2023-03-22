@@ -847,7 +847,6 @@ where
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
         let verbose = verbose != 0;
-        let latest_chain_tip = verbose.then(|| self.latest_chain_tip.clone());
 
         async move {
             let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
@@ -887,9 +886,10 @@ where
             };
 
             // Now check the state
-            let best_tip_height =
-                latest_chain_tip.and_then(|latest_chain_tip| latest_chain_tip.best_tip_height());
-            let request = zebra_state::ReadRequest::Transaction(txid);
+            let request = zebra_state::ReadRequest::Transaction {
+                hash: txid,
+                should_return_confirmations: true,
+            };
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -901,24 +901,19 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Transaction(Some((tx, height))) => {
-                    // # Correctness:
-                    //
-                    // The transaction request only checks the best chain, so it's okay
-                    // to get the transaction depth by subtracting the transaction height
-                    // from the best chain tip height just before the transaction request.
-                    let depth = best_tip_height
-                        .and_then(|tip_height| tip_height.0.checked_sub(height.0))
-                        .unwrap_or(0);
-
-                    Ok(GetRawTransaction::from_transaction(
-                        tx,
-                        Some(height),
-                        depth + 1,
-                        verbose,
-                    ))
-                }
-                zebra_state::ReadResponse::Transaction(None) => Err(Error {
+                zebra_state::ReadResponse::Transaction {
+                    transaction_and_height: Some((tx, height)),
+                    confirmations: Some(confirmations),
+                } => Ok(GetRawTransaction::from_transaction(
+                    tx,
+                    Some(height),
+                    confirmations,
+                    verbose,
+                )),
+                zebra_state::ReadResponse::Transaction {
+                    transaction_and_height: None,
+                    confirmations: None,
+                } => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Transaction not found".to_string(),
                     data: None,
