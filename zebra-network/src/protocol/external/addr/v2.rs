@@ -6,7 +6,6 @@
 //! Zebra never sends `addrv2` messages, because peers still accept `addr` (v1) messages.
 
 use std::{
-    convert::{TryFrom, TryInto},
     io::Read,
     net::{IpAddr, SocketAddr},
 };
@@ -15,8 +14,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
 use zebra_chain::serialization::{
-    zcash_deserialize_bytes_external_count, CompactSize64, DateTime32, SerializationError,
-    TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
+    zcash_deserialize_bytes_external_count, CompactSize64, CompactSizeMessage, DateTime32,
+    SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
 };
 
 use crate::{
@@ -283,17 +282,16 @@ impl ZcashDeserialize for AddrV2 {
         let network_id = reader.read_u8()?;
 
         // > CompactSize  The length in bytes of addr.
-        let max_size = MAX_ADDR_V2_ADDR_SIZE as u64; // `MAX_ADDR_V2_ADDR_SIZE` fits in `u64`.
-        let addr_len: CompactSize64 = (&mut reader).zcash_deserialize_into()?;
-        if addr_len > CompactSize64::from(max_size) {
+        let addr_len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        let addr_len: usize = addr_len.into();
+        if addr_len > MAX_ADDR_V2_ADDR_SIZE {
             return Err(SerializationError::Parse(
                 "addr field longer than MAX_ADDR_V2_ADDR_SIZE in addrv2 message",
             ));
         }
 
         // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
-        let addr: Vec<u8> =
-            zcash_deserialize_bytes_external_count(u64::from(addr_len) as usize, &mut reader)?;
+        let addr: Vec<u8> = zcash_deserialize_bytes_external_count(addr_len, &mut reader)?;
 
         // > uint16  Network port. If not relevant for the network this MUST be 0.
         let port = reader.read_u16::<BigEndian>()?;
