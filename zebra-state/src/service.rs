@@ -725,25 +725,25 @@ impl StateService {
         }
 
         // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
-        if self.finalized_block_write_sender.is_none() {
-            self.send_ready_non_finalized_queued(parent_hash);
+        self.send_ready_non_finalized_queued(parent_hash);
 
-            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
+        let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
+            "Finalized state must have at least one block before committing non-finalized state",
+        );
 
-            self.queued_non_finalized_blocks
-                .prune_by_height(finalized_tip_height);
+        self.queued_non_finalized_blocks
+            .prune_by_height(finalized_tip_height);
 
-            self.sent_blocks.prune_by_height(finalized_tip_height);
-        }
+        self.sent_blocks.prune_by_height(finalized_tip_height);
 
         rsp_rx
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.sent_blocks.contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
+        self.finalized_block_write_sender.is_none()
+            && (self.sent_blocks.contains(hash)
+                || &self.read_service.db.finalized_tip_hash() == hash)
     }
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
