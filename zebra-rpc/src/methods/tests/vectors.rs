@@ -436,13 +436,14 @@ async fn rpc_getrawtransaction() {
         }
     };
 
-    // Test case where transaction is _not_ in mempool.
-    // Skip genesis because its tx is not indexed.
-    for (block_idx, block) in blocks.iter().enumerate().skip(1) {
-        for tx in block.transactions.iter() {
-            let tx_hash = tx.hash();
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 0u8);
-            let (response, _) = futures::join!(get_tx_req, make_mempool_req(tx_hash));
+    let run_state_test_case = |block_idx: usize, block: Arc<Block>, tx: Arc<Transaction>| {
+        let read_state = read_state.clone();
+        let tx_hash = tx.hash();
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(tx_hash.encode_hex(), 0u8);
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(tx_hash.encode_hex(), 1u8);
+
+        async move {
+            let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(tx_hash));
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
@@ -450,8 +451,7 @@ async fn rpc_getrawtransaction() {
                 unreachable!("Should return a Raw enum")
             }
 
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 1u8);
-            let (response, _) = futures::join!(get_tx_req, make_mempool_req(tx_hash));
+            let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
             let GetRawTransaction::Object { hex, height, confirmations } = response.expect("We should have a GetRawTransaction struct") else {
                 unreachable!("Should return a Raw enum")
             };
@@ -460,7 +460,6 @@ async fn rpc_getrawtransaction() {
             assert_eq!(height, block_idx as i32);
 
             let depth_response = read_state
-                .clone()
                 .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
                 .await
                 .expect("state request should succeed");
@@ -471,44 +470,51 @@ async fn rpc_getrawtransaction() {
 
             let expected_confirmations = 1 + depth.expect("depth should be Some");
 
+            (confirmations, expected_confirmations)
+        }
+    };
+
+    // Test case where transaction is _not_ in mempool.
+    // Skip genesis because its tx is not indexed.
+    for (block_idx, block) in blocks.iter().enumerate().skip(1) {
+        for tx in block.transactions.iter() {
+            let (confirmations, expected_confirmations) =
+                run_state_test_case(block_idx, block.clone(), tx.clone()).await;
             assert_eq!(confirmations, expected_confirmations);
         }
     }
 
-    latest_chain_tip_sender.send_best_tip_height(Height(0));
-
     // Test case where transaction is _not_ in mempool with a fake chain tip height of 0
     // Skip genesis because its tx is not indexed.
+    latest_chain_tip_sender.send_best_tip_height(Height(0));
     for (block_idx, block) in blocks.iter().enumerate().skip(1) {
         for tx in block.transactions.iter() {
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 1u8);
-            let (response, _) = futures::join!(get_tx_req, make_mempool_req(tx.hash()));
-            let GetRawTransaction::Object { 
-                hex,
-                height,
-                confirmations
-            } = response.expect("We should have a GetRawTransaction struct") else {
-                unreachable!("Should return a Raw enum")
-            };
-
-            assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
-            assert_eq!(height, block_idx as i32);
-
-            let depth_response = read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
-                .await
-                .expect("state request should succeed");
-
-            let zebra_state::ReadResponse::Depth(depth) = depth_response else {
-                panic!("unexpected response to Depth request");
-            };
-
-            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            let (confirmations, expected_confirmations) =
+                run_state_test_case(block_idx, block.clone(), tx.clone()).await;
 
             let is_confirmations_within_bounds = confirmations <= expected_confirmations;
 
-            assert!(is_confirmations_within_bounds, "confirmations should be equal to or lower than (depth + 1) when transaction height is above best tip");
+            assert!(
+                is_confirmations_within_bounds,
+                "confirmations should be at or below depth + 1"
+            );
+        }
+    }
+
+    // Test case where transaction is _not_ in mempool with a fake chain tip height of 0
+    // Skip genesis because its tx is not indexed.
+    latest_chain_tip_sender.send_best_tip_height(Height(20));
+    for (block_idx, block) in blocks.iter().enumerate().skip(1) {
+        for tx in block.transactions.iter() {
+            let (confirmations, expected_confirmations) =
+                run_state_test_case(block_idx, block.clone(), tx.clone()).await;
+
+            let is_confirmations_within_bounds = confirmations <= expected_confirmations;
+
+            assert!(
+                is_confirmations_within_bounds,
+                "confirmations should be at or below depth + 1"
+            );
         }
     }
 
