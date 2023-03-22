@@ -355,6 +355,15 @@ impl SentHashes {
         self.update_metrics_for_cache();
     }
 
+    /// Clears all data from `SentBlocks`
+    pub fn clear(&mut self) {
+        self.sent.clear();
+        self.bufs.clear();
+        self.curr_buf.clear();
+        self.known_utxos.clear();
+        self.update_metrics_for_cache();
+    }
+
     /// Returns true if SentHashes contains the `hash`
     pub fn contains(&self, hash: &block::Hash) -> bool {
         self.sent.contains_key(hash)

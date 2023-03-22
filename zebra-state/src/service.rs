@@ -469,6 +469,12 @@ impl StateService {
         let queued_prev_hash = finalized.block.header.previous_block_hash;
         let queued_height = finalized.height;
 
+        // If we're close to the final checkpoint, make the block's UTXOs available for
+        // full verification of non-finalized blocks, even when it is in the channel.
+        if self.is_close_to_final_checkpoint(queued_height) {
+            self.sent_blocks.add_finalized(&finalized)
+        }
+
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (finalized, rsp_tx);
 
@@ -485,10 +491,6 @@ impl StateService {
             }
 
             self.drain_queue_and_commit_finalized();
-
-            if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
-                self.sent_blocks.prune_by_height(finalized_tip_height);
-            }
         } else {
             // We've finished committing finalized blocks, so drop any repeated queued blocks,
             // and return an error.
@@ -549,13 +551,23 @@ impl StateService {
 
         // If a block failed, we need to start again from a valid tip.
         match self.invalid_block_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => self.last_sent_finalized_block_hash = reset_tip_hash,
+            Ok(reset_tip_hash) => {
+                // any blocks that may have been sent were either committed or dropped
+                // if a reset signal has been received, so we can clear `sent_blocks` and
+                // let Zebra re-download/verify blocks that were dropped.
+                self.sent_blocks.clear();
+                self.last_sent_finalized_block_hash = reset_tip_hash
+            }
             Err(TryRecvError::Disconnected) => {
                 info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
                 return;
             }
             // There are no errors, so we can just use the last block hash we sent
-            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Empty) => {
+                if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
+                    self.sent_blocks.prune_by_height(finalized_tip_height);
+                }
+            }
         }
 
         while let Some(queued_block) = self
@@ -567,13 +579,9 @@ impl StateService {
 
             self.last_sent_finalized_block_hash = hash;
 
-            // If we're close to the final checkpoint, make the block's UTXOs available for
-            // full verification of non-finalized blocks, even when it is in the channel.
             // If we're not close to the final checkpoint, add the hash for checking if
             // a block is present in a queue when called with `Request::KnownBlock`.
-            if self.is_close_to_final_checkpoint(height) {
-                self.sent_blocks.add_finalized(finalized)
-            } else {
+            if !self.is_close_to_final_checkpoint(height) {
                 self.sent_blocks.add_finalized_hash(hash, height);
             }
 
