@@ -10,13 +10,14 @@ static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter
 
 bitflags::bitflags! {
     /// The different SigHash types, as defined in <https://zips.z.cash/zip-0143>
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     pub struct HashType: u32 {
         /// Sign all the outputs
         const ALL = 0b0000_0001;
         /// Sign none of the outputs - anyone can spend
         const NONE = 0b0000_0010;
         /// Sign one of the outputs - anyone can spend the rest
-        const SINGLE = Self::ALL.bits | Self::NONE.bits;
+        const SINGLE = Self::ALL.bits() | Self::NONE.bits();
         /// Anyone can add inputs to this transaction
         const ANYONECANPAY = 0b1000_0000;
     }
