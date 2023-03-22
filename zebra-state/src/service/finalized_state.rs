@@ -200,7 +200,13 @@ impl FinalizedState {
         // and the block write task.
         let result = result.map_err(CloneError::from);
 
-        let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
+        if let Some(rsp_tx) = rsp_tx
+            .lock()
+            .map_err(|e| BoxError::from(e.to_string()))?
+            .take()
+        {
+            let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
+        }
 
         result.map(|_hash| finalized).map_err(BoxError::from)
     }

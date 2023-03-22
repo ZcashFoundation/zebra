@@ -19,7 +19,7 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -476,7 +476,7 @@ impl StateService {
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (finalized, rsp_tx);
+        let queued = (finalized, Arc::new(Mutex::new(Some(rsp_tx))));
 
         if self.finalized_block_write_sender.is_some() {
             // We're still committing finalized blocks
@@ -491,6 +491,11 @@ impl StateService {
             }
 
             self.drain_queue_and_commit_finalized();
+
+            if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
+                self.queued_finalized_blocks
+                    .retain(|_parent_hash, (finalized, _)| finalized.height > finalized_tip_height);
+            }
         } else {
             // We've finished committing finalized blocks, so drop any repeated queued blocks,
             // and return an error.
@@ -551,44 +556,28 @@ impl StateService {
 
         // If a block failed, we need to start again from a valid tip.
         match self.invalid_block_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => {
-                // any blocks that may have been sent were either committed or dropped
-                // if a reset signal has been received, so we can clear `sent_blocks` and
-                // let Zebra re-download/verify blocks that were dropped.
-                self.sent_blocks.clear();
-                self.last_sent_finalized_block_hash = reset_tip_hash
-            }
+            Ok(reset_tip_hash) => self.last_sent_finalized_block_hash = reset_tip_hash,
             Err(TryRecvError::Disconnected) => {
                 info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
                 return;
             }
             // There are no errors, so we can just use the last block hash we sent
-            Err(TryRecvError::Empty) => {
-                if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
-                    self.sent_blocks.prune_by_height(finalized_tip_height);
-                }
-            }
+            Err(TryRecvError::Empty) => {}
         }
 
         while let Some(queued_block) = self
             .queued_finalized_blocks
-            .remove(&self.last_sent_finalized_block_hash)
+            .get(&self.last_sent_finalized_block_hash)
         {
             let (finalized, _) = &queued_block;
             let &FinalizedBlock { hash, height, .. } = finalized;
 
             self.last_sent_finalized_block_hash = hash;
 
-            // If we're not close to the final checkpoint, add the hash for checking if
-            // a block is present in a queue when called with `Request::KnownBlock`.
-            if !self.is_close_to_final_checkpoint(height) {
-                self.sent_blocks.add_finalized_hash(hash, height);
-            }
-
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
             if let Some(finalized_block_write_sender) = &self.finalized_block_write_sender {
-                let send_result = finalized_block_write_sender.send(queued_block);
+                let send_result = finalized_block_write_sender.send(queued_block.clone());
 
                 // If the receiver is closed, we can't send any more blocks.
                 if let Err(SendError(queued)) = send_result {
@@ -621,7 +610,14 @@ impl StateService {
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error.into()));
+        if let Some(rsp_tx) = rsp_tx
+            .lock()
+            .expect("thread panicked while holding rsp_tx mutex guard")
+            .take()
+        {
+            let _ = rsp_tx.send(Err(error.into()));
+        }
+
         std::mem::drop(finalized);
     }
 
