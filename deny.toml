@@ -59,13 +59,15 @@ skip-tree = [
     # Wait until `orchard` updates `aes`, which depends on `cipher`
     { name = "cipher", version = "=0.3.0" },
 
-
     # wait for zcash_primitives to remove duplicated dependencies
     { name = "block-buffer", version = "=0.7.3" },
     { name = "block-buffer", version = "=0.9.0" },
 
     # wait for zcash_address to upgrade
     { name = "bech32", version = "=0.8.1"},
+    
+    # wait for zcash_proofs to upgrade `directories`
+    { name = "dirs-sys", version = "=0.3.6"},
 
     # zebra-utils dependencies
 
