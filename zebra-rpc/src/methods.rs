@@ -908,7 +908,7 @@ where
                     // to get the transaction depth by subtracting the transaction height
                     // from the best chain tip height just before the transaction request.
                     let depth = best_tip_height
-                        .map(|tip_height| (tip_height.0 - height.0))
+                        .and_then(|tip_height| tip_height.0.checked_sub(height.0))
                         .unwrap_or(0);
 
                     Ok(GetRawTransaction::from_transaction(
