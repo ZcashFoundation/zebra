@@ -4,16 +4,16 @@ use std::sync::Arc;
 
 use color_eyre::eyre;
 use eyre::Result;
-
 use hex::FromHex;
+
 use zebra_test::vectors;
 
-use crate::block::Block;
-use crate::parameters::{Network, NetworkUpgrade};
-use crate::serialization::ZcashDeserializeInto;
-use crate::sprout::commitment::NoteCommitment;
-use crate::sprout::tests::test_vectors;
-use crate::sprout::tree;
+use crate::{
+    block::Block,
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
+    sprout::{commitment::NoteCommitment, tests::test_vectors, tree},
+};
 
 /// Tests if empty roots are generated correctly.
 #[test]
@@ -24,7 +24,7 @@ fn empty_roots() {
         assert_eq!(
             hex::encode(tree::EMPTY_ROOTS[i]),
             // The test vector is in reversed order.
-            test_vectors::HEX_EMPTY_ROOTS[tree::MERKLE_DEPTH - i]
+            test_vectors::HEX_EMPTY_ROOTS[usize::from(tree::MERKLE_DEPTH) - i]
         );
     }
 }
