@@ -505,7 +505,9 @@ where
                 //
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
-                let mempool_txs = fetch_mempool_transactions(mempool.clone()).await?;
+                let mempool_txs =
+                    fetch_mempool_transactions(mempool.clone(), chain_tip_and_local_time.tip_hash)
+                        .await?;
 
                 // - Long poll ID calculation
                 let server_long_poll_id = LongPollInput::new(

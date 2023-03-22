@@ -235,7 +235,10 @@ where
 ///
 /// You should call `check_synced_to_tip()` before calling this function.
 /// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
-pub async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
+pub async fn fetch_mempool_transactions<Mempool>(
+    mempool: Mempool,
+    chain_tip_hash: block::Hash,
+) -> Result<Vec<VerifiedUnminedTx>>
 where
     Mempool: Service<
             mempool::Request,
@@ -253,8 +256,16 @@ where
             data: None,
         })?;
 
-    if let mempool::Response::FullTransactions(transactions) = response {
-        Ok(transactions)
+    if let mempool::Response::FullTransactions {
+        transactions,
+        last_seen_chain_tip,
+    } = response
+    {
+        if last_seen_chain_tip == Some(chain_tip_hash) {
+            Ok(transactions)
+        } else {
+            Ok(vec![])
+        }
     } else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
     }

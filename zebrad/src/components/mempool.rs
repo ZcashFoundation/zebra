@@ -160,6 +160,9 @@ pub struct Mempool {
     /// and chain tip resets.
     chain_tip_change: ChainTipChange,
 
+    /// Last seen chain tip hash that mempool transactions have been verified against
+    last_seen_tip_hash: Option<block::Hash>,
+
     /// Handle to the outbound service.
     /// Used to construct the transaction downloader.
     outbound: Outbound,
@@ -197,6 +200,7 @@ impl Mempool {
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
+            last_seen_tip_hash: None,
             outbound,
             state,
             tx_verifier,
@@ -509,11 +513,17 @@ impl Service<Request> for Mempool {
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
-                    let res: Vec<_> = storage.full_transactions().cloned().collect();
+                    let transactions: Vec<_> = storage.full_transactions().cloned().collect();
 
                     trace!(?req, res_count = ?res.len(), "answered mempool request");
 
-                    async move { Ok(Response::FullTransactions(res)) }.boxed()
+                    async move {
+                        Ok(Response::FullTransactions {
+                            transactions,
+                            last_seen_chain_tip: self.last_seen_tip_hash,
+                        })
+                    }
+                    .boxed()
                 }
 
                 Request::RejectedTransactionIds(ref ids) => {
