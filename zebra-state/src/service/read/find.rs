@@ -103,12 +103,12 @@ where
 
 /// Returns the location of the block if present in the non-finalized state.
 /// Returns None if the block hash is not found in the non-finalized state.
-pub fn non_finalized_state_contains_hash(
+pub fn non_finalized_state_contains_block_hash(
     non_finalized_state: &NonFinalizedState,
     hash: block::Hash,
 ) -> Option<KnownBlock> {
     let mut chains_iter = non_finalized_state.chain_set.iter().rev();
-    let is_hash_in_chain = |chain: &Arc<Chain>| chain.contains(&hash);
+    let is_hash_in_chain = |chain: &Arc<Chain>| chain.contains_block_hash(&hash);
 
     // Equivalent to `chain_set.iter().next_back()` in `NonFinalizedState.best_chain()` method.
     let best_chain = chains_iter.next();
@@ -122,7 +122,7 @@ pub fn non_finalized_state_contains_hash(
 
 /// Returns the location of the block if present in the finalized state.
 /// Returns None if the block hash is not found in the finalized state.
-pub fn finalized_state_contains_hash(db: &ZebraDb, hash: block::Hash) -> Option<KnownBlock> {
+pub fn finalized_state_contains_block_hash(db: &ZebraDb, hash: block::Hash) -> Option<KnownBlock> {
     db.contains_hash(hash).then_some(KnownBlock::BestChain)
 }
 

@@ -812,7 +812,7 @@ impl StateService {
     /// Returns true if the block hash is queued or has been sent to be validated and committed.
     /// Returns false otherwise.
     fn is_block_queued(&self, hash: &block::Hash) -> bool {
-        self.queued_non_finalized_blocks.contains(hash)
+        self.queued_non_finalized_blocks.contains_block_hash(hash)
             || self.queued_finalized_blocks.contains_key(hash)
             || self.sent_blocks.contains(hash)
     }
@@ -1082,12 +1082,12 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let response = read::non_finalized_state_contains_hash(
+                    let response = read::non_finalized_state_contains_block_hash(
                         &read_service.latest_non_finalized_state(),
                         hash,
                     )
                     .or(is_block_queued.then_some(KnownBlock::Queue))
-                    .or_else(|| read::finalized_state_contains_hash(&read_service.db, hash));
+                    .or_else(|| read::finalized_state_contains_block_hash(&read_service.db, hash));
 
                     // The work is done in the future.
                     timer.finish(module_path!(), line!(), "Request::KnownBlock");
