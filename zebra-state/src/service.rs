@@ -52,7 +52,6 @@ use crate::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
         MAX_LEGACY_CHAIN_BLOCKS,
     },
-    response::KnownBlock,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -1090,12 +1089,12 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let response = read::non_finalized_state_contains_block_hash(
+                    let response = read::contains_block(
                         &read_service.latest_non_finalized_state(),
+                        &read_service.db,
+                        is_block_queued,
                         hash,
-                    )
-                    .or(is_block_queued.then_some(KnownBlock::Queue))
-                    .or_else(|| read::finalized_state_contains_block_hash(&read_service.db, hash));
+                    );
 
                     // The work is done in the future.
                     timer.finish(module_path!(), line!(), "Request::KnownBlock");
