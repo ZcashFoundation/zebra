@@ -22,28 +22,38 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
+# Experimental elasticsearch support
+elasticsearch = [
+    "dep:elasticsearch",
+    "dep:serde_json",
+]
+
 [dependencies]
 bincode = "1.3.3"
-chrono = { version = "0.4.23", default-features = false, features = ["clock", "std"] }
-dirs = "4.0.0"
-futures = "0.3.26"
+chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
+dirs = "5.0.0"
+futures = "0.3.27"
 hex = "0.4.3"
 indexmap = "1.9.2"
 itertools = "0.10.5"
 lazy_static = "1.4.0"
 metrics = "0.20.1"
 mset = "0.1.1"
-regex = "1.7.1"
+regex = "1.7.2"
 rlimit = "0.9.1"
 rocksdb = { version = "0.20.1", default_features = false, features = ["lz4"] }
-serde = { version = "1.0.154", features = ["serde_derive"] }
+serde = { version = "1.0.158", features = ["serde_derive"] }
 tempfile = "3.4.0"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 
 rayon = "1.7.0"
 tokio = { version = "1.26.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
+
+# elasticsearch specific dependencies.
+elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional = true }
+serde_json = { version = "1.0.93", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
@@ -61,7 +71,7 @@ once_cell = "1.17.1"
 spandoc = "0.2.2"
 
 hex = { version = "0.4.3", features = ["serde"] }
-insta = { version = "1.28.0", features = ["ron"] }
+insta = { version = "1.29.0", features = ["ron"] }
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"

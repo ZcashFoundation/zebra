@@ -6,7 +6,6 @@
 //! Zebra never sends `addrv2` messages, because peers still accept `addr` (v1) messages.
 
 use std::{
-    convert::{TryFrom, TryInto},
     io::Read,
     net::{IpAddr, SocketAddr},
 };
@@ -15,8 +14,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
 use zebra_chain::serialization::{
-    CompactSize64, DateTime32, SerializationError, TrustedPreallocate, ZcashDeserialize,
-    ZcashDeserializeInto,
+    zcash_deserialize_bytes_external_count, CompactSize64, CompactSizeMessage, DateTime32,
+    SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
 };
 
 use crate::{
@@ -282,18 +281,20 @@ impl ZcashDeserialize for AddrV2 {
         // See the list of reserved network IDs in ZIP 155.
         let network_id = reader.read_u8()?;
 
-        // > CompactSize      The length in bytes of addr.
-        // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
-        let addr: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
-
-        // > uint16  Network port. If not relevant for the network this MUST be 0.
-        let port = reader.read_u16::<BigEndian>()?;
-
-        if addr.len() > MAX_ADDR_V2_ADDR_SIZE {
+        // > CompactSize  The length in bytes of addr.
+        let addr_len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        let addr_len: usize = addr_len.into();
+        if addr_len > MAX_ADDR_V2_ADDR_SIZE {
             return Err(SerializationError::Parse(
                 "addr field longer than MAX_ADDR_V2_ADDR_SIZE in addrv2 message",
             ));
         }
+
+        // > uint8[sizeAddr]  Network address. The interpretation depends on networkID.
+        let addr: Vec<u8> = zcash_deserialize_bytes_external_count(addr_len, &mut reader)?;
+
+        // > uint16  Network port. If not relevant for the network this MUST be 0.
+        let port = reader.read_u16::<BigEndian>()?;
 
         let ip = if network_id == ADDR_V2_IPV4_NETWORK_ID {
             AddrV2::ip_addr_from_bytes::<ADDR_V2_IPV4_ADDR_SIZE>(addr)?
