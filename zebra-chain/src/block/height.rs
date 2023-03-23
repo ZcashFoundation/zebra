@@ -67,14 +67,6 @@ impl Height {
 /// A difference between two [`Height`]s, possibly negative.
 pub type HeightDiff = i32;
 
-// impl TryFrom<Height> for HeightDiff {
-//     type Error = TryFromIntError;
-
-//     fn try_from(height: Height) -> Result<Self, Self::Error> {
-//         HeightDiff::try_from(height.0)
-//     }
-// }
-
 impl Sub<Height> for Height {
     type Output = Option<HeightDiff>;
 
