@@ -541,7 +541,7 @@ impl StateService {
     ///
     /// Returns an error if the block commit channel has been closed.
     pub fn drain_queue_and_commit_finalized(&mut self) {
-        use tokio::sync::mpsc::error::{SendError, TryRecvError};
+        use tokio::sync::mpsc::error::SendError;
 
         // # Correctness & Performance
         //
@@ -549,24 +549,8 @@ impl StateService {
         // because it is called directly from the tokio executor's Future threads.
 
         // If a block failed, we need to start again from a valid tip.
-        match self.invalid_block_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => {
-                // any blocks that may have been sent were either committed or dropped
-                // if a reset signal has been received, so we can clear `sent_blocks` and
-                // let Zebra re-download/verify blocks that were dropped.
-                self.sent_blocks.clear();
-                self.last_sent_finalized_block_hash = reset_tip_hash
-            }
-            Err(TryRecvError::Disconnected) => {
-                info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
-            // There are no errors, so we can just use the last block hash we sent
-            Err(TryRecvError::Empty) => {
-                if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
-                    self.sent_blocks.prune_by_height(finalized_tip_height);
-                }
-            }
+        if self.try_handle_invalid_block_reset(true).is_err() {
+            return;
         }
 
         while let Some(queued_block) = self
@@ -818,10 +802,42 @@ impl StateService {
 
     /// Returns true if the block hash is queued or has been sent to be validated and committed.
     /// Returns false otherwise.
-    fn is_block_queued(&self, hash: &block::Hash) -> bool {
+    fn is_block_queued(&mut self, hash: &block::Hash) -> bool {
+        let _ = self.try_handle_invalid_block_reset(false);
         self.queued_non_finalized_blocks.contains_block_hash(hash)
             || self.queued_finalized_blocks.contains_key(hash)
             || self.sent_blocks.contains(hash)
+    }
+
+    /// Sets `last_sent_finalized_block_hash` to finalized tip to restart from a valid tip and
+    /// clears `sent_blocks` so blocks that could not be committed are re-downloaded and re-verified.
+    fn try_handle_invalid_block_reset(&mut self, should_prune: bool) -> Result<(), ()> {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        match self.invalid_block_reset_receiver.try_recv() {
+            Ok(reset_tip_hash) => {
+                // any blocks that may have been sent were either committed or dropped
+                // if a reset signal has been received, so we can clear `sent_blocks` and
+                // let Zebra re-download/verify blocks that were dropped.
+                self.sent_blocks.clear();
+
+                // If a block failed validation, we need to start again from a valid tip.
+                self.last_sent_finalized_block_hash = reset_tip_hash
+            }
+            Err(TryRecvError::Disconnected) => {
+                info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
+                return Err(());
+            }
+            // There are no errors, so we can just use the last block hash we sent
+            Err(TryRecvError::Empty) if should_prune => {
+                if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
+                    self.sent_blocks.prune_by_height(finalized_tip_height);
+                }
+            }
+            Err(TryRecvError::Empty) => {}
+        };
+
+        Ok(())
     }
 }
 
