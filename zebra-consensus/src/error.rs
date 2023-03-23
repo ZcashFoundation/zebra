@@ -246,7 +246,7 @@ pub enum BlockError {
     DuplicateTransaction,
 
     #[error("block {0:?} is already in present in the state {1:?}")]
-    AlreadyInState(zebra_chain::block::Hash, zebra_state::KnownBlock),
+    AlreadyInChain(zebra_chain::block::Hash, zebra_state::KnownBlock),
 
     #[error("invalid block {0:?}: missing block height")]
     MissingHeight(zebra_chain::block::Hash),
@@ -311,6 +311,6 @@ impl BlockError {
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
-        matches!(self, BlockError::AlreadyInState(..))
+        matches!(self, BlockError::AlreadyInChain(..))
     }
 }

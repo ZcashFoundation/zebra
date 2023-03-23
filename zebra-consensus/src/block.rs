@@ -159,7 +159,7 @@ where
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {
                 zs::Response::KnownBlock(Some(location)) => {
-                    return Err(BlockError::AlreadyInState(hash, location).into())
+                    return Err(BlockError::AlreadyInChain(hash, location).into())
                 }
                 zs::Response::KnownBlock(None) => {}
                 _ => unreachable!("wrong response to Request::KnownBlock"),

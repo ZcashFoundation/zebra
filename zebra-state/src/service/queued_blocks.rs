@@ -217,12 +217,6 @@ impl QueuedBlocks {
 
         self.blocks.drain()
     }
-
-    /// Returns true if QueuedBlocks contains a block with the given hash.
-    /// Returns false otherwise.
-    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
-        self.blocks.contains_key(hash)
-    }
 }
 
 #[derive(Debug, Default)]
@@ -295,20 +289,6 @@ impl SentHashes {
         self.update_metrics_for_block(block.height);
     }
 
-    /// Stores the finalized `block`'s hash, so it can be used to check if a
-    /// block is in the state queue.
-    ///
-    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
-    /// for efficient pruning.
-    ///
-    /// For more details see `add()`.
-    pub fn add_finalized_hash(&mut self, hash: block::Hash, height: block::Height) {
-        self.curr_buf.push_back((hash, height));
-        self.sent.insert(hash, vec![]);
-
-        self.update_metrics_for_block(height);
-    }
-
     /// Try to look up this UTXO in any sent block.
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
@@ -352,15 +332,6 @@ impl SentHashes {
 
         self.sent.shrink_to_fit();
 
-        self.update_metrics_for_cache();
-    }
-
-    /// Clears all data from `SentBlocks`
-    pub fn clear(&mut self) {
-        self.sent.clear();
-        self.bufs.clear();
-        self.curr_buf.clear();
-        self.known_utxos.clear();
         self.update_metrics_for_cache();
     }
 

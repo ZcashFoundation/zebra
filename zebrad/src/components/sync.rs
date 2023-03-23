@@ -1156,7 +1156,7 @@ where
                 // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{e:?}");
                 if err_str.contains("AlreadyVerified")
-                    || err_str.contains("AlreadyInState")
+                    || err_str.contains("AlreadyInChain")
                     || err_str.contains("block is already committed to the state")
                     || err_str.contains("block has already been sent to be committed to the state")
                     || err_str.contains("NotFound")
