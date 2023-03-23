@@ -104,12 +104,12 @@ pub trait ChainTip {
     /// The estimate is calculated based on the current local time, the block time of the best tip
     /// and the height of the best tip.
     ///
-    /// This estimate may be [`None`] if the current local time is behind the chain tip block's
+    /// This estimate may be negative if the current local time is behind the chain tip block's
     /// timestamp.
     fn estimate_distance_to_network_chain_tip(
         &self,
         network: Network,
-    ) -> Option<(block::Height, block::Height)> {
+    ) -> Option<(block::HeightDiff, block::Height)> {
         let (current_height, current_block_time) = self.best_tip_height_and_block_time()?;
 
         let estimator =

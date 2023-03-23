@@ -23,14 +23,14 @@ const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// The number of blocks we consider to be close to the tip.
 ///
 /// Most chain forks are 1-7 blocks long.
-const MAX_CLOSE_TO_TIP_BLOCKS: u32 = 1;
+const MAX_CLOSE_TO_TIP_BLOCKS: i32 = 1;
 
 /// Skip slow sync warnings when we are this close to the tip.
 ///
 /// In testing, we've seen warnings around 30 blocks.
 ///
 /// TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
-const MIN_SYNC_WARNING_BLOCKS: u32 = 60;
+const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
 
 /// The number of fractional digits in sync percentages.
 const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
@@ -129,7 +129,7 @@ pub async fn show_block_chain_progress(
             );
 
             let remaining_sync_blocks =
-                (estimated_height - current_height).map_or(0, |height| height.0);
+                (estimated_height - current_height).map_or(0, |height| height);
 
             // Work out how long it has been since the state height has increased.
             //

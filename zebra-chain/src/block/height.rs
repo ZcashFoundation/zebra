@@ -6,9 +6,9 @@ use crate::serialization::SerializationError;
 
 /// The length of the chain back to the genesis block.
 ///
-/// Block heights can't be added, but they can be *subtracted*,
-/// to get a difference of block heights, represented as an `i32`,
-/// and height differences can be added to block heights to get new heights.
+/// Two [`Height`]s can't be added, but they can be *subtracted* to get their difference,
+/// represented as an [`HeightDiff`]. This difference can then be added to or subtracted from a
+/// [`Height`]. Note the similarity with `chrono::DateTime` and `chrono::Duration`.
 ///
 /// # Invariants
 ///
@@ -64,31 +64,41 @@ impl Height {
     pub const MAX_EXPIRY_HEIGHT: Height = Height(499_999_999);
 }
 
-impl Add<Height> for Height {
-    type Output = Option<Height>;
+/// A difference between two [`Height`]s, possibly negative.
+pub type HeightDiff = i32;
 
-    fn add(self, rhs: Height) -> Option<Height> {
-        // We know that both values are positive integers. Therefore, the result is
-        // positive, and we can skip the conversions. The checked_add is required,
-        // because the result may overflow.
-        let height = self.0.checked_add(rhs.0)?;
-        let height = Height(height);
+// impl TryFrom<Height> for HeightDiff {
+//     type Error = TryFromIntError;
 
-        if height <= Height::MAX && height >= Height::MIN {
-            Some(height)
-        } else {
-            None
-        }
+//     fn try_from(height: Height) -> Result<Self, Self::Error> {
+//         HeightDiff::try_from(height.0)
+//     }
+// }
+
+impl Sub<Height> for Height {
+    type Output = Option<HeightDiff>;
+
+    fn sub(self, rhs: Height) -> Self::Output {
+        // We convert the heights from [`u32`] to [`i32`] because `u32::checked_sub` returns
+        // [`None`] for negative results. We must check the conversion since it's possible to
+        // construct heights outside the valid range for [`i32`].
+        let lhs = i32::try_from(self.0).ok()?;
+        let rhs = i32::try_from(rhs.0).ok()?;
+        lhs.checked_sub(rhs)
     }
 }
 
-impl Sub<Height> for Height {
-    type Output = Option<Height>;
+impl Sub<HeightDiff> for Height {
+    type Output = Option<Self>;
 
-    fn sub(self, rhs: Height) -> Self::Output {
-        // Perform the subtraction.
-        let result = self.0.checked_sub(rhs.0)?;
-        let height = Height(result);
+    fn sub(self, rhs: HeightDiff) -> Option<Self> {
+        // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
+        // must check the conversion since it's possible to construct heights outside the valid
+        // range for [`i32`].
+        let lhs = i32::try_from(self.0).ok()?;
+        let res = lhs.checked_sub(rhs)?;
+        let res = u32::try_from(res).ok()?;
+        let height = Height(res);
 
         // Check the bounds.
         if Height::MIN <= height && height <= Height::MAX {
@@ -99,35 +109,23 @@ impl Sub<Height> for Height {
     }
 }
 
-// We don't implement Add<u32> or Sub<u32>, because they cause type inference issues for integer constants.
-
-impl Add<i32> for Height {
+impl Add<HeightDiff> for Height {
     type Output = Option<Height>;
 
-    fn add(self, rhs: i32) -> Option<Height> {
-        // Because we construct heights from integers without any checks,
-        // the input values could be outside the valid range for i32.
+    fn add(self, rhs: HeightDiff) -> Option<Height> {
+        // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
+        // must check the conversion since it's possible to construct heights outside the valid
+        // range for [`i32`].
         let lhs = i32::try_from(self.0).ok()?;
-        let result = lhs.checked_add(rhs)?;
-        let result = u32::try_from(result).ok()?;
-        match result {
-            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
-            _ => None,
-        }
-    }
-}
+        let res = lhs.checked_add(rhs)?;
+        let res = u32::try_from(res).ok()?;
+        let height = Height(res);
 
-impl Sub<i32> for Height {
-    type Output = Option<Height>;
-
-    fn sub(self, rhs: i32) -> Option<Height> {
-        // These checks are required, see above for details.
-        let lhs = i32::try_from(self.0).ok()?;
-        let result = lhs.checked_sub(rhs)?;
-        let result = u32::try_from(result).ok()?;
-        match result {
-            h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
-            _ => None,
+        // Check the bounds.
+        if Height::MIN <= height && height <= Height::MAX {
+            Some(height)
+        } else {
+            None
         }
     }
 }
@@ -137,22 +135,22 @@ fn operator_tests() {
     let _init_guard = zebra_test::init();
 
     // Elementary checks.
-    assert_eq!(Some(Height(2)), Height(1) + Height(1));
-    assert_eq!(None, Height::MAX + Height(1));
+    assert_eq!(Some(Height(2)), Height(1) + 1);
+    assert_eq!(None, Height::MAX + 1);
 
     let height = Height(u32::pow(2, 31) - 2);
     assert!(height < Height::MAX);
 
-    let max_height = (height + Height(1)).expect("this addition should produce the max height");
+    let max_height = (height + 1).expect("this addition should produce the max height");
     assert!(height < max_height);
     assert!(max_height <= Height::MAX);
     assert_eq!(Height::MAX, max_height);
-    assert_eq!(None, max_height + Height(1));
+    assert_eq!(None, max_height + 1);
 
     // Bad heights aren't caught at compile-time or runtime, until we add or subtract
-    assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + Height(0));
-    assert_eq!(None, Height(i32::MAX as u32) + Height(1));
-    assert_eq!(None, Height(u32::MAX) + Height(0));
+    assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + 0);
+    assert_eq!(None, Height(i32::MAX as u32) + 1);
+    assert_eq!(None, Height(u32::MAX) + 0);
 
     assert_eq!(Some(Height(2)), Height(1) + 1);
     assert_eq!(None, Height::MAX + 1);
@@ -192,12 +190,12 @@ fn operator_tests() {
     assert_eq!(None, Height(i32::MAX as u32) - -1);
     assert_eq!(None, Height(u32::MAX) - -1);
 
-    assert_eq!(1, (Height(2) - Height(1)).unwrap().0);
-    assert_eq!(0, (Height(1) - Height(1)).unwrap().0);
-    assert_eq!(None, Height(0) - Height(1));
-    assert_eq!(None, Height(2) - Height(7));
-    assert_eq!(Height::MAX, (Height::MAX - Height(0)).unwrap());
-    assert_eq!(1, (Height::MAX - Height(Height::MAX_AS_U32 - 1)).unwrap().0);
-    assert_eq!(None, Height(Height::MAX_AS_U32 - 1) - Height::MAX);
-    assert_eq!(None, Height(0) - Height::MAX);
+    assert_eq!(1, (Height(2) - Height(1)).unwrap());
+    assert_eq!(0, (Height(1) - Height(1)).unwrap());
+    assert_eq!(Some(-1), Height(0) - Height(1));
+    assert_eq!(Some(-5), Height(2) - Height(7));
+    assert_eq!(Height::MAX, (Height::MAX - 0).unwrap());
+    assert_eq!(1, (Height::MAX - Height(Height::MAX_AS_U32 - 1)).unwrap());
+    assert_eq!(Some(-1), Height(Height::MAX_AS_U32 - 1) - Height::MAX);
+    assert_eq!(Some(-(Height::MAX_AS_U32 as i32)), Height(0) - Height::MAX);
 }

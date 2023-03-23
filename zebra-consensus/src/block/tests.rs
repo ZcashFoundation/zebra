@@ -485,7 +485,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
     };
 
     for (&height, block) in block_iter {
-        if Height(height) > SLOW_START_SHIFT {
+        if (Height(height) - SLOW_START_SHIFT).is_some() {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
 
             // fake the miner fee to a big amount

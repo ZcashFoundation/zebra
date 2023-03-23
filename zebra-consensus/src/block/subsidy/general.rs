@@ -25,36 +25,36 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
         .activation_height(network)
         .expect("blossom activation height should be available");
 
-    let slow_start_shift_diff = height - SLOW_START_SHIFT;
-    let slow_start_shift_diff = slow_start_shift_diff.unwrap_or_else(|| {
+    let Some(height_after_slow_start_shift) = height - SLOW_START_SHIFT else {
         unreachable!(
             "unsupported block height: checkpoints should handle blocks below {:?}",
             SLOW_START_SHIFT
         )
-    });
+    };
 
-    if let Some(post_blossom_height) = height - blossom_height {
-        // The Blossom height is way above `SLOW_START_SHIFT`.
-        let pre_blossom_height = (blossom_height - SLOW_START_SHIFT)
-            .expect("Blossom height must be above SlowStartShift.")
-            .0;
-        let scaled_pre_blossom_height = pre_blossom_height * BLOSSOM_POW_TARGET_SPACING_RATIO;
+    let post_blossom_height_diff = (height - blossom_height)?;
 
-        let halving_shift =
-            (scaled_pre_blossom_height + post_blossom_height.0) / POST_BLOSSOM_HALVING_INTERVAL.0;
+    post_blossom_height_diff
+        .is_negative()
+        .then(|| {
+            let pre_blossom_height = height_after_slow_start_shift.0;
+            let halving_shift = pre_blossom_height / (PRE_BLOSSOM_HALVING_INTERVAL as u32);
 
-        // Some far-future shifts can be more than 63 bits
-        1u64.checked_shl(halving_shift)
-    } else {
-        let pre_blossom_height = slow_start_shift_diff.0;
-        let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL.0;
+            1u64.checked_shl(halving_shift)
+                .expect("pre-blossom heights produce small shifts")
+        })
+        .or_else(|| {
+            let pre_blossom_height = (blossom_height - SLOW_START_SHIFT)
+                .expect("Blossom height must be above SlowStartShift.")
+                .0;
+            let scaled_pre_blossom_height = pre_blossom_height * BLOSSOM_POW_TARGET_SPACING_RATIO;
 
-        let halving_div = 1u64
-            .checked_shl(halving_shift)
-            .expect("pre-blossom heights produce small shifts");
+            let halving_shift = (scaled_pre_blossom_height + (post_blossom_height_diff as u32))
+                / (POST_BLOSSOM_HALVING_INTERVAL as u32);
 
-        Some(halving_div)
-    }
+            // Some far-future shifts can be more than 63 bits
+            1u64.checked_shl(halving_shift)
+        })
 }
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
@@ -73,7 +73,7 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
         return Ok(Amount::zero());
     };
 
-    if height < SLOW_START_INTERVAL {
+    if (height - SLOW_START_INTERVAL).is_none() {
         unreachable!(
             "unsupported block height: callers should handle blocks below {:?}",
             SLOW_START_INTERVAL
@@ -161,7 +161,7 @@ mod test {
         assert_eq!(
             8,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 2)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 2)).unwrap(),
                 network
             )
             .unwrap()
@@ -170,7 +170,7 @@ mod test {
         assert_eq!(
             1024,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 9)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 9)).unwrap(),
                 network
             )
             .unwrap()
@@ -178,7 +178,7 @@ mod test {
         assert_eq!(
             1024 * 1024,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 19)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 19)).unwrap(),
                 network
             )
             .unwrap()
@@ -186,7 +186,7 @@ mod test {
         assert_eq!(
             1024 * 1024 * 1024,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 29)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
                 network
             )
             .unwrap()
@@ -194,7 +194,7 @@ mod test {
         assert_eq!(
             1024 * 1024 * 1024 * 1024,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 39)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
                 network
             )
             .unwrap()
@@ -204,7 +204,7 @@ mod test {
         assert_eq!(
             (i64::MAX as u64 + 1),
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 62)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
                 network
             )
             .unwrap(),
@@ -214,7 +214,7 @@ mod test {
         assert_eq!(
             None,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 63)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
                 network,
             ),
         );
@@ -222,7 +222,7 @@ mod test {
         assert_eq!(
             None,
             halving_divisor(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 64)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
                 network,
             ),
         );
@@ -296,7 +296,7 @@ mod test {
         assert_eq!(
             Amount::try_from(4_882_812),
             block_subsidy(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 6)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 6)).unwrap(),
                 network
             )
         );
@@ -306,7 +306,7 @@ mod test {
         assert_eq!(
             Amount::try_from(1),
             block_subsidy(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 28)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 28)).unwrap(),
                 network
             )
         );
@@ -316,7 +316,7 @@ mod test {
         assert_eq!(
             Amount::try_from(0),
             block_subsidy(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 29)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
                 network
             )
         );
@@ -325,7 +325,7 @@ mod test {
         assert_eq!(
             Amount::try_from(0),
             block_subsidy(
-                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 62)).unwrap(),
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
                 network
             )
         );
