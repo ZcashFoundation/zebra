@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.0-rc.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.6) - 2023-03-23
 
-In this release, we fixed several security issues, most notably the [vulnerabilities recently disclosed by Halborn](https://zfnd.org/statement-on-recent-security-disclosures-by-halborn/).
+In this release, we fixed several minor security issues, most notably [hardening Zebra in response to the vulnerabilities recently disclosed by Halborn](https://zfnd.org/statement-on-recent-security-disclosures-by-halborn/).
 
 ### Known Issues
 
