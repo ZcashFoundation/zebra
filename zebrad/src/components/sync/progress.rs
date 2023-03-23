@@ -129,7 +129,7 @@ pub async fn show_block_chain_progress(
             );
 
             let remaining_sync_blocks =
-                (estimated_height - current_height).map_or(0, |height| height);
+                (estimated_height - current_height).unwrap_or(0);
 
             // Work out how long it has been since the state height has increased.
             //
