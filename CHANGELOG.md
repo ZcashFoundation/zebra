@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.0-rc.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.6) - 2023-03-23
 
-This release we fixed several security issues.
+In this release, we fixed several security issues, most notably the [vulnerabilities recently disclosed by Halborn].(https://zfnd.org/statement-on-recent-security-disclosures-by-halborn/).
 
 ### Known Issues
 
-- `orchard` 0.3.0 can't verify `halo2` proofs when compiled with Rust 1.69 or later (currently beta Rust). Compile Zebra with stable Rust to avoid this bug. ([halo2/#737](https://github.com/zcash/halo2/issues/737)).
+- `orchard` 0.3.0 can't verify `halo2` proofs when compiled with Rust 1.69 or later (currently beta and nightly Rust). Compile Zebra with stable Rust to avoid this bug. ([halo2/#737](https://github.com/zcash/halo2/issues/737)).
 Zebra tracking issue for this problem is [here](https://github.com/ZcashFoundation/zebra/issues/6232).
 
 ### Security
 
-- Fix Halborn disclosures in Zebra ([#6297](https://github.com/ZcashFoundation/zebra/pull/6297))
+- Harden Zebra's network protocol implementation in response to the Holborn disclosures ([#6297](https://github.com/ZcashFoundation/zebra/pull/6297))
 - Bump incrementalmerkletree from 0.3.0 to 0.3.1, resolving a consensus bug on 32-bit platforms ([#6258](https://github.com/ZcashFoundation/zebra/pull/6258))
 - Remove unused dependencies, and check for them in CI ([#6216](https://github.com/ZcashFoundation/zebra/pull/6216))
 - Validate address length before reading ([#6320](https://github.com/ZcashFoundation/zebra/pull/6320)) [#6368](https://github.com/ZcashFoundation/zebra/pull/6368)
