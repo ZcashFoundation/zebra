@@ -16,7 +16,7 @@ Zebra tracking issue for this problem is [here](https://github.com/ZcashFoundati
 
 ### Security
 
-- Harden Zebra's network protocol implementation in response to the Holborn disclosures ([#6297](https://github.com/ZcashFoundation/zebra/pull/6297))
+- Harden Zebra's network protocol implementation in response to the Halborn disclosures ([#6297](https://github.com/ZcashFoundation/zebra/pull/6297))
 - Bump incrementalmerkletree from 0.3.0 to 0.3.1, resolving a consensus bug on 32-bit platforms ([#6258](https://github.com/ZcashFoundation/zebra/pull/6258))
 - Remove unused dependencies, and check for them in CI ([#6216](https://github.com/ZcashFoundation/zebra/pull/6216))
 - Validate address length before reading ([#6320](https://github.com/ZcashFoundation/zebra/pull/6320)) [#6368](https://github.com/ZcashFoundation/zebra/pull/6368)
