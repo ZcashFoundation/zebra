@@ -71,7 +71,7 @@ zebra-script = { path = "../zebra-script" }
 zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
-insta = { version = "1.28.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.29.0", features = ["redactions", "json", "ron"] }
 
 proptest = "0.10.1"
 
