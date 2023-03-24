@@ -3,15 +3,15 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
 edition = "2021"
 
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
-# Zebra's code uses features introduced in Rust 1.65, or any later stable release.
-rust-version = "1.65"
+# Zebra's code uses features introduced in Rust 1.68, or any later stable release.
+rust-version = "1.68"
 
 # Settings that impact runtime behaviour
 
