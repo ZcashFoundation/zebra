@@ -174,7 +174,7 @@ RUN set -ex; \
   { \
     echo "[network]"; \
     echo "network = '${NETWORK}'"; \
-    [ $NETWORK = "Testnet" ] && echo "listen_addr = '127.0.0.1:18233'"; \
+    echo "listen_addr = '127.0.0.1'"; \
     echo "[consensus]"; \
     echo "checkpoint_sync = ${CHECKPOINT_SYNC}"; \
     echo "[state]"; \

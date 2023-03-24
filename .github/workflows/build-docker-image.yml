@@ -86,7 +86,7 @@ jobs:
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
             zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
-          # appends inputs.tag_suffix to tags
+          # appends inputs.tag_suffix to image tags/names
           flavor: |
             suffix=${{ inputs.tag_suffix }}
           # generate Docker tags based on the following events/attributes
