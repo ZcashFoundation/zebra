@@ -30,7 +30,7 @@ use zebra_node_services::{
     BoxError,
 };
 
-use zebra_state::{ReadRequest, ReadResponse};
+use zebra_state::{MinedTx, ReadRequest, ReadResponse};
 
 #[cfg(test)]
 mod tests;
@@ -287,19 +287,12 @@ impl Runner {
         let mut response = HashSet::new();
 
         for t in transactions {
-            let request = ReadRequest::Transaction {
-                hash: t.mined_id(),
-                should_return_confirmations: false,
-            };
+            let request = ReadRequest::Transaction(t.mined_id());
 
             // ignore any error coming from the state
             let state_response = state.clone().oneshot(request).await;
-            if let Ok(ReadResponse::Transaction {
-                transaction_and_height: Some(tx),
-                confirmations: _,
-            }) = state_response
-            {
-                response.insert(tx.0.unmined_id());
+            if let Ok(ReadResponse::Transaction(Some(MinedTx { tx, .. }))) = state_response {
+                response.insert(tx.unmined_id());
             }
         }
 

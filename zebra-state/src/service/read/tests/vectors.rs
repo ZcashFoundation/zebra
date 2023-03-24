@@ -11,7 +11,7 @@ use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
 };
 
-use crate::{init_test_services, populated_state, ReadRequest, ReadResponse};
+use crate::{init_test_services, populated_state, response::MinedTx, ReadRequest, ReadResponse};
 
 /// Test that ReadStateService responds correctly when empty.
 #[tokio::test]
@@ -67,17 +67,12 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
         for transaction in &block.transactions {
             let transaction_cases = vec![(
-                ReadRequest::Transaction {
-                    hash: transaction.hash(),
-                    should_return_confirmations: false,
-                },
-                Ok(ReadResponse::Transaction {
-                    transaction_and_height: Some((
-                        transaction.clone(),
-                        block.coinbase_height().unwrap(),
-                    )),
-                    confirmations: None,
-                }),
+                ReadRequest::Transaction(transaction.hash()),
+                Ok(ReadResponse::Transaction(Some(MinedTx {
+                    tx: transaction.clone(),
+                    height: block.coinbase_height().unwrap(),
+                    confirmations: 2,
+                }))),
             )];
 
             let transaction_cases = Transcript::from(transaction_cases);
@@ -96,14 +91,8 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
 
     vec![
         (
-            ReadRequest::Transaction {
-                hash: transaction::Hash([0; 32]),
-                should_return_confirmations: false,
-            },
-            Ok(ReadResponse::Transaction {
-                transaction_and_height: None,
-                confirmations: None,
-            }),
+            ReadRequest::Transaction(transaction::Hash([0; 32])),
+            Ok(ReadResponse::Transaction(None)),
         ),
         (
             ReadRequest::Block(block.hash().into()),

@@ -30,7 +30,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
 
@@ -886,10 +886,7 @@ where
             };
 
             // Now check the state
-            let request = zebra_state::ReadRequest::Transaction {
-                hash: txid,
-                should_return_confirmations: true,
-            };
+            let request = zebra_state::ReadRequest::Transaction(txid);
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -901,19 +898,17 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Transaction {
-                    transaction_and_height: Some((tx, height)),
-                    confirmations: Some(confirmations),
-                } => Ok(GetRawTransaction::from_transaction(
+                zebra_state::ReadResponse::Transaction(Some(MinedTx {
+                    tx,
+                    height,
+                    confirmations,
+                })) => Ok(GetRawTransaction::from_transaction(
                     tx,
                     Some(height),
                     confirmations,
                     verbose,
                 )),
-                zebra_state::ReadResponse::Transaction {
-                    transaction_and_height: None,
-                    confirmations: None,
-                } => Err(Error {
+                zebra_state::ReadResponse::Transaction(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Transaction not found".to_string(),
                     data: None,

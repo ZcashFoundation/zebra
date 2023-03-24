@@ -691,13 +691,7 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
-    Transaction {
-        /// Transaction hash to look up.
-        hash: transaction::Hash,
-
-        /// Whether the state should return confirmations for this transaction.
-        should_return_confirmations: bool,
-    },
+    Transaction(transaction::Hash),
 
     /// Looks up the transaction IDs for a block, using a block hash or height.
     ///
@@ -885,7 +879,7 @@ impl ReadRequest {
             ReadRequest::Tip => "tip",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
-            ReadRequest::Transaction { .. } => "transaction",
+            ReadRequest::Transaction(_) => "transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
@@ -936,10 +930,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
-            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction {
-                hash: tx_hash,
-                should_return_confirmations: false,
-            }),
+            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
             }
