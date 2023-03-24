@@ -1433,10 +1433,10 @@ pub enum GetRawTransaction {
         /// The raw transaction, encoded as hex bytes.
         #[serde(with = "hex")]
         hex: SerializedTransaction,
-        /// The height of the block that contains the transaction, or -1 if
-        /// not applicable.
+        /// The height of the block in the best chain that contains the transaction, or -1 if
+        /// the transaction is in the mempool.
         height: i32,
-        /// The confirmations of the block that contains the transaction,
+        /// The confirmations of the block in the best chain that contains the transaction,
         /// or 0 if the transaction is in the mempool.
         confirmations: u32,
     },
