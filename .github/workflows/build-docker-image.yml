@@ -177,7 +177,7 @@ jobs:
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-to: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
