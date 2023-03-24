@@ -69,9 +69,25 @@ pub enum Response {
     /// specified block hash.
     BlockHash(Option<block::Hash>),
 
+    /// Response to [`Request::KnownBlock`].
+    KnownBlock(Option<KnownBlock>),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`](Request::CheckBlockProposalValidity)
     ValidBlockProposal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// An enum of block stores in the state where a block hash could be found.
+pub enum KnownBlock {
+    /// Block is in the best chain.
+    BestChain,
+
+    /// Block is in a side chain.
+    SideChain,
+
+    /// Block is queued to be validated and committed, or rejected and dropped.
+    Queue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

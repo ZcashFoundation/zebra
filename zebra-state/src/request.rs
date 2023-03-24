@@ -607,6 +607,13 @@ pub enum Request {
     /// * [`Response::BlockHash(None)`](Response::BlockHash) otherwise.
     BestChainBlockHash(block::Height),
 
+    /// Checks if a block is present anywhere in the state service.
+    /// Looks up `hash` in block queues as well as the finalized chain and all non-finalized chains.
+    ///
+    /// Returns [`Response::KnownBlock(Some(Location))`](Response::KnownBlock) if the block is in the best state service.
+    /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
+    KnownBlock(block::Hash),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
@@ -634,6 +641,7 @@ impl Request {
             }
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
+            Request::KnownBlock(_) => "known_block",
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
@@ -946,6 +954,8 @@ impl TryFrom<Request> for ReadRequest {
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
                      and handle pending UTXOs"),
+
+            Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(prepared) => {

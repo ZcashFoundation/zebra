@@ -160,7 +160,7 @@ pub(crate) struct StateService {
     // - remove block hashes once their heights are strictly less than the finalized tip
     last_sent_finalized_block_hash: block::Hash,
 
-    /// A set of non-finalized block hashes that have been sent to the block write task.
+    /// A set of block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     sent_non_finalized_block_hashes: SentHashes,
 
@@ -713,13 +713,13 @@ impl StateService {
             return rsp_rx;
         }
 
-        // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
         if self.finalized_block_write_sender.is_none() {
+            // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
 
             let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
+            "Finalized state must have at least one block before committing non-finalized state",
+        );
 
             self.queued_non_finalized_blocks
                 .prune_by_height(finalized_tip_height);
@@ -1059,6 +1059,28 @@ impl Service<Request> for StateService {
                     timer.finish(module_path!(), line!(), "AwaitUtxo/waiting");
 
                     response_fut.await
+                }
+                .boxed()
+            }
+
+            // Used by sync, inbound, and block verifier to check if a block is already in the state
+            // before downloading or validating it.
+            Request::KnownBlock(hash) => {
+                let timer = CodeTimer::start();
+
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let response = read::non_finalized_state_contains_block_hash(
+                        &read_service.latest_non_finalized_state(),
+                        hash,
+                    )
+                    .or_else(|| read::finalized_state_contains_block_hash(&read_service.db, hash));
+
+                    // The work is done in the future.
+                    timer.finish(module_path!(), line!(), "Request::KnownBlock");
+
+                    Ok(Response::KnownBlock(response))
                 }
                 .boxed()
             }
