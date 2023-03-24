@@ -91,6 +91,7 @@ pub enum KnownBlock {
 }
 
 /// Information about a transaction in the best chain
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MinedTx {
     /// The transaction.
     pub tx: Arc<Transaction>,
