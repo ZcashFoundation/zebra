@@ -108,7 +108,7 @@ pub enum Response {
         transactions: Vec<VerifiedUnminedTx>,
 
         /// Last seen chain tip hash by mempool service
-        last_seen_chain_tip: Option<zebra_chain::block::Hash>,
+        last_seen_tip_hash: zebra_chain::block::Hash,
     },
 
     /// Returns matching cached rejected [`UnminedTxId`]s from the mempool,

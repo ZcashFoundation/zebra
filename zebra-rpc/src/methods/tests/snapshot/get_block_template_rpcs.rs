@@ -219,7 +219,10 @@ pub async fn test_responses<State, ReadState>(
             mempool
                 .expect_request(mempool::Request::FullTransactions)
                 .await
-                .respond(mempool::Response::FullTransactions(vec![]));
+                .respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    last_seen_tip_hash: [0; 32].into(),
+                });
         }
     };
 

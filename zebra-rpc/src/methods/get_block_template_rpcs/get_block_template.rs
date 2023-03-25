@@ -256,19 +256,16 @@ where
             data: None,
         })?;
 
-    if let mempool::Response::FullTransactions {
+    let mempool::Response::FullTransactions {
         transactions,
-        last_seen_chain_tip,
-    } = response
-    {
-        if last_seen_chain_tip == Some(chain_tip_hash) {
-            Ok(transactions)
-        } else {
-            Ok(vec![])
-        }
-    } else {
+        last_seen_tip_hash,
+    } = response else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
-    }
+    };
+
+    Ok((last_seen_tip_hash == chain_tip_hash)
+        .then_some(transactions)
+        .unwrap_or_default())
 }
 
 // - Response processing

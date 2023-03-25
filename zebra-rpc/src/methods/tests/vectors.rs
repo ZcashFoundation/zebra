@@ -1259,7 +1259,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
             mempool
                 .expect_request(mempool::Request::FullTransactions)
                 .await
-                .respond(mempool::Response::FullTransactions(vec![]));
+                .respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    last_seen_tip_hash: fake_tip_hash,
+                });
         }
     };
 
