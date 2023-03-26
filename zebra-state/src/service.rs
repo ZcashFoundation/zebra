@@ -1274,16 +1274,13 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let transaction_and_height = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::transaction(non_finalized_state.best_chain(), &state.db, hash)
-                            });
+                        let response =
+                            read::mined_transaction(state.latest_best_chain(), &state.db, hash);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
 
-                        Ok(ReadResponse::Transaction(transaction_and_height))
+                        Ok(ReadResponse::Transaction(response))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))

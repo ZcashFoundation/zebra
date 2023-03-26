@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, io, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
@@ -30,7 +30,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
 
@@ -846,6 +846,7 @@ where
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
+        let verbose = verbose != 0;
 
         async move {
             let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
@@ -878,12 +879,7 @@ where
                 mempool::Response::Transactions(unmined_transactions) => {
                     if !unmined_transactions.is_empty() {
                         let tx = unmined_transactions[0].transaction.clone();
-                        return GetRawTransaction::from_transaction(tx, None, verbose != 0)
-                            .map_err(|error| Error {
-                                code: ErrorCode::ServerError(0),
-                                message: error.to_string(),
-                                data: None,
-                            });
+                        return Ok(GetRawTransaction::from_transaction(tx, None, 0, verbose));
                     }
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
@@ -902,15 +898,16 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Transaction(Some((tx, height))) => Ok(
-                    GetRawTransaction::from_transaction(tx, Some(height), verbose != 0).map_err(
-                        |error| Error {
-                            code: ErrorCode::ServerError(0),
-                            message: error.to_string(),
-                            data: None,
-                        },
-                    )?,
-                ),
+                zebra_state::ReadResponse::Transaction(Some(MinedTx {
+                    tx,
+                    height,
+                    confirmations,
+                })) => Ok(GetRawTransaction::from_transaction(
+                    tx,
+                    Some(height),
+                    confirmations,
+                    verbose,
+                )),
                 zebra_state::ReadResponse::Transaction(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Transaction not found".to_string(),
@@ -1436,9 +1433,12 @@ pub enum GetRawTransaction {
         /// The raw transaction, encoded as hex bytes.
         #[serde(with = "hex")]
         hex: SerializedTransaction,
-        /// The height of the block that contains the transaction, or -1 if
-        /// not applicable.
+        /// The height of the block in the best chain that contains the transaction, or -1 if
+        /// the transaction is in the mempool.
         height: i32,
+        /// The confirmations of the block in the best chain that contains the transaction,
+        /// or 0 if the transaction is in the mempool.
+        confirmations: u32,
     },
 }
 
@@ -1490,10 +1490,11 @@ impl GetRawTransaction {
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
+        confirmations: u32,
         verbose: bool,
-    ) -> std::result::Result<Self, io::Error> {
+    ) -> Self {
         if verbose {
-            Ok(GetRawTransaction::Object {
+            GetRawTransaction::Object {
                 hex: tx.into(),
                 height: match height {
                     Some(height) => height
@@ -1502,9 +1503,10 @@ impl GetRawTransaction {
                         .expect("valid block heights are limited to i32::MAX"),
                     None => -1,
                 },
-            })
+                confirmations,
+            }
         } else {
-            Ok(GetRawTransaction::Raw(tx.into()))
+            GetRawTransaction::Raw(tx.into())
         }
     }
 }
