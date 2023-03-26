@@ -90,6 +90,31 @@ pub enum KnownBlock {
     Queue,
 }
 
+/// Information about a transaction in the best chain
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MinedTx {
+    /// The transaction.
+    pub tx: Arc<Transaction>,
+
+    /// The transaction height.
+    pub height: block::Height,
+
+    /// The number of confirmations for this transaction
+    /// (1 + depth of block the transaction was found in)
+    pub confirmations: u32,
+}
+
+impl MinedTx {
+    /// Creates a new [`MinedTx`]
+    pub fn new(tx: Arc<Transaction>, height: block::Height, confirmations: u32) -> Self {
+        Self {
+            tx,
+            height,
+            confirmations,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s
@@ -105,7 +130,7 @@ pub enum ReadResponse {
     Block(Option<Arc<Block>>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
-    Transaction(Option<(Arc<Transaction>, block::Height)>),
+    Transaction(Option<MinedTx>),
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
     /// with an list of transaction hashes in block order,
@@ -227,8 +252,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
-            ReadResponse::Transaction(tx_and_height) => {
-                Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
+            ReadResponse::Transaction(tx_info) => {
+                Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }
             ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
 
