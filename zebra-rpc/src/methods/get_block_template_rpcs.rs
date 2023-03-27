@@ -448,8 +448,14 @@ where
             .as_ref()
             .and_then(get_block_template::JsonParameters::block_proposal_data)
         {
-            return validate_block_proposal(self.chain_verifier.clone(), block_proposal_bytes)
-                .boxed();
+            return validate_block_proposal(
+                self.chain_verifier.clone(),
+                block_proposal_bytes,
+                network,
+                latest_chain_tip,
+                sync_status,
+            )
+            .boxed();
         }
 
         // To implement long polling correctly, we split this RPC into multiple phases.
@@ -505,9 +511,14 @@ where
                 //
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
-                let mempool_txs =
+                let Some(mempool_txs) =
                     fetch_mempool_transactions(mempool.clone(), chain_tip_and_local_time.tip_hash)
-                        .await?;
+                        .await?
+                        // Omit mempool transactions from the template if called without a long poll id, or
+                        // continue to the next iteration of the loop to make fresh state and mempool requests.
+                        .or_else(|| client_long_poll_id.is_none().then(Vec::new)) else {
+                            continue;
+                        };
 
                 // - Long poll ID calculation
                 let server_long_poll_id = LongPollInput::new(
