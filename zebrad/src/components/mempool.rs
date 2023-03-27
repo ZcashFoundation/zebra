@@ -264,11 +264,19 @@ impl Mempool {
             let (tip_height, last_seen_tip_hash) = if let Some(tip_action) = tip_action {
                 (tip_action.best_tip_height(), tip_action.best_tip_hash())
             } else {
-                self.latest_chain_tip
-                    .best_tip_height_and_hash()
-                    // There should be a chain tip when Zebra is close to the network tip,
-                    // but not in tests that pretend we're close to tip.
-                    .unwrap_or_else(|| (Height(0), [0; 32].into()))
+                let tip_height_and_hash = self.latest_chain_tip.best_tip_height_and_hash();
+
+                #[cfg(test)]
+                // There should be a chain tip when Zebra is close to the network tip,
+                // but not in tests that pretend we're close to tip.
+                let tip_height_and_hash =
+                    tip_height_and_hash.unwrap_or_else(|| (Height(0), [0; 32].into()));
+
+                #[cfg(not(test))]
+                let tip_height_and_hash = tip_height_and_hash
+                    .expect("there should be a chain tip when Zebra is close to the network tip");
+
+                tip_height_and_hash
             };
 
             info!(?tip_height, "activating mempool: Zebra is close to the tip");
