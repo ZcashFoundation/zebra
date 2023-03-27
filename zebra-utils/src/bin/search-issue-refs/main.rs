@@ -85,6 +85,11 @@ fn github_issue_url(issue_id: &str) -> String {
     format!("https://github.com/ZcashFoundation/zebra/issues/{issue_id}")
 }
 
+fn github_remote_file_ref(file_path: &str, line: usize) -> String {
+    let file_path = &file_path[2..];
+    format!("https://github.com/ZcashFoundation/zebra/blob/main/{file_path}#L{line}")
+}
+
 fn github_issue_api_url(issue_id: &str) -> String {
     format!("https://api.github.com/repos/ZcashFoundation/zebra/issues/{issue_id}")
 }
@@ -157,7 +162,9 @@ async fn main() -> Result<()> {
         Some((_, github_token)) => github_token,
         _ => {
             println!(
-                "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs"
+                "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs,\
+see https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token \
+to create a github token."
             );
 
             for PossibleIssueRef {
@@ -168,9 +175,11 @@ async fn main() -> Result<()> {
             } in possible_issue_refs
             {
                 let github_url = github_issue_url(&id);
+                let github_file_ref = github_remote_file_ref(&file_path, line_number);
 
                 println!("\n--------------------------------------");
                 println!("Found possible reference to closed issue #{id}: {file_path}:{line_number}:{column}");
+                println!("{github_file_ref}");
                 println!("{github_url}");
             }
 
@@ -239,9 +248,11 @@ async fn main() -> Result<()> {
         num_possible_issue_refs += 1;
 
         let github_url = github_issue_url(&id);
+        let github_file_ref = github_remote_file_ref(&file_path, line_number);
 
         println!("\n--------------------------------------");
         println!("Found reference to closed issue #{id}: {file_path}:{line_number}:{column}");
+        println!("{github_file_ref}");
         println!("{github_url}");
     }
 
