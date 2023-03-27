@@ -486,6 +486,7 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
+                #[allow(unused_variables)]
                 last_seen_tip_hash,
             } => match req {
                 // Queries
