@@ -16,16 +16,19 @@
 //! > Found 3 possible issue refs, checking Github issue statuses..
 //! >
 //! > --------------------------------------
-//! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:130:57
-//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
+//! > Found reference to closed issue #4794: ./zebra-rpc/src/methods/get_block_template_rpcs.rs:114:19
+//! > <https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/methods/get_block_template_rpcs.rs#L114>
+//! > <https://github.com/ZcashFoundation/zebra/issues/4794>
 //! >
 //! > --------------------------------------
-//! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:157:51
-//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
+//! > Found reference to closed issue #2379: ./zebra-consensus/src/transaction.rs:717:49
+//! > <https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction.rs#L717>
+//! > <https://github.com/ZcashFoundation/zebra/issues/2379>
 //! >
 //! > --------------------------------------
-//! > Found reference to closed issue #1140: ./zebra-test/tests/command.rs:445:61
-//! > <https://github.com/ZcashFoundation/zebra/issues/1140>
+//! > Found reference to closed issue #3027: ./zebra-consensus/src/transaction/check.rs:319:6
+//! > <https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction/check.rs#L319>
+//! > <https://github.com/ZcashFoundation/zebra/issues/3027>
 //! >
 //! > Found 3 references to closed issues.
 
