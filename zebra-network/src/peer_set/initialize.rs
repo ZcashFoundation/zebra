@@ -603,8 +603,8 @@ where
             }
 
             // Rate-limit inbound connection handshakes.
-            // But only sleep after a successful connection,
-            // so we clear out failed connections as fast as possible.
+            // But sleep longer after a successful connection,
+            // so we can clear out failed connections at a higher rate.
             //
             // If there is a flood of connections,
             // this stops Zebra overloading the network with handshake data.
@@ -613,7 +613,10 @@ where
             // but most OSes also limit the number of queued inbound connections on a listener port.
             tokio::time::sleep(min_inbound_peer_connection_interval).await;
         } else {
+            // Allow invalid connections to be cleared quickly,
+            // but still put a limit on our CPU and network usage from failed connections.
             debug!(?inbound_result, "error accepting inbound connection");
+            tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
         }
 
         // Security: Let other tasks run after each connection is processed.

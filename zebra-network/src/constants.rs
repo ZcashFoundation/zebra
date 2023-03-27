@@ -160,7 +160,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 /// It also enforces a minimum per-peer reconnection interval, and filters failed outbound peers.
 pub const MIN_OUTBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(50);
 
-/// The minimum time between inbound peer connections, implemented by
+/// The minimum time between _successful_ inbound peer connections, implemented by
 /// `peer_set::initialize::accept_inbound_connections`.
 ///
 /// To support multiple peers connecting simultaneously, this is less than the
@@ -168,13 +168,29 @@ pub const MIN_OUTBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_milli
 ///
 /// ## Security
 ///
-/// Zebra resists distributed denial of service attacks by making sure that new inbound
-/// peer connections are only accepted, and our side of the handshake initiated, after this
-/// minimum time has elapsed.
+/// Zebra resists distributed denial of service attacks by limiting the inbound connection rate.
+/// After a _successful_ inbound connection, new inbound peer connections are only accepted,
+/// and our side of the handshake initiated, after this minimum time has elapsed.
 ///
 /// The inbound interval is much longer than the outbound interval, because Zebra does not
 /// control the selection or reconnections of inbound peers.
 pub const MIN_INBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The minimum time between _failed_ inbound peer connections, implemented by
+/// `peer_set::initialize::accept_inbound_connections`.
+///
+/// This is a tradeoff between:
+/// - the memory, CPU, and network usage of each new connection attempt, and
+/// - denying service to honest peers due to an attack which makes many inbound connections.
+///
+/// Attacks that reach this limit should be managed using a firewall or intrusion prevention system.
+///
+/// ## Security
+///
+/// Zebra resists distributed denial of service attacks by limiting the inbound connection rate.
+/// After a _failed_ inbound connection, new inbound peer connections are only accepted,
+/// and our side of the handshake initiated, after this minimum time has elapsed.
+pub const MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The minimum time between successive calls to
 /// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
