@@ -1,3 +1,5 @@
+//! Fixed test vectors for the peer set.
+
 use std::{iter, time::Duration};
 
 use tokio::time::timeout;
