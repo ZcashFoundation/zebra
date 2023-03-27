@@ -2,7 +2,6 @@
 
 use std::{
     cmp::min,
-    collections::HashSet,
     fmt,
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -14,6 +13,7 @@ use std::{
 
 use chrono::{TimeZone, Utc};
 use futures::{channel::oneshot, future, pin_mut, FutureExt, SinkExt, StreamExt};
+use indexmap::IndexSet;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::broadcast,
@@ -71,7 +71,7 @@ where
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
-    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
 
     parent_span: Span,
 }
@@ -515,7 +515,7 @@ where
             let (tx, _rx) = tokio::sync::mpsc::channel(1);
             tx
         });
-        let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
+        let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
@@ -572,7 +572,7 @@ pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
     config: Config,
-    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
@@ -583,12 +583,34 @@ where
 {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
+
+    // Insert the nonce for this handshake into the shared nonce set.
+    // Each connection has its own connection state, and handshakes execute concurrently.
+    //
     // # Correctness
     //
     // It is ok to wait for the lock here, because handshakes have a short
     // timeout, and the async mutex will be released when the task times
     // out.
-    nonces.lock().await.insert(local_nonce);
+    //
+    // Duplicate nonces don't matter here, because 64-bit random collisions are very rare.
+    // If they happen, we're probably replacing a leftover nonce from a failed connection,
+    // which wasn't cleaned up when it closed.
+    {
+        let mut locked_nonces = nonces.lock().await;
+        locked_nonces.insert(local_nonce);
+
+        // # Security
+        //
+        // Limit the amount of memory used for nonces.
+        // Nonces can be left in the set if the connection fails or times out between
+        // the nonce being inserted, and it being removed.
+        while locked_nonces.len() > constants::MAX_SELF_CONNECTION_NONCES {
+            locked_nonces.shift_remove_index(0);
+        }
+
+        std::mem::drop(locked_nonces);
+    };
 
     // Don't leak our exact clock skew to our peers. On the other hand,
     // we can't deviate too much, or zcashd will get confused.
@@ -684,10 +706,15 @@ where
     // We must wait for the lock before we continue with the connection, to avoid
     // self-connection. If the connection times out, the async lock will be
     // released.
+    //
+    // # Security
+    //
+    // Connections that get a `Version` message will remove their nonces here,
+    // but connections that fail before this point can leave their nonces in the nonce set.
     let nonce_reuse = {
         let mut locked_nonces = nonces.lock().await;
         let nonce_reuse = locked_nonces.contains(&remote.nonce);
-        // Regardless of whether we observed nonce reuse, clean up the nonce set.
+        // Regardless of whether we observed nonce reuse, remove our own nonce from the nonce set.
         locked_nonces.remove(&local_nonce);
         nonce_reuse
     };
