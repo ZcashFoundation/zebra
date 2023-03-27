@@ -106,7 +106,7 @@ abscissa_core = "0.5"
 gumdrop = { version = "0.7", features = ["default_expr"]}
 chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "1.9.2"
+indexmap = "1.9.3"
 lazy_static = "1.4.0"
 serde = { version = "1.0.158", features = ["serde_derive"] }
 toml = "0.7.3"
