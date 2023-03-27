@@ -595,13 +595,15 @@ where
     // It is ok to wait for the lock here, because handshakes have a short
     // timeout, and the async mutex will be released when the task times
     // out.
-    //
-    // Duplicate nonces don't matter here, because 64-bit random collisions are very rare.
-    // If they happen, we're probably replacing a leftover nonce from a failed connection,
-    // which wasn't cleaned up when it closed.
     {
         let mut locked_nonces = nonces.lock().await;
-        locked_nonces.insert(local_nonce);
+
+        // Duplicate nonces are very rare, because they require a 64-bit random number collision,
+        // and the nonce set is limited to a few hundred entries.
+        let is_unique_nonce = locked_nonces.insert(local_nonce);
+        if !is_unique_nonce {
+            return Err(HandshakeError::LocalDuplicateNonce);
+        }
 
         // # Security
         //
@@ -615,7 +617,7 @@ where
         // - avoiding memory denial of service attacks which make large numbers of connections,
         //   for example, 100 failed inbound connections takes 1 second.
         // - memory usage: 16 bytes per `Nonce`, 3.2 kB for 200 nonces
-        // - collision probability: 2^32 has ~50% collision probability, so we use a lower limit
+        // - collision probability: two hundred 64-bit nonces have a very low collision probability
         //   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
         while locked_nonces.len() > config.peerset_total_connection_limit() {
             locked_nonces.shift_remove_index(0);
@@ -731,7 +733,7 @@ where
         nonce_reuse
     };
     if nonce_reuse {
-        Err(HandshakeError::NonceReuse)?;
+        Err(HandshakeError::RemoteNonceReuse)?;
     }
 
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
