@@ -58,6 +58,9 @@ const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 /// Using a very short time can make the listener not run at all.
 const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
 
+/// The amount of time to make the inbound connection acceptor wait between peer connections.
+const MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS: Duration = Duration::from_millis(25);
+
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
 ///
@@ -1067,7 +1070,9 @@ async fn add_initial_peers_is_rate_limited() {
     assert_eq!(connections.len(), PEER_COUNT);
     // Make sure the rate limiting worked by checking if it took long enough
     assert!(
-        elapsed > constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul((PEER_COUNT - 1) as u32),
+        elapsed
+            > constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL
+                .saturating_mul((PEER_COUNT - 1) as u32),
         "elapsed only {elapsed:?}"
     );
 
@@ -1360,6 +1365,7 @@ where
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
         listen_handshaker,
         peerset_tx.clone(),
     );

@@ -149,14 +149,32 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 /// Using a prime number makes sure that heartbeats don't synchronise with crawls.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
-/// The minimum time between successive calls to
+/// The minimum time between outbound peer connections, implemented by
 /// [`CandidateSet::next`][crate::peer_set::CandidateSet::next].
 ///
 /// ## Security
 ///
-/// Zebra resists distributed denial of service attacks by making sure that new peer connections
-/// are initiated at least [`MIN_PEER_CONNECTION_INTERVAL`] apart.
-pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
+/// Zebra resists distributed denial of service attacks by making sure that new outbound peer
+/// connections are only initiated after this minimum time has elapsed.
+///
+/// It also enforces a minimum per-peer reconnection interval, and filters failed outbound peers.
+pub const MIN_OUTBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(50);
+
+/// The minimum time between inbound peer connections, implemented by
+/// `peer_set::initialize::accept_inbound_connections`.
+///
+/// To support multiple peers connecting simultaneously, this is less than the
+/// [`HANDSHAKE_TIMEOUT`].
+///
+/// ## Security
+///
+/// Zebra resists distributed denial of service attacks by making sure that new inbound
+/// peer connections are only accepted, and our side of the handshake initiated, after this
+/// minimum time has elapsed.
+///
+/// The inbound interval is much longer than the outbound interval, because Zebra does not
+/// control the selection or reconnections of inbound peers.
+pub const MIN_INBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The minimum time between successive calls to
 /// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
@@ -324,9 +342,6 @@ pub mod magics {
 
 #[cfg(test)]
 mod tests {
-
-    use std::convert::TryFrom;
-
     use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
 
     use super::*;
@@ -363,18 +378,20 @@ mod tests {
                 "The EWMA decay time should be higher than the request timeout, so timed out peers are penalised by the EWMA.");
 
         assert!(
-            u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
-                * MIN_PEER_CONNECTION_INTERVAL
-                < MIN_PEER_RECONNECTION_DELAY,
-            "each peer should get at least one connection attempt in each connection interval",
+            MIN_PEER_RECONNECTION_DELAY.as_secs() as f32
+                / (u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
+                    * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL)
+                    .as_secs() as f32
+                >= 0.5,
+            "most peers should get a connection attempt in each connection interval",
         );
 
         assert!(
-            MIN_PEER_RECONNECTION_DELAY.as_secs()
+            MIN_PEER_RECONNECTION_DELAY.as_secs() as f32
                 / (u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
-                    * MIN_PEER_CONNECTION_INTERVAL)
-                    .as_secs()
-                <= 2,
+                    * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL)
+                    .as_secs() as f32
+                <= 2.0,
             "each peer should only have a few connection attempts in each connection interval",
         );
     }
