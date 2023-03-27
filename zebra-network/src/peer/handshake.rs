@@ -595,6 +595,8 @@ where
     // It is ok to wait for the lock here, because handshakes have a short
     // timeout, and the async mutex will be released when the task times
     // out.
+    //
+    // START CRITICAL SECTION
     {
         let mut locked_nonces = nonces.lock().await;
 
@@ -624,7 +626,8 @@ where
         }
 
         std::mem::drop(locked_nonces);
-    };
+    }
+    // END CRITICAL SECTION
 
     // Don't leak our exact clock skew to our peers. On the other hand,
     // we can't deviate too much, or zcashd will get confused.
@@ -723,20 +726,16 @@ where
     //
     // # Security
     //
-    // Connections that get a `Version` message will remove their nonces here,
-    // but connections that fail before this point can leave their nonces in the nonce set.
-    let nonce_reuse = {
-        let mut locked_nonces = nonces.lock().await;
-        let nonce_reuse = locked_nonces.contains(&remote.nonce);
-        // Regardless of whether we observed nonce reuse, remove our own nonce from the nonce set.
-        locked_nonces.remove(&local_nonce);
-        nonce_reuse
-    };
+    // We don't remove the nonce here, because peers that observe our network traffic could
+    // maliciously remove nonces, and force us to make self-connections.
+    let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
         Err(HandshakeError::RemoteNonceReuse)?;
     }
 
-    // SECURITY: Reject connections to peers on old versions, because they might not know about all
+    // # Security
+    //
+    // Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
     if remote.version < min_version {
