@@ -211,7 +211,7 @@ impl Mempool {
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state();
+        service.update_state(None);
 
         (service, transaction_receiver)
     }
@@ -244,11 +244,14 @@ impl Mempool {
         is_debug_enabled
     }
 
+    /// Accepts an optional [`TipAction`] for setting a reset action's block hash as
+    /// the last seen hash, or uses the latest chain tip instead.
+    ///
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self) -> bool {
+    fn update_state(&mut self, tip_action: Option<TipAction>) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
         if self.is_enabled() == is_close_to_tip {
@@ -258,10 +261,15 @@ impl Mempool {
 
         // Update enabled / disabled state
         if is_close_to_tip {
-            let (tip_height, last_seen_tip_hash) = self
-                .latest_chain_tip
-                .best_tip_height_and_hash()
-                .expect("there should be a chain tip when Zebra is close to the network tip");
+            let (tip_height, last_seen_tip_hash) = if let Some(tip_action) = tip_action {
+                (tip_action.best_tip_height(), tip_action.best_tip_hash())
+            } else {
+                self.latest_chain_tip
+                    .best_tip_height_and_hash()
+                    // There should be a chain tip when Zebra is close to the network tip,
+                    // but not in tests that pretend we're close to tip.
+                    .unwrap_or_else(|| (Height(0), [0; 32].into()))
+            };
 
             info!(?tip_height, "activating mempool: Zebra is close to the tip");
 
@@ -316,7 +324,7 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let is_state_changed = self.update_state();
+        let is_state_changed = self.update_state(None);
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
@@ -350,7 +358,7 @@ impl Service<Request> for Mempool {
             std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
-            self.update_state();
+            self.update_state(tip_action);
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
