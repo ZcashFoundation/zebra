@@ -1,6 +1,6 @@
 //! Recursively searches local directory for references to issues that are closed.
 //!
-//! Requires a Github access token.
+//! Requires a Github access token as this program will make queries to the GitHub API where authentication is needed.
 //!
 //! See <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token>
 //!
@@ -91,7 +91,7 @@ fn github_issue_api_url(issue_id: &str) -> String {
 
 #[derive(Debug)]
 struct PossibleIssueRef {
-    file_path: PathBuf,
+    file_path: String,
     line_number: usize,
     column: usize,
     id: String,
@@ -120,6 +120,11 @@ async fn main() -> Result<()> {
             let line = line?;
 
             possible_issue_refs.extend(issue_regex.captures_iter(&line).map(|captures| {
+                let file_path = file_path
+                    .to_str()
+                    .expect("paths from read_dir should be valid unicode")
+                    .to_string();
+
                 let potential_issue_ref = captures.get(2).expect("matches should have 2 captures");
                 let matching_text = potential_issue_ref.as_str();
 
@@ -127,7 +132,7 @@ async fn main() -> Result<()> {
                     matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..].to_string();
 
                 PossibleIssueRef {
-                    file_path: file_path.clone(),
+                    file_path,
                     line_number: line_idx + 1,
                     column: captures
                         .get(1)
@@ -155,8 +160,18 @@ async fn main() -> Result<()> {
                 "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs"
             );
 
-            for issue in possible_issue_refs {
-                println!("{issue:?}");
+            for PossibleIssueRef {
+                file_path,
+                line_number,
+                column,
+                id,
+            } in possible_issue_refs
+            {
+                let github_url = github_issue_url(&id);
+
+                println!("\n--------------------------------------");
+                println!("Found possible reference to closed issue #{id}: {file_path}:{line_number}:{column}");
+                println!("{github_url}");
             }
 
             return Ok(());
@@ -202,24 +217,18 @@ async fn main() -> Result<()> {
             continue;
         };
 
-        let file_path = file_path
-            .to_str()
-            .expect("paths from read_dir should be valid unicode");
-
-        let ref_location = format!("{file_path}:{line_number}:{column}");
-
         let Ok(res) = res else {
-            println!("warning: no response from github api about issue #{id}, {ref_location}");
+            println!("warning: no response from github api about issue #{id}, {file_path}:{line_number}:{column}");
             continue;
         };
 
         let Ok(text) = res.text().await else {
-            println!("warning: failed to get text from response about issue #{id}, {ref_location}");
+            println!("warning: failed to get text from response about issue #{id}, {file_path}:{line_number}:{column}");
             continue;
         };
 
         let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
-            println!("warning: failed to get serde_json::Value from response for issue #{id}, {ref_location}");
+            println!("warning: failed to get serde_json::Value from response for issue #{id}, {file_path}:{line_number}:{column}");
             continue;
         };
 
@@ -232,7 +241,7 @@ async fn main() -> Result<()> {
         let github_url = github_issue_url(&id);
 
         println!("\n--------------------------------------");
-        println!("Found reference to closed issue #{id}: {ref_location}");
+        println!("Found reference to closed issue #{id}: {file_path}:{line_number}:{column}");
         println!("{github_url}");
     }
 
