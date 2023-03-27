@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
         Some((_, github_token)) => github_token,
         _ => {
             println!(
-                "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs,\
+                "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs, \
 see https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token \
 to create a github token."
             );
