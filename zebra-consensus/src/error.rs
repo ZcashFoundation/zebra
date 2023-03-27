@@ -130,12 +130,12 @@ pub enum TransactionError {
     #[error("spend description cv and rk MUST NOT be of small order")]
     SmallOrder,
 
-    // XXX: the underlying error is bellman::VerificationError, but it does not implement
+    // TODO: the underlying error is bellman::VerificationError, but it does not implement
     // Arbitrary as required here.
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
     Groth16(String),
 
-    // XXX: the underlying error is io::Error, but it does not implement Clone as required here.
+    // TODO: the underlying error is io::Error, but it does not implement Clone as required here.
     #[error("Groth16 proof is malformed")]
     MalformedGroth16(String),
 

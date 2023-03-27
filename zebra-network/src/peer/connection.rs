@@ -135,7 +135,7 @@ impl Handler {
     /// Unexpected messages are left unprocessed, and may be rejected later.
     fn process_message(&mut self, msg: Message) -> Option<Message> {
         let mut ignored_msg = None;
-        // XXX can this be avoided?
+        // TODO: can this be avoided?
         let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
 
         debug!(handler = %tmp_state, %msg, "received peer response to Zebra request");
