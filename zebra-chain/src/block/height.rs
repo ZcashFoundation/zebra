@@ -67,9 +67,26 @@ impl Height {
 /// A difference between two [`Height`]s, possibly negative.
 pub type HeightDiff = i32;
 
+impl TryFrom<u32> for Height {
+    type Error = &'static str;
+
+    /// Checks that the `height` is within the valid [`Height`] range.
+    fn try_from(height: u32) -> Result<Self, Self::Error> {
+        // Check the bounds.
+        if Height::MIN.0 <= height && height <= Height::MAX.0 {
+            Ok(Height(height))
+        } else {
+            Err("heights must be less than or equal to Height::MAX")
+        }
+    }
+}
+
 impl Sub<Height> for Height {
     type Output = Option<HeightDiff>;
 
+    /// Subtract two heights, returning `None` if:
+    /// - either height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
+    /// - the result is outside the valid `i32` range
     fn sub(self, rhs: Height) -> Self::Output {
         // We convert the heights from [`u32`] to [`i32`] because `u32::checked_sub` returns
         // [`None`] for negative results. We must check the conversion since it's possible to
@@ -83,6 +100,10 @@ impl Sub<Height> for Height {
 impl Sub<HeightDiff> for Height {
     type Output = Option<Self>;
 
+    /// Subtract a height difference from a height, returning `None` if:
+    /// - the height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
+    /// - the resulting height is outside the valid `Height` range,
+    ///   this also checks the result is non-negative
     fn sub(self, rhs: HeightDiff) -> Option<Self> {
         // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
         // must check the conversion since it's possible to construct heights outside the valid
@@ -90,20 +111,19 @@ impl Sub<HeightDiff> for Height {
         let lhs = i32::try_from(self.0).ok()?;
         let res = lhs.checked_sub(rhs)?;
         let res = u32::try_from(res).ok()?;
-        let height = Height(res);
 
         // Check the bounds.
-        if Height::MIN <= height && height <= Height::MAX {
-            Some(height)
-        } else {
-            None
-        }
+        Height::try_from(res).ok()
     }
 }
 
 impl Add<HeightDiff> for Height {
     type Output = Option<Height>;
 
+    /// Add a height difference to a height, returning `None` if:
+    /// - the height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
+    /// - the resulting height is outside the valid `Height` range,
+    ///   this also checks the result is non-negative
     fn add(self, rhs: HeightDiff) -> Option<Height> {
         // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
         // must check the conversion since it's possible to construct heights outside the valid
@@ -111,14 +131,9 @@ impl Add<HeightDiff> for Height {
         let lhs = i32::try_from(self.0).ok()?;
         let res = lhs.checked_add(rhs)?;
         let res = u32::try_from(res).ok()?;
-        let height = Height(res);
 
         // Check the bounds.
-        if Height::MIN <= height && height <= Height::MAX {
-            Some(height)
-        } else {
-            None
-        }
+        Height::try_from(res).ok()
     }
 }
 
