@@ -197,12 +197,12 @@ fn operator_tests() {
     assert_eq!(None, Height(i32::MAX as u32) - -1);
     assert_eq!(None, Height(u32::MAX) - -1);
 
-    assert_eq!(1, (Height(2) - Height(1)).unwrap());
-    assert_eq!(0, (Height(1) - Height(1)).unwrap());
+    assert_eq!(Some(1), (Height(2) - Height(1)));
+    assert_eq!(Some(0), (Height(1) - Height(1)));
     assert_eq!(Some(-1), Height(0) - Height(1));
     assert_eq!(Some(-5), Height(2) - Height(7));
-    assert_eq!(Height::MAX, (Height::MAX - 0).unwrap());
-    assert_eq!(1, (Height::MAX - Height(Height::MAX_AS_U32 - 1)).unwrap());
+    assert_eq!(Some(Height::MAX), (Height::MAX - 0));
+    assert_eq!(Some(1), (Height::MAX - Height(Height::MAX_AS_U32 - 1)));
     assert_eq!(Some(-1), Height(Height::MAX_AS_U32 - 1) - Height::MAX);
     assert_eq!(Some(-(Height::MAX_AS_U32 as i32)), Height(0) - Height::MAX);
 }
