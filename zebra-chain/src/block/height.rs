@@ -65,7 +65,10 @@ impl Height {
 }
 
 /// A difference between two [`Height`]s, possibly negative.
-pub type HeightDiff = i32;
+///
+/// This can represent the difference between any height values,
+/// even if they are outside the valid height range (for example, in buggy RPC code).
+pub type HeightDiff = i64;
 
 impl TryFrom<u32> for Height {
     type Error = &'static str;
@@ -84,37 +87,31 @@ impl TryFrom<u32> for Height {
 // We don't implement Add<u32> or Sub<u32>, because they cause type inference issues for integer constants.
 
 impl Sub<Height> for Height {
-    type Output = Option<HeightDiff>;
+    type Output = HeightDiff;
 
-    /// Subtract two heights, returning `None` if:
-    /// - either height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
-    /// - the result is outside the valid `i32` range
+    /// Subtract two heights, returning the result, which can be negative.
+    /// Since [`HeightDiff`] is `i64` and [`Height`] is `u32`, the result is always correct.
     fn sub(self, rhs: Height) -> Self::Output {
-        // We convert the heights from [`u32`] to [`i32`] because `u32::checked_sub` returns
-        // [`None`] for negative results. We must check the conversion since it's possible to
-        // construct heights outside the valid range for [`i32`].
-        let lhs = i32::try_from(self.0).ok()?;
-        let rhs = i32::try_from(rhs.0).ok()?;
-        lhs.checked_sub(rhs)
+        // All these conversions are exact, and the subtraction can't overflow or underflow.
+        let lhs = HeightDiff::from(self.0);
+        let rhs = HeightDiff::from(rhs.0);
+
+        lhs - rhs
     }
 }
 
 impl Sub<HeightDiff> for Height {
     type Output = Option<Self>;
 
-    /// Subtract a height difference from a height, returning `None` if:
-    /// - the height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
-    /// - the resulting height is outside the valid `Height` range,
-    ///   this also checks the result is non-negative
+    /// Subtract a height difference from a height, returning `None` if the resulting height is
+    /// outside the valid `Height` range (this also checks the result is non-negative).
     fn sub(self, rhs: HeightDiff) -> Option<Self> {
-        // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
-        // must check the conversion since it's possible to construct heights outside the valid
-        // range for [`i32`].
-        let lhs = i32::try_from(self.0).ok()?;
-        let res = lhs.checked_sub(rhs)?;
-        let res = u32::try_from(res).ok()?;
+        // We need to convert the height to [`i64`] so we can subtract negative [`HeightDiff`]s.
+        let lhs = HeightDiff::from(self.0);
+        let res = lhs - rhs;
 
         // Check the bounds.
+        let res = u32::try_from(res).ok()?;
         Height::try_from(res).ok()
     }
 }
@@ -122,19 +119,15 @@ impl Sub<HeightDiff> for Height {
 impl Add<HeightDiff> for Height {
     type Output = Option<Height>;
 
-    /// Add a height difference to a height, returning `None` if:
-    /// - the height is outside the valid `i32` range ([`Height::MAX`] is currently [`i32::MAX`])
-    /// - the resulting height is outside the valid `Height` range,
-    ///   this also checks the result is non-negative
+    /// Add a height difference to a height, returning `None` if the resulting height is outside
+    /// the valid `Height` range (this also checks the result is non-negative).
     fn add(self, rhs: HeightDiff) -> Option<Height> {
-        // We need to convert the height to [`i32`] so we can subtract negative [`HeightDiff`]s. We
-        // must check the conversion since it's possible to construct heights outside the valid
-        // range for [`i32`].
-        let lhs = i32::try_from(self.0).ok()?;
-        let res = lhs.checked_add(rhs)?;
-        let res = u32::try_from(res).ok()?;
+        // We need to convert the height to [`i64`] so we can add negative [`HeightDiff`]s.
+        let lhs = i64::from(self.0);
+        let res = lhs + rhs;
 
         // Check the bounds.
+        let res = u32::try_from(res).ok()?;
         Height::try_from(res).ok()
     }
 }
@@ -199,12 +192,12 @@ fn operator_tests() {
     assert_eq!(None, Height(i32::MAX as u32) - -1);
     assert_eq!(None, Height(u32::MAX) - -1);
 
-    assert_eq!(Some(1), (Height(2) - Height(1)));
-    assert_eq!(Some(0), (Height(1) - Height(1)));
-    assert_eq!(Some(-1), Height(0) - Height(1));
-    assert_eq!(Some(-5), Height(2) - Height(7));
-    assert_eq!(Some(Height::MAX), (Height::MAX - 0));
-    assert_eq!(Some(1), (Height::MAX - Height(Height::MAX_AS_U32 - 1)));
-    assert_eq!(Some(-1), Height(Height::MAX_AS_U32 - 1) - Height::MAX);
-    assert_eq!(Some(-(Height::MAX_AS_U32 as i32)), Height(0) - Height::MAX);
+    assert_eq!(1, (Height(2) - Height(1)));
+    assert_eq!(0, (Height(1) - Height(1)));
+    assert_eq!(-1, Height(0) - Height(1));
+    assert_eq!(-5, Height(2) - Height(7));
+    assert_eq!(Height::MAX.0 as HeightDiff, (Height::MAX - Height(0)));
+    assert_eq!(1, (Height::MAX - Height(Height::MAX_AS_U32 - 1)));
+    assert_eq!(-1, Height(Height::MAX_AS_U32 - 1) - Height::MAX);
+    assert_eq!(-(Height::MAX_AS_U32 as HeightDiff), Height(0) - Height::MAX);
 }

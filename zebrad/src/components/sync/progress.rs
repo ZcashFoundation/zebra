@@ -6,7 +6,7 @@ use chrono::Utc;
 use num_integer::div_ceil;
 
 use zebra_chain::{
-    block::Height,
+    block::{Height, HeightDiff},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     fmt::humantime_seconds,
@@ -23,14 +23,14 @@ const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// The number of blocks we consider to be close to the tip.
 ///
 /// Most chain forks are 1-7 blocks long.
-const MAX_CLOSE_TO_TIP_BLOCKS: i32 = 1;
+const MAX_CLOSE_TO_TIP_BLOCKS: HeightDiff = 1;
 
 /// Skip slow sync warnings when we are this close to the tip.
 ///
 /// In testing, we've seen warnings around 30 blocks.
 ///
 /// TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
-const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
+const MIN_SYNC_WARNING_BLOCKS: HeightDiff = 60;
 
 /// The number of fractional digits in sync percentages.
 const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
@@ -49,6 +49,8 @@ const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
 ///
 /// We might add tests that sync from a cached tip state,
 /// so we only allow a few extra blocks here.
+//
+// TODO: change to HeightDiff?
 const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: u32 = 10;
 
 /// Logs Zebra's estimated progress towards the chain tip every minute or so.
@@ -67,9 +69,7 @@ pub async fn show_block_chain_progress(
     //   and the automated tests for that update.
     let min_after_checkpoint_blocks =
         MAX_BLOCK_REORG_HEIGHT + MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE;
-    let min_after_checkpoint_blocks: i32 = min_after_checkpoint_blocks
-        .try_into()
-        .expect("constant fits in i32");
+    let min_after_checkpoint_blocks: HeightDiff = min_after_checkpoint_blocks.into();
 
     // The minimum height of the valid best chain, based on:
     // - the hard-coded checkpoint height,
