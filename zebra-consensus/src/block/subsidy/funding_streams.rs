@@ -74,8 +74,14 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
     // - In Rust, "integer division rounds towards zero":
     //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
     //   This is the same as `floor()`, because these numbers are all positive.
-    (height.0 + (POST_BLOSSOM_HALVING_INTERVAL as u32) - (height_for_first_halving(network).0))
-        / (FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL.0)
+    let height_above_first_halving = height - height_for_first_halving(network);
+
+    let address_period = (height_above_first_halving - POST_BLOSSOM_HALVING_INTERVAL)
+        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
+
+    address_period
+        .try_into()
+        .expect("all values are positive and smaller than the input height")
 }
 
 /// Returns the position in the address slice for each funding stream

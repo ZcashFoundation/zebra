@@ -154,7 +154,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    if (height - SLOW_START_INTERVAL).is_none() {
+    if height < SLOW_START_INTERVAL {
         unreachable!(
             "unsupported block height: callers should handle blocks below {:?}",
             SLOW_START_INTERVAL

@@ -13,14 +13,14 @@ use zebra_chain::{
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
 ///
 /// [slow-mining]: https://z.cash/support/faq/#what-is-slow-start-mining
-pub const SLOW_START_INTERVAL: HeightDiff = 20_000;
+pub const SLOW_START_INTERVAL: Height = Height(20_000);
 
 /// `SlowStartShift()` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 ///
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
-pub const SLOW_START_SHIFT: HeightDiff = SLOW_START_INTERVAL / 2;
+pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 
 /// The largest block subsidy, used before the first halving.
 ///
@@ -137,8 +137,7 @@ lazy_static! {
 /// as described in [protocol specification §7.10.1][7.10.1].
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
-    Height(POST_BLOSSOM_HALVING_INTERVAL as u32 / 48);
+pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: HeightDiff = POST_BLOSSOM_HALVING_INTERVAL / 48;
 
 /// Number of addresses for each funding stream in the Mainnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
