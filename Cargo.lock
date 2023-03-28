@@ -5836,10 +5836,13 @@ version = "1.0.0-beta.22"
 dependencies = [
  "color-eyre",
  "hex",
+ "regex",
+ "reqwest",
  "serde_json",
  "structopt",
  "thiserror",
  "tinyvec",
+ "tokio",
  "tracing-error",
  "tracing-subscriber 0.3.16",
  "zebra-chain",
