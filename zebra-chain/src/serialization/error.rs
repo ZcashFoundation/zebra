@@ -5,7 +5,7 @@ use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
 use thiserror::Error;
 
 /// A serialization error.
-// XXX refine error types -- better to use boxed errors?
+// TODO: refine error types -- better to use boxed errors?
 #[derive(Error, Debug)]
 pub enum SerializationError {
     /// An io error that prevented deserialization
@@ -13,7 +13,7 @@ pub enum SerializationError {
     Io(#[from] io::Error),
 
     /// The data to be deserialized was malformed.
-    // XXX refine errors
+    // TODO: refine errors
     #[error("parse error: {0}")]
     Parse(&'static str),
 

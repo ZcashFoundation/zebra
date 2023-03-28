@@ -10,7 +10,7 @@ use std::{collections::HashMap, time::Duration};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-// XXX should these constants be split into protocol also?
+// TODO: should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
 use zebra_chain::{
