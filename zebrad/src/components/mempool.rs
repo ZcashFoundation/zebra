@@ -107,7 +107,9 @@ enum ActiveState {
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
 
-        /// Last seen chain tip hash that mempool transactions have been verified against
+        /// Last seen chain tip hash that mempool transactions have been verified against.
+        ///
+        /// In some tests, this is initialized to the latest chain tip, then updated in `poll_ready()` before each request.
         last_seen_tip_hash: block::Hash,
     },
 }
@@ -332,7 +334,8 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let is_state_changed = self.update_state(None);
+        let tip_action = self.chain_tip_change.last_tip_change();
+        let is_state_changed = self.update_state(tip_action);
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
