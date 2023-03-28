@@ -128,7 +128,10 @@ pub async fn show_block_chain_progress(
                 frac = SYNC_PERCENT_FRAC_DIGITS,
             );
 
-            let remaining_sync_blocks = (estimated_height - current_height).unwrap_or(0);
+            let mut remaining_sync_blocks = estimated_height - current_height;
+            if remaining_sync_blocks < 0 {
+                remaining_sync_blocks = 0;
+            }
 
             // Work out how long it has been since the state height has increased.
             //
