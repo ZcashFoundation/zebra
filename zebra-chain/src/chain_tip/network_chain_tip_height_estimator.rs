@@ -87,17 +87,15 @@ impl NetworkChainTipHeightEstimator {
     /// The amount of blocks advanced is then used to extrapolate the amount to advance the
     /// `current_block_time`.
     fn estimate_up_to(&mut self, max_height: block::Height) {
-        (max_height - self.current_height).and_then(|remaining_blocks| {
-            remaining_blocks.is_positive().then(|| {
-                let remaining_blocks = i64::from(remaining_blocks);
-                let target_spacing_seconds = self.current_target_spacing.num_seconds();
-                let time_to_activation =
-                    Duration::seconds(remaining_blocks * target_spacing_seconds);
-
-                self.current_block_time += time_to_activation;
-                self.current_height = max_height;
-            })
-        });
+        if let Some(remaining_blocks) =
+            (max_height - self.current_height).filter(|r| r.is_positive())
+        {
+            let remaining_blocks = i64::from(remaining_blocks);
+            let target_spacing_seconds = self.current_target_spacing.num_seconds();
+            let time_to_activation = Duration::seconds(remaining_blocks * target_spacing_seconds);
+            self.current_block_time += time_to_activation;
+            self.current_height = max_height;
+        }
     }
 
     /// Calculate an estimate for the chain height using the `current_target_spacing`.
