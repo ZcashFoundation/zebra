@@ -58,7 +58,7 @@ serde_json = { version = "1.0.93", package = "serde_json", optional = true }
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
 
-proptest = { version = "0.10.1", optional = true }
+proptest = { version = "1.1.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
@@ -73,7 +73,7 @@ spandoc = "0.2.2"
 hex = { version = "0.4.3", features = ["serde"] }
 insta = { version = "1.29.0", features = ["ron"] }
 
-proptest = "0.10.1"
+proptest = "1.1.0"
 proptest-derive = "0.3.0"
 
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
