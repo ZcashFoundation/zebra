@@ -514,8 +514,9 @@ where
                 let Some(mempool_txs) =
                     fetch_mempool_transactions(mempool.clone(), chain_tip_and_local_time.tip_hash)
                         .await?
-                        // Omit mempool transactions from the template if called without a long poll id, or
-                        // continue to the next iteration of the loop to make fresh state and mempool requests.
+                        // If the mempool and state responses are out of sync:
+                        // - if we are not long polling, omit mempool transactions from the template,
+                        // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
                         .or_else(|| client_long_poll_id.is_none().then(Vec::new)) else {
                             continue;
                         };
