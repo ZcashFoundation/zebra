@@ -2,7 +2,7 @@
 name = "zebra-utils"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 edition = "2021"
 
 # Prevent accidental publication of this utility crate.
@@ -16,8 +16,15 @@ name = "block-template-to-proposal"
 path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
+[[bin]]
+name = "search-issue-refs"
+path = "src/bin/search-issue-refs/main.rs"
+required-features = ["search-issue-refs"]
+
 [features]
 default = []
+
+search-issue-refs = ["regex", "reqwest", "tokio"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -39,7 +46,12 @@ hex = "0.4.3"
 serde_json = "1.0.94"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.16"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
+
+# These crates are needed for the search-issue-refs binary
+regex = { version = "1.7.1", optional = true }
+reqwest =  { version = "0.11.14", optional = true }
+tokio = { version = "1.26.0", features = ["full"], optional = true }
 
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }

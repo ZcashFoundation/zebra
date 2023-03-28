@@ -46,12 +46,14 @@ skip-tree = [
 
     # ZF crates
 
-    # wait for zcash_script to upgrade
+    # wait for zcashd and zcash_script to upgrade
     # https://github.com/ZcashFoundation/zcash_script/pulls
     { name = "zcash_primitives", version = "=0.9.1" },
+    { name = "sha2", version = "=0.9.9" },
+    { name = "reddsa", version = "=0.3.0" },
 
     # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
-    # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/63
+    # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
     { name = "ahash", version = "=0.7.6" },
 
     # ECC crates
@@ -59,13 +61,14 @@ skip-tree = [
     # Wait until `orchard` updates `aes`, which depends on `cipher`
     { name = "cipher", version = "=0.3.0" },
 
-
     # wait for zcash_primitives to remove duplicated dependencies
-    { name = "block-buffer", version = "=0.7.3" },
     { name = "block-buffer", version = "=0.9.0" },
 
     # wait for zcash_address to upgrade
     { name = "bech32", version = "=0.8.1"},
+
+    # wait for zcash_proofs to upgrade `directories`
+    { name = "dirs-sys", version = "=0.3.7"},
 
     # zebra-utils dependencies
 
@@ -76,17 +79,14 @@ skip-tree = [
     # Test-only dependencies
 
     # wait for tokio-test -> tokio-stream to upgrade
-    { name = "tokio-util", version = "=0.6.9" },
+    { name = "tokio-util", version = "=0.6.10" },
 
     # wait for proptest-derive to upgrade proc-macro2 and syn
     { name = "unicode-xid", version = "=0.1.0"},
 
-    # wait for insta to remove duplicated dependencies
-    { name = "sha-1", version = "=0.8.2" },
-
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
-    { name = "base64", version = "=0.13.0" },
+    { name = "base64", version = "=0.13.1" },
 
     # Optional dependencies
 
@@ -97,20 +97,13 @@ skip-tree = [
 
     # Elasticsearch dependencies
 
-    # wait for elasticsearch to update.
-    { name = "base64", version = "=0.11.0" },
-    # wait for elasticsearch to update.
-    { name = "darling", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "darling_core", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "darling_macro", version = "=0.13.4" },
-    # wait for elasticsearch to update.
-    { name = "rustc_version", version = "=0.2.3" },
-    # wait for elasticsearch to update.
-    { name = "serde_with", version = "=1.14.0" },
-    # wait for elasticsearch to update.
-    { name = "serde_with_macros", version = "=1.5.2" },
+    # wait for elasticsearch to update base64, darling, rustc_version, serde_with
+    { name = "elasticsearch", version = "=8.5.0-alpha.1" },
+
+    # Unused dependencies
+
+    # we don't support Windows at the moment (#3801)
+    { name = "windows-sys", version = "=0.42.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

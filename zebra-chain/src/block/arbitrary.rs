@@ -446,7 +446,7 @@ impl Block {
                     ) {
                         // The FinalizedState does not update the note commitment trees with the genesis block,
                         // because it doesn't need to (the trees are not used at that point) and updating them
-                        // would be awkward since the genesis block is handled separatedly there.
+                        // would be awkward since the genesis block is handled separately there.
                         // This forces us to skip the genesis block here too in order to able to use
                         // this to test the finalized state.
                         //

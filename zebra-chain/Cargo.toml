@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -34,7 +34,8 @@ bench = ["zebra-test"]
 
 # Cryptography
 bitvec = "1.0.1"
-bitflags = "1.3.2"
+bitflags = "2.0.2"
+bitflags-serde-legacy = "0.1.0"
 blake2b_simd = "1.0.1"
 blake2s_simd = "1.0.1"
 bs58 = { version = "0.4.0", features = ["check"] }
@@ -59,21 +60,21 @@ orchard = "0.3.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
 zcash_note_encryption = "0.2.0"
-zcash_primitives = { version = "0.10.1", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.10.2", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.23", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.24", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
 displaydoc = "0.2.3"
 static_assertions = "1.1.0"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 tracing = "0.1.37"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.154", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.158", features = ["serde_derive", "rc"] }
 serde_with = "2.3.1"
 serde-big-array = "0.5.1"
 

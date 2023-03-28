@@ -85,6 +85,15 @@ With every release and for performance reasons, we want to update the Zebra chec
 
 To do this you will need a synchronized `zcashd` node. You can request help from other zebra team members to submit this PR if you can't make it yourself at the moment of the release.
 
+## Missed Dependency Updates
+
+Sometimes `dependabot` misses some dependency updates, or we accidentally turned them off.
+
+Here's how we make sure we got everything:
+1. Run `cargo update` on the latest `main` branch, and keep the output
+2. If needed, update [deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+3. Open a separate PR with the changes, including the output of `cargo update`
+
 ## Change Log
 
 **Important**: Any merge into `main` deletes any edits to the draft changelog.
@@ -118,9 +127,10 @@ From "Keep a Changelog":
 
 ### Create the Release PR
 
-After you have the version increments, the updated checkpoints and the updated changelog:
+After you have the version increments, the updated checkpoints, any missed dependency updates,
+and the updated changelog:
 
-- [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
+- [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged
 - [ ] Push the version increments and the updated changelog into a branch
       (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
@@ -150,9 +160,12 @@ After you have the version increments, the updated checkpoints and the updated c
 
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
+- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
-- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
+- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>`,
+      and put the output in a comment on the PR
+      <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
 
 

@@ -5,17 +5,42 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-rc.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.6) - 2023-03-TODO INSERT DATE HERE
+## [Zebra 1.0.0-rc.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.6) - 2023-03-23
 
-This release:
-- TODO: insert summary here
+In this release, we fixed several minor security issues, most notably [hardening Zebra in response to the vulnerabilities recently disclosed by Halborn](https://zfnd.org/statement-on-recent-security-disclosures-by-halborn/).
 
 ### Known Issues
 
-- `orchard` 0.3.0 can't verify `halo2` proofs when compiled with Rust 1.69 or later (currently nightly Rust TODO: update this based on https://releases.rs/ ). Compile Zebra with stable Rust to avoid this bug. ([halo2/#737](https://github.com/zcash/halo2/issues/737))
-    - TODO: turn this into a breaking change if the bug is fixed in `orchard` 0.3.1 or 0.4.0, and [Zebra has updated #6232](https://github.com/ZcashFoundation/zebra/issues/6232)
+- `orchard` 0.3.0 can't verify `halo2` proofs when compiled with Rust 1.69 or later (currently beta and nightly Rust). Compile Zebra with stable Rust to avoid this bug. ([halo2/#737](https://github.com/zcash/halo2/issues/737)).
+Zebra tracking issue for this problem is [#6232](https://github.com/ZcashFoundation/zebra/issues/6232).
 
-TODO: insert the rest of the changelog here
+### Security
+
+- Harden Zebra's network protocol implementation in response to the Halborn disclosures ([#6297](https://github.com/ZcashFoundation/zebra/pull/6297))
+- Bump incrementalmerkletree from 0.3.0 to 0.3.1, resolving a consensus bug on 32-bit platforms ([#6258](https://github.com/ZcashFoundation/zebra/pull/6258))
+- Remove unused dependencies, and check for them in CI ([#6216](https://github.com/ZcashFoundation/zebra/pull/6216))
+- Validate address length before reading ([#6320](https://github.com/ZcashFoundation/zebra/pull/6320), [#6368](https://github.com/ZcashFoundation/zebra/pull/6368))
+
+### Added
+
+- Add instructions for mining with s-nomp to Zebra book ([#6220](https://github.com/ZcashFoundation/zebra/pull/6220))
+- Export block data to elasticsearch database ([#6274](https://github.com/ZcashFoundation/zebra/pull/6274))
+- Add elasticsearch section to Zebra book ([#6295](https://github.com/ZcashFoundation/zebra/pull/6295))
+
+### Changed
+
+- Update Zebra's build instructions ([#6273](https://github.com/ZcashFoundation/zebra/pull/6273))
+- Improve CommitBlockError message ([#6251](https://github.com/ZcashFoundation/zebra/pull/6251))
+
+### Fixed
+
+- Stop ignoring some transaction broadcasts ([#6230](https://github.com/ZcashFoundation/zebra/pull/6230))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dconnolly, @mpguerra, @oxarbitrage, @teor2345 and @upbqdn
+
 
 ## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-23
 
