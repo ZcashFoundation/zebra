@@ -51,7 +51,7 @@ thiserror = "1.0.40"
 # These crates are needed for the search-issue-refs binary
 regex = { version = "1.7.1", optional = true }
 reqwest =  { version = "0.11.14", optional = true }
-tokio = { version = "1.26.0", features = ["full"], optional = true }
+tokio = { version = "1.27.0", features = ["full"], optional = true }
 
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }
