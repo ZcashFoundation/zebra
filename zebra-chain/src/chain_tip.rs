@@ -106,6 +106,10 @@ pub trait ChainTip {
     ///
     /// This estimate may be negative if the current local time is behind the chain tip block's
     /// timestamp.
+    ///
+    /// Returns `None` if:
+    /// - the state is empty, or
+    /// - the distance to the tip is outside the valid `i32` range (currently unreachable).
     fn estimate_distance_to_network_chain_tip(
         &self,
         network: Network,
