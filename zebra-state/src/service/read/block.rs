@@ -21,9 +21,11 @@ use zebra_chain::{
 };
 
 use crate::{
+    response::MinedTx,
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
+        read::tip_height,
     },
     HashOrHeight,
 };
@@ -70,7 +72,7 @@ where
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the
 /// non-finalized `chain` or finalized `db`.
-pub fn transaction<C>(
+fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
@@ -91,6 +93,28 @@ where
                 .map(|(tx, height)| (tx.clone(), height))
         })
         .or_else(|| db.transaction(hash))
+}
+
+/// Returns a [`MinedTx`] for a [`Transaction`] with [`transaction::Hash`],
+/// if one exists in the non-finalized `chain` or finalized `db`.
+pub fn mined_transaction<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash: transaction::Hash,
+) -> Option<MinedTx>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // It is ok to do this lookup in two different calls. Finalized state updates
+    // can only add overlapping blocks, and hashes are unique.
+    let chain = chain.as_ref();
+
+    let (tx, height) = transaction(chain, db, hash)?;
+    let confirmations = 1 + tip_height(chain, db)?.0 - height.0;
+
+    Some(MinedTx::new(tx, height, confirmations))
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,

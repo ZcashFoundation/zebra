@@ -202,7 +202,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .expect("We should have a GetTreestate struct");
     snapshot_rpc_z_gettreestate(tree_state, &settings);
 
-    // `getrawtransaction`
+    // `getrawtransaction` verbosity=0
     //
     // - similar to `getrawmempool` described above, a mempool request will be made to get the requested
     // transaction from the mempool, response will be empty as we have this transaction in state
@@ -220,7 +220,24 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (response, _) = futures::join!(get_raw_transaction, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 
-    snapshot_rpc_getrawtransaction(get_raw_transaction, &settings);
+    snapshot_rpc_getrawtransaction("verbosity_0", get_raw_transaction, &settings);
+
+    // `getrawtransaction` verbosity=1
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    // make the api call
+    let get_raw_transaction =
+        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), 1u8);
+    let (response, _) = futures::join!(get_raw_transaction, mempool_req);
+    let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
+
+    snapshot_rpc_getrawtransaction("verbosity_1", get_raw_transaction, &settings);
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
@@ -322,8 +339,14 @@ fn snapshot_rpc_z_gettreestate(tree_state: GetTreestate, settings: &insta::Setti
 }
 
 /// Snapshot `getrawtransaction` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getrawtransaction(raw_transaction: GetRawTransaction, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_raw_transaction", raw_transaction));
+fn snapshot_rpc_getrawtransaction(
+    variant: &'static str,
+    raw_transaction: GetRawTransaction,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_raw_transaction_{variant}"), raw_transaction)
+    });
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.

@@ -154,15 +154,15 @@ where
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::Depth(hash))
+                .call(zs::Request::KnownBlock(hash))
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
             {
-                zs::Response::Depth(Some(depth)) => {
-                    return Err(BlockError::AlreadyInChain(hash, depth).into())
+                zs::Response::KnownBlock(Some(location)) => {
+                    return Err(BlockError::AlreadyInChain(hash, location).into())
                 }
-                zs::Response::Depth(None) => {}
-                _ => unreachable!("wrong response to Request::Depth"),
+                zs::Response::KnownBlock(None) => {}
+                _ => unreachable!("wrong response to Request::KnownBlock"),
             }
 
             tracing::trace!("performing block checks");

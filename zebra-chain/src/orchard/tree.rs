@@ -36,7 +36,7 @@ use crate::serialization::{
 /// Unfortunately, this is not the same as `orchard::NoteCommitment`.
 pub type NoteCommitmentUpdate = pallas::Base;
 
-pub(super) const MERKLE_DEPTH: usize = 32;
+pub(super) const MERKLE_DEPTH: u8 = 32;
 
 /// MerkleCRH^Orchard Hash Function
 ///
@@ -56,7 +56,7 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
     let mut s = bitvec![u8, Lsb0;];
 
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-    let l = MERKLE_DEPTH - 1 - layer as usize;
+    let l = MERKLE_DEPTH - 1 - layer;
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from([l, 0])[0..10]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left.to_repr())[0..255]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right.to_repr())[0..255]);
@@ -83,7 +83,7 @@ lazy_static! {
         {
             // The vector is generated from the end, pushing new nodes to its beginning.
             // For this reason, the layer below is v[0].
-            let next = merkle_crh_orchard(layer as u8, v[0], v[0]);
+            let next = merkle_crh_orchard(layer, v[0], v[0]);
             v.insert(0, next);
         }
 
@@ -196,7 +196,7 @@ impl merkle_tree::Hashable for Node {
 
     fn combine(level: usize, a: &Self, b: &Self) -> Self {
         let level = u8::try_from(level).expect("level must fit into u8");
-        let layer = (MERKLE_DEPTH - 1) as u8 - level;
+        let layer = MERKLE_DEPTH - 1 - level;
         Self(merkle_crh_orchard(layer, a.0, b.0))
     }
 
@@ -205,7 +205,7 @@ impl merkle_tree::Hashable for Node {
     }
 
     fn empty_root(level: usize) -> Self {
-        let layer_below: usize = MERKLE_DEPTH - level;
+        let layer_below = usize::from(MERKLE_DEPTH) - level;
         Self(EMPTY_ROOTS[layer_below])
     }
 }
@@ -219,13 +219,13 @@ impl incrementalmerkletree::Hashable for Node {
     /// Level 0 is the layer above the leaves (layer 31).
     /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
-        let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
+        let layer = MERKLE_DEPTH - 1 - u8::from(level);
         Self(merkle_crh_orchard(layer, a.0, b.0))
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        let layer_below: usize = MERKLE_DEPTH - usize::from(level);
+        let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
 }
@@ -282,7 +282,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Orchard = MERKLE_DEPTH = 32.
-    inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///

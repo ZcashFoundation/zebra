@@ -10,7 +10,7 @@ use std::{collections::HashMap, time::Duration};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-// XXX should these constants be split into protocol also?
+// TODO: should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
 use zebra_chain::{
@@ -24,7 +24,7 @@ use zebra_chain::{
 /// The name of the current Zebra release.
 //
 // TODO: generate this from crate metadata (#2375)
-pub const RELEASE_NAME: &str = "Zebra 1.0.0-rc.5";
+pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
 
 /// The date of the current Zebra release.
 ///
@@ -314,7 +314,6 @@ lazy_static! {
     } else {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
-
 
     /// The User-Agent string provided by the node.
     ///

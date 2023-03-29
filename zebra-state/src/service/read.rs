@@ -31,11 +31,13 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
 };
 pub use block::{
-    any_utxo, block, block_header, transaction, transaction_hashes_for_block, unspent_utxo, utxo,
+    any_utxo, block, block_header, mined_transaction, transaction_hashes_for_block, unspent_utxo,
+    utxo,
 };
 pub use find::{
-    best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
-    hash_by_height, height_by_hash, next_median_time_past, tip, tip_height,
+    best_tip, block_locator, chain_contains_hash, depth, finalized_state_contains_block_hash,
+    find_chain_hashes, find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
+    non_finalized_state_contains_block_hash, tip, tip_height,
 };
 pub use tree::{orchard_tree, sapling_tree};
 

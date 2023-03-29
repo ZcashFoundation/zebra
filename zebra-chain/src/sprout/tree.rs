@@ -26,7 +26,7 @@ use proptest_derive::Arbitrary;
 /// Sprout note commitment trees have a max depth of 29.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#constants>
-pub(super) const MERKLE_DEPTH: usize = 29;
+pub(super) const MERKLE_DEPTH: u8 = 29;
 
 /// [MerkleCRH^Sprout] Hash Function.
 ///
@@ -153,7 +153,7 @@ impl incrementalmerkletree::Hashable for Node {
 
     /// Returns the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        let layer_below: usize = MERKLE_DEPTH - usize::from(level);
+        let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
 }
@@ -222,7 +222,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sprout = MERKLE_DEPTH = 29.
-    inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
