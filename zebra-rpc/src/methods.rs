@@ -368,7 +368,7 @@ where
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
             build: self.app_version.clone(),
-            subversion: USER_AGENT.into(),
+            subversion: USER_AGENT.to_string(),
         };
 
         Ok(response)

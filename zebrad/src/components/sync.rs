@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, pin::Pin, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, pin::Pin, str::FromStr, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -604,6 +604,9 @@ where
                 })?;
             }
             self.update_metrics();
+
+            // check for the end of support of this release.
+            self.end_of_support();
         }
 
         info!("exhausted prospective tip set");
@@ -1174,6 +1177,30 @@ where
 
                 warn!(?e, "error downloading and verifying block");
                 true
+            }
+        }
+    }
+
+    /// Check if the current release is too old and panic if so.
+    fn end_of_support(&self) {
+        use zn::constants::{
+            EOS_PANIC_MESSAGE_HEADER, RELEASE_DATE, RELEASE_DURATION_DAYS, RELEASE_NAME,
+        };
+
+        // Only check if we have a tip, we can't know where we are if we don't.
+        if let Some(block_tip_time) = self.latest_chain_tip.best_tip_block_time() {
+            let release_date: chrono::DateTime<chrono::Utc> =
+                chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
+            let max_time = release_date
+                .checked_add_days(chrono::Days::new(RELEASE_DURATION_DAYS))
+                .expect("`RELEASE_DURATION` should never be that big to overflow");
+
+            if block_tip_time > max_time {
+                panic!(
+                    "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than `{RELEASE_DURATION_DAYS}` days. \
+                    \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
+                    \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
+                );
             }
         }
     }

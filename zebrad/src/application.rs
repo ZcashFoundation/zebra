@@ -3,7 +3,7 @@
 mod entry_point;
 use self::entry_point::EntryPoint;
 
-use std::{fmt::Write as _, io::Write as _, process, str::FromStr};
+use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
     application::{self, AppCell},
@@ -13,15 +13,10 @@ use abscissa_core::{
     Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
-use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_network::constants::{EOS_PANIC_MESSAGE_HEADER, PORT_IN_USE_ERROR};
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
-use crate::{
-    commands::ZebradCmd,
-    components::tracing::Tracing,
-    config::ZebradConfig,
-    constants::{RELEASE_DATE, RELEASE_DURATION_DAYS, RELEASE_NAME, ZEBRA_PANIC_MESSAGE_HEADER},
-};
+use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 
 /// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit
@@ -300,7 +295,7 @@ impl Application for ZebradApp {
                         return false;
                     }
                     // Don't ask users to report old version panics.
-                    if error_str.to_string().contains(ZEBRA_PANIC_MESSAGE_HEADER) {
+                    if error_str.to_string().contains(EOS_PANIC_MESSAGE_HEADER) {
                         return false;
                     }
                     true
@@ -403,21 +398,6 @@ impl Application for ZebradApp {
         // Log git metadata and platform info when zebrad starts up
         if is_server {
             tracing::info!("Diagnostic {}", metadata_section);
-
-            // Check if Zebra is too old by using the last commit timestamp and the `RELEASE_DURATION` constant.
-            let release_date: chrono::DateTime<chrono::Utc> =
-                chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
-            let max_time = release_date
-                .checked_add_days(chrono::Days::new(RELEASE_DURATION_DAYS))
-                .expect("`RELEASE_DURATION` should never be that big to overflow");
-            if chrono::Utc::now() > max_time {
-                panic!(
-                    "{ZEBRA_PANIC_MESSAGE_HEADER} if the release date is older than `{RELEASE_DURATION_DAYS}` days. \
-                    \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
-                    \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
-                );
-            }
-
             info!(config_path = ?command.config_path(), config = ?cfg_ref, "loaded zebrad config");
         }
 
