@@ -95,26 +95,31 @@ pub trait ChainTip {
         Some(estimator.estimate_height_at(now))
     }
 
-    /// Return an estimate of how many blocks there are ahead of Zebra's best chain tip
-    /// until the network chain tip, and Zebra's best chain tip height.
+    /// Return an estimate of how many blocks there are ahead of Zebra's best chain tip until the
+    /// network chain tip, and Zebra's best chain tip height.
+    ///
+    /// The first element in the returned tuple is the estimate.
+    /// The second element in the returned tuple is the current best chain tip.
     ///
     /// The estimate is calculated based on the current local time, the block time of the best tip
     /// and the height of the best tip.
     ///
-    /// This estimate may be negative if the current local time is behind the chain tip block's timestamp.
+    /// This estimate may be negative if the current local time is behind the chain tip block's
+    /// timestamp.
+    ///
+    /// Returns `None` if the state is empty.
     fn estimate_distance_to_network_chain_tip(
         &self,
         network: Network,
-    ) -> Option<(i32, block::Height)> {
+    ) -> Option<(block::HeightDiff, block::Height)> {
         let (current_height, current_block_time) = self.best_tip_height_and_block_time()?;
 
         let estimator =
             NetworkChainTipHeightEstimator::new(current_block_time, current_height, network);
 
-        Some((
-            estimator.estimate_height_at(Utc::now()) - current_height,
-            current_height,
-        ))
+        let distance_to_tip = estimator.estimate_height_at(Utc::now()) - current_height;
+
+        Some((distance_to_tip, current_height))
     }
 }
 
