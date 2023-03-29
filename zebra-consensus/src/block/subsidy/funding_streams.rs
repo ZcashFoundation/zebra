@@ -69,13 +69,23 @@ pub fn height_for_first_halving(network: Network) -> Height {
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_period(height: Height, network: Network) -> u32 {
-    // - Spec equation: `address_period = floor((height - height_for_halving(1) - post_blossom_halving_interval)/funding_stream_address_change_interval)`:
-    //   https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    // - In Rust, "integer division rounds towards zero":
-    //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
+    // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
+    // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+    //
+    // Note that the brackets make it so the post blossom halving interval is added to the total.
+    //
+    // In Rust, "integer division rounds towards zero":
+    // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
     //   This is the same as `floor()`, because these numbers are all positive.
-    (height.0 + (POST_BLOSSOM_HALVING_INTERVAL.0) - (height_for_first_halving(network).0))
-        / (FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL.0)
+
+    let height_after_first_halving = height - height_for_first_halving(network);
+
+    let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
+        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
+
+    address_period
+        .try_into()
+        .expect("all values are positive and smaller than the input height")
 }
 
 /// Returns the position in the address slice for each funding stream

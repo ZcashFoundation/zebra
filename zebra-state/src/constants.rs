@@ -15,6 +15,8 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 /// early non-finalized blocks, or finalized blocks. But if that chain becomes
 /// the best chain, all non-finalized blocks past the [`MAX_BLOCK_REORG_HEIGHT`]
 /// will be finalized. This includes all mature coinbase outputs.
+//
+// TODO: change to HeightDiff
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
 /// The database format version, incremented each time the database format changes.

@@ -42,7 +42,7 @@ use tracing::{instrument, Instrument, Span};
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::{self, CountedHeader},
+    block::{self, CountedHeader, HeightDiff},
     diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
 };
@@ -391,7 +391,8 @@ impl StateService {
         );
 
         let full_verifier_utxo_lookahead = max_checkpoint_height
-            - i32::try_from(checkpoint_verify_concurrency_limit).expect("fits in i32");
+            - HeightDiff::try_from(checkpoint_verify_concurrency_limit)
+                .expect("fits in HeightDiff");
         let full_verifier_utxo_lookahead =
             full_verifier_utxo_lookahead.expect("unexpected negative height");
 
