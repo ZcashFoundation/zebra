@@ -298,7 +298,7 @@ jobs:
           override: true
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v1
+        uses: baptiste0928/cargo-install@v2.0.0
         with:
           crate: cargo-machete
 
