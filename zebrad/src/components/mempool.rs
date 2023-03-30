@@ -253,7 +253,7 @@ impl Mempool {
     /// the tip is the synchronization, including side effects to state changes.
     ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self, tip_action: Option<TipAction>) -> bool {
+    fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
         match (is_close_to_tip, self.is_enabled(), tip_action) {
@@ -322,7 +322,7 @@ impl Service<Request> for Mempool {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let tip_action = self.chain_tip_change.last_tip_change();
-        let is_state_changed = self.update_state(tip_action);
+        let is_state_changed = self.update_state(tip_action.as_ref());
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
@@ -331,8 +331,6 @@ impl Service<Request> for Mempool {
         if !self.is_enabled() {
             return Poll::Ready(Ok(()));
         }
-
-        let tip_action = self.chain_tip_change.last_tip_change();
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         //
@@ -356,7 +354,7 @@ impl Service<Request> for Mempool {
             std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
-            self.update_state(tip_action);
+            self.update_state(tip_action.as_ref());
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
