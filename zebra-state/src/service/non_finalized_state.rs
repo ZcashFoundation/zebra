@@ -87,9 +87,9 @@ impl NonFinalizedState {
             && self.network == other.network
     }
 
-    /// Returns an iterator over the non-finalized chains.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    #[allow(dead_code)]
+    /// Returns an iterator over the non-finalized chains, with the best chain first.
+    //
+    // TODO: replace chain_set.iter().rev() with this method
     pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
         self.chain_set.iter()
     }
