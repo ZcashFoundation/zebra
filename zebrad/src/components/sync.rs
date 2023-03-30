@@ -606,7 +606,9 @@ where
             self.update_metrics();
 
             // check for the end of support of this release.
-            self.end_of_support();
+            if let Some(block_tip_time) = self.latest_chain_tip.best_tip_block_time() {
+                end_of_support(block_tip_time);
+            }
         }
 
         info!("exhausted prospective tip set");
@@ -1176,28 +1178,36 @@ where
             }
         }
     }
+}
 
-    /// Check if the current release is too old and panic if so.
-    fn end_of_support(&self) {
-        use zn::constants::{
-            EOS_PANIC_MESSAGE_HEADER, RELEASE_DATE, RELEASE_DURATION_DAYS, RELEASE_NAME,
-        };
+/// Check if the current release is too old and panic if so.
+pub fn end_of_support(block_tip_time: chrono::DateTime<chrono::Utc>) {
+    use zn::constants::{
+        EOS_PANIC_AFTER, EOS_PANIC_MESSAGE_HEADER, EOS_WARN_AFTER, RELEASE_DATE, RELEASE_NAME,
+    };
 
-        // Only check if we have a tip, we can't know where we are if we don't.
-        if let Some(block_tip_time) = self.latest_chain_tip.best_tip_block_time() {
-            let release_date: chrono::DateTime<chrono::Utc> =
-                chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
-            let max_time = release_date
-                .checked_add_days(chrono::Days::new(RELEASE_DURATION_DAYS))
-                .expect("`RELEASE_DURATION` should never be that big to overflow");
+    debug!("Checking if Zebra release is too old");
 
-            if block_tip_time > max_time {
-                panic!(
-                    "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than `{RELEASE_DURATION_DAYS}` days. \
-                    \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
-                    \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
-                );
-            }
-        }
+    let release_date: chrono::DateTime<chrono::Utc> =
+        chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
+    let max_time_panic = release_date
+        .checked_add_days(chrono::Days::new(EOS_PANIC_AFTER))
+        .expect("`EOS_DURATION_PANIC` should never be that big to overflow");
+    let max_time_warning = release_date
+        .checked_add_days(chrono::Days::new(EOS_WARN_AFTER))
+        .expect("`EOS_DURATION_WARNING` should never be that big to overflow");
+
+    if block_tip_time > max_time_panic {
+        panic!(
+            "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
+            \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
+        );
+    } else if block_tip_time > max_time_warning {
+        warn!(
+            "Your Zebra release is too old and it will stop running in {max_time_panic}. \
+            \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
+        );
     }
 }
