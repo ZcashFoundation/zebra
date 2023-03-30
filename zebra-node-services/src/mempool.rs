@@ -104,7 +104,7 @@ pub enum Response {
     //       and remove the FullTransactions variant
     #[cfg(feature = "getblocktemplate-rpcs")]
     FullTransactions {
-        /// All [`VerifiedUnminedTx`] in the mempool
+        /// All [`VerifiedUnminedTx`]s in the mempool
         transactions: Vec<VerifiedUnminedTx>,
 
         /// Last seen chain tip hash by mempool service

@@ -256,53 +256,40 @@ impl Mempool {
     fn update_state(&mut self, tip_action: Option<TipAction>) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
-        if self.is_enabled() == is_close_to_tip {
+        match (is_close_to_tip, self.is_enabled(), tip_action) {
             // the active state is up to date
-            return false;
-        }
+            (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
-        // Update enabled / disabled state
-        if is_close_to_tip {
-            let (tip_height, last_seen_tip_hash) = if let Some(tip_action) = tip_action {
-                (tip_action.best_tip_height(), tip_action.best_tip_hash())
-            } else {
-                let tip_height_and_hash = self.latest_chain_tip.best_tip_height_and_hash();
+            // Enable state - there should be a chain tip when Zebra is close to the network tip
+            (true, false, Some(tip_action)) => {
+                let (last_seen_tip_hash, tip_height) = tip_action.best_tip_hash_and_height();
 
-                #[cfg(test)]
-                // There should be a chain tip when Zebra is close to the network tip,
-                // but not in tests that pretend we're close to tip.
-                let tip_height_and_hash =
-                    tip_height_and_hash.unwrap_or_else(|| (Height(0), [0; 32].into()));
+                info!(?tip_height, "activating mempool: Zebra is close to the tip");
 
-                #[cfg(not(test))]
-                let tip_height_and_hash = tip_height_and_hash
-                    .expect("there should be a chain tip when Zebra is close to the network tip");
+                let tx_downloads = Box::pin(TxDownloads::new(
+                    Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                    Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                    self.state.clone(),
+                ));
+                self.active_state = ActiveState::Enabled {
+                    storage: storage::Storage::new(&self.config),
+                    tx_downloads,
+                    last_seen_tip_hash,
+                };
+            }
 
-                tip_height_and_hash
-            };
+            // Disable state
+            (false, true, _) => {
+                info!(
+                    tip_height = ?self.latest_chain_tip.best_tip_height(),
+                    "deactivating mempool: Zebra is syncing lots of blocks"
+                );
 
-            info!(?tip_height, "activating mempool: Zebra is close to the tip");
-
-            let tx_downloads = Box::pin(TxDownloads::new(
-                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state.clone(),
-            ));
-            self.active_state = ActiveState::Enabled {
-                storage: storage::Storage::new(&self.config),
-                tx_downloads,
-                last_seen_tip_hash,
-            };
-        } else {
-            info!(
-                tip_height = ?self.latest_chain_tip.best_tip_height(),
-                "deactivating mempool: Zebra is syncing lots of blocks"
-            );
-
-            // This drops the previous ActiveState::Enabled, cancelling its download tasks.
-            // We don't preserve the previous transactions, because we are syncing lots of blocks.
-            self.active_state = ActiveState::Disabled
-        }
+                // This drops the previous ActiveState::Enabled, cancelling its download tasks.
+                // We don't preserve the previous transactions, because we are syncing lots of blocks.
+                self.active_state = ActiveState::Disabled;
+            }
+        };
 
         true
     }
@@ -497,8 +484,10 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
-                #[allow(unused_variables)]
+                #[cfg(feature = "getblocktemplate-rpcs")]
                 last_seen_tip_hash,
+                #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -605,7 +594,10 @@ impl Service<Request> for Mempool {
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     #[cfg(feature = "getblocktemplate-rpcs")]
                     Request::FullTransactions => {
-                        return async move { Err("no last seen chain tip hash".into()) }.boxed()
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
                     }
 
                     Request::RejectedTransactionIds(_) => {
