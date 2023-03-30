@@ -621,7 +621,11 @@ where
 
         // Security: Let other tasks run after each connection is processed.
         //
-        // Avoids remote peers starving other Zebra tasks using inbound connection successes or errors.
+        // Avoids remote peers starving other Zebra tasks using inbound connection successes or
+        // errors.
+        //
+        // Preventing a denial of service is important in this code, so we want to sleep *and* make
+        // the next connection after other tasks have run. (Sleeps are not guaranteed to do that.)
         tokio::task::yield_now().await;
     }
 }
