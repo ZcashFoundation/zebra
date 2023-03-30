@@ -340,11 +340,9 @@ impl Chain {
     pub fn recent_fork_length(&self) -> Option<u32> {
         let fork_length = self.non_finalized_tip_height() - self.recent_fork_height()?;
 
-        Some(
-            fork_length
-                .try_into()
-                .expect("fork must be at or below tip"),
-        )
+        // If the fork is above the tip, it is invalid, so just return `None`
+        // (Ignoring invalid data is ok because this is metrics-only code.)
+        fork_length.try_into().ok()
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
