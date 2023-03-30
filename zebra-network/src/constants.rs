@@ -261,24 +261,6 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 3;
 pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
     MAX_ADDRS_IN_MESSAGE * (ADDR_RESPONSE_LIMIT_DENOMINATOR + 1);
 
-/// The maximum number of self-connection nonces Zebra will track.
-/// Most nonces are cleaned up when their handshake finishes,
-/// but some errors leave them in the nonce set.
-///
-/// Our handshake timeout is a few seconds, and we can make just over a hundred connections
-/// per second.
-///
-/// This is a tradeoff between:
-/// - avoiding memory denial of service attacks which make large numbers of connections:
-///     - 500 successful inbound connections takes about 9 minutes;
-///     - 500 failed inbound connections takes 5 seconds;
-///     - 500 outbound connections takes about 25 seconds,
-///       but outbound connection peer selection and reconnections are controlled by Zebra
-/// - memory usage: 16 bytes per `Nonce`, 8 kB for 500 nonces
-/// - collision probability: 2^32 has ~50% collision probability, so we use a much lower limit
-///   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
-pub const MAX_SELF_CONNECTION_NONCES: usize = 500;
-
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY

@@ -605,7 +605,16 @@ where
         // Limit the amount of memory used for nonces.
         // Nonces can be left in the set if the connection fails or times out between
         // the nonce being inserted, and it being removed.
-        while locked_nonces.len() > constants::MAX_SELF_CONNECTION_NONCES {
+        //
+        // Zebra has strict connection limits, so we limit the number of nonces to
+        // the configured connection limit.
+        // This is a tradeoff between:
+        // - avoiding memory denial of service attacks which make large numbers of connections,
+        //   for example, 100 failed inbound connections takes 1 second.
+        // - memory usage: 16 bytes per `Nonce`, 3.2 kB for 200 nonces
+        // - collision probability: 2^32 has ~50% collision probability, so we use a lower limit
+        //   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
+        while locked_nonces.len() > config.peerset_total_connection_limit() {
             locked_nonces.shift_remove_index(0);
         }
 
