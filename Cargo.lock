@@ -6014,6 +6014,7 @@ dependencies = [
  "humantime-serde",
  "hyper",
  "indexmap",
+ "indicatif",
  "inferno",
  "jsonrpc-core",
  "lazy_static",

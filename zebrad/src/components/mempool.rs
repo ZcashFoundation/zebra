@@ -63,7 +63,7 @@ pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
 pub use queue_checker::QueueChecker;
 pub use storage::{
-    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError, Storage,
 };
 
 #[cfg(test)]
@@ -102,7 +102,7 @@ enum ActiveState {
         ///
         /// Only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
-        storage: storage::Storage,
+        storage: Storage,
 
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
@@ -158,6 +158,18 @@ impl ActiveState {
         match self {
             ActiveState::Disabled => 0,
             ActiveState::Enabled { storage, .. } => storage.total_cost(),
+        }
+    }
+
+    /// Returns the total serialized size of the verified transactions in the set,
+    /// or zero if the mempool is disabled.
+    ///
+    /// See [`Storage::total_serialized_size()`] for details.
+    #[cfg(feature = "progress-bar")]
+    pub fn total_serialized_size(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_serialized_size(),
         }
     }
 }
@@ -371,7 +383,9 @@ impl Mempool {
             let transaction_count = self.active_state.transaction_count();
             let transaction_cost = self.active_state.total_cost();
 
-            self.transaction_count_bar
+            let transaction_size = self.active_state.total_serialized_size();
+            let transaction_size = indicatif::self
+                .transaction_count_bar
                 .set_pos(u64::try_from(transaction_count).expect("fits in u64"));
             // Note: costs can be much higher than the transaction size due to the
             // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
