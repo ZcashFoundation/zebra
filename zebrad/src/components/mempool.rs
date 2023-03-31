@@ -481,7 +481,7 @@ impl Mempool {
             // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
             transaction_cost_bar
                 .set_pos(transaction_cost)
-                .desc(transaction_size.to_string());
+                .desc(format!("Actual size {transaction_size}"));
 
             rejected_count_bar.set_pos(u64::try_from(rejected_count).expect("fits in u64"));
         }
