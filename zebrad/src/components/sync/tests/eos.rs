@@ -4,9 +4,9 @@ use std::str::FromStr;
 use crate::components::sync;
 
 /// Test that the `end_of_support` function is working as expected.
-#[tokio::test]
+#[test]
 #[should_panic(expected = "Zebra refuses to run if the release date is older than")]
-async fn end_of_support_panic() {
+fn end_of_support_panic() {
     let release_date: chrono::DateTime<chrono::Utc> =
         chrono::DateTime::from_str(zebra_network::constants::RELEASE_DATE).unwrap();
 
@@ -21,9 +21,9 @@ async fn end_of_support_panic() {
 }
 
 /// Test that the `end_of_support` function is working as expected.
-#[tokio::test]
+#[test]
 #[tracing_test::traced_test]
-async fn end_of_support_function() {
+ fn end_of_support_function() {
     let release_date: chrono::DateTime<chrono::Utc> =
         chrono::DateTime::from_str(zebra_network::constants::RELEASE_DATE).unwrap();
 
@@ -54,9 +54,9 @@ async fn end_of_support_function() {
 }
 
 /// Test that we are never in end of support warning or panic.
-#[tokio::test]
+#[test]
 #[tracing_test::traced_test]
-async fn end_of_support_date() {
+fn end_of_support_date() {
     // We check this with local clock.
     let now = chrono::Utc::now();
 
@@ -66,3 +66,4 @@ async fn end_of_support_date() {
         "Your Zebra release is too old and it will stop running in"
     ));
 }
+

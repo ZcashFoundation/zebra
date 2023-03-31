@@ -2206,3 +2206,34 @@ async fn get_block_template() -> Result<()> {
 async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
+
+/// Check that the the end oif support code is called.
+#[test]
+fn end_of_support_is_checked() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+
+    // Run extra time to ensure eos code is called.
+    std::thread::sleep(Duration::from_secs(120));
+
+    child.kill(false)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure the check for eos is done.
+    output.stdout_line_contains("Checking if Zebra release is too old")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    Ok(())
+}
