@@ -217,16 +217,15 @@ pub struct Mempool {
 
     // Diagnostics
     //
-    // TODO: make these optional and only initialize them when the mempool is active,
-    //       or move them to ActiveState
-    //
     /// Number of mempool transactions transmitter.
+    /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
-    transaction_count_bar: howudoin::Tx,
+    transaction_count_bar: Option<howudoin::Tx>,
 
     /// Mempool transaction cost transmitter.
+    /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
-    transaction_cost_bar: howudoin::Tx,
+    transaction_cost_bar: Option<howudoin::Tx>,
 }
 
 impl Mempool {
@@ -242,17 +241,6 @@ impl Mempool {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::watch::channel(HashSet::new());
 
-        #[cfg(feature = "progress-bar")]
-        let transaction_count_bar = howudoin::new().label("Mempool Txs").set_pos(0u64).set_len(
-            config.tx_cost_limit / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD,
-        );
-        #[cfg(feature = "progress-bar")]
-        let transaction_cost_bar = howudoin::new()
-            .label("Mempool Cost")
-            .set_pos(0u64)
-            .set_len(config.tx_cost_limit)
-            .fmt_as_bytes(true);
-
         let mut service = Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
@@ -265,9 +253,9 @@ impl Mempool {
             tx_verifier,
             transaction_sender,
             #[cfg(feature = "progress-bar")]
-            transaction_count_bar,
+            transaction_count_bar: None,
             #[cfg(feature = "progress-bar")]
-            transaction_cost_bar,
+            transaction_cost_bar: None,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -373,23 +361,59 @@ impl Mempool {
     }
 
     /// Update metrics for the mempool.
-    //
-    // TODO: call this whenever the storage is updated
-    fn update_metrics(&self) {
+    fn update_metrics(&mut self) {
+        // Shutdown if needed
         #[cfg(feature = "progress-bar")]
         if matches!(howudoin::cancelled(), Some(true)) {
             self.disable_metrics();
-        } else {
+            return;
+        }
+
+        // Initialize if just activated
+        #[cfg(feature = "progress-bar")]
+        if self.is_enabled()
+            && (self.transaction_count_bar.is_none() || self.transaction_cost_bar.is_none())
+        {
+            let max_transaction_count = self.config.tx_cost_limit
+                / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
+
+            self.transaction_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Txs")
+                    .set_pos(0u64)
+                    .set_len(max_transaction_count),
+            );
+
+            self.transaction_cost_bar = Some(
+                howudoin::new()
+                    .label("Mempool Cost")
+                    .set_pos(0u64)
+                    .set_len(self.config.tx_cost_limit)
+                    .fmt_as_bytes(true),
+            );
+        }
+
+        // Update if the mempool has ever been active
+        #[cfg(feature = "progress-bar")]
+        if let (Some(transaction_count_bar), Some(transaction_cost_bar)) =
+            (self.transaction_count_bar, self.transaction_cost_bar)
+        {
             let transaction_count = self.active_state.transaction_count();
             let transaction_cost = self.active_state.total_cost();
 
             let transaction_size = self.active_state.total_serialized_size();
-            let transaction_size = indicatif::self
-                .transaction_count_bar
-                .set_pos(u64::try_from(transaction_count).expect("fits in u64"));
-            // Note: costs can be much higher than the transaction size due to the
+            let transaction_size =
+                indicatif::HumanBytes(transaction_size.try_into().expect("fits in u64"));
+
+            transaction_count_bar.set_pos(u64::try_from(transaction_count).expect("fits in u64"));
+
+            // Display the cost and cost limit, with the actual size as a description.
+            //
+            // Costs can be much higher than the transaction size due to the
             // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
-            self.transaction_cost_bar.set_pos(transaction_cost);
+            transaction_cost_bar
+                .set_pos(transaction_cost)
+                .desc(transaction_size.to_string());
         }
     }
 
@@ -397,8 +421,12 @@ impl Mempool {
     fn disable_metrics(&self) {
         #[cfg(feature = "progress-bar")]
         {
-            self.transaction_count_bar.close();
-            self.transaction_cost_bar.close();
+            if let Some(bar) = self.transaction_count_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.transaction_cost_bar {
+                bar.close()
+            }
         }
     }
 }
