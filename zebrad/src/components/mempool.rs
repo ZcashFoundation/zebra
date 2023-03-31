@@ -246,11 +246,11 @@ impl Mempool {
         is_debug_enabled
     }
 
-    /// Accepts an optional [`TipAction`] for setting a reset action's block hash as
-    /// the last seen hash, or uses the latest chain tip instead.
-    ///
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
+    ///
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash` field
+    /// when enabling the mempool state, it will not enable the mempool if this is None.
     ///
     /// Returns `true` if the state changed.
     fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
