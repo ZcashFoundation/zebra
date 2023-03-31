@@ -257,7 +257,7 @@ impl Mempool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
         match (is_close_to_tip, self.is_enabled(), tip_action) {
-            // the active state is up to date
+            // the active state is up to date, or there is no tip action to activate the mempool
             (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
             // Enable state - there should be a chain tip when Zebra is close to the network tip
