@@ -85,7 +85,7 @@ rayon = "1.7.0"
 
 # ZF deps
 ed25519-zebra = "3.1.0"
-redjubjub = "0.5.0"
+redjubjub = "0.7.0"
 reddsa = "0.5.0"
 
 # Experimental feature getblocktemplate-rpcs
