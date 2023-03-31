@@ -40,11 +40,7 @@ const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 ///
 /// This test also makes sure that the syncer downloads blocks in order.
 #[tokio::test]
-#[tracing_test::traced_test]
 async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
-
-    tracing_subscriber::fmt::init();
-
     // Get services
     let (
         chain_sync_future,
@@ -219,8 +215,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             .await
             .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
     }
-
-    assert!(logs_contain("Checking if Zebra release is too old"));
 
     // Check that nothing unexpected happened.
     chain_verifier.expect_no_requests().await;
@@ -1005,7 +999,7 @@ fn end_of_support_function() {
         ))
         .unwrap();
 
-    sync::end_of_support(no_warn);
+    sync::progress::end_of_support(no_warn);
     assert!(logs_contain("Checking if Zebra release is too old"));
 
     // We are in warn range
@@ -1015,7 +1009,7 @@ fn end_of_support_function() {
         ))
         .unwrap();
 
-    sync::end_of_support(warn);
+    sync::progress::end_of_support(warn);
     assert!(logs_contain("Checking if Zebra release is too old"));
     assert!(logs_contain(
         "Your Zebra release is too old and it will stop running in"
@@ -1028,7 +1022,7 @@ fn end_of_support_function() {
         ))
         .unwrap();
 
-    sync::end_of_support(panic);
+    sync::progress::end_of_support(panic);
     assert!(logs_contain("Checking if Zebra release is too old"));
 }
 
@@ -1039,7 +1033,7 @@ fn end_of_support_date() {
     // We check this with local clock.
     let now = chrono::Utc::now();
 
-    sync::end_of_support(now);
+    sync::progress::end_of_support(now);
     assert!(logs_contain("Checking if Zebra release is too old"));
     assert!(!logs_contain(
         "Your Zebra release is too old and it will stop running in"
