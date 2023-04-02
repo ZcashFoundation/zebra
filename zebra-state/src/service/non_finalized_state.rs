@@ -669,8 +669,17 @@ impl NonFinalizedState {
             }
 
             // Update each chain length bar, creating or deleting bars as needed
-            self.chain_fork_length_bars
-                .resize_with(self.chain_count(), howudoin::new);
+            let prev_length_bars = self.chain_fork_length_bars.len();
+
+            if self.chain_count() > prev_length_bars {
+                self.chain_fork_length_bars
+                    .resize_with(self.chain_count(), howudoin::new);
+            } else if self.chain_count() < prev_length_bars {
+                let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                for bar in redundant_bars {
+                    bar.close();
+                }
+            }
 
             // It doesn't matter what chain the bar was previously used for,
             // because we update everything based on the latest chain in that position.
@@ -682,6 +691,9 @@ impl NonFinalizedState {
                     .unwrap_or_else(|| chain.non_finalized_tip_height())
                     .0;
 
+                // We need to initialize and set all the values of the bar here, because:
+                // - the bar might have been newly created, or
+                // - the chain this bar was previously assigned to might have changed position.
                 chain_length_bar
                     .label(format!("Fork {fork_height}"))
                     .set_pos(u64::try_from(chain.len()).expect("fits in u64"))
