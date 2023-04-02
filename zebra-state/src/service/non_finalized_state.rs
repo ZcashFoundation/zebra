@@ -642,6 +642,8 @@ impl NonFinalizedState {
 
         #[cfg(feature = "progress-bar")]
         {
+            use std::cmp::Ordering::*;
+
             if matches!(howudoin::cancelled(), Some(true)) {
                 self.disable_metrics();
                 return;
@@ -671,14 +673,17 @@ impl NonFinalizedState {
             // Update each chain length bar, creating or deleting bars as needed
             let prev_length_bars = self.chain_fork_length_bars.len();
 
-            if self.chain_count() > prev_length_bars {
-                self.chain_fork_length_bars
-                    .resize_with(self.chain_count(), howudoin::new);
-            } else if self.chain_count() < prev_length_bars {
-                let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
-                for bar in redundant_bars {
-                    bar.close();
+            match self.chain_count().cmp(&prev_length_bars) {
+                Greater => self
+                    .chain_fork_length_bars
+                    .resize_with(self.chain_count(), howudoin::new),
+                Less => {
+                    let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                    for bar in redundant_bars {
+                        bar.close();
+                    }
                 }
+                Equal => {}
             }
 
             // It doesn't matter what chain the bar was previously used for,
