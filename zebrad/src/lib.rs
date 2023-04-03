@@ -62,6 +62,8 @@
 //! ### Metrics
 //!
 //! * `prometheus`: export metrics to prometheus.
+//! * `progres-bar`: shows key metrics in the terminal using progress bars.
+//!   We recommend configuring `tracing.log_file` so the logs don't overwrite the progress bars.
 //!
 //! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
 //! for more details.
@@ -69,6 +71,7 @@
 //! ### Tracing
 //!
 //! Sending traces to different subscribers:
+//! * configuring a `tracing.log_file`: appends traces to a file on disk.
 //! * `journald`: send tracing spans and events to `systemd-journald`.
 //! * `sentry`: send crash and panic events to sentry.io.
 //! * `flamegraph`: generate a flamegraph of tracing spans.
