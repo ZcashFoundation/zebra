@@ -39,7 +39,8 @@ pub(crate) use chain::Chain;
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
-    /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
+    /// The best chain is `chain_iter().next()`.
+    /// Using `chain_set.last()` or `chain_set.iter().next_back()` is deprecated, and should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
     /// The configured Zcash network.
@@ -91,7 +92,7 @@ impl NonFinalizedState {
     //
     // TODO: replace chain_set.iter().rev() with this method
     pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
-        self.chain_set.iter()
+        self.chain_set.iter().rev()
     }
 
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
