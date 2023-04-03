@@ -101,6 +101,10 @@ pub struct Config {
     /// replaced with `.folded` and `.svg` for the respective files.
     pub flamegraph: Option<PathBuf>,
 
+    /// If set to a path, write the tracing logs to that path.
+    /// By default, logs are sent to the terminal standard output.
+    pub log_file: Option<PathBuf>,
+
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
     /// distributions that use systemd.
     ///
@@ -117,6 +121,7 @@ impl Default for Config {
             buffer_limit: 128_000,
             endpoint_addr: None,
             flamegraph: None,
+            log_file: None,
             use_journald: false,
         }
     }
