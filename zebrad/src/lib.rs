@@ -59,6 +59,10 @@
 //!
 //! * `getblocktemplate-rpcs`: Experimental mining pool RPC support (currently incomplete)
 //!
+//! ### rkyv-RPC
+//!
+//! * `rkyv-serialization`: Experimental rkyv RPC support (currently incomplete)
+//!
 //! ### Metrics
 //!
 //! * `prometheus`: export metrics to prometheus.
