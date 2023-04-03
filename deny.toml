@@ -78,6 +78,9 @@ skip-tree = [
 
     # Test-only dependencies
 
+    # wait for console-api -> console-subscriber to upgrade
+    { name = "tonic", version = "=0.8.3" },
+
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
 
