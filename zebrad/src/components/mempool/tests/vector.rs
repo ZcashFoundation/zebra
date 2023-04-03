@@ -44,7 +44,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let mut unmined_transactions = unmined_transactions_in_blocks(1..=10, network);
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
@@ -56,7 +56,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     let cost_limit = more_transactions.iter().map(|tx| tx.cost()).sum();
 
     let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
-        setup(network, cost_limit).await;
+        setup(network, cost_limit, true).await;
 
     // Enable the mempool
     service.enable(&mut recent_syncs).await;
@@ -187,7 +187,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     // Get transactions to use in the test
-    let unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let unmined_transactions = unmined_transactions_in_blocks(1..=10, network);
     let mut transactions = unmined_transactions.collect::<Vec<_>>();
     // Split unmined_transactions into:
     // [transactions..., new_tx]
@@ -203,7 +203,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
         .sum();
 
     let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
-        setup(network, cost_limit).await;
+        setup(network, cost_limit, true).await;
 
     // Enable the mempool
     service.enable(&mut recent_syncs).await;
@@ -277,10 +277,10 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
-        setup(network, u64::MAX).await;
+        setup(network, u64::MAX, true).await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(..=10, network);
+    let mut unmined_transactions = unmined_transactions_in_blocks(1..=10, network);
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
@@ -398,40 +398,11 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         mut chain_tip_change,
         _tx_verifier,
         mut recent_syncs,
-    ) = setup(network, u64::MAX).await;
+    ) = setup(network, u64::MAX, true).await;
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
-
-    // Push the genesis block to the state
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update
-    if let Err(timeout_error) = timeout(
-        CHAIN_TIP_UPDATE_WAIT_LIMIT,
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await
-    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-    {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
-    }
 
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
@@ -542,40 +513,11 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         mut chain_tip_change,
         _tx_verifier,
         mut recent_syncs,
-    ) = setup(network, u64::MAX).await;
+    ) = setup(network, u64::MAX, true).await;
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
-
-    // Push the genesis block to the state
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update
-    if let Err(timeout_error) = timeout(
-        CHAIN_TIP_UPDATE_WAIT_LIMIT,
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await
-    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-    {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
-    }
 
     // Queue transaction from block 2 for download
     let txid = block2.transactions[0].unmined_id();
@@ -658,7 +600,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         _chain_tip_change,
         mut tx_verifier,
         mut recent_syncs,
-    ) = setup(network, u64::MAX).await;
+    ) = setup(network, u64::MAX, true).await;
 
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
@@ -733,7 +675,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
         _chain_tip_change,
         _tx_verifier,
         mut recent_syncs,
-    ) = setup(network, u64::MAX).await;
+    ) = setup(network, u64::MAX, true).await;
 
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
@@ -801,9 +743,6 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
 async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     let network = Network::Mainnet;
 
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()
         .unwrap();
@@ -821,30 +760,11 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         mut chain_tip_change,
         mut tx_verifier,
         mut recent_syncs,
-    ) = setup(network, u64::MAX).await;
+    ) = setup(network, u64::MAX, true).await;
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
-
-    // Push the genesis block to the state
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update without a timeout
-    // (skipping the chain tip change here may cause the test to
-    // pass without reverifying transactions for  `TipAction::Grow`)
-    chain_tip_change
-        .wait_for_tip_change()
-        .await
-        .expect("unexpected chain tip update failure");
 
     // Queue transaction from block 3 for download
     let tx = block3.transactions[0].clone();
@@ -985,6 +905,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
 async fn setup(
     network: Network,
     tx_cost_limit: u64,
+    should_commit_genesis_block: bool,
 ) -> (
     Mempool,
     MockPeerSet,
@@ -997,9 +918,9 @@ async fn setup(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0);
-    let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let tx_verifier = MockService::build().for_unit_tests();
 
@@ -1017,6 +938,29 @@ async fn setup(
         latest_chain_tip,
         chain_tip_change.clone(),
     );
+
+    if should_commit_genesis_block {
+        let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+
+        // Push the genesis block to the state
+        state_service
+            .ready()
+            .await
+            .unwrap()
+            .call(zebra_state::Request::CommitFinalizedBlock(
+                genesis_block.clone().into(),
+            ))
+            .await
+            .unwrap();
+
+        // Wait for the chain tip update without a timeout
+        chain_tip_change
+            .wait_for_tip_change()
+            .await
+            .expect("unexpected chain tip update failure");
+    }
 
     (
         mempool,

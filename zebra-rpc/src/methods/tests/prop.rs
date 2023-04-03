@@ -386,7 +386,10 @@ proptest! {
                 mempool
                     .expect_request(mempool::Request::FullTransactions)
                     .await?
-                    .respond(mempool::Response::FullTransactions(transactions));
+                    .respond(mempool::Response::FullTransactions {
+                        transactions,
+                        last_seen_tip_hash: [0; 32].into(),
+                    });
 
                 expected_response
             };

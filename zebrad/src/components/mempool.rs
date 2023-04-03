@@ -31,7 +31,9 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::Height, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
+    block::{self, Height},
+    chain_sync_status::ChainSyncStatus,
+    chain_tip::ChainTip,
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
@@ -104,6 +106,11 @@ enum ActiveState {
 
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
+
+        /// Last seen chain tip hash that mempool transactions have been verified against.
+        ///
+        /// In some tests, this is initialized to the latest chain tip, then updated in `poll_ready()` before each request.
+        last_seen_tip_hash: block::Hash,
     },
 }
 
@@ -120,6 +127,7 @@ impl ActiveState {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
+                ..
             } => {
                 let mut transactions = Vec::new();
 
@@ -205,7 +213,7 @@ impl Mempool {
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state();
+        service.update_state(None);
 
         (service, transaction_receiver)
     }
@@ -241,41 +249,47 @@ impl Mempool {
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     ///
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash` field
+    /// when enabling the mempool state, it will not enable the mempool if this is None.
+    ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self) -> bool {
+    fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
-        if self.is_enabled() == is_close_to_tip {
-            // the active state is up to date
-            return false;
-        }
+        match (is_close_to_tip, self.is_enabled(), tip_action) {
+            // the active state is up to date, or there is no tip action to activate the mempool
+            (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
-        // Update enabled / disabled state
-        if is_close_to_tip {
-            info!(
-                tip_height = ?self.latest_chain_tip.best_tip_height(),
-                "activating mempool: Zebra is close to the tip"
-            );
+            // Enable state - there should be a chain tip when Zebra is close to the network tip
+            (true, false, Some(tip_action)) => {
+                let (last_seen_tip_hash, tip_height) = tip_action.best_tip_hash_and_height();
 
-            let tx_downloads = Box::pin(TxDownloads::new(
-                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state.clone(),
-            ));
-            self.active_state = ActiveState::Enabled {
-                storage: storage::Storage::new(&self.config),
-                tx_downloads,
-            };
-        } else {
-            info!(
-                tip_height = ?self.latest_chain_tip.best_tip_height(),
-                "deactivating mempool: Zebra is syncing lots of blocks"
-            );
+                info!(?tip_height, "activating mempool: Zebra is close to the tip");
 
-            // This drops the previous ActiveState::Enabled, cancelling its download tasks.
-            // We don't preserve the previous transactions, because we are syncing lots of blocks.
-            self.active_state = ActiveState::Disabled
-        }
+                let tx_downloads = Box::pin(TxDownloads::new(
+                    Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                    Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                    self.state.clone(),
+                ));
+                self.active_state = ActiveState::Enabled {
+                    storage: storage::Storage::new(&self.config),
+                    tx_downloads,
+                    last_seen_tip_hash,
+                };
+            }
+
+            // Disable state
+            (false, true, _) => {
+                info!(
+                    tip_height = ?self.latest_chain_tip.best_tip_height(),
+                    "deactivating mempool: Zebra is syncing lots of blocks"
+                );
+
+                // This drops the previous ActiveState::Enabled, cancelling its download tasks.
+                // We don't preserve the previous transactions, because we are syncing lots of blocks.
+                self.active_state = ActiveState::Disabled;
+            }
+        };
 
         true
     }
@@ -307,7 +321,8 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let is_state_changed = self.update_state();
+        let tip_action = self.chain_tip_change.last_tip_change();
+        let is_state_changed = self.update_state(tip_action.as_ref());
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
@@ -316,8 +331,6 @@ impl Service<Request> for Mempool {
         if !self.is_enabled() {
             return Poll::Ready(Ok(()));
         }
-
-        let tip_action = self.chain_tip_change.last_tip_change();
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         //
@@ -341,7 +354,7 @@ impl Service<Request> for Mempool {
             std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
-            self.update_state();
+            self.update_state(tip_action.as_ref());
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
@@ -364,6 +377,7 @@ impl Service<Request> for Mempool {
         if let ActiveState::Enabled {
             storage,
             tx_downloads,
+            last_seen_tip_hash,
         } = &mut self.active_state
         {
             // Collect inserted transaction ids.
@@ -413,6 +427,7 @@ impl Service<Request> for Mempool {
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
+                *last_seen_tip_hash = block.hash;
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -467,6 +482,10 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                last_seen_tip_hash,
+                #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -509,11 +528,16 @@ impl Service<Request> for Mempool {
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
-                    let res: Vec<_> = storage.full_transactions().cloned().collect();
+                    let transactions: Vec<_> = storage.full_transactions().cloned().collect();
 
-                    trace!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 
-                    async move { Ok(Response::FullTransactions(res)) }.boxed()
+                    let response = Response::FullTransactions {
+                        transactions,
+                        last_seen_tip_hash: *last_seen_tip_hash,
+                    };
+
+                    async move { Ok(response) }.boxed()
                 }
 
                 Request::RejectedTransactionIds(ref ids) => {
@@ -559,6 +583,7 @@ impl Service<Request> for Mempool {
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
+
                 let resp = match req {
                     // Return empty responses for queries.
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
@@ -566,7 +591,12 @@ impl Service<Request> for Mempool {
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     #[cfg(feature = "getblocktemplate-rpcs")]
-                    Request::FullTransactions => Response::FullTransactions(Default::default()),
+                    Request::FullTransactions => {
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
+                    }
 
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
@@ -590,6 +620,7 @@ impl Service<Request> for Mempool {
                         Response::CheckedForVerifiedTransactions
                     }
                 };
+
                 async move { Ok(resp) }.boxed()
             }
         }
