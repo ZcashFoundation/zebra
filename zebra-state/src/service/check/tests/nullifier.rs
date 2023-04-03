@@ -115,7 +115,7 @@ proptest! {
             prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
 
             // the non-finalized state has the nullifiers
-            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            prop_assert_eq!(non_finalized_state.chain_count(), 1);
             prop_assert!(non_finalized_state
                 .best_contains_sprout_nullifier(&expected_nullifiers[0]));
             prop_assert!(non_finalized_state

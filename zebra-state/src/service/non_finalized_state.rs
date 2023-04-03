@@ -15,6 +15,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     request::{ContextuallyValidBlock, FinalizedWithTrees},
     service::{check, finalized_state::ZebraDb},
     PreparedBlock, ValidateContextError,
@@ -38,8 +39,9 @@ pub(crate) use chain::Chain;
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
-    /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
-    pub chain_set: BTreeSet<Arc<Chain>>,
+    /// The best chain is `chain_iter().next()`.
+    /// Using `chain_set.last()` or `chain_set.iter().next_back()` is deprecated, and should migrate to `chain_iter().next()`.
+    chain_set: BTreeSet<Arc<Chain>>,
 
     /// The configured Zcash network.
     pub network: Network,
@@ -86,6 +88,34 @@ impl NonFinalizedState {
             && self.network == other.network
     }
 
+    /// Returns an iterator over the non-finalized chains, with the best chain first.
+    //
+    // TODO: replace chain_set.iter().rev() with this method
+    pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
+        self.chain_set.iter().rev()
+    }
+
+    /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
+    /// then limit the number of tracked chains.
+    fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
+    where
+        F: FnOnce(&mut BTreeSet<Arc<Chain>>),
+    {
+        self.chain_set.insert(chain);
+
+        chain_filter(&mut self.chain_set);
+
+        while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
+            // The first chain is the chain with the lowest work.
+            self.chain_set.pop_first();
+        }
+    }
+
+    /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
+    fn insert(&mut self, chain: Arc<Chain>) {
+        self.insert_with(chain, |_ignored_chain| { /* no filter */ })
+    }
+
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizedWithTrees {
@@ -111,7 +141,7 @@ impl NonFinalizedState {
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
-            self.chain_set.insert(best_chain);
+            self.insert(best_chain);
         }
 
         // for each remaining chain in side_chains
@@ -134,7 +164,7 @@ impl NonFinalizedState {
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.chain_set.insert(side_chain);
+            self.insert(side_chain);
         }
 
         self.update_metrics_for_chains();
@@ -165,9 +195,9 @@ impl NonFinalizedState {
         // - add the new chain fork or updated chain to the set of recent chains
         // - remove the parent chain, if it was in the chain set
         //   (if it was a newly created fork, it won't be in the chain set)
-        self.chain_set.insert(modified_chain);
-        self.chain_set
-            .retain(|chain| chain.non_finalized_tip_hash() != parent_hash);
+        self.insert_with(modified_chain, |chain_set| {
+            chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
 
         self.update_metrics_for_committed_block(height, hash);
 
@@ -206,7 +236,7 @@ impl NonFinalizedState {
         let chain = self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
 
         // If the block is valid, add the new chain fork to the set of recent chains.
-        self.chain_set.insert(chain);
+        self.insert(chain);
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
@@ -458,8 +488,13 @@ impl NonFinalizedState {
     }
 
     /// Return the non-finalized portion of the current best chain.
-    pub(crate) fn best_chain(&self) -> Option<&Arc<Chain>> {
+    pub fn best_chain(&self) -> Option<&Arc<Chain>> {
         self.chain_set.iter().next_back()
+    }
+
+    /// Return the number of chains.
+    pub fn chain_count(&self) -> usize {
+        self.chain_set.len()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.
