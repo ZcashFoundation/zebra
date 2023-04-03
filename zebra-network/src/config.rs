@@ -31,7 +31,7 @@ mod tests;
 /// check if it has enough peer addresses from other seed peers. If it has
 /// enough addresses, it won't retry this peer again.
 ///
-/// If the number of tries is `0`, other peers are checked after every successful
+/// If the number of retries is `0`, other peers are checked after every successful
 /// or failed DNS attempt.
 const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
@@ -197,22 +197,22 @@ impl Config {
     ///
     /// If DNS continues to fail, returns an empty list of addresses.
     async fn resolve_host(host: &str, max_retries: usize) -> HashSet<SocketAddr> {
-        for attempts in 0..=max_retries {
+        for retries in 0..=max_retries {
             if let Ok(addresses) = Config::resolve_host_once(host).await {
                 return addresses;
             }
 
-            if attempts < max_retries {
+            if retries < max_retries {
                 tracing::info!(
                     ?host,
-                    previous_attempts = ?(attempts + 1),
+                    previous_attempts = ?(retries + 1),
                     "Waiting {DNS_LOOKUP_TIMEOUT:?} to retry seed peer DNS resolution",
                 );
                 tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
             } else {
                 tracing::info!(
                     ?host,
-                    attempts = ?(attempts + 1),
+                    attempts = ?(retries + 1),
                     "Seed peer DNS resolution failed, checking for addresses from other seed peers",
                 );
             }
