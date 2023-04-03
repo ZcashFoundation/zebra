@@ -97,9 +97,12 @@ pub fn check_miner_address(
 /// usual acceptance rules (except proof-of-work).
 ///
 /// Returns a `getblocktemplate` [`Response`].
-pub async fn validate_block_proposal<ChainVerifier>(
+pub async fn validate_block_proposal<ChainVerifier, Tip, SyncStatus>(
     mut chain_verifier: ChainVerifier,
     block_proposal_bytes: Vec<u8>,
+    network: Network,
+    latest_chain_tip: Tip,
+    sync_status: SyncStatus,
 ) -> Result<Response>
 where
     ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -107,7 +110,11 @@ where
         + Send
         + Sync
         + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    check_synced_to_tip(network, latest_chain_tip, sync_status)?;
+
     let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
         Ok(block) => block,
         Err(parse_error) => {
@@ -231,11 +238,15 @@ where
     Ok(chain_info)
 }
 
-/// Returns the transactions that are currently in `mempool`.
+/// Returns the transactions that are currently in `mempool`, or None if the
+/// `last_seen_tip_hash` from the mempool response doesn't match the tip hash from the state.
 ///
 /// You should call `check_synced_to_tip()` before calling this function.
 /// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
-pub async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
+pub async fn fetch_mempool_transactions<Mempool>(
+    mempool: Mempool,
+    chain_tip_hash: block::Hash,
+) -> Result<Option<Vec<VerifiedUnminedTx>>>
 where
     Mempool: Service<
             mempool::Request,
@@ -253,11 +264,15 @@ where
             data: None,
         })?;
 
-    if let mempool::Response::FullTransactions(transactions) = response {
-        Ok(transactions)
-    } else {
+    let mempool::Response::FullTransactions {
+        transactions,
+        last_seen_tip_hash,
+    } = response else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
-    }
+    };
+
+    // Check that the mempool and state were in sync when we made the requests
+    Ok((last_seen_tip_hash == chain_tip_hash).then_some(transactions))
 }
 
 // - Response processing

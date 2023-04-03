@@ -798,7 +798,10 @@ where
 
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
-                mempool::Response::FullTransactions(mut transactions) => {
+                mempool::Response::FullTransactions {
+                    mut transactions,
+                    last_seen_tip_hash: _,
+                } => {
                     // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
                     transactions.sort_by_cached_key(|tx| {
                         // zcashd uses modified fee here but Zebra doesn't currently
