@@ -46,7 +46,6 @@ filter-reload = ["hyper"]
 progress-bar = [
     "howudoin",
     "indicatif",
-    "lock_api",
     "zebra-consensus/progress-bar",
     "zebra-state/progress-bar",
     "zebra-network/progress-bar",
@@ -170,13 +169,8 @@ metrics-exporter-prometheus = { version = "0.11.0", default-features = false, fe
 log = "0.4.17"
 
 # prod feature progress-bar
-howudoin = { version = "0.1.1", features = ["term-line"], optional = true }
+howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
 indicatif = { version = "0.17.3", optional = true }
-# Zebra does not depend on this crate directly,
-# but it contains a workaround for a compilation issue on stable Rust:
-# https://github.com/kdr-aus/how-u-doin/pull/1
-# TODO: upgrade to a version of howudoin with the actual fix.
-lock_api = { version = "0.4.9", optional = true }
 
 # test feature proptest-impl
 proptest = { version = "1.1.0", optional = true }

@@ -6018,7 +6018,6 @@ dependencies = [
  "inferno",
  "jsonrpc-core",
  "lazy_static",
- "lock_api",
  "log",
  "metrics",
  "metrics-exporter-prometheus",

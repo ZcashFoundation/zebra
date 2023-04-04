@@ -62,7 +62,7 @@ serde_json = { version = "1.0.95", package = "serde_json", optional = true }
 zebra-chain = { path = "../zebra-chain" }
 
 # prod feature progress-bar
-howudoin = { version = "0.1.1", optional = true }
+howudoin = { version = "0.1.2", optional = true }
 
 # test feature proptest-impl
 zebra-test = { path = "../zebra-test/", optional = true }

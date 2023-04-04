@@ -51,7 +51,7 @@ tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.37"
 
 # prod feature progress-bar
-howudoin = { version = "0.1.1", optional = true }
+howudoin = { version = "0.1.2", optional = true }
 
 # tor dependencies
 # Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
