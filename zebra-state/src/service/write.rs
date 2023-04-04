@@ -43,7 +43,7 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
     fields(
         height = ?prepared.height,
         hash = %prepared.hash,
-        chains = non_finalized_state.chain_set.len()
+        chains = non_finalized_state.chain_count()
     )
 )]
 pub(crate) fn validate_and_commit_non_finalized(
@@ -82,7 +82,7 @@ pub(crate) fn validate_and_commit_non_finalized(
         non_finalized_state_sender,
         last_zebra_mined_log_height
     ),
-    fields(chains = non_finalized_state.chain_set.len())
+    fields(chains = non_finalized_state.chain_count())
 )]
 fn update_latest_chain_channels(
     non_finalized_state: &NonFinalizedState,
