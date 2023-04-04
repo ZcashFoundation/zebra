@@ -38,7 +38,7 @@ pub mod index;
 
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Chain {
     // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
 
@@ -185,46 +185,15 @@ pub struct Chain {
     ///
     /// This field is only used for metrics, it is not consensus-critical, and it is not checked
     /// for equality.
+    ///
+    /// We keep the same last fork height in both sides of a clone, because every new block clones
+    /// a chain, even if it's just growing that chain.
     pub(super) last_fork_height: Option<Height>,
     // # Note
     //
     // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
     // Some diagnostics only use the best chain, and others need to modify the Chain state,
     // but that's difficult with `Arc<Chain>`s.
-}
-
-impl Clone for Chain {
-    fn clone(&self) -> Self {
-        Self {
-            network: self.network,
-            blocks: self.blocks.clone(),
-            height_by_hash: self.height_by_hash.clone(),
-            tx_loc_by_hash: self.tx_loc_by_hash.clone(),
-            created_utxos: self.created_utxos.clone(),
-            spent_utxos: self.spent_utxos.clone(),
-            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
-            sprout_trees_by_height: self.sprout_trees_by_height.clone(),
-            sapling_trees_by_height: self.sapling_trees_by_height.clone(),
-            orchard_trees_by_height: self.orchard_trees_by_height.clone(),
-            history_trees_by_height: self.history_trees_by_height.clone(),
-            sprout_anchors: self.sprout_anchors.clone(),
-            sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
-            sapling_anchors: self.sapling_anchors.clone(),
-            sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
-            orchard_anchors: self.orchard_anchors.clone(),
-            orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
-            sprout_nullifiers: self.sprout_nullifiers.clone(),
-            sapling_nullifiers: self.sapling_nullifiers.clone(),
-            orchard_nullifiers: self.orchard_nullifiers.clone(),
-            partial_transparent_transfers: self.partial_transparent_transfers.clone(),
-            partial_cumulative_work: self.partial_cumulative_work,
-            chain_value_pools: self.chain_value_pools,
-
-            // Keep the last fork height in clones, because every new block clones a chain,
-            // even if it's just growing that chain.
-            last_fork_height: self.last_fork_height,
-        }
-    }
 }
 
 impl Chain {
