@@ -23,10 +23,11 @@ pub const PARAMETER_DOWNLOAD_MAX_ATTEMPTS: usize = 3;
 lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
-    /// When this static is accessed:
-    /// - the parameters are downloaded if needed, then cached to a shared directory,
-    /// - the file hashes are checked, for both newly downloaded and previously cached files,
-    /// - the parameters are loaded into Zebra.
+    /// This static is accessed when:
+    ///
+    /// - Zebra needs to download and cache the parameters to a shared directory, or
+    /// - Zebra checks the file hashes for both newly downloaded and previously cached files, or
+    /// - Zebra loads the parameters.
     ///
     /// # Panics
     ///
@@ -60,7 +61,9 @@ pub struct SproutParameters {
 }
 
 impl Groth16Parameters {
-    /// Download if needed, cache, check, and load the Sprout and Sapling Groth16 parameters.
+    /// Loads the Sprout and Sapling Groth16 parameters, checking the sizes and hashes of the files.
+    ///
+    /// If the parameters are not present, they are automatically downloaded and cached.
     ///
     /// # Panics
     ///
@@ -150,12 +153,12 @@ impl Groth16Parameters {
         }
     }
 
-    /// Try to download the Sapling parameters once, and return the result.
+    /// Tries to download the Sapling parameters once and returns the result.
     ///
     /// # Panics
     ///
-    /// If the parameters were downloaded to different paths to `sapling_spend_path`
-    /// or `sapling_output_path`.
+    /// If the parameters were downloaded to paths different to `sapling_spend_path` or
+    /// `sapling_output_path`.
     fn download_sapling_parameters_once(
         sapling_spend_path: &Path,
         sapling_output_path: &Path,
@@ -199,11 +202,11 @@ impl Groth16Parameters {
         }
     }
 
-    /// Try to download the Sprout parameters once, and return the result.
+    /// Tries to download the Sprout parameters once and returns the result.
     ///
     /// # Panics
     ///
-    /// If the parameters were downloaded to a different path to `sprout_path`.
+    /// If the parameters were downloaded to a path different to `sprout_path`.
     fn download_sprout_parameters_once(sprout_path: &Path) -> Result<PathBuf, BoxError> {
         let new_sprout_path =
             zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))?;
