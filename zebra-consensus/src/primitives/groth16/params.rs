@@ -23,11 +23,11 @@ pub const PARAMETER_DOWNLOAD_MAX_ATTEMPTS: usize = 3;
 lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
-    /// This static is accessed when:
+    /// This static is accessed when Zebra:
     ///
-    /// - Zebra needs to download and cache the parameters to a shared directory, or
-    /// - Zebra checks the file hashes for both newly downloaded and previously cached files, or
-    /// - Zebra loads the parameters.
+    /// - needs to download and cache the parameters to a shared directory, or
+    /// - checks the file hashes for both newly downloaded and previously cached files, or
+    /// - loads the parameters.
     ///
     /// # Panics
     ///
