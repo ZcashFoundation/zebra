@@ -14,7 +14,7 @@ default = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.0.2"
+bitflags = "2.1.0"
 byteorder = "1.4.3"
 bytes = "1.4.0"
 chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
