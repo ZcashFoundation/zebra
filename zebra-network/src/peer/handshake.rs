@@ -912,7 +912,7 @@ where
 
             // Reconfigure the codec to use the negotiated version.
             //
-            // XXX The tokio documentation says not to do this while any frames are still being processed.
+            // TODO: The tokio documentation says not to do this while any frames are still being processed.
             // Since we don't know that here, another way might be to release the tcp
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
             let bare_codec = peer_conn.codec_mut();

@@ -11,7 +11,7 @@ fn empty_roots() {
         assert_eq!(
             EMPTY_ROOTS[i].to_repr(),
             // The test vector is in reversed order.
-            vectors::EMPTY_ROOTS[MERKLE_DEPTH - i]
+            vectors::EMPTY_ROOTS[usize::from(MERKLE_DEPTH) - i]
         );
     }
 }

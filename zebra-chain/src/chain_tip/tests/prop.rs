@@ -71,10 +71,13 @@ fn estimate_time_difference(
     active_network_upgrade: NetworkUpgrade,
 ) -> Duration {
     let spacing_seconds = active_network_upgrade.target_spacing().num_seconds();
+    let height_difference = end_height - start_height;
 
-    let height_difference = i64::from(end_height - start_height);
-
-    Duration::seconds(height_difference * spacing_seconds)
+    if height_difference > 0 {
+        Duration::seconds(height_difference * spacing_seconds)
+    } else {
+        Duration::zero()
+    }
 }
 
 /// Use `displacement` to get a displacement duration between zero and the target spacing of the

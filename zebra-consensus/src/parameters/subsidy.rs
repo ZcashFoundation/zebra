@@ -4,7 +4,11 @@ use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 
-use zebra_chain::{amount::COIN, block::Height, parameters::Network};
+use zebra_chain::{
+    amount::COIN,
+    block::{Height, HeightDiff},
+    parameters::Network,
+};
 
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
 ///
@@ -33,11 +37,11 @@ pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u32 = 2;
 /// Halving is at about every 4 years, before Blossom block time is 150 seconds.
 ///
 /// `(60 * 60 * 24 * 365 * 4) / 150 = 840960`
-pub const PRE_BLOSSOM_HALVING_INTERVAL: Height = Height(840_000);
+pub const PRE_BLOSSOM_HALVING_INTERVAL: HeightDiff = 840_000;
 
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
-pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
-    Height(PRE_BLOSSOM_HALVING_INTERVAL.0 * BLOSSOM_POW_TARGET_SPACING_RATIO);
+pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
+    PRE_BLOSSOM_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
 
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
@@ -133,8 +137,7 @@ lazy_static! {
 /// as described in [protocol specification §7.10.1][7.10.1].
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
-    Height(POST_BLOSSOM_HALVING_INTERVAL.0 / 48);
+pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: HeightDiff = POST_BLOSSOM_HALVING_INTERVAL / 48;
 
 /// Number of addresses for each funding stream in the Mainnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`

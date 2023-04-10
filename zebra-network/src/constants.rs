@@ -10,7 +10,7 @@ use std::{collections::HashMap, time::Duration};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-// XXX should these constants be split into protocol also?
+// TODO: should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
 use zebra_chain::{
@@ -242,7 +242,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-rc.5/";
+pub const USER_AGENT: &str = "/Zebra:1.0.0-rc.6/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.

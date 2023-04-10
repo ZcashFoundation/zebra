@@ -3,15 +3,15 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
 edition = "2021"
 
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
-# Zebra's code uses features introduced in Rust 1.65, or any later stable release.
-rust-version = "1.65"
+# Zebra's code uses features introduced in Rust 1.68, or any later stable release.
+rust-version = "1.68"
 
 # Settings that impact runtime behaviour
 
@@ -106,14 +106,14 @@ abscissa_core = "0.5"
 gumdrop = { version = "0.7", features = ["default_expr"]}
 chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "1.9.2"
+indexmap = "1.9.3"
 lazy_static = "1.4.0"
-serde = { version = "1.0.156", features = ["serde_derive"] }
+serde = { version = "1.0.159", features = ["serde_derive"] }
 toml = "0.7.3"
 
-futures = "0.3.27"
+futures = "0.3.28"
 rayon = "1.7.0"
-tokio = { version = "1.26.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.27.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
@@ -122,7 +122,7 @@ color-eyre = { version = "0.6.2", default_features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 tracing-appender = "0.2.2"
@@ -132,7 +132,7 @@ tracing = "0.1.37"
 
 metrics = "0.20.1"
 
-dirs = "4.0.0"
+dirs = "5.0.0"
 atty = "0.2.14"
 
 num-integer = "0.1.45"
@@ -161,7 +161,7 @@ metrics-exporter-prometheus = { version = "0.11.0", default-features = false, fe
 log = "0.4.17"
 
 # test feature proptest-impl
-proptest = { version = "0.10.1", optional = true }
+proptest = { version = "1.1.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 # test feature tokio-console
@@ -171,31 +171,31 @@ console-subscriber = { version = "0.1.8", optional = true }
 vergen = { version = "7.5.1", default-features = false, features = ["cargo", "git"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { version = "0.8.0", optional = true }
+tonic-build = { version = "0.9.1", optional = true }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 jsonrpc-core = "18.0.0"
 once_cell = "1.17.1"
-regex = "1.7.1"
+regex = "1.7.3"
 semver = "1.0.17"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.94", features = ["preserve_order"] }
-tempfile = "3.4.0"
+serde_json = { version = "1.0.95", features = ["preserve_order"] }
+tempfile = "3.5.0"
 
 hyper = { version = "0.14.25", features = ["http1", "http2", "server"]}
-reqwest = "0.11.14"
+reqwest = "0.11.16"
 
-tokio = { version = "1.26.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.12"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.11.8"
-tonic = "0.8.0"
+tonic = "0.9.1"
 
-proptest = "0.10.1"
+proptest = "1.1.0"
 proptest-derive = "0.3.0"
 
 # enable span traces and track caller in tests

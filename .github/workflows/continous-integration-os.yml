@@ -83,7 +83,7 @@ jobs:
             features: " --features getblocktemplate-rpcs"
 
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -202,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -226,7 +226,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -268,7 +268,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -286,7 +286,7 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v3.4.0
+        uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -298,7 +298,7 @@ jobs:
           override: true
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v1
+        uses: baptiste0928/cargo-install@v2.0.0
         with:
           crate: cargo-machete
 

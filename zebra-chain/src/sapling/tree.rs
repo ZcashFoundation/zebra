@@ -19,13 +19,11 @@ use std::{
 };
 
 use bitvec::prelude::*;
-
 use incrementalmerkletree::{
     bridgetree::{self, Leaf},
     Frontier,
 };
 use lazy_static::lazy_static;
-
 use thiserror::Error;
 use zcash_encoding::{Optional, Vector};
 use zcash_primitives::merkle_tree::{self, Hashable};
@@ -41,7 +39,7 @@ use crate::serialization::{
 /// Unfortunately, this is not the same as `sapling::NoteCommitment`.
 pub type NoteCommitmentUpdate = jubjub::Fq;
 
-pub(super) const MERKLE_DEPTH: usize = 32;
+pub(super) const MERKLE_DEPTH: u8 = 32;
 
 /// MerkleCRH^Sapling Hash Function
 ///
@@ -56,7 +54,7 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s = bitvec![u8, Lsb0;];
 
     // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
-    let l = (MERKLE_DEPTH - 1) as u8 - layer;
+    let l = MERKLE_DEPTH - 1 - layer;
     s.extend_from_bitslice(&BitSlice::<_, Lsb0>::from_element(&l)[0..6]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
@@ -79,7 +77,7 @@ lazy_static! {
         for layer in (0..MERKLE_DEPTH).rev() {
             // The vector is generated from the end, pushing new nodes to its beginning.
             // For this reason, the layer below is v[0].
-            let next = merkle_crh_sapling(layer as u8, v[0], v[0]);
+            let next = merkle_crh_sapling(layer, v[0], v[0]);
             v.insert(0, next);
         }
 
@@ -200,7 +198,7 @@ impl merkle_tree::Hashable for Node {
 
     fn combine(level: usize, a: &Self, b: &Self) -> Self {
         let level = u8::try_from(level).expect("level must fit into u8");
-        let layer = (MERKLE_DEPTH - 1) as u8 - level;
+        let layer = MERKLE_DEPTH - 1 - level;
         Self(merkle_crh_sapling(layer, a.0, b.0))
     }
 
@@ -209,7 +207,7 @@ impl merkle_tree::Hashable for Node {
     }
 
     fn empty_root(level: usize) -> Self {
-        let layer_below = MERKLE_DEPTH - level;
+        let layer_below = usize::from(MERKLE_DEPTH) - level;
         Self(EMPTY_ROOTS[layer_below])
     }
 }
@@ -223,13 +221,13 @@ impl incrementalmerkletree::Hashable for Node {
     /// Level 0 is the layer above the leaves (layer 31).
     /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
-        let layer = (MERKLE_DEPTH - 1) as u8 - u8::from(level);
+        let layer = MERKLE_DEPTH - 1 - u8::from(level);
         Self(merkle_crh_sapling(layer, a.0, b.0))
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
-        let layer_below: usize = MERKLE_DEPTH - usize::from(level);
+        let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
 }
@@ -287,7 +285,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sapling = MERKLE_DEPTH = 32.
-    inner: bridgetree::Frontier<Node, { MERKLE_DEPTH as u8 }>,
+    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///

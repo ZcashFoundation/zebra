@@ -155,23 +155,14 @@ fn fetch_sprout_final_treestates(
             .or_else(|| finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor));
 
         if let Some(input_tree) = input_tree {
-            /* TODO:
-                 - fix tests that generate incorrect root data
-                 - assert that roots match the fetched tree during tests
-                 - move this CPU-intensive check to sprout_anchors_refer_to_treestates()
-
-            assert_eq!(
-                input_tree.root(),
-                joinsplit.anchor,
-                "anchor and fetched input tree root did not match:\n\
-                 anchor: {anchor:?},\n\
-                 input tree root: {input_tree_root:?},\n\
-                 input_tree: {input_tree:?}",
-                anchor = joinsplit.anchor
-            );
-             */
-
             sprout_final_treestates.insert(joinsplit.anchor, input_tree);
+
+            /* TODO:
+               - fix tests that generate incorrect root data
+               - assert that joinsplit.anchor matches input_tree.root() during tests,
+                 but don't assert in production, because the check is CPU-intensive,
+                 and sprout_anchors_refer_to_treestates() constructs the map correctly
+            */
 
             tracing::debug!(
                 sprout_final_treestate_count = ?sprout_final_treestates.len(),

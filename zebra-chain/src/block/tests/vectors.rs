@@ -17,7 +17,7 @@ use crate::{
     transaction::LockTime,
 };
 
-use super::generate; // XXX this should be rewritten as strategies
+use super::generate; // TODO: this should be rewritten as strategies
 
 #[test]
 fn blockheaderhash_debug() {

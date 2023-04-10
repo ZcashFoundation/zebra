@@ -21,7 +21,7 @@ fn empty_roots() {
         assert_eq!(
             hex::encode(EMPTY_ROOTS[i]),
             // The test vector is in reversed order.
-            test_vectors::HEX_EMPTY_ROOTS[MERKLE_DEPTH - i]
+            test_vectors::HEX_EMPTY_ROOTS[usize::from(MERKLE_DEPTH) - i]
         );
     }
 }

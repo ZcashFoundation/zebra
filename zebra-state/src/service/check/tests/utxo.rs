@@ -207,10 +207,9 @@ proptest! {
             prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the non-finalized state has created and spent the UTXO
-            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            prop_assert_eq!(non_finalized_state.chain_count(), 1);
             let chain = non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap();
             prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
@@ -294,10 +293,9 @@ proptest! {
             prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the UTXO is spent
-            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            prop_assert_eq!(non_finalized_state.chain_count(), 1);
             let chain = non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap();
             prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
@@ -448,11 +446,10 @@ proptest! {
             // the finalized state has the UTXO
             prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             // the non-finalized state has no chains (so it can't have the UTXO)
-            prop_assert!(non_finalized_state.chain_set.iter().next().is_none());
+            prop_assert!(non_finalized_state.chain_iter().next().is_none());
         } else {
             let chain = non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap();
             // the non-finalized state has the UTXO
@@ -534,11 +531,10 @@ proptest! {
             // the finalized state has the UTXO
             prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             // the non-finalized state has no chains (so it can't have the UTXO)
-            prop_assert!(non_finalized_state.chain_set.iter().next().is_none());
+            prop_assert!(non_finalized_state.chain_iter().next().is_none());
         } else {
             let chain = non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap();
             // the non-finalized state has the UTXO
@@ -637,10 +633,9 @@ proptest! {
             // the block data is in the non-finalized state
             prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
-            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            prop_assert_eq!(non_finalized_state.chain_count(), 1);
             let chain = non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap();
 
@@ -926,13 +921,12 @@ fn new_state_with_mainnet_transparent_data(
         // the block data is in the non-finalized state
         assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
-        assert_eq!(non_finalized_state.chain_set.len(), 1);
+        assert_eq!(non_finalized_state.chain_count(), 1);
 
         for expected_outpoint in expected_outpoints {
             // the non-finalized state has the unspent UTXOs
             assert!(non_finalized_state
-                .chain_set
-                .iter()
+                .chain_iter()
                 .next()
                 .unwrap()
                 .unspent_utxos()

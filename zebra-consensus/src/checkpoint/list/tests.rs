@@ -1,14 +1,14 @@
 //! Tests for CheckpointList
 
-use super::*;
-
 use std::sync::Arc;
 
-use zebra_chain::parameters::{Network, Network::*};
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, HeightDiff},
+    parameters::{Network, Network::*},
     serialization::ZcashDeserialize,
 };
+
+use super::*;
 
 /// Make a checkpoint list containing only the genesis block
 #[test]
@@ -290,7 +290,8 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
     assert_eq!(heights.next(), Some(&previous_height));
 
     for height in heights {
-        let height_limit = (previous_height + (crate::MAX_CHECKPOINT_HEIGHT_GAP as i32)).unwrap();
+        let height_limit =
+            (previous_height + (crate::MAX_CHECKPOINT_HEIGHT_GAP as HeightDiff)).unwrap();
         assert!(
             height <= &height_limit,
             "Checkpoint gaps must be within MAX_CHECKPOINT_HEIGHT_GAP"

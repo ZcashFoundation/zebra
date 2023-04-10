@@ -267,6 +267,9 @@ impl SentHashes {
     /// Used for finalized blocks close to the final checkpoint, so non-finalized blocks can look up
     /// their UTXOs.
     ///
+    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
+    /// for efficient pruning.
+    ///
     /// For more details see `add()`.
     pub fn add_finalized(&mut self, block: &FinalizedBlock) {
         // Track known UTXOs in sent blocks.
