@@ -20,7 +20,7 @@ pub enum RandError {
 
 /// Errors related to `AffinePoint`.
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
-pub enum AffineError {
+pub enum AffinePointError {
     /// Error of `jubjub::AffinePoint::try_from`.
     #[error("failed to generate a AffinePoint from a diversifier")]
     FromDiversifier,
@@ -32,7 +32,7 @@ pub enum CryptoError {
     /// Errors of type `RandError`.
     #[error("Random generation failure")]
     Rand(#[from] RandError),
-    /// Errors of type `AffineError`.
+    /// Errors of type `AffinePointError`.
     #[error("Affine point failure")]
-    Affine(#[from] AffineError),
+    Affine(#[from] AffinePointError),
 }
