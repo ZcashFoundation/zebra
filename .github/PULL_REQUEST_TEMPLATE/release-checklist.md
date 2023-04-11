@@ -135,11 +135,8 @@ and the updated changelog:
       (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
-- [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
-- [ ] Once the PR is ready to be merged, unfreeze it [here](https://www.mergefreeze.com/installations/3676/branches).
-      Do not unfreeze the whole repository.
-- [ ] Update the PR to the latest `main` branch using `@mergifyio update`. Then Mergify should merge it in-place.
-      If it makes a merge PR instead, that PR will get cancelled by the merge freeze. So just merge the changelog PR manually.
+- [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
+- [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 
 ### Create the Release
 
@@ -166,7 +163,7 @@ and the updated changelog:
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>`,
       and put the output in a comment on the PR
       <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
-- [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
+- [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 
 
 ## Blog Post
