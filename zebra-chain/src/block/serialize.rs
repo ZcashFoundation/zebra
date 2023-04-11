@@ -22,7 +22,16 @@ use crate::{
 /// transaction in the chain is approximately 1.5 kB smaller.)
 pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
-/// Checks if a block header version is valid
+/// Checks if a block header version is valid.
+///
+/// Zebra could encounter a [`Header`] with an invalid version when serializing a block header constructed
+/// in memory with the wrong version in tests or the getblocktemplate RPC.
+///
+/// The getblocktemplate RPC generates a template with version 4. The miner generates the actual block,
+/// and then we deserialize it and do this check.
+///
+/// All other blocks are deserialized when we receive them, and never modified,
+/// so the deserialisation would pick up any errors.
 fn check_version(version: u32) -> Result<(), &'static str> {
     match version {
         // The Zcash specification says that:
