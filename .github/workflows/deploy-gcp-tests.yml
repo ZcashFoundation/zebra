@@ -251,7 +251,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
 
@@ -512,7 +512,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
@@ -561,7 +561,7 @@ jobs:
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
 
