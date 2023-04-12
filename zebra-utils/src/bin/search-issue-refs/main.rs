@@ -33,6 +33,7 @@
 //! > Found 3 references to closed issues.
 
 use std::{
+    collections::HashMap,
     env,
     ffi::OsStr,
     fs::{self, File},
@@ -89,8 +90,18 @@ fn github_issue_url(issue_id: &str) -> String {
 }
 
 fn github_remote_file_ref(file_path: &str, line: usize) -> String {
+    let file_path = &crate_mod_path(file_path, line);
+    format!("https://github.com/ZcashFoundation/zebra/blob/main/{file_path}")
+}
+
+fn github_permalink(file_path: &str, line: usize) -> String {
+    let file_path = &crate_mod_path(file_path, line);
+    format!("https://github.com/ZcashFoundation/zebra/blob/5db2243c25cdde03d9cdccd72a137ccc6f2370a5/{file_path}")
+}
+
+fn crate_mod_path(file_path: &str, line: usize) -> String {
     let file_path = &file_path[2..];
-    format!("https://github.com/ZcashFoundation/zebra/blob/main/{file_path}#L{line}")
+    format!("{file_path}#L{line}")
 }
 
 fn github_issue_api_url(issue_id: &str) -> String {
@@ -102,8 +113,26 @@ struct PossibleIssueRef {
     file_path: String,
     line_number: usize,
     column: usize,
-    id: String,
 }
+
+impl PossibleIssueRef {
+    #[allow(clippy::print_stdout, clippy::print_stderr)]
+    fn print_paths(issue_refs: &[PossibleIssueRef]) {
+        for PossibleIssueRef {
+            file_path,
+            line_number,
+            column,
+        } in issue_refs
+        {
+            let file_ref = format!("{file_path}:{line_number}:{column}");
+            let github_file_ref = github_remote_file_ref(file_path, *line_number);
+
+            println!("{file_ref}\n{github_file_ref}\n");
+        }
+    }
+}
+
+type IssueId = String;
 
 /// Process entry point for `search-issue-refs`
 #[allow(clippy::print_stdout, clippy::print_stderr)]
@@ -112,82 +141,103 @@ async fn main() -> Result<()> {
     init_tracing();
     color_eyre::install()?;
 
-    let file_paths = search_directory(&".".into())?;
+    let possible_issue_refs = {
+        let file_paths = search_directory(&".".into())?;
 
-    // Zebra's github issue numbers could be up to 4 digits
-    let issue_regex =
-        Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,4})").unwrap();
+        // Zebra's github issue numbers could be up to 4 digits
+        let issue_regex =
+            Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,4})").unwrap();
 
-    let mut possible_issue_refs: Vec<PossibleIssueRef> = vec![];
+        let mut possible_issue_refs: HashMap<IssueId, Vec<PossibleIssueRef>> = HashMap::new();
+        let mut num_possible_issue_refs = 0;
 
-    for file_path in file_paths {
-        let file = File::open(&file_path)?;
-        let lines = io::BufReader::new(file).lines();
+        for file_path in file_paths {
+            let file = File::open(&file_path)?;
+            let lines = io::BufReader::new(file).lines();
 
-        for (line_idx, line) in lines.into_iter().enumerate() {
-            let line = line?;
+            for (line_idx, line) in lines.into_iter().enumerate() {
+                let line = line?;
+                let line_number = line_idx + 1;
 
-            possible_issue_refs.extend(issue_regex.captures_iter(&line).map(|captures| {
-                let file_path = file_path
-                    .to_str()
-                    .expect("paths from read_dir should be valid unicode")
-                    .to_string();
+                for captures in issue_regex.captures_iter(&line) {
+                    let file_path = file_path
+                        .to_str()
+                        .expect("paths from read_dir should be valid unicode")
+                        .to_string();
 
-                let potential_issue_ref = captures.get(2).expect("matches should have 2 captures");
-                let matching_text = potential_issue_ref.as_str();
-
-                let id =
-                    matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..].to_string();
-
-                PossibleIssueRef {
-                    file_path,
-                    line_number: line_idx + 1,
-                    column: captures
+                    let column = captures
                         .get(1)
                         .expect("matches should have 2 captures")
                         .start()
-                        + 1,
-                    id,
+                        + 1;
+
+                    let potential_issue_ref =
+                        captures.get(2).expect("matches should have 2 captures");
+                    let matching_text = potential_issue_ref.as_str();
+
+                    let id = matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..]
+                        .to_string();
+
+                    let issue_entry = possible_issue_refs.entry(id).or_default();
+
+                    if issue_entry.iter().all(|issue_ref| {
+                        issue_ref.line_number != line_number || issue_ref.file_path != file_path
+                    }) {
+                        num_possible_issue_refs += 1;
+
+                        issue_entry.push(PossibleIssueRef {
+                            file_path,
+                            line_number,
+                            column,
+                        });
+                    }
                 }
-            }))
+            }
         }
-    }
 
-    let num_possible_issue_refs = possible_issue_refs.len();
+        let num_possible_issues = possible_issue_refs.len();
 
-    println!(
-        "\nFound {num_possible_issue_refs} possible issue refs, checking Github issue statuses..\n"
-    );
+        println!(
+            "\nFound {num_possible_issue_refs} possible references to {num_possible_issues} issues, checking statuses on Github..\n"
+        );
+
+        possible_issue_refs
+    };
 
     // check if issues are closed on Github
 
-    let github_token = match env::vars().find(|(key, _)| key == GITHUB_TOKEN_ENV_KEY) {
-        Some((_, github_token)) => github_token,
-        _ => {
-            println!(
-                "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs, \
+    let Some((_, github_token)) = env::vars().find(|(key, _)| key == GITHUB_TOKEN_ENV_KEY) else {
+        println!(
+            "Can't find {GITHUB_TOKEN_ENV_KEY} in env vars, printing all found possible issue refs, \
 see https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token \
 to create a github token."
-            );
+        );
 
-            for PossibleIssueRef {
+        for (
+            id,
+            PossibleIssueRef {
                 file_path,
                 line_number,
                 column,
-                id,
-            } in possible_issue_refs
-            {
-                let github_url = github_issue_url(&id);
-                let github_file_ref = github_remote_file_ref(&file_path, line_number);
+            },
+        ) in possible_issue_refs
+            .into_iter()
+            .flat_map(|(issue_id, issue_refs)| {
+                issue_refs
+                    .into_iter()
+                    .map(move |issue_ref| (issue_id.clone(), issue_ref))
+            })
+        {
+            let github_url = github_issue_url(&id);
+            let github_file_ref = github_remote_file_ref(&file_path, line_number);
 
-                println!("\n--------------------------------------");
-                println!("Found possible reference to closed issue #{id}: {file_path}:{line_number}:{column}");
-                println!("{github_file_ref}");
-                println!("{github_url}");
-            }
-
-            return Ok(());
+            println!("\n--------------------------------------");
+            println!("Found possible reference to closed issue #{id}: {file_path}:{line_number}:{column}");
+            println!("{github_file_ref}");
+            println!("{github_url}");
         }
+
+        return Ok(());
     };
 
     let mut headers = HeaderMap::new();
@@ -206,41 +256,42 @@ to create a github token."
     let client = ClientBuilder::new().default_headers(headers).build()?;
 
     let mut github_api_requests = JoinSet::new();
-    let mut num_possible_issue_refs = 0;
 
-    for possible_issue_ref in possible_issue_refs {
-        let request = client
-            .get(github_issue_api_url(&possible_issue_ref.id))
-            .send();
-        github_api_requests.spawn(async move { (request.await, possible_issue_ref) });
+    for (id, issue_refs) in possible_issue_refs {
+        let request = client.get(github_issue_api_url(&id)).send();
+        github_api_requests.spawn(async move { (request.await, id, issue_refs) });
     }
+
+    // print out closed issues
+
+    let mut num_closed_issue_refs = 0;
+    let mut num_closed_issues = 0;
 
     while let Some(res) = github_api_requests.join_next().await {
         let Ok((
             res,
-            PossibleIssueRef {
-                file_path,
-                line_number,
-                column,
-                id,
-            },
+            id,
+            issue_refs,
         )) = res else {
             println!("warning: failed to join api request thread/task");
             continue;
         };
 
         let Ok(res) = res else {
-            println!("warning: no response from github api about issue #{id}, {file_path}:{line_number}:{column}");
+            println!("warning: no response from github api about issue #{id}");
+            PossibleIssueRef::print_paths(&issue_refs);
             continue;
         };
 
         let Ok(text) = res.text().await else {
-            println!("warning: failed to get text from response about issue #{id}, {file_path}:{line_number}:{column}");
+            println!("warning: no response from github api about issue #{id}");
+            PossibleIssueRef::print_paths(&issue_refs);
             continue;
         };
 
         let Ok(json): Result<serde_json::Value, _> = serde_json::from_str(&text) else {
-            println!("warning: failed to get serde_json::Value from response for issue #{id}, {file_path}:{line_number}:{column}");
+            println!("warning: no response from github api about issue #{id}");
+            PossibleIssueRef::print_paths(&issue_refs);
             continue;
         };
 
@@ -248,18 +299,27 @@ to create a github token."
             continue;
         };
 
-        num_possible_issue_refs += 1;
+        println!("\n--------------------------------------\n- #{id}\n");
 
-        let github_url = github_issue_url(&id);
-        let github_file_ref = github_remote_file_ref(&file_path, line_number);
+        num_closed_issues += 1;
 
-        println!("\n--------------------------------------");
-        println!("Found reference to closed issue #{id}: {file_path}:{line_number}:{column}");
-        println!("{github_file_ref}");
-        println!("{github_url}");
+        for PossibleIssueRef {
+            file_path,
+            line_number,
+            column: _,
+        } in issue_refs
+        {
+            num_closed_issue_refs += 1;
+
+            let github_permalink = github_permalink(&file_path, line_number);
+
+            println!("{github_permalink}");
+        }
     }
 
-    println!("\nFound {num_possible_issue_refs} references to closed issues.\n");
+    println!(
+        "\nConfirmed {num_closed_issue_refs} references to {num_closed_issues} closed issues.\n"
+    );
 
     Ok(())
 }
