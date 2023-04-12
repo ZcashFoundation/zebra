@@ -87,8 +87,6 @@ on:
         description: 'Application name, used to work out when a job is an update job'
 
 env:
-  # where we get the Docker image from
-  IMAGE_NAME: zebrad-test
   # How many previous log lines we show at the start of each new log job.
   # Increase this number if some log lines are skipped between jobs
   #
@@ -253,7 +251,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
 
@@ -514,7 +512,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
@@ -563,7 +561,7 @@ jobs:
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          ${{ vars.GAR_BASE }}/${{ vars.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
 
