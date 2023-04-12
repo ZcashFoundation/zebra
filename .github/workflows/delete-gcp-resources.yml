@@ -40,8 +40,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -192,8 +192,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
           token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
@@ -210,7 +210,7 @@ jobs:
         # https://github.com/GoogleCloudPlatform/gcr-cleaner
         with:
           args: >-
-            -repo=us-docker.pkg.dev/zealous-zebra/zebra/zebrad-test
-            -repo=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd
+            -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/zebrad-test
+            -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/lightwalletd
             -grace=${{ env.DELETE_IMAGE_HOURS }}
             -keep=${{ env.KEEP_LATEST_IMAGE_COUNT }}
