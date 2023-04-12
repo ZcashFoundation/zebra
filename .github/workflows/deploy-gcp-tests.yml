@@ -166,7 +166,7 @@ jobs:
           --image-family=cos-stable \
           --create-disk=name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ vars.GCP_MACHINE_TYPE }} \
+          --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
@@ -407,7 +407,7 @@ jobs:
           --image-family=cos-stable \
           --create-disk=image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ vars.GCP_MACHINE_TYPE }} \
+          --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \

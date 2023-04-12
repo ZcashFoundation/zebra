@@ -158,7 +158,7 @@ jobs:
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
-          --machine-type ${{ vars.GCP_MACHINE_TYPE }} \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --scopes cloud-platform \
           --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
@@ -244,7 +244,7 @@ jobs:
           --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
-          --machine-type ${{ vars.GCP_MACHINE_TYPE }} \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --zone ${{ vars.GCP_ZONE }} \
           --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
