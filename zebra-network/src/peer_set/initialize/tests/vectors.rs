@@ -22,8 +22,8 @@ use std::{
 use chrono::Utc;
 use futures::{channel::mpsc, FutureExt, StreamExt};
 use indexmap::IndexSet;
-use tokio::{net::TcpStream, task::JoinHandle};
-use tower::{service_fn, Service};
+use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
+use tower::{service_fn, Layer, Service, ServiceExt};
 use tracing::Span;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
@@ -1093,6 +1093,94 @@ async fn add_initial_peers_is_rate_limited() {
             || matches!(updater_result, Some(Ok(Err(ref _all_senders_closed)))),
         "unexpected error or panic in address book updater task: {updater_result:?}",
     );
+}
+
+/// Test that the number of nonces is limited when peers send an invalid response or
+/// if handshakes time out and are dropped.
+#[tokio::test]
+async fn remnant_nonces_from_outbound_connections_are_limited() {
+    use tower::timeout::TimeoutLayer;
+
+    let _init_guard = zebra_test::init();
+
+    // This test should not require network access.
+
+    const TEST_PEERSET_INITIAL_TARGET_SIZE: usize = 3;
+
+    // Create a test config that listens on an unused port.
+    let listen_addr = "127.0.0.1:0".parse().unwrap();
+    let config = Config {
+        listen_addr,
+        peerset_initial_target_size: TEST_PEERSET_INITIAL_TARGET_SIZE,
+        ..Config::default()
+    };
+
+    let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
+    let nil_inbound_service =
+        tower::service_fn(|_req| async move { Ok::<Response, BoxError>(Response::Nil) });
+
+    let hs = peer::Handshake::builder()
+        .with_config(config.clone())
+        .with_inbound_service(nil_inbound_service)
+        .with_user_agent(crate::constants::USER_AGENT.to_string())
+        .with_latest_chain_tip(NoChainTip)
+        .want_transactions(true)
+        .finish()
+        .expect("configured all required parameters");
+
+    let mut outbound_connector = hs_timeout.layer(peer::Connector::new(hs.clone()));
+
+    let mut active_outbound_connections = ActiveConnectionCounter::new_counter();
+
+    let expected_max_nonces = config.peerset_total_connection_limit();
+    let num_connection_attempts = 2 * expected_max_nonces;
+
+    for i in 1..num_connection_attempts {
+        let expected_nonce_count = expected_max_nonces.min(i);
+
+        let (tcp_listener, addr) = open_listener(&config.clone()).await;
+
+        tokio::spawn(async move {
+            let (mut tcp_stream, _addr) = tcp_listener
+                .accept()
+                .await
+                .expect("client connection should succeed");
+
+            tcp_stream
+                .shutdown()
+                .await
+                .expect("shutdown should succeed");
+        });
+
+        let outbound_connector = outbound_connector
+            .ready()
+            .await
+            .expect("outbound connector never errors");
+
+        let connection_tracker = active_outbound_connections.track_connection();
+
+        let req = OutboundConnectorRequest {
+            addr,
+            connection_tracker,
+        };
+
+        outbound_connector
+            .call(req)
+            .await
+            .expect_err("connection attempt should fail");
+
+        let nonce_count = hs.nonce_count().await;
+
+        assert!(
+            expected_max_nonces >= nonce_count,
+            "number of nonces should be limited to `peerset_total_connection_limit`"
+        );
+
+        assert!(
+            expected_nonce_count == nonce_count,
+            "number of nonces should be the lesser of the number of closed connections and `peerset_total_connection_limit`"
+        )
+    }
 }
 
 /// Test that [`init`] does not deadlock in `add_initial_peers`,

@@ -48,6 +48,9 @@ use crate::{
     BoxError, Config, VersionMessage,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
 ///
