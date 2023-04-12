@@ -608,8 +608,8 @@ where
                     //
                     // `futures::StreamExt::next()` is cancel-safe:
                     // <https://docs.rs/tokio/latest/tokio/macro.select.html#cancellation-safety>
-                    // This means that messages from the future that isn't selected will be selected
-                    // the next time that future is ready.
+                    // This means that messages from the future that isn't selected stay in the stream,
+                    // and they will be returned next time the future is checked.
                     //
                     // If an inbound peer message arrives at a ready peer that also has a pending
                     // request from Zebra, we want to process the peer's message first.
