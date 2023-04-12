@@ -103,7 +103,13 @@ pub enum Response {
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
     #[cfg(feature = "getblocktemplate-rpcs")]
-    FullTransactions(Vec<VerifiedUnminedTx>),
+    FullTransactions {
+        /// All [`VerifiedUnminedTx`]s in the mempool
+        transactions: Vec<VerifiedUnminedTx>,
+
+        /// Last seen chain tip hash by mempool service
+        last_seen_tip_hash: zebra_chain::block::Hash,
+    },
 
     /// Returns matching cached rejected [`UnminedTxId`]s from the mempool,
     RejectedTransactionIds(HashSet<UnminedTxId>),

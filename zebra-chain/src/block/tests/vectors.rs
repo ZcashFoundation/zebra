@@ -13,11 +13,13 @@ use crate::{
         Network::{self, *},
         NetworkUpgrade::*,
     },
-    serialization::{sha256d, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+    },
     transaction::LockTime,
 };
 
-use super::generate; // XXX this should be rewritten as strategies
+use super::generate; // TODO: this should be rewritten as strategies
 
 #[test]
 fn blockheaderhash_debug() {
@@ -63,7 +65,7 @@ fn blockheaderhash_from_blockheader() {
 }
 
 #[test]
-fn deserialize_blockheader() {
+fn blockheader_serialization() {
     let _init_guard = zebra_test::init();
 
     // Includes the 32-byte nonce and 3-byte equihash length field.
@@ -73,11 +75,65 @@ fn deserialize_blockheader() {
         + crate::work::equihash::SOLUTION_SIZE;
 
     for block in zebra_test::vectors::BLOCKS.iter() {
+        // successful deserialization
+
         let header_bytes = &block[..BLOCK_HEADER_LENGTH];
 
-        let _header = header_bytes
+        let mut header = header_bytes
             .zcash_deserialize_into::<Header>()
             .expect("blockheader test vector should deserialize");
+
+        // successful serialization
+
+        let _serialized_header = header
+            .zcash_serialize_to_vec()
+            .expect("blockheader test vector should serialize");
+
+        // deserialiation errors
+
+        let header_bytes = [&[255; 4], &header_bytes[4..]].concat();
+
+        let deserialization_err = header_bytes
+            .zcash_deserialize_into::<Header>()
+            .expect_err("blockheader test vector should fail to deserialize");
+
+        let SerializationError::Parse(err_msg) = deserialization_err else {
+            panic!("SerializationError variant should be Parse")
+        };
+
+        assert_eq!(err_msg, "high bit was set in version field");
+
+        let header_bytes = [&[0; 4], &header_bytes[4..]].concat();
+
+        let deserialization_err = header_bytes
+            .zcash_deserialize_into::<Header>()
+            .expect_err("blockheader test vector should fail to deserialize");
+
+        let SerializationError::Parse(err_msg) = deserialization_err else {
+            panic!("SerializationError variant should be Parse")
+        };
+
+        assert_eq!(err_msg, "version must be at least 4");
+
+        // serialiation errors
+
+        header.version = u32::MAX;
+
+        let serialization_err = header
+            .zcash_serialize_to_vec()
+            .expect_err("blockheader test vector with modified version should fail to serialize");
+
+        assert_eq!(
+            serialization_err.kind(),
+            std::io::ErrorKind::Other,
+            "error kind should be Other"
+        );
+
+        let err_msg = serialization_err
+            .into_inner()
+            .expect("there should be an inner error");
+
+        assert_eq!(err_msg.to_string(), "high bit was set in version field");
     }
 }
 

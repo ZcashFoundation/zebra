@@ -1,5 +1,7 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
+use std::{fs::File, io::Write};
+
 use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -16,6 +18,9 @@ use crate::{application::app_version, components::tracing::Config};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
+
+/// A type-erased boxed writer that can be sent between threads safely.
+pub type BoxWrite = Box<dyn Write + Send + Sync + 'static>;
 
 /// Abscissa component for initializing the `tracing` subsystem
 pub struct Tracing {
@@ -43,16 +48,26 @@ pub struct Tracing {
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
+    #[allow(clippy::print_stdout, clippy::print_stderr)]
     pub fn new(config: Config) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
+
+        let writer = if let Some(log_file) = config.log_file.as_ref() {
+            println!("running zebra, sending logs to {log_file:?}...");
+            let log_file = File::options().append(true).create(true).open(log_file)?;
+            Box::new(log_file) as BoxWrite
+        } else {
+            let stdout = std::io::stdout();
+            Box::new(stdout) as BoxWrite
+        };
 
         // Builds a lossy NonBlocking logger with a default line limit of 128_000 or an explicit buffer_limit.
         // The write method queues lines down a bounded channel with this capacity to a worker thread that writes to stdout.
         // Increments error_counter and drops lines when the buffer is full.
         let (non_blocking, _guard) = NonBlockingBuilder::default()
             .buffered_lines_limit(config.buffer_limit.max(100))
-            .finish(std::io::stdout());
+            .finish(writer);
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.

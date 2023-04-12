@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use zebra_chain::{
-    amount, block,
+    amount,
     transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
 };
 
@@ -200,7 +200,7 @@ pub fn transparent_coinbase_spend(
     match spend_restriction {
         OnlyShieldedOutputs { spend_height } => {
             let min_spend_height =
-                utxo.utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
+                utxo.utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
             if spend_height >= min_spend_height {

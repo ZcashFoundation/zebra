@@ -15,7 +15,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
@@ -165,7 +165,7 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(2 * 
 /// The number of blocks after the final checkpoint that get the shorter timeout.
 ///
 /// We've only seen this error on the first few blocks after the final checkpoint.
-const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: i32 = 100;
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -1057,22 +1057,18 @@ where
 
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
-    ///
-    /// TODO BUG: check if the hash is in any chain (#862)
-    /// Depth only checks the main chain.
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
             .ready()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Depth(hash))
+            .call(zebra_state::Request::KnownBlock(hash))
             .await
             .map_err(|e| eyre!(e))?
         {
-            zs::Response::Depth(Some(_)) => Ok(true),
-            zs::Response::Depth(None) => Ok(false),
-            _ => unreachable!("wrong response to depth request"),
+            zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
+            _ => unreachable!("wrong response to known block request"),
         }
     }
 

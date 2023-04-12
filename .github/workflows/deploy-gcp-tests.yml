@@ -111,7 +111,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -134,7 +134,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -204,7 +204,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -216,7 +216,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -269,7 +269,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -286,7 +286,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -445,7 +445,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -457,7 +457,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -581,7 +581,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -593,7 +593,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -628,7 +628,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -640,7 +640,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -700,7 +700,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -712,7 +712,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -767,7 +767,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -779,7 +779,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -818,7 +818,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -836,7 +836,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -848,7 +848,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -887,7 +887,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -905,7 +905,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -917,7 +917,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -956,7 +956,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*17[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -975,7 +975,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -987,7 +987,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1025,7 +1025,7 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -1044,7 +1044,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1056,7 +1056,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1095,7 +1095,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*18[2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -1113,7 +1113,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1125,7 +1125,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1164,7 +1164,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*18[5-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -1182,7 +1182,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1194,7 +1194,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1233,7 +1233,7 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*18[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -1251,7 +1251,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1263,7 +1263,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1301,7 +1301,7 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*19[2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
@@ -1319,7 +1319,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1331,7 +1331,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1369,11 +1369,12 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e 'estimated progress.*current_height.*=.*19[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  # follow the logs of the test we just launched, up to the last checkpoint, or the test finishing,
+  # or for lightwalletd tests, about 5 hours into the full lightwalletd sync (block 1880k)
   logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
     needs: [ logs-1960k ]
@@ -1384,7 +1385,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1396,7 +1397,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1417,7 +1418,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
 
-      # Show recent logs, following until the last checkpoint (or the test finishes)
+      # Show recent logs, following until the last checkpoint, or the test finishes, or 5 hours of lightwalletd sync (1880k)
       #
       # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
@@ -1436,6 +1437,9 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e 'verified final checkpoint' \
+          -e 'lightwalletd.*Adding block to cache 18[8-9][0-9][0-9][0-9][0-9]' \
+          -e 'lightwalletd.*Adding block to cache 19[0-9][0-9][0-9][0-9][0-9]' \
+          -e 'lightwalletd.*Adding block to cache [2-9][0-9][0-9][0-9][0-9][0-9][0-9]' \
           -e 'test result:.*finished in' \
           "
 
@@ -1456,7 +1460,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1468,7 +1472,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1538,7 +1542,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1567,7 +1571,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.0
+        uses: shimataro/ssh-key-action@v2.5.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -1741,7 +1745,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
           fetch-depth: '2'

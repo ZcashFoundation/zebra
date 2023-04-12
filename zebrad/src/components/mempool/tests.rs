@@ -31,6 +31,8 @@ impl Mempool {
     }
 
     /// Enable the mempool by pretending the synchronization is close to the tip.
+    ///
+    /// Requires a chain tip action to enable the mempool before the future resolves.
     pub async fn enable(&mut self, recent_syncs: &mut RecentSyncLengths) {
         // Pretend we're close to tip
         SyncStatus::sync_close_to_tip(recent_syncs);

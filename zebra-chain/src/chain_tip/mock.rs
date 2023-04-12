@@ -27,7 +27,7 @@ pub struct MockChainTipSender {
     best_tip_block_time: watch::Sender<Option<DateTime<Utc>>>,
 
     /// A sender that sets the `estimate_distance_to_network_chain_tip` of a [`MockChainTip`].
-    estimated_distance_to_network_chain_tip: watch::Sender<Option<i32>>,
+    estimated_distance_to_network_chain_tip: watch::Sender<Option<block::HeightDiff>>,
 }
 
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
@@ -43,7 +43,7 @@ pub struct MockChainTip {
     best_tip_block_time: watch::Receiver<Option<DateTime<Utc>>>,
 
     /// A mocked `estimate_distance_to_network_chain_tip` value set by the [`MockChainTipSender`].
-    estimated_distance_to_network_chain_tip: watch::Receiver<Option<i32>>,
+    estimated_distance_to_network_chain_tip: watch::Receiver<Option<block::HeightDiff>>,
 }
 
 impl MockChainTip {
@@ -112,7 +112,7 @@ impl ChainTip for MockChainTip {
     fn estimate_distance_to_network_chain_tip(
         &self,
         _network: Network,
-    ) -> Option<(i32, block::Height)> {
+    ) -> Option<(block::HeightDiff, block::Height)> {
         self.estimated_distance_to_network_chain_tip
             .borrow()
             .and_then(|estimated_distance| {
@@ -179,7 +179,10 @@ impl MockChainTipSender {
     }
 
     /// Send a new estimated distance to network chain tip to the [`MockChainTip`].
-    pub fn send_estimated_distance_to_network_chain_tip(&self, distance: impl Into<Option<i32>>) {
+    pub fn send_estimated_distance_to_network_chain_tip(
+        &self,
+        distance: impl Into<Option<block::HeightDiff>>,
+    ) {
         self.estimated_distance_to_network_chain_tip
             .send(distance.into())
             .expect("attempt to send a best tip height to a dropped `MockChainTip`");

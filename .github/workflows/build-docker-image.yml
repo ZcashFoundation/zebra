@@ -37,6 +37,20 @@ on:
         required: false
         type: string
         default: info
+      features:
+        required: false
+        type: string
+      test_features: 
+        required: false
+        default: "lightwalletd-grpc-tests"
+        type: string
+      rpc_port: 
+        required: false
+        type: string
+      tag_suffix: 
+        required: false
+        type: string
+
     outputs:
       image_digest:
         description: 'The image digest to be used on a caller workflow'
@@ -54,7 +68,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           persist-credentials: false
 
@@ -72,6 +86,9 @@ jobs:
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
             zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+          # appends inputs.tag_suffix to image tags/names
+          flavor: |
+            suffix=${{ inputs.tag_suffix }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -145,6 +162,9 @@ jobs:
             ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
+            FEATURES=${{ inputs.features }}
+            TEST_FEATURES=${{ inputs.test_features }}
+            RPC_PORT=${{ inputs.rpc_port }}
           push: true
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
@@ -157,7 +177,7 @@ jobs:
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-to: |
-            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

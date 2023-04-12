@@ -22,9 +22,49 @@ use crate::{
 /// transaction in the chain is approximately 1.5 kB smaller.)
 pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
+/// Checks if a block header version is valid.
+///
+/// Zebra could encounter a [`Header`] with an invalid version when serializing a block header constructed
+/// in memory with the wrong version in tests or the getblocktemplate RPC.
+///
+/// The getblocktemplate RPC generates a template with version 4. The miner generates the actual block,
+/// and then we deserialize it and do this check.
+///
+/// All other blocks are deserialized when we receive them, and never modified,
+/// so the deserialisation would pick up any errors.
+fn check_version(version: u32) -> Result<(), &'static str> {
+    match version {
+        // The Zcash specification says that:
+        // "The current and only defined block version number for Zcash is 4."
+        // but this is not actually part of the consensus rules, and in fact
+        // broken mining software created blocks that do not have version 4.
+        // There are approximately 4,000 blocks with version 536870912; this
+        // is the bit-reversal of the value 4, indicating that that mining pool
+        // reversed bit-ordering of the version field. Because the version field
+        // was not properly validated, these blocks were added to the chain.
+        //
+        // The only possible way to work around this is to do a similar hack
+        // as the overwintered field in transaction parsing, which we do here:
+        // treat the high bit (which zcashd interprets as a sign bit) as an
+        // indicator that the version field is meaningful.
+        version if version >> 31 != 0 => Err("high bit was set in version field"),
+
+        // # Consensus
+        //
+        // > The block version number MUST be greater than or equal to 4.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#blockheader
+        version if version < ZCASH_BLOCK_VERSION => Err("version must be at least 4"),
+
+        _ => Ok(()),
+    }
+}
+
 impl ZcashSerialize for Header {
     #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        check_version(self.version).map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
+
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
         writer.write_all(&self.merkle_root.0[..])?;
@@ -44,41 +84,8 @@ impl ZcashSerialize for Header {
 
 impl ZcashDeserialize for Header {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // The Zcash specification says that
-        // "The current and only defined block version number for Zcash is 4."
-        // but this is not actually part of the consensus rules, and in fact
-        // broken mining software created blocks that do not have version 4.
-        // There are approximately 4,000 blocks with version 536870912; this
-        // is the bit-reversal of the value 4, indicating that that mining pool
-        // reversed bit-ordering of the version field. Because the version field
-        // was not properly validated, these blocks were added to the chain.
-        //
-        // The only possible way to work around this is to do a similar hack
-        // as the overwintered field in transaction parsing, which we do here:
-        // treat the high bit (which zcashd interprets as a sign bit) as an
-        // indicator that the version field is meaningful.
-        //
-        //
-        let (version, future_version_flag) = {
-            const LOW_31_BITS: u32 = (1 << 31) - 1;
-            let raw_version = reader.read_u32::<LittleEndian>()?;
-            (raw_version & LOW_31_BITS, raw_version >> 31 != 0)
-        };
-
-        if future_version_flag {
-            return Err(SerializationError::Parse(
-                "high bit was set in version field",
-            ));
-        }
-
-        // # Consensus
-        //
-        // > The block version number MUST be greater than or equal to 4.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#blockheader
-        if version < ZCASH_BLOCK_VERSION {
-            return Err(SerializationError::Parse("version must be at least 4"));
-        }
+        let version = reader.read_u32::<LittleEndian>()?;
+        check_version(version).map_err(SerializationError::Parse)?;
 
         Ok(Header {
             version,

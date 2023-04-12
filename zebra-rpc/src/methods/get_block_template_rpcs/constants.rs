@@ -2,6 +2,7 @@
 
 use jsonrpc_core::ErrorCode;
 
+use zebra_chain::block;
 use zebra_consensus::FundingStreamReceiver::{self, *};
 
 /// When long polling, the amount of time we wait between mempool queries.
@@ -42,7 +43,7 @@ pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &["proposal"];
 /// > and clock time varies between nodes.
 /// >
 /// > <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-pub const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
+pub const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: block::HeightDiff = 100;
 
 /// The RPC error code used by `zcashd` for when it's still downloading initial blocks.
 ///
