@@ -603,7 +603,7 @@ where
                     // - incoming messages from the remote peer, then
                     // - outgoing messages to the remote peer.
                     //
-                    // This improves the performance of peer responses to Zebra requests,and new
+                    // This improves the performance of peer responses to Zebra requests, and new
                     // peer requests to Zebra's inbound service.
                     //
                     // `futures::StreamExt::next()` is cancel-safe:
