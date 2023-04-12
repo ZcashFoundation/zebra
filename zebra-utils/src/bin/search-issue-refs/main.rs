@@ -94,9 +94,9 @@ fn github_remote_file_ref(file_path: &str, line: usize) -> String {
     format!("https://github.com/ZcashFoundation/zebra/blob/main/{file_path}")
 }
 
-fn github_permalink(file_path: &str, line: usize) -> String {
+fn github_permalink(sha: &str, file_path: &str, line: usize) -> String {
     let file_path = &crate_mod_path(file_path, line);
-    format!("https://github.com/ZcashFoundation/zebra/blob/5db2243c25cdde03d9cdccd72a137ccc6f2370a5/{file_path}")
+    format!("https://github.com/ZcashFoundation/zebra/blob/{sha}/{file_path}")
 }
 
 fn crate_mod_path(file_path: &str, line: usize) -> String {
@@ -106,6 +106,10 @@ fn crate_mod_path(file_path: &str, line: usize) -> String {
 
 fn github_issue_api_url(issue_id: &str) -> String {
     format!("https://api.github.com/repos/ZcashFoundation/zebra/issues/{issue_id}")
+}
+
+fn github_ref_api_url(reference: &str) -> String {
+    format!("https://api.github.com/repos/ZcashFoundation/zebra/git/ref/{reference}")
 }
 
 #[derive(Debug)]
@@ -255,6 +259,22 @@ to create a github token."
 
     let client = ClientBuilder::new().default_headers(headers).build()?;
 
+    // get latest commit sha on main
+
+    let latest_commit_json: serde_json::Value = serde_json::from_str::<serde_json::Value>(
+        &client
+            .get(github_ref_api_url("heads/main"))
+            .send()
+            .await?
+            .text()
+            .await?,
+    )
+    .expect("response text should be json");
+
+    let latest_commit_sha = latest_commit_json["object"]["sha"]
+        .as_str()
+        .expect("response.object.sha should be a string");
+
     let mut github_api_requests = JoinSet::new();
 
     for (id, issue_refs) in possible_issue_refs {
@@ -311,7 +331,7 @@ to create a github token."
         {
             num_closed_issue_refs += 1;
 
-            let github_permalink = github_permalink(&file_path, line_number);
+            let github_permalink = github_permalink(latest_commit_sha, &file_path, line_number);
 
             println!("{github_permalink}");
         }
