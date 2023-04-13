@@ -25,7 +25,7 @@ use zebra_chain::{
         },
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseData},
+    transparent::{self, CoinbaseData, MIN_TRANSPARENT_COINBASE_MATURITY},
 };
 
 use zebra_test::mock_service::MockService;
@@ -562,6 +562,87 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
         verifier_response.is_ok(),
         "expected successful verification, got: {verifier_response:?}"
     );
+}
+
+#[tokio::test]
+async fn mempool_response_maturity_height_correct() {
+    let _init_guard = zebra_test::init();
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    let coinbase_spend_height = Height(5);
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos.get(&input_outpoint).map(|utxo| {
+                    let mut utxo = utxo.utxo.clone();
+                    utxo.height = coinbase_spend_height;
+                    utxo.from_coinbase = true;
+                    utxo
+                }),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    let Ok(super::Response::Mempool { transaction }) = verifier_response else {
+        panic!("expected successful verification, got: {verifier_response:?}");
+    };
+
+    let expected_maturity_height =
+        coinbase_spend_height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
+
+    assert_eq!(transaction.maturity_height, expected_maturity_height, "maturity_height should be MIN_TRANSPARENT_COINBASE_MATURITY ahead the spent coinbase tx height")
 }
 
 #[test]

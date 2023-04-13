@@ -489,6 +489,8 @@ fn validate_expiry_height_mined(
 /// > Founders’ Reward outputs and transparent funding stream outputs.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+// TODO: Move tests for `zebra_state::service::check::utxo::transparent_coinbase_spend()` to this crate
+//       once the transaction verifier returns an error for block transactions that fail this check.
 fn transparent_coinbase_spend_maturity(
     outpoint: transparent::OutPoint,
     spend_restriction: transparent::CoinbaseSpendRestriction,
