@@ -57,7 +57,7 @@ tracing = "0.1.37"
 
 # elasticsearch specific dependencies.
 elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional = true }
-serde_json = { version = "1.0.95", package = "serde_json", optional = true }
+serde_json = { version = "1.0.96", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
 

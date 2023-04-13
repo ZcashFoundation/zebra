@@ -194,7 +194,7 @@ regex = "1.7.3"
 semver = "1.0.17"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.95", features = ["preserve_order"] }
+serde_json = { version = "1.0.96", features = ["preserve_order"] }
 tempfile = "3.5.0"
 
 hyper = { version = "0.14.25", features = ["http1", "http2", "server"]}
