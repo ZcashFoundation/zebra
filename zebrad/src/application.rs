@@ -309,7 +309,7 @@ impl Application for ZebradApp {
                         return false;
                     }
 
-                    // Don't ask users to create bug reports for timeouts, duplicate blocks,
+                    // Don't ask users to create bug reports for known timeouts, duplicate blocks,
                     // full disks, or updated binaries.
                     let error_str = error.to_string();
                     !error_str.contains("timed out")
