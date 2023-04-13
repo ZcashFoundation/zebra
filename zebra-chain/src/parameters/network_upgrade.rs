@@ -53,7 +53,7 @@ pub enum NetworkUpgrade {
 impl fmt::Display for NetworkUpgrade {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Same as the debug representation for now
-        f.write_str(&format!("{:?}", self))
+        fmt::Debug::fmt(self, f)
     }
 }
 
