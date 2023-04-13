@@ -1,8 +1,12 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
-use std::{fs::File, io::Write};
+use std::{
+    fs::{self, File},
+    io::Write,
+};
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
+use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::{format, Formatter},
@@ -11,8 +15,6 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-
-use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 
 use crate::{application::app_version, components::tracing::Config};
 
@@ -42,7 +44,9 @@ pub struct Tracing {
     flamegrapher: Option<flame::Grapher>,
 
     /// Drop guard for worker thread of non-blocking logger,
-    /// responsible for flushing any remaining logs when the program terminates
+    /// responsible for flushing any remaining logs when the program terminates.
+    //
+    // Correctness: must be listed last in the struct, so it drops after other drops have logged.
     _guard: WorkerGuard,
 }
 
@@ -54,7 +58,32 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            println!("running zebra, sending logs to {log_file:?}...");
+            println!("running zebra");
+
+            // Make sure the directory for the log file exists.
+            // If the log is configured in the current directory, it won't have a parent directory.
+            //
+            // # Security
+            //
+            // If the user is running Zebra with elevated permissions ("root"), they should
+            // create the log file directory before running Zebra, and make sure the Zebra user
+            // account has exclusive access to that directory, and other users can't modify
+            // its parent directories.
+            //
+            // This avoids a TOCTOU security issue in the Rust filesystem API.
+            let log_file_dir = log_file.parent();
+            if let Some(log_file_dir) = log_file_dir {
+                if !log_file_dir.exists() {
+                    println!("directory for log file {log_file:?} does not exist, trying to create it...");
+
+                    if let Err(create_dir_error) = fs::create_dir_all(log_file_dir) {
+                        println!("failed to create directory for log file: {create_dir_error}");
+                        println!("trying log file anyway...");
+                    }
+                }
+            }
+
+            println!("sending logs to {log_file:?}...");
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
         } else {
@@ -220,6 +249,27 @@ impl Tracing {
             "installed tokio-console tracing layer",
         );
 
+        // Write any progress reports sent by other tasks to the terminal
+        //
+        // TODO: move this to its own module?
+        #[cfg(feature = "progress-bar")]
+        {
+            use howudoin::consumers::TermLine;
+            use std::time::Duration;
+
+            // Stops flickering during the initial sync.
+            const PROGRESS_BAR_DEBOUNCE: Duration = Duration::from_secs(2);
+
+            let terminal_consumer = TermLine::with_debounce(PROGRESS_BAR_DEBOUNCE);
+            howudoin::init(terminal_consumer);
+
+            info!("activated progress bar");
+
+            if config.log_file.is_some() {
+                eprintln!("waiting for initial progress reports...");
+            }
+        }
+
         Ok(Self {
             filter_handle,
             initial_filter: filter,
@@ -295,6 +345,16 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
         }
 
+        #[cfg(feature = "progress-bar")]
+        howudoin::disable();
+
         Ok(())
+    }
+}
+
+impl Drop for Tracing {
+    fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        howudoin::disable();
     }
 }

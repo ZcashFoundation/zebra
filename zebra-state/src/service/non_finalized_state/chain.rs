@@ -36,7 +36,9 @@ use self::index::TransparentTransfers;
 
 pub mod index;
 
-#[derive(Debug, Clone)]
+/// A single non-finalized partial chain, from the child of the finalized tip,
+/// to a non-finalized chain tip.
+#[derive(Clone, Debug)]
 pub struct Chain {
     // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
 
@@ -176,6 +178,22 @@ pub struct Chain {
     /// When a new chain is created from the finalized tip,
     /// it is initialized with the finalized tip chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
+
+    // Diagnostics
+    //
+    /// The last height this chain forked at. Diagnostics only.
+    ///
+    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
+    /// for equality.
+    ///
+    /// We keep the same last fork height in both sides of a clone, because every new block clones
+    /// a chain, even if it's just growing that chain.
+    pub(super) last_fork_height: Option<Height>,
+    // # Note
+    //
+    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
+    // Some diagnostics only use the best chain, and others need to modify the Chain state,
+    // but that's difficult with `Arc<Chain>`s.
 }
 
 impl Chain {
@@ -213,6 +231,7 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+            last_fork_height: None,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -233,8 +252,8 @@ impl Chain {
     ///
     /// If the internal states are different, it returns `false`,
     /// even if the blocks in the two chains are equal.
-    #[cfg(test)]
-    pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn eq_internal_state(&self, other: &Chain) -> bool {
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
@@ -274,6 +293,25 @@ impl Chain {
 
             // chain value pool balances
             self.chain_value_pools == other.chain_value_pools
+    }
+
+    /// Returns the last fork height if that height is still in the non-finalized state.
+    /// Otherwise, if that fork has been finalized, returns `None`.
+    #[allow(dead_code)]
+    pub fn recent_fork_height(&self) -> Option<Height> {
+        self.last_fork_height
+            .filter(|last| last >= &self.non_finalized_root_height())
+    }
+
+    /// Returns this chain fork's length, if its fork is still in the non-finalized state.
+    /// Otherwise, if the fork has been finalized, returns `None`.
+    #[allow(dead_code)]
+    pub fn recent_fork_length(&self) -> Option<u32> {
+        let fork_length = self.non_finalized_tip_height() - self.recent_fork_height()?;
+
+        // If the fork is above the tip, it is invalid, so just return `None`
+        // (Ignoring invalid data is ok because this is metrics-only code.)
+        fork_length.try_into().ok()
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
@@ -338,6 +376,8 @@ impl Chain {
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
+
+            forked.last_fork_height = Some(forked.non_finalized_tip_height());
         }
 
         Some(forked)

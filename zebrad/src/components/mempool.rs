@@ -63,7 +63,7 @@ pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
 pub use queue_checker::QueueChecker;
 pub use storage::{
-    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError, Storage,
 };
 
 #[cfg(test)]
@@ -102,7 +102,7 @@ enum ActiveState {
         ///
         /// Only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
-        storage: storage::Storage,
+        storage: Storage,
 
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
@@ -139,6 +139,57 @@ impl ActiveState {
 
                 transactions
             }
+        }
+    }
+
+    /// Returns the number of pending transactions waiting for download or verify,
+    /// or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn queued_transaction_count(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { tx_downloads, .. } => tx_downloads.in_flight(),
+        }
+    }
+
+    /// Returns the number of transactions in storage, or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn transaction_count(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.transaction_count(),
+        }
+    }
+
+    /// Returns the cost of the transactions in the mempool, according to ZIP-401.
+    /// Returns zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn total_cost(&self) -> u64 {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_cost(),
+        }
+    }
+
+    /// Returns the total serialized size of the verified transactions in the set,
+    /// or zero if the mempool is disabled.
+    ///
+    /// See [`Storage::total_serialized_size()`] for details.
+    #[cfg(feature = "progress-bar")]
+    pub fn total_serialized_size(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_serialized_size(),
+        }
+    }
+
+    /// Returns the number of rejected transaction hashes in storage,
+    /// or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn rejected_transaction_count(&mut self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.rejected_transaction_count(),
         }
     }
 }
@@ -183,6 +234,28 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    // Diagnostics
+    //
+    /// Queued transactions pending download or verification transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    queued_count_bar: Option<howudoin::Tx>,
+
+    /// Number of mempool transactions transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    transaction_count_bar: Option<howudoin::Tx>,
+
+    /// Mempool transaction cost transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    transaction_cost_bar: Option<howudoin::Tx>,
+
+    /// Rejected transactions transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    rejected_count_bar: Option<howudoin::Tx>,
 }
 
 impl Mempool {
@@ -209,6 +282,14 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            #[cfg(feature = "progress-bar")]
+            queued_count_bar: None,
+            #[cfg(feature = "progress-bar")]
+            transaction_count_bar: None,
+            #[cfg(feature = "progress-bar")]
+            transaction_cost_bar: None,
+            #[cfg(feature = "progress-bar")]
+            rejected_count_bar: None,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -312,6 +393,118 @@ impl Mempool {
             .copied()
             .collect()
     }
+
+    /// Update metrics for the mempool.
+    fn update_metrics(&mut self) {
+        // Shutdown if needed
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.disable_metrics();
+            return;
+        }
+
+        // Initialize if just activated
+        #[cfg(feature = "progress-bar")]
+        if self.is_enabled()
+            && (self.queued_count_bar.is_none()
+                || self.transaction_count_bar.is_none()
+                || self.transaction_cost_bar.is_none()
+                || self.rejected_count_bar.is_none())
+        {
+            let max_transaction_count = self.config.tx_cost_limit
+                / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
+
+            self.queued_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Queue")
+                    .set_pos(0u64)
+                    .set_len(
+                        u64::try_from(downloads::MAX_INBOUND_CONCURRENCY).expect("fits in u64"),
+                    ),
+            );
+
+            self.transaction_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Txs")
+                    .set_pos(0u64)
+                    .set_len(max_transaction_count),
+            );
+
+            self.transaction_cost_bar = Some(
+                howudoin::new()
+                    .label("Mempool Cost")
+                    .set_pos(0u64)
+                    .set_len(self.config.tx_cost_limit)
+                    .fmt_as_bytes(true),
+            );
+
+            self.rejected_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Rejects")
+                    .set_pos(0u64)
+                    .set_len(
+                        u64::try_from(storage::MAX_EVICTION_MEMORY_ENTRIES).expect("fits in u64"),
+                    ),
+            );
+        }
+
+        // Update if the mempool has ever been active
+        #[cfg(feature = "progress-bar")]
+        if let (
+            Some(queued_count_bar),
+            Some(transaction_count_bar),
+            Some(transaction_cost_bar),
+            Some(rejected_count_bar),
+        ) = (
+            self.queued_count_bar,
+            self.transaction_count_bar,
+            self.transaction_cost_bar,
+            self.rejected_count_bar,
+        ) {
+            let queued_count = self.active_state.queued_transaction_count();
+            let transaction_count = self.active_state.transaction_count();
+
+            let transaction_cost = self.active_state.total_cost();
+            let transaction_size = self.active_state.total_serialized_size();
+            let transaction_size =
+                indicatif::HumanBytes(transaction_size.try_into().expect("fits in u64"));
+
+            let rejected_count = self.active_state.rejected_transaction_count();
+
+            queued_count_bar.set_pos(u64::try_from(queued_count).expect("fits in u64"));
+
+            transaction_count_bar.set_pos(u64::try_from(transaction_count).expect("fits in u64"));
+
+            // Display the cost and cost limit, with the actual size as a description.
+            //
+            // Costs can be much higher than the transaction size due to the
+            // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
+            transaction_cost_bar
+                .set_pos(transaction_cost)
+                .desc(format!("Actual size {transaction_size}"));
+
+            rejected_count_bar.set_pos(u64::try_from(rejected_count).expect("fits in u64"));
+        }
+    }
+
+    /// Disable metrics for the mempool.
+    fn disable_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        {
+            if let Some(bar) = self.queued_count_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.transaction_count_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.transaction_cost_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.rejected_count_bar {
+                bar.close()
+            }
+        }
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -329,6 +522,8 @@ impl Service<Request> for Mempool {
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
+            self.update_metrics();
+
             return Poll::Ready(Ok(()));
         }
 
@@ -370,6 +565,8 @@ impl Service<Request> for Mempool {
                     let _result = tx_downloads.download_if_needed_and_verify(tx);
                 }
             }
+
+            self.update_metrics();
 
             return Poll::Ready(Ok(()));
         }
@@ -469,6 +666,8 @@ impl Service<Request> for Mempool {
             }
         }
 
+        self.update_metrics();
+
         Poll::Ready(Ok(()))
     }
 
@@ -564,6 +763,10 @@ impl Service<Request> for Mempool {
                         })
                         .map(|result| result.map_err(BoxError::from))
                         .collect();
+
+                    // We've added transactions to the queue
+                    self.update_metrics();
+
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
 
@@ -624,5 +827,11 @@ impl Service<Request> for Mempool {
                 async move { Ok(resp) }.boxed()
             }
         }
+    }
+}
+
+impl Drop for Mempool {
+    fn drop(&mut self) {
+        self.disable_metrics();
     }
 }

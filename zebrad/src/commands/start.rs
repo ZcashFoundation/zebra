@@ -61,9 +61,10 @@
 //!    * answers RPC client requests using the State Service and Mempool Service
 //!    * submits client transactions to the node's mempool
 //!
-//! Zebra also has diagnostic support
+//! Zebra also has diagnostic support:
 //! * [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md)
 //! * [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md)
+//! * [progress-bar](https://docs.rs/howudoin/0.1.1/howudoin)
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
@@ -310,11 +311,12 @@ impl StartCmd {
                     .map(|_| info!("transaction gossip task exited"))
                     .map_err(|e| eyre!(e)),
 
+                // The progress task runs forever, unless it panics.
+                // So we don't need to provide an exit status for it.
                 progress_result = &mut progress_task_handle => {
+                    info!("chain progress task exited");
                     progress_result
                         .expect("unexpected panic in the chain progress task");
-                    info!("chain progress task exited");
-                    Ok(())
                 }
 
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.

@@ -9,6 +9,10 @@ edition = "2021"
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
+progress-bar = [
+    "howudoin",
+]
+
 # Experimental mining RPC support
 getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
@@ -56,8 +60,12 @@ elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional
 serde_json = { version = "1.0.95", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
-zebra-test = { path = "../zebra-test/", optional = true }
 
+# prod feature progress-bar
+howudoin = { version = "0.1.2", optional = true }
+
+# test feature proptest-impl
+zebra-test = { path = "../zebra-test/", optional = true }
 proptest = { version = "1.1.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 

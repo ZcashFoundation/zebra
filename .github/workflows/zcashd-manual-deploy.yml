@@ -12,12 +12,6 @@ on:
         description: 'GCP Managed Instance Group size'
         required: true
 
-env:
-  PROJECT_ID: zealous-zebra
-  REGION: us-central1
-  ZONE: us-central1-a
-  MACHINE_TYPE: c2-standard-4
-
 jobs:
   deploy:
     name: Deploy zcashd nodes
@@ -28,7 +22,7 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
 
@@ -54,8 +48,8 @@ jobs:
         uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
@@ -72,7 +66,7 @@ jobs:
           --container-tty \
           --container-image electriccoinco/zcashd \
           --container-env ZCASHD_NETWORK="${{ inputs.network }}" \
-          --machine-type ${{ env.MACHINE_TYPE }} \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
           --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
@@ -83,7 +77,7 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" | grep "${{ vars.GCP_REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
@@ -92,7 +86,7 @@ jobs:
           gcloud compute instance-groups managed create \
           "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" \
           --template "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --region "${{ env.REGION }}" \
+          --region "${{ vars.GCP_REGION }}" \
           --size "${{ github.event.inputs.size }}"
 
       # Rolls out update to existing group using the new instance template
@@ -102,4 +96,4 @@ jobs:
           gcloud compute instance-groups managed rolling-action start-update \
           "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" \
           --version template="zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --region "${{ env.REGION }}"
+          --region "${{ vars.GCP_REGION }}"
