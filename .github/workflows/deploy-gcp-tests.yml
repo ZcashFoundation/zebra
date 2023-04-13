@@ -1719,13 +1719,13 @@ jobs:
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
           if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]]; then
              gcloud compute images create \
-              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ vars.ZCASH_NETWORK }}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${{ vars.ZCASH_NETWORK }},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT"
           fi

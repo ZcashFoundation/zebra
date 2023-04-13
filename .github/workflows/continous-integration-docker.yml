@@ -163,7 +163,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
-      # TODO: validate how to use variable/conditional values for Testnet
+      # The default network in the image is based on the default network variable in GitHub
       network: ${{ vars.ZCASH_NETWORK }}
       checkpoint_sync: true
       rust_backtrace: full
