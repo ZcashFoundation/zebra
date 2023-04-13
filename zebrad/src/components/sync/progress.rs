@@ -95,9 +95,16 @@ pub async fn show_block_chain_progress(
     //       after fixing slow syncing near tip (#3375)
     let min_state_block_interval = max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
 
-    // Formatted string for logging.
+    // Formatted strings for logging.
+    let target_block_spacing = humantime_seconds(
+        target_block_spacing
+            .to_std()
+            .expect("constant fits in std::Duration"),
+    );
     let max_block_spacing = max_block_spacing
-        .map(|duration| duration.to_string())
+        .map(|duration| {
+            humantime_seconds(duration.to_std().expect("constant fits in std::Duration"))
+        })
         .unwrap_or_else(|| "None".to_string());
 
     // The last time we downloaded and verified at least one block.
