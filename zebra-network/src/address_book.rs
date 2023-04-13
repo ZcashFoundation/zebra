@@ -115,7 +115,7 @@ pub struct AddressMetrics {
     pub recently_stopped_responding: usize,
 
     /// The number of addresses in the address book, regardless of their states.
-    pub addresses: usize,
+    pub num_addresses: usize,
 
     /// The maximum number of addresses in the address book.
     pub address_limit: usize,
@@ -503,7 +503,7 @@ impl AddressBook {
             .checked_sub(recently_live)
             .expect("all recently live peers must have responded");
 
-        let addresses = self.len();
+        let num_addresses = self.len();
 
         AddressMetrics {
             responded,
@@ -513,7 +513,7 @@ impl AddressBook {
             attempt_pending,
             recently_live,
             recently_stopped_responding,
-            addresses,
+            num_addresses,
             address_limit: self.addr_limit,
         }
     }
