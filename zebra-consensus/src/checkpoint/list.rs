@@ -205,13 +205,9 @@ impl CheckpointList {
     /// Returns the checkpoint at `height`, as a zero-based index.
     /// If `height` is not a checkpoint height, returns the checkpoint immediately before that height.
     pub fn prev_checkpoint_index(&self, height: block::Height) -> usize {
-        let checkpoint_height = self
-            .max_height_in_range(..=height)
-            .expect("checkpoints must start at the genesis block height 0");
-
         self.0
             .keys()
-            .position(|key| key == &checkpoint_height)
+            .rposition(|&key| key <= height)
             .expect("checkpoints must start at the genesis block height 0")
     }
 
