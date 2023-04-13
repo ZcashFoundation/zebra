@@ -92,6 +92,13 @@ pub struct Config {
     /// The need to create two files means that we will slightly manipulate the
     /// path given to us to create the two representations.
     ///
+    /// # Security
+    ///
+    /// If you are running Zebra with elevated permissions ("root"), create the
+    /// directory for this file before running Zebra, and make sure the Zebra user
+    /// account has exclusive access to that directory, and other users can't modify
+    /// its parent directories.
+    ///
     /// # Example
     ///
     /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg` and
@@ -102,7 +109,19 @@ pub struct Config {
     pub flamegraph: Option<PathBuf>,
 
     /// If set to a path, write the tracing logs to that path.
+    ///
     /// By default, logs are sent to the terminal standard output.
+    /// But if the `progress-bar` feature is activated, logs are sent to the standard log file path:
+    /// - Linux: `$XDG_STATE_HOME/zebrad.log` or `$HOME/.local/state/zebrad.log`
+    /// - macOS: `$HOME/Library/Application Support/zebrad.log`
+    /// - Windows: `%LOCALAPPDATA%\zebrad.log` or `C:\Users\%USERNAME%\AppData\Local\zebrad.log`
+    ///
+    /// # Security
+    ///
+    /// If you are running Zebra with elevated permissions ("root"), create the
+    /// directory for this file before running Zebra, and make sure the Zebra user
+    /// account has exclusive access to that directory, and other users can't modify
+    /// its parent directories.
     pub log_file: Option<PathBuf>,
 
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
@@ -114,6 +133,11 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        #[cfg(feature = "progress-bar")]
+        let default_log_file = dirs::state_dir()
+            .or_else(dirs::data_local_dir)
+            .map(|dir| dir.join("zebrad.log"));
+
         Self {
             use_color: true,
             force_use_color: false,
@@ -121,7 +145,10 @@ impl Default for Config {
             buffer_limit: 128_000,
             endpoint_addr: None,
             flamegraph: None,
+            #[cfg(not(feature = "progress-bar"))]
             log_file: None,
+            #[cfg(feature = "progress-bar")]
+            log_file: default_log_file,
             use_journald: false,
         }
     }

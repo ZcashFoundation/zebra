@@ -1779,7 +1779,8 @@ impl Service<ReadRequest> for ReadStateService {
                         // blocks into the db) is not mutated here.
                         //
                         // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
-                        latest_non_finalized_state.should_count_metrics = false;
+                        latest_non_finalized_state.disable_metrics();
+
                         write::validate_and_commit_non_finalized(
                             &state.db,
                             &mut latest_non_finalized_state,

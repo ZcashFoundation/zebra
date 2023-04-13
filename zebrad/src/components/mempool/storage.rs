@@ -433,6 +433,19 @@ impl Storage {
         self.verified.transaction_count()
     }
 
+    /// Returns the cost of the transactions in the mempool, according to ZIP-401.
+    #[allow(dead_code)]
+    pub fn total_cost(&self) -> u64 {
+        self.verified.total_cost()
+    }
+
+    /// Returns the total serialized size of the verified transactions in the set.
+    ///
+    /// See [`VerifiedSet::total_serialized_size()`] for details.
+    pub fn total_serialized_size(&self) -> usize {
+        self.verified.total_serialized_size()
+    }
+
     /// Returns the set of [`UnminedTx`]es with exactly matching `tx_ids` in the
     /// mempool.
     ///

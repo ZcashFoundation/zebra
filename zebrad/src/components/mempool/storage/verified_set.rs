@@ -1,3 +1,5 @@
+//! The set of verified transactions in the mempool.
+
 use std::{
     borrow::Cow,
     collections::{HashSet, VecDeque},
@@ -11,6 +13,10 @@ use zebra_chain::{
 };
 
 use super::super::SameEffectsTipRejectionError;
+
+// Imports for doc links
+#[allow(unused_imports)]
+use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
 /// The set of verified transactions stored in the mempool.
 ///
@@ -30,7 +36,7 @@ pub struct VerifiedSet {
     /// serialized.
     transactions_serialized_size: usize,
 
-    /// The total cost of the verified transactons in the set.
+    /// The total cost of the verified transactions in the set.
     total_cost: u64,
 
     /// The set of spent out points by the verified transactions.
@@ -80,6 +86,14 @@ impl VerifiedSet {
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn total_cost(&self) -> u64 {
         self.total_cost
+    }
+
+    /// Returns the total serialized size of the verified transactions in the set.
+    ///
+    /// This can be less than the total cost, because the minimum transaction cost
+    /// is based on the [`MEMPOOL_TRANSACTION_COST_THRESHOLD`].
+    pub fn total_serialized_size(&self) -> usize {
+        self.transactions_serialized_size
     }
 
     /// Returns `true` if the set of verified transactions contains the transaction with the
