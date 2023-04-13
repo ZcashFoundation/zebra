@@ -1,6 +1,9 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
-use std::{fs::File, io::Write};
+use std::{
+    fs::{self, File},
+    io::Write,
+};
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
@@ -55,7 +58,32 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            println!("running zebra, sending logs to {log_file:?}...");
+            println!("running zebra");
+
+            // Make sure the directory for the log file exists.
+            // If the log is configured in the current directory, it won't have a parent directory.
+            //
+            // # Security
+            //
+            // If the user is running Zebra with elevated permissions ("root"), they should
+            // create the log file directory before running Zebra, and make sure the Zebra user
+            // account has exclusive access to that directory, and other users can't modify
+            // its parent directories.
+            //
+            // This avoids a TOCTOU security issue in the Rust filesystem API.
+            let log_file_dir = log_file.parent();
+            if let Some(log_file_dir) = log_file_dir {
+                if !log_file_dir.exists() {
+                    println!("directory for log file {log_file:?} does not exist, trying to create it...");
+
+                    if let Err(create_dir_error) = fs::create_dir_all(log_file_dir) {
+                        println!("failed to create directory for log file: {create_dir_error}");
+                        println!("trying log file anyway...");
+                    }
+                }
+            }
+
+            println!("sending logs to {log_file:?}...");
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
         } else {
