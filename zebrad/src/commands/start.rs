@@ -311,6 +311,8 @@ impl StartCmd {
                     .map(|_| info!("transaction gossip task exited"))
                     .map_err(|e| eyre!(e)),
 
+                // The progress task runs forever, unless it panics.
+                // So we don't need to provide an exit status for it.
                 progress_result = &mut progress_task_handle => {
                     info!("chain progress task exited");
                     progress_result
