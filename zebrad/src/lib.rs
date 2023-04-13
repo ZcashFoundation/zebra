@@ -62,8 +62,8 @@
 //! ### Metrics
 //!
 //! * `prometheus`: export metrics to prometheus.
-//! * `progres-bar`: shows key metrics in the terminal using progress bars.
-//!   We recommend configuring `tracing.log_file` so the logs don't overwrite the progress bars.
+//! * `progress-bar`: shows key metrics in the terminal using progress bars,
+//!   and automatically configures Zebra to send logs to a file.
 //!
 //! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
 //! for more details.
