@@ -736,17 +736,9 @@ impl NonFinalizedState {
 
         #[cfg(feature = "progress-bar")]
         {
-            if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
-                chain_count_bar.close();
-            }
-
-            self.chain_count_bar = None;
-
-            for chain_length_bar in self.chain_fork_length_bars.iter() {
-                chain_length_bar.close();
-            }
-
-            self.chain_fork_length_bars = Vec::new();
+            let count_bar = self.chain_count_bar.take().into_iter();
+            let fork_bars = self.chain_fork_length_bars.drain(..);
+            count_bar.chain(fork_bars).for_each(howudoin::Tx::close);
         }
     }
 }
