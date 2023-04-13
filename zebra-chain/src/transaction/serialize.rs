@@ -962,8 +962,18 @@ pub(crate) const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
 ///
 /// Shielded transfers are much larger than transparent transfers,
 /// so this is the minimum transaction size.
-pub(crate) const MIN_TRANSPARENT_TX_SIZE: u64 =
+pub const MIN_TRANSPARENT_TX_SIZE: u64 =
     MIN_TRANSPARENT_INPUT_SIZE + 4 + MIN_TRANSPARENT_OUTPUT_SIZE;
+
+/// The minimum transaction size for v4 transactions.
+///
+/// v4 transactions also have an expiry height.
+pub const MIN_TRANSPARENT_TX_V4_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4;
+
+/// The minimum transaction size for v5 transactions.
+///
+/// v5 transactions also have an expiry height and a consensus branch ID.
+pub const MIN_TRANSPARENT_TX_V5_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4 + 4;
 
 /// No valid Zcash message contains more transactions than can fit in a single block
 ///

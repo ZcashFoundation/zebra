@@ -50,6 +50,13 @@ pub enum NetworkUpgrade {
     Nu5,
 }
 
+impl fmt::Display for NetworkUpgrade {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Same as the debug representation for now
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 /// Mainnet network upgrade activation heights.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and

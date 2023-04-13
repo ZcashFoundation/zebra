@@ -62,6 +62,8 @@
 //! ### Metrics
 //!
 //! * `prometheus`: export metrics to prometheus.
+//! * `progress-bar`: shows key metrics in the terminal using progress bars,
+//!   and automatically configures Zebra to send logs to a file.
 //!
 //! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
 //! for more details.
@@ -69,6 +71,7 @@
 //! ### Tracing
 //!
 //! Sending traces to different subscribers:
+//! * configuring a `tracing.log_file`: appends traces to a file on disk.
 //! * `journald`: send tracing spans and events to `systemd-journald`.
 //! * `sentry`: send crash and panic events to sentry.io.
 //! * `flamegraph`: generate a flamegraph of tracing spans.

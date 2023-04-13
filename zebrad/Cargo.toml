@@ -43,6 +43,14 @@ flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper"]
 
+progress-bar = [
+    "howudoin",
+    "indicatif",
+    "zebra-consensus/progress-bar",
+    "zebra-state/progress-bar",
+    "zebra-network/progress-bar",
+]
+
 prometheus = ["metrics-exporter-prometheus"]
 
 # Production features that modify dependency behaviour
@@ -159,6 +167,10 @@ metrics-exporter-prometheus = { version = "0.11.0", default-features = false, fe
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
 log = "0.4.17"
+
+# prod feature progress-bar
+howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
+indicatif = { version = "0.17.3", optional = true }
 
 # test feature proptest-impl
 proptest = { version = "1.1.0", optional = true }
