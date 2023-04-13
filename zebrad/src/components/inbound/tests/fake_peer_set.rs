@@ -168,6 +168,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
+            None,
         )));
     });
 
@@ -270,6 +271,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
+            None,
         )));
     });
 
@@ -369,6 +371,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
+            None,
         )));
     });
 
@@ -503,6 +506,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
+            None,
         )));
     });
 

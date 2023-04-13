@@ -224,9 +224,22 @@ impl Request {
 
     /// Returns true if the request is a mempool request.
     pub fn is_mempool(&self) -> bool {
+        matches!(self, Request::Mempool { .. })
+    }
+
+    /// Returns lowest height at which all transparent coinbase spends will be valid,
+    /// or None if this transaction has no transparent coinbase spends.
+    pub fn maturity_height(&self, spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>) -> Option<block::Height> {
         match self {
-            Request::Block { .. } => false,
-            Request::Mempool { .. } => true,
+            // TODO: return an error for Request::Block to replace this check in the state (#2336)
+            Request::Block { .. } => None,
+
+            Request::Mempool { transaction, height } => check::tx_transparent_coinbase_spends_maturity(
+                transaction.transaction.clone(),
+                *height,
+                Default::default(),
+                spent_utxos
+            ),
         }
     }
 }
@@ -420,7 +433,10 @@ where
                         unmined_tx,
                     ))
                     .map(|res| {
-                        assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors, "unexpected response to CheckBestChainTipNullifiersAndAnchors request");
+                        assert!(
+                            res? == zs::Response::ValidBestChainTipNullifiersAndAnchors, 
+                            "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
+                        );
                         Ok(())
                     }
                 );
@@ -453,6 +469,7 @@ where
             }
 
             let legacy_sigop_count = cached_ffi_transaction.legacy_sigop_count()?;
+            let maturity_height = req.maturity_height(&spent_utxos);
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
@@ -467,6 +484,7 @@ where
                             "unexpected mempool coinbase transaction: should have already rejected",
                         ),
                         legacy_sigop_count,
+                        maturity_height,
                     ),
                 },
             };

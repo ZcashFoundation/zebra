@@ -2,7 +2,13 @@
 //!
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
-use std::{borrow::Cow, collections::HashSet, convert::TryFrom, hash::Hash};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    hash::Hash,
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 
@@ -13,6 +19,11 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
     transaction::{LockTime, Transaction},
+    transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
+};
+
+use zebra_chain::transparent::CoinbaseSpendRestriction::{
+    OnlyShieldedOutputs, SomeTransparentOutputs,
 };
 
 use crate::error::TransactionError;
@@ -461,4 +472,102 @@ fn validate_expiry_height_mined(
     }
 
     Ok(())
+}
+
+/// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.
+///
+/// # Consensus
+///
+/// > A transaction with one or more transparent inputs from coinbase transactions
+/// > MUST have no transparent outputs (i.e. tx_out_count MUST be 0).
+/// > Inputs from coinbase transactions include Founders’ Reward outputs and
+/// > funding stream outputs.
+///
+/// > A transaction MUST NOT spend a transparent output of a coinbase transaction
+/// > from a block less than 100 blocks prior to the spend.
+/// > Note that transparent outputs of coinbase transactions include
+/// > Founders’ Reward outputs and transparent funding stream outputs.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+fn transparent_coinbase_spend_maturity(
+    outpoint: transparent::OutPoint,
+    spend_restriction: transparent::CoinbaseSpendRestriction,
+    utxo: transparent::Utxo,
+) -> Result<(), TransactionError> {
+    if !utxo.from_coinbase {
+        return Ok(());
+    }
+
+    let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
+    let min_spend_height =
+        min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
+
+    match spend_restriction {
+        OnlyShieldedOutputs { spend_height } => {
+            if spend_height >= min_spend_height {
+                Ok(())
+            } else {
+                Err(TransactionError::ImmatureTransparentCoinbaseSpend {
+                    outpoint,
+                    spend_height,
+                    min_spend_height,
+                    created_height: utxo.height,
+                })
+            }
+        }
+        SomeTransparentOutputs => Err(TransactionError::UnshieldedTransparentCoinbaseSpend {
+            outpoint,
+            min_spend_height,
+        }),
+    }
+}
+
+/// Accepts a transaction, UTXOs in the same block, and spent UTXOs from the chain.
+///
+/// Returns the lowest/earlier height at which every transparent coinbase spend
+/// in the provided [`Transaction`] will be mature,
+///
+/// Returns None if the transaction has no transparent coinbase spends.
+pub fn tx_transparent_coinbase_spends_maturity(
+    tx: Arc<Transaction>,
+    height: Height,
+    block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+    spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+) -> Option<Height> {
+    let mut maturity_height = None;
+
+    for spend in tx.spent_outpoints() {
+        let utxo = block_new_outputs
+            .get(&spend)
+            .map(|ordered_utxo| ordered_utxo.utxo.clone())
+            .or_else(|| spent_utxos.get(&spend).cloned())
+            .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
+
+        let spend_restriction = tx.coinbase_spend_restriction(height);
+
+        let check_coinbase_spend_result =
+            transparent_coinbase_spend_maturity(spend, spend_restriction, utxo);
+
+        match check_coinbase_spend_result {
+            Err(TransactionError::ImmatureTransparentCoinbaseSpend {
+                min_spend_height, ..
+            })
+            | Err(TransactionError::UnshieldedTransparentCoinbaseSpend {
+                min_spend_height, ..
+            }) if maturity_height
+                .map(|h| h < min_spend_height)
+                .unwrap_or(true) =>
+            {
+                maturity_height = Some(min_spend_height);
+            }
+
+            Err(TransactionError::ImmatureTransparentCoinbaseSpend { .. })
+            | Err(TransactionError::UnshieldedTransparentCoinbaseSpend { .. })
+            | Ok(()) => {}
+
+            Err(_other) => panic!("unexpected error from transparent_coinbase_spend_maturity"),
+        };
+    }
+
+    maturity_height
 }

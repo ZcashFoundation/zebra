@@ -1428,6 +1428,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         legacy_sigop_count: 0,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
+        maturity_height: None,
     };
 
     let next_fake_tip_hash =

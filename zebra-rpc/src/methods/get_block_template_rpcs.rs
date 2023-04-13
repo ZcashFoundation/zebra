@@ -498,8 +498,11 @@ where
                 //
                 // We always return after 90 minutes on mainnet, even if we have the same response,
                 // because the max time has been reached.
-                let chain_tip_and_local_time =
-                    fetch_state_tip_and_local_time(state.clone()).await?;
+                let chain_tip_and_local_time @ zebra_state::GetBlockTemplateChainInfo {
+                    tip_hash,
+                    tip_height,
+                    ..
+                } = fetch_state_tip_and_local_time(state.clone()).await?;
 
                 // Fetch the mempool data for the block template:
                 // - if the mempool transactions change, we might return from long polling.
@@ -512,7 +515,7 @@ where
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
                 let Some(mempool_txs) =
-                    fetch_mempool_transactions(mempool.clone(), chain_tip_and_local_time.tip_hash)
+                    fetch_mempool_transactions(mempool.clone(), (tip_hash, tip_height))
                         .await?
                         // If the mempool and state responses are out of sync:
                         // - if we are not long polling, omit mempool transactions from the template,
