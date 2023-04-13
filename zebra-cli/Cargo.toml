@@ -1,0 +1,15 @@
+[package]
+# Crate metadata
+name = "zebra-cli"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+license = "MIT OR Apache-2.0"
+version = "0.0.0-placeholder.0"
+repository = "https://github.com/ZcashFoundation/zebra"
+description = "A zcash client for zebrad"
+
+# Settings that impact compilation
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
