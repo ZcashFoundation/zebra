@@ -975,12 +975,6 @@ pub const MIN_TRANSPARENT_TX_V4_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4;
 /// v5 transactions also have an expiry height and a consensus branch ID.
 pub const MIN_TRANSPARENT_TX_V5_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4 + 4;
 
-/// The minimum transaction size for mempool transactions.
-///
-/// Zebra doesn't activate its mempool until it is near the tip,
-/// so transactions must be at least version 4.
-pub const MIN_TRANSPARENT_TX_MEMPOOL_SIZE: u64 = MIN_TRANSPARENT_TX_V4_SIZE;
-
 /// No valid Zcash message contains more transactions than can fit in a single block
 ///
 /// `tx` messages contain a single transaction, and `block` messages are limited to the maximum
