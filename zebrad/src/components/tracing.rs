@@ -92,6 +92,13 @@ pub struct Config {
     /// The need to create two files means that we will slightly manipulate the
     /// path given to us to create the two representations.
     ///
+    /// # Security
+    ///
+    /// If you are running Zebra with elevated permissions ("root"), create the
+    /// directory for this file before running Zebra, and make sure the Zebra user
+    /// account has exclusive access to that directory, and other users can't modify
+    /// its parent directories.
+    ///
     /// # Example
     ///
     /// Given `flamegraph = "flamegraph"` we will generate a `flamegraph.svg` and
