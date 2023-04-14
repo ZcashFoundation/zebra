@@ -8,13 +8,12 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
-use std::process::Stdio;
+use std::{ffi::OsStr, process::Stdio};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
 use color_eyre::eyre::{ensure, Result};
-use hex::FromHex;
 use serde_json::Value;
 use structopt::StructOpt;
 
@@ -30,19 +29,18 @@ pub mod args;
 
 use args::{Args, Backend};
 
-/// Return a new `zcash-cli` command, including the `zebra-checkpoints`
-/// passthrough arguments.
-fn passthrough_cmd(args: &Args) -> std::process::Command {
-    let mut cmd = std::process::Command::new(&args.cli);
+/// Run `cmd` with `cli_args` and `rpc_command`, and return its output as a string.
+fn cli_output<S>(cli_args: &Args, rpc_command: &[S]) -> Result<String>
+where
+    S: AsRef<OsStr>,
+{
+    // Get a new `zcash-cli` command, including the `zebra-checkpoints` passthrough arguments.
+    let mut cmd = std::process::Command::new(&cli_args.cli);
+    cmd.args(&cli_args.zcli_args);
 
-    if !args.zcli_args.is_empty() {
-        cmd.args(&args.zcli_args);
-    }
-    cmd
-}
+    // Add the RPC command and arguments
+    cmd.args(rpc_command);
 
-/// Run `cmd` and return its output as a string.
-fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
     // Capture stdout, but send stderr to the user
     let output = cmd.stderr(Stdio::inherit()).output()?;
 
@@ -76,11 +74,8 @@ fn main() -> Result<()> {
     let args = args::Args::from_args();
 
     // get the current block count
-    let mut cmd = passthrough_cmd(&args);
-    cmd.arg("getblockchaininfo");
-
-    let output = cmd_output(&mut cmd)?;
-    let get_block_chain_info: Value = serde_json::from_str(&output)?;
+    let get_block_chain_info = cli_output(&args, &["getblockchaininfo"])?;
+    let get_block_chain_info: Value = serde_json::from_str(&get_block_chain_info)?;
 
     // calculate the maximum height
     let height_limit = get_block_chain_info["blocks"]
@@ -116,17 +111,15 @@ fn main() -> Result<()> {
 
     // loop through all blocks
     for request_height in starting_height.0..height_limit.0 {
-        // unfortunately we need to create a process for each block
-        let mut cmd = passthrough_cmd(&args);
+        // In `Cli` transport mode we need to create a process for each block
 
         let (hash, response_height, size) = match args.backend {
             Backend::Zcashd => {
                 // get block data from zcashd using verbose=1
-                cmd.args(["getblock", &request_height.to_string(), "1"]);
-                let output = cmd_output(&mut cmd)?;
+                let get_block = cli_output(&args, &["getblock", &request_height.to_string(), "1"])?;
 
                 // parse json
-                let get_block: Value = serde_json::from_str(&output)?;
+                let get_block: Value = serde_json::from_str(&get_block)?;
 
                 // get the values we are interested in
                 let hash: block::Hash = get_block["hash"]
@@ -145,10 +138,10 @@ fn main() -> Result<()> {
             }
             Backend::Zebrad => {
                 // get block data from zebrad (or zcashd) by deserializing the raw block
-                cmd.args(["getblock", &request_height.to_string(), "0"]);
-                let output = cmd_output(&mut cmd)?;
+                let block_bytes =
+                    cli_output(&args, &["getblock", &request_height.to_string(), "0"])?;
 
-                let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
+                let block_bytes: Vec<u8> = hex::decode(block_bytes.trim_end_matches('\n'))?;
 
                 // TODO: is it faster to call both `getblock height 0` and `getblock height 1`,
                 //       rather than deserializing the block and calculating its hash?
