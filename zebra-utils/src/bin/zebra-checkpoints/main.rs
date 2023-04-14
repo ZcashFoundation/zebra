@@ -13,7 +13,10 @@ use std::{ffi::OsString, process::Stdio};
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
-use color_eyre::eyre::{ensure, Result};
+use color_eyre::{
+    eyre::{ensure, Result},
+    Help,
+};
 use itertools::Itertools;
 use serde_json::Value;
 use structopt::StructOpt;
@@ -129,7 +132,10 @@ async fn main() -> Result<()> {
 
     // get the current block count
     let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None).await?;
-    let get_block_chain_info: Value = serde_json::from_str(&get_block_chain_info)?;
+    let get_block_chain_info: Value =
+        serde_json::from_str(&get_block_chain_info).with_suggestion(|| {
+            "Is the RPC server address and port correct? Is authentication configured correctly?"
+        })?;
 
     // calculate the maximum height
     let height_limit = get_block_chain_info["blocks"]
