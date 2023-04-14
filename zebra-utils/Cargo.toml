@@ -25,9 +25,11 @@ required-features = ["getblocktemplate-rpcs"]
 [features]
 default = []
 
-# Each binary can have a feature that provides the necessary extra dependencies
+# Each binary has a feature that activates the extra dependencies it needs
 
 zebra-checkpoints = [
+    "itertools",
+    "tokio",
     "zebra-chain/json-conversion",
     "zebra-node-services/rpc-client"
 ]
@@ -58,13 +60,18 @@ tracing-error = "0.2.0"
 tracing-subscriber = "0.3.16"
 thiserror = "1.0.40"
 
-# These crates are needed for the search-issue-refs binary
-regex = { version = "1.8.1", optional = true }
-reqwest =  { version = "0.11.14", optional = true }
-tokio = { version = "1.27.0", features = ["full"], optional = true }
-
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }
 
-# Experimental feature getblocktemplate-rpcs
+# These crates are needed for the zebra-checkpoints binary
+itertools = { version = "0.10.5", optional = true }
+
+# These crates are needed for the search-issue-refs binary
+regex = { version = "1.8.1", optional = true }
+reqwest =  { version = "0.11.14", optional = true }
+
+# These crates are needed for the zebra-checkpoints and search-issue-refs binaries
+tokio = { version = "1.27.0", features = ["full"], optional = true }
+
+# These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", optional = true }

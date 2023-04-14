@@ -8,12 +8,13 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
-use std::{ffi::OsStr, process::Stdio};
+use std::{ffi::OsString, process::Stdio};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
 use color_eyre::eyre::{ensure, Result};
+use itertools::Itertools;
 use serde_json::Value;
 use structopt::StructOpt;
 
@@ -22,26 +23,78 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
-use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
+use zebra_node_services::{
+    constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
+    rpc_client::RpcRequestClient,
+};
 use zebra_utils::init_tracing;
 
 pub mod args;
 
-use args::{Args, Backend};
+use args::{Args, Backend, Transport};
 
-/// Run `cmd` with `cli_args` and `rpc_command`, and return its output as a string.
-fn cli_output<S>(cli_args: &Args, rpc_command: &[S]) -> Result<String>
+/// Make an RPC call based on `our_args` and `rpc_command`, and return the response as a string.
+async fn rpc_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
 where
-    S: AsRef<OsStr>,
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
 {
-    // Get a new `zcash-cli` command, including the `zebra-checkpoints` passthrough arguments.
-    let mut cmd = std::process::Command::new(&cli_args.cli);
-    cmd.args(&cli_args.zcli_args);
+    match our_args.transport {
+        Transport::Cli => cli_output(our_args, method, params),
+        Transport::Direct => direct_output(our_args, method, params).await,
+    }
+}
 
-    // Add the RPC command and arguments
-    cmd.args(rpc_command);
+/// Connect to the node with `our_args` and `rpc_command`, and return the response as a string.
+///
+/// Only used if the transport is [`Direct`](Transport::Direct).
+async fn direct_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
+where
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
+{
+    // Get a new RPC client that will connect to our node
+    let addr = our_args
+        .addr
+        .unwrap_or_else(|| "127.0.0.1:8232".parse().expect("valid address"));
+    let client = RpcRequestClient::new(addr);
 
-    // Capture stdout, but send stderr to the user
+    // Launch a request with the RPC method and arguments
+    let params = format!("[{}]", params.into_iter().join(", "));
+    let response = client.text_from_call(method, params).await?;
+
+    Ok(response)
+}
+
+/// Run `cmd` with `our_args` and `rpc_command`, and return its output as a string.
+///
+/// Only used if the transport is [`Cli`](Transport::Cli).
+fn cli_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
+where
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
+{
+    // Get a new `zcash-cli` command configured for our node,
+    // including the `zebra-checkpoints` passthrough arguments.
+    let mut cmd = std::process::Command::new(&our_args.cli);
+    cmd.args(&our_args.zcli_args);
+
+    // Turn the address into command-line arguments
+    if let Some(addr) = our_args.addr {
+        cmd.arg(format!("-rpcconnect={}", addr.ip()));
+        cmd.arg(format!("-rpcport={}", addr.port()));
+    }
+
+    // Add the RPC method and arguments
+    let method: OsString = method.as_ref().into();
+    cmd.arg(method);
+
+    for param in params {
+        let param: OsString = param.into();
+        cmd.arg(param);
+    }
+
+    // Launch a CLI request, capturing stdout, but sending stderr to the user
     let output = cmd.stderr(Stdio::inherit()).output()?;
 
     // Make sure the command was successful
@@ -65,8 +118,9 @@ where
 }
 
 /// Process entry point for `zebra-checkpoints`
+#[tokio::main]
 #[allow(clippy::print_stdout)]
-fn main() -> Result<()> {
+async fn main() -> Result<()> {
     // initialise
     init_tracing();
     color_eyre::install()?;
@@ -74,7 +128,7 @@ fn main() -> Result<()> {
     let args = args::Args::from_args();
 
     // get the current block count
-    let get_block_chain_info = cli_output(&args, &["getblockchaininfo"])?;
+    let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None).await?;
     let get_block_chain_info: Value = serde_json::from_str(&get_block_chain_info)?;
 
     // calculate the maximum height
@@ -116,7 +170,12 @@ fn main() -> Result<()> {
         let (hash, response_height, size) = match args.backend {
             Backend::Zcashd => {
                 // get block data from zcashd using verbose=1
-                let get_block = cli_output(&args, &["getblock", &request_height.to_string(), "1"])?;
+                let get_block = rpc_output(
+                    &args,
+                    "getblock",
+                    [request_height.to_string(), 1.to_string()],
+                )
+                .await?;
 
                 // parse json
                 let get_block: Value = serde_json::from_str(&get_block)?;
@@ -138,8 +197,12 @@ fn main() -> Result<()> {
             }
             Backend::Zebrad => {
                 // get block data from zebrad (or zcashd) by deserializing the raw block
-                let block_bytes =
-                    cli_output(&args, &["getblock", &request_height.to_string(), "0"])?;
+                let block_bytes = rpc_output(
+                    &args,
+                    "getblock",
+                    [request_height.to_string(), 0.to_string()],
+                )
+                .await?;
 
                 let block_bytes: Vec<u8> = hex::decode(block_bytes.trim_end_matches('\n'))?;
 
