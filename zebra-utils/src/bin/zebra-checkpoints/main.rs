@@ -36,8 +36,8 @@ pub mod args;
 
 use args::{Args, Backend, Transport};
 
-/// Make an RPC call based on `our_args` and `rpc_command`, and return the response as a string.
-async fn rpc_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
+/// Make an RPC call based on `our_args` and `rpc_command`, and return the response as a [`Value`].
+async fn rpc_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
 where
     M: AsRef<str>,
     I: IntoIterator<Item = String>,
@@ -48,10 +48,10 @@ where
     }
 }
 
-/// Connect to the node with `our_args` and `rpc_command`, and return the response as a string.
+/// Connect to the node with `our_args` and `rpc_command`, and return the response as a [`Value`].
 ///
 /// Only used if the transport is [`Direct`](Transport::Direct).
-async fn direct_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
+async fn direct_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
 where
     M: AsRef<str>,
     I: IntoIterator<Item = String>,
@@ -63,16 +63,23 @@ where
     let client = RpcRequestClient::new(addr);
 
     // Launch a request with the RPC method and arguments
+    //
+    // The params are a JSON array with typed arguments.
+    // TODO: accept JSON value arguments, and do this formatting using serde_json
     let params = format!("[{}]", params.into_iter().join(", "));
     let response = client.text_from_call(method, params).await?;
+
+    // Extract the "result" field from the RPC response
+    let mut response: Value = serde_json::from_str(&response)?;
+    let response = response["result"].take();
 
     Ok(response)
 }
 
-/// Run `cmd` with `our_args` and `rpc_command`, and return its output as a string.
+/// Run `cmd` with `our_args` and `rpc_command`, and return its output as a [`Value`].
 ///
 /// Only used if the transport is [`Cli`](Transport::Cli).
-fn cli_output<M, I>(our_args: &Args, method: M, params: I) -> Result<String>
+fn cli_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
 where
     M: AsRef<str>,
     I: IntoIterator<Item = String>,
@@ -93,6 +100,9 @@ where
     cmd.arg(method);
 
     for param in params {
+        // Remove JSON string/int type formatting, because zcash-cli will add it anyway
+        // TODO: accept JSON value arguments, and do this formatting using serde_json?
+        let param = param.trim_matches('"');
         let param: OsString = param.into();
         cmd.arg(param);
     }
@@ -115,9 +125,14 @@ where
         output.status.code()
     );
 
-    // Make sure the output is valid UTF-8
-    let s = String::from_utf8(output.stdout)?;
-    Ok(s)
+    // Make sure the output is valid UTF-8 JSON
+    let response = String::from_utf8(output.stdout)?;
+    // zcash-cli returns raw strings without JSON type info.
+    // As a workaround, assume that invalid responses are strings.
+    let response: Value = serde_json::from_str(&response)
+        .unwrap_or_else(|_error| Value::String(response.trim().to_string()));
+
+    Ok(response)
 }
 
 /// Process entry point for `zebra-checkpoints`
@@ -131,9 +146,9 @@ async fn main() -> Result<()> {
     let args = args::Args::from_args();
 
     // get the current block count
-    let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None).await?;
-    let get_block_chain_info: Value =
-        serde_json::from_str(&get_block_chain_info).with_suggestion(|| {
+    let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None)
+        .await
+        .with_suggestion(|| {
             "Is the RPC server address and port correct? Is authentication configured correctly?"
         })?;
 
@@ -179,12 +194,9 @@ async fn main() -> Result<()> {
                 let get_block = rpc_output(
                     &args,
                     "getblock",
-                    [request_height.to_string(), 1.to_string()],
+                    [format!(r#""{request_height}""#), 1.to_string()],
                 )
                 .await?;
-
-                // parse json
-                let get_block: Value = serde_json::from_str(&get_block)?;
 
                 // get the values we are interested in
                 let hash: block::Hash = get_block["hash"]
@@ -206,11 +218,14 @@ async fn main() -> Result<()> {
                 let block_bytes = rpc_output(
                     &args,
                     "getblock",
-                    [request_height.to_string(), 0.to_string()],
+                    [format!(r#""{request_height}""#), 0.to_string()],
                 )
                 .await?;
+                let block_bytes = block_bytes
+                    .as_str()
+                    .expect("block bytes: unexpected missing field or field type");
 
-                let block_bytes: Vec<u8> = hex::decode(block_bytes.trim_end_matches('\n'))?;
+                let block_bytes: Vec<u8> = hex::decode(block_bytes)?;
 
                 // TODO: is it faster to call both `getblock height 0` and `getblock height 1`,
                 //       rather than deserializing the block and calculating its hash?
