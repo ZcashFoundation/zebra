@@ -475,8 +475,8 @@ impl SpendConflictTestInput {
         };
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0, None),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0, None),
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
         )
     }
 
@@ -493,8 +493,8 @@ impl SpendConflictTestInput {
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0, None),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0, None),
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
         )
     }
 

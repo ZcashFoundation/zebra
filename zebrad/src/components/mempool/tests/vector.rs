@@ -809,7 +809,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                 transaction,
                 Amount::zero(),
                 0,
-                None,
             )));
         })
         .await;
@@ -867,7 +866,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                 transaction,
                 Amount::zero(),
                 0,
-                None,
             )));
         })
         .await;
