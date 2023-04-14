@@ -110,7 +110,9 @@ fn main() -> Result<()> {
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
-    let mut height_gap = 0;
+    let mut last_checkpoint_height = args.last_checkpoint.unwrap_or(Height::MIN);
+    let max_checkpoint_height_gap =
+        HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
 
     // loop through all blocks
     for request_height in starting_height.0..height_limit.0 {
@@ -169,19 +171,20 @@ fn main() -> Result<()> {
 
         // compute cumulative totals
         cumulative_bytes += size;
-        height_gap += 1;
+
+        let height_gap = response_height - last_checkpoint_height;
 
         // check if this block should be a checkpoint
         if response_height == Height::MIN
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap >= MAX_CHECKPOINT_HEIGHT_GAP
+            || height_gap >= max_checkpoint_height_gap
         {
             // print to output
             println!("{} {hash}", response_height.0);
 
-            // reset counters
+            // reset cumulative totals
             cumulative_bytes = 0;
-            height_gap = 0;
+            last_checkpoint_height = response_height;
         }
     }
 
