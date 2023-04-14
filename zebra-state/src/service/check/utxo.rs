@@ -71,7 +71,7 @@ pub fn transparent_spend(
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
             let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
-            let utxo = transparent_coinbase_spend(spend, spend_restriction, utxo)?;
+            transparent_coinbase_spend(spend, spend_restriction, utxo.as_ref())?;
 
             // We don't delete the UTXOs until the block is committed,
             // so we  need to check for duplicate spends within the same block.
@@ -191,26 +191,26 @@ fn transparent_spend_chain_order(
 pub fn transparent_coinbase_spend(
     outpoint: transparent::OutPoint,
     spend_restriction: transparent::CoinbaseSpendRestriction,
-    utxo: transparent::OrderedUtxo,
-) -> Result<transparent::OrderedUtxo, ValidateContextError> {
-    if !utxo.utxo.from_coinbase {
-        return Ok(utxo);
+    utxo: &transparent::Utxo,
+) -> Result<(), ValidateContextError> {
+    if !utxo.from_coinbase {
+        return Ok(());
     }
 
     match spend_restriction {
         OnlyShieldedOutputs { spend_height } => {
             let min_spend_height =
-                utxo.utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
+                utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
             if spend_height >= min_spend_height {
-                Ok(utxo)
+                Ok(())
             } else {
                 Err(ImmatureTransparentCoinbaseSpend {
                     outpoint,
                     spend_height,
                     min_spend_height,
-                    created_height: utxo.utxo.height,
+                    created_height: utxo.height,
                 })
             }
         }

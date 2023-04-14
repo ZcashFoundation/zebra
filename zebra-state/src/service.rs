@@ -71,6 +71,8 @@ pub mod watch_receiver;
 
 pub(crate) mod check;
 
+pub use check::transparent_coinbase_spend;
+
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;

@@ -36,7 +36,7 @@ pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Requ
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    init, spawn_init,
+    init, spawn_init, transparent_coinbase_spend,
     watch_receiver::WatchReceiver,
     OutputIndex, OutputLocation, TransactionLocation,
 };

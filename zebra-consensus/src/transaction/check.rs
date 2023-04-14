@@ -19,11 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
     transaction::{LockTime, Transaction},
-    transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
-};
-
-use zebra_chain::transparent::CoinbaseSpendRestriction::{
-    OnlyShieldedOutputs, SomeTransparentOutputs,
+    transparent,
 };
 
 use crate::error::TransactionError;
@@ -474,56 +470,6 @@ fn validate_expiry_height_mined(
     Ok(())
 }
 
-/// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.
-///
-/// # Consensus
-///
-/// > A transaction with one or more transparent inputs from coinbase transactions
-/// > MUST have no transparent outputs (i.e. tx_out_count MUST be 0).
-/// > Inputs from coinbase transactions include Founders’ Reward outputs and
-/// > funding stream outputs.
-///
-/// > A transaction MUST NOT spend a transparent output of a coinbase transaction
-/// > from a block less than 100 blocks prior to the spend.
-/// > Note that transparent outputs of coinbase transactions include
-/// > Founders’ Reward outputs and transparent funding stream outputs.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-// TODO: Move tests for `zebra_state::service::check::utxo::transparent_coinbase_spend()` to this crate
-//       once the transaction verifier returns an error for block transactions that fail this check.
-fn transparent_coinbase_spend_maturity(
-    outpoint: transparent::OutPoint,
-    spend_restriction: transparent::CoinbaseSpendRestriction,
-    utxo: transparent::Utxo,
-) -> Result<(), TransactionError> {
-    if !utxo.from_coinbase {
-        return Ok(());
-    }
-
-    let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
-    let min_spend_height =
-        min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
-
-    match spend_restriction {
-        OnlyShieldedOutputs { spend_height } => {
-            if spend_height >= min_spend_height {
-                Ok(())
-            } else {
-                Err(TransactionError::ImmatureTransparentCoinbaseSpend {
-                    outpoint,
-                    spend_height,
-                    min_spend_height,
-                    created_height: utxo.height,
-                })
-            }
-        }
-        SomeTransparentOutputs => Err(TransactionError::UnshieldedTransparentCoinbaseSpend {
-            outpoint,
-            min_spend_height,
-        }),
-    }
-}
-
 /// Accepts a transaction, UTXOs in the same block, and spent UTXOs from the chain.
 ///
 /// Returns the lowest/earlier height at which every transparent coinbase spend
@@ -545,7 +491,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
 
         let spend_restriction = tx.coinbase_spend_restriction(height);
 
-        transparent_coinbase_spend_maturity(spend, spend_restriction, utxo)?;
+        zebra_state::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }
 
     Ok(())

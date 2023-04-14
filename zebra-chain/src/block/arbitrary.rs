@@ -373,7 +373,7 @@ impl Arbitrary for Block {
 pub fn allow_all_transparent_coinbase_spends(
     _: transparent::OutPoint,
     _: transparent::CoinbaseSpendRestriction,
-    _: transparent::OrderedUtxo,
+    _: &transparent::Utxo,
 ) -> Result<(), ()> {
     Ok(())
 }
@@ -390,7 +390,7 @@ impl Block {
     /// `generate_valid_commitments` specifies if the generated blocks
     /// should have valid commitments. This makes it much slower so it's better
     /// to enable only when needed.
-    pub fn partial_chain_strategy<F, T, E>(
+    pub fn partial_chain_strategy<F, E>(
         mut current: LedgerState,
         count: usize,
         check_transparent_coinbase_spend: F,
@@ -400,8 +400,8 @@ impl Block {
         F: Fn(
                 transparent::OutPoint,
                 transparent::CoinbaseSpendRestriction,
-                transparent::OrderedUtxo,
-            ) -> Result<T, E>
+                &transparent::Utxo,
+            ) -> Result<(), E>
             + Copy
             + 'static,
     {
@@ -558,7 +558,7 @@ impl Block {
 /// Spends [`transparent::OutPoint`]s from `utxos`, and adds newly created outputs.
 ///
 /// If the transaction can't be fixed, returns `None`.
-pub fn fix_generated_transaction<F, T, E>(
+pub fn fix_generated_transaction<F, E>(
     mut transaction: Transaction,
     tx_index_in_block: usize,
     height: Height,
@@ -570,8 +570,8 @@ where
     F: Fn(
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
-            transparent::OrderedUtxo,
-        ) -> Result<T, E>
+            &transparent::Utxo,
+        ) -> Result<(), E>
         + Copy
         + 'static,
 {
@@ -640,7 +640,7 @@ where
 /// Modifies `transaction` and updates `spend_restriction` if needed.
 ///
 /// If there is no valid output, or many search attempts have failed, returns `None`.
-pub fn find_valid_utxo_for_spend<F, T, E>(
+pub fn find_valid_utxo_for_spend<F, E>(
     transaction: &mut Transaction,
     spend_restriction: &mut CoinbaseSpendRestriction,
     spend_height: Height,
@@ -651,8 +651,8 @@ where
     F: Fn(
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
-            transparent::OrderedUtxo,
-        ) -> Result<T, E>
+            &transparent::Utxo,
+        ) -> Result<(), E>
         + Copy
         + 'static,
 {
@@ -674,7 +674,7 @@ where
         if check_transparent_coinbase_spend(
             *candidate_outpoint,
             *spend_restriction,
-            candidate_utxo.clone(),
+            candidate_utxo.as_ref(),
         )
         .is_ok()
         {
@@ -683,7 +683,7 @@ where
             && check_transparent_coinbase_spend(
                 *candidate_outpoint,
                 delete_transparent_outputs,
-                candidate_utxo.clone(),
+                candidate_utxo.as_ref(),
             )
             .is_ok()
         {
