@@ -7,6 +7,8 @@ use std::str::FromStr;
 use structopt::StructOpt;
 use thiserror::Error;
 
+use zebra_chain::block::Height;
+
 /// The backend type the zebra-checkpoints utility will use to get data from.
 ///
 /// This changes which RPCs the tool calls, and which fields it expects them to have.
@@ -62,7 +64,7 @@ pub struct Args {
     /// Start looking for checkpoints after this height.
     /// If there is no last checkpoint, we start looking at the Genesis block (height 0).
     #[structopt(short, long)]
-    pub last_checkpoint: Option<u32>,
+    pub last_checkpoint: Option<Height>,
 
     /// Passthrough args for `zcash-cli`
     #[structopt(last = true)]

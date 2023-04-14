@@ -5,10 +5,16 @@ license = "MIT OR Apache-2.0"
 version = "1.0.0-beta.23"
 edition = "2021"
 
-# Prevent accidental publication of this utility crate.
-publish = false
+[[bin]]
+name = "zebra-checkpoints"
+# this setting is required for Zebra's Docker build caches
+path = "src/bin/zebra-checkpoints/main.rs"
+required-features = ["zebra-checkpoints"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "search-issue-refs"
+path = "src/bin/search-issue-refs/main.rs"
+required-features = ["search-issue-refs"]
 
 [[bin]]
 name = "block-template-to-proposal"
@@ -16,19 +22,22 @@ name = "block-template-to-proposal"
 path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
-[[bin]]
-name = "search-issue-refs"
-path = "src/bin/search-issue-refs/main.rs"
-required-features = ["search-issue-refs"]
-
 [features]
 default = []
 
-search-issue-refs = ["regex", "reqwest", "tokio"]
+# Each binary can have a feature that provides the necessary extra dependencies
 
-# Production features that activate extra dependencies, or extra features in dependencies
+zebra-checkpoints = [
+    "zebra-chain/json-conversion",
+]
 
-# Experimental mining RPC support
+search-issue-refs = [
+    "regex",
+    "reqwest",
+    "tokio"
+]
+
+# block-template-to-proposal uses the experimental mining RPC support feature name
 getblocktemplate-rpcs = [
     "zebra-rpc/getblocktemplate-rpcs",
     "zebra-node-services/getblocktemplate-rpcs",

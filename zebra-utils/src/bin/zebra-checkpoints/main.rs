@@ -19,17 +19,20 @@ use serde_json::Value;
 use structopt::StructOpt;
 
 use zebra_chain::{
-    block, serialization::ZcashDeserializeInto, transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+    block::{self, Block, Height, HeightDiff, TryIntoHeight},
+    serialization::ZcashDeserializeInto,
+    transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
 use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 use zebra_utils::init_tracing;
 
 pub mod args;
 
+use args::{Args, Backend};
+
 /// Return a new `zcash-cli` command, including the `zebra-checkpoints`
 /// passthrough arguments.
-fn passthrough_cmd() -> std::process::Command {
-    let args = args::Args::from_args();
+fn passthrough_cmd(args: &Args) -> std::process::Command {
     let mut cmd = std::process::Command::new(&args.cli);
 
     if !args.zcli_args.is_empty() {
@@ -70,77 +73,84 @@ fn main() -> Result<()> {
     init_tracing();
     color_eyre::install()?;
 
+    let args = args::Args::from_args();
+
     // get the current block count
-    let mut cmd = passthrough_cmd();
+    let mut cmd = passthrough_cmd(&args);
     cmd.arg("getblockchaininfo");
 
     let output = cmd_output(&mut cmd)?;
     let get_block_chain_info: Value = serde_json::from_str(&output)?;
 
     // calculate the maximum height
-    let height_limit = block::Height(get_block_chain_info["blocks"].as_u64().unwrap() as u32);
+    let height_limit = get_block_chain_info["blocks"]
+        .try_into_height()
+        .expect("height: unexpected invalid value, missing field, or field type");
 
-    assert!(height_limit <= block::Height::MAX);
     // Checkpoints must be on the main chain, so we skip blocks that are within the
     // Zcash reorg limit.
     let height_limit = height_limit
-        .0
-        .checked_sub(MIN_TRANSPARENT_COINBASE_MATURITY)
-        .map(block::Height)
-        .expect("node has some mature blocks: wait for it to sync more blocks");
+        - HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY).expect("constant fits in i32");
+    let height_limit =
+        height_limit.expect("node has some mature blocks: wait for it to sync more blocks");
 
-    let starting_height = args::Args::from_args().last_checkpoint.map(block::Height);
-    if starting_height.is_some() {
-        // Since we're about to add 1, height needs to be strictly less than the maximum
-        assert!(starting_height.unwrap() < block::Height::MAX);
-    }
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
-    let starting_height = starting_height.map_or(0, |block::Height(h)| h + 1);
+    let starting_height = if let Some(last_checkpoint) = args.last_checkpoint {
+        (last_checkpoint + 1)
+            .expect("invalid last checkpoint height, must be less than the max height")
+    } else {
+        Height::MIN
+    };
 
     assert!(
-        starting_height < height_limit.0,
+        starting_height < height_limit,
         "No mature blocks after the last checkpoint: wait for node to sync more blocks"
     );
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
-    let mut height_gap: block::Height = block::Height(0);
+    let mut height_gap = 0;
 
     // loop through all blocks
-    for request_height in starting_height..height_limit.0 {
+    for request_height in starting_height.0..height_limit.0 {
         // unfortunately we need to create a process for each block
-        let mut cmd = passthrough_cmd();
+        let mut cmd = passthrough_cmd(&args);
 
-        let (hash, response_height, size) = match args::Args::from_args().backend {
-            args::Backend::Zcashd => {
+        let (hash, response_height, size) = match args.backend {
+            Backend::Zcashd => {
                 // get block data from zcashd using verbose=1
                 cmd.args(["getblock", &request_height.to_string(), "1"]);
                 let output = cmd_output(&mut cmd)?;
 
                 // parse json
-                let v: Value = serde_json::from_str(&output)?;
+                let get_block: Value = serde_json::from_str(&output)?;
 
                 // get the values we are interested in
-                let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-                let response_height = block::Height(v["height"].as_u64().unwrap() as u32);
+                let hash: block::Hash = get_block["hash"]
+                    .as_str()
+                    .expect("hash: unexpected missing field or field type")
+                    .parse()?;
+                let response_height: Height = get_block["height"]
+                    .try_into_height()
+                    .expect("height: unexpected invalid value, missing field, or field type");
 
-                let size = v["size"].as_u64().unwrap();
+                let size = get_block["size"]
+                    .as_u64()
+                    .expect("size: unexpected invalid value, missing field, or field type");
 
                 (hash, response_height, size)
             }
-            args::Backend::Zebrad => {
+            Backend::Zebrad => {
                 // get block data from zebrad (or zcashd) by deserializing the raw block
                 cmd.args(["getblock", &request_height.to_string(), "0"]);
                 let output = cmd_output(&mut cmd)?;
 
                 let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
 
-                // TODO: is it faster to call `getblock height 1`,
+                // TODO: is it faster to call both `getblock height 0` and `getblock height 1`,
                 //       rather than deserializing the block and calculating its hash?
-                let block = block_bytes
-                    .zcash_deserialize_into::<block::Block>()
-                    .expect("obtained block should deserialize");
+                let block: Block = block_bytes.zcash_deserialize_into()?;
 
                 (
                     block.hash(),
@@ -152,24 +162,26 @@ fn main() -> Result<()> {
             }
         };
 
-        assert!(response_height <= block::Height::MAX);
-        assert_eq!(request_height, response_height.0);
+        assert_eq!(
+            request_height, response_height.0,
+            "node returned a different block than requested"
+        );
 
-        // compute
+        // compute cumulative totals
         cumulative_bytes += size;
-        height_gap = block::Height(height_gap.0 + 1);
+        height_gap += 1;
 
-        // check if checkpoint
-        if response_height == block::Height(0)
+        // check if this block should be a checkpoint
+        if response_height == Height::MIN
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap.0 >= MAX_CHECKPOINT_HEIGHT_GAP as u32
+            || height_gap >= MAX_CHECKPOINT_HEIGHT_GAP
         {
             // print to output
             println!("{} {hash}", response_height.0);
 
             // reset counters
             cumulative_bytes = 0;
-            height_gap = block::Height(0);
+            height_gap = 0;
         }
     }
 
