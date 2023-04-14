@@ -29,6 +29,7 @@ default = []
 
 zebra-checkpoints = [
     "zebra-chain/json-conversion",
+    "zebra-node-services/rpc-client"
 ]
 
 search-issue-refs = [

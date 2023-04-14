@@ -144,6 +144,7 @@ use zebra_chain::{
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_node_services::rpc_client::RPCRequestClient;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
@@ -166,8 +167,6 @@ use common::{
     },
     test_type::TestType::{self, *},
 };
-
-use crate::common::rpc_client::RPCRequestClient;
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///

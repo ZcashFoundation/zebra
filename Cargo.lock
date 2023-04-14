@@ -6050,6 +6050,11 @@ dependencies = [
 name = "zebra-node-services"
 version = "1.0.0-beta.23"
 dependencies = [
+ "color-eyre",
+ "jsonrpc-core",
+ "reqwest",
+ "serde",
+ "serde_json",
  "zebra-chain",
 ]
 
@@ -6218,7 +6223,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "regex",
- "reqwest",
  "semver 1.0.17",
  "sentry",
  "serde",
