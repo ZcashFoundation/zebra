@@ -24,7 +24,7 @@ use zebra_chain::{
 use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 use zebra_utils::init_tracing;
 
-mod args;
+pub mod args;
 
 /// Return a new `zcash-cli` command, including the `zebra-checkpoints`
 /// passthrough arguments.
