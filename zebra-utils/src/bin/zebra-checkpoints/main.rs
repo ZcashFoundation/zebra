@@ -108,14 +108,14 @@ fn main() -> Result<()> {
     let mut height_gap: block::Height = block::Height(0);
 
     // loop through all blocks
-    for x in starting_height..height_limit.0 {
+    for request_height in starting_height..height_limit.0 {
         // unfortunately we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
-        let (hash, height, size) = match args::Args::from_args().backend {
+        let (hash, response_height, size) = match args::Args::from_args().backend {
             args::Backend::Zcashd => {
                 // get block data from zcashd using verbose=1
-                cmd.args(["getblock", &x.to_string(), "1"]);
+                cmd.args(["getblock", &request_height.to_string(), "1"]);
                 let output = cmd_output(&mut cmd)?;
 
                 // parse json
@@ -123,15 +123,15 @@ fn main() -> Result<()> {
 
                 // get the values we are interested in
                 let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-                let height = block::Height(v["height"].as_u64().unwrap() as u32);
+                let response_height = block::Height(v["height"].as_u64().unwrap() as u32);
 
                 let size = v["size"].as_u64().unwrap();
 
-                (hash, height, size)
+                (hash, response_height, size)
             }
             args::Backend::Zebrad => {
                 // get block data from zebrad by deserializing the raw block
-                cmd.args(["getblock", &x.to_string(), "0"]);
+                cmd.args(["getblock", &request_height.to_string(), "0"]);
                 let output = cmd_output(&mut cmd)?;
 
                 let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
@@ -150,20 +150,20 @@ fn main() -> Result<()> {
             }
         };
 
-        assert!(height <= block::Height::MAX);
-        assert_eq!(x, height.0);
+        assert!(response_height <= block::Height::MAX);
+        assert_eq!(request_height, response_height.0);
 
         // compute
         cumulative_bytes += size;
         height_gap = block::Height(height_gap.0 + 1);
 
         // check if checkpoint
-        if height == block::Height(0)
+        if response_height == block::Height(0)
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
             || height_gap.0 >= MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
-            println!("{} {hash}", height.0);
+            println!("{} {hash}", response_height.0);
 
             // reset counters
             cumulative_bytes = 0;
