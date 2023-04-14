@@ -1,13 +1,12 @@
-//! A client for calling Zebra's Json-RPC methods
+//! A client for calling Zebra's JSON-RPC methods.
 
 use std::net::SocketAddr;
 
 use reqwest::Client;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use color_eyre::{eyre::eyre, Result};
 
-/// An http client for making Json-RPC requests
+/// An HTTP client for making JSON-RPC requests.
 #[derive(Clone, Debug)]
 pub struct RPCRequestClient {
     client: Client,
@@ -54,7 +53,6 @@ impl RPCRequestClient {
     ///
     /// Returns Ok with json result from response if successful.
     /// Returns an error if the call or result deserialization fail.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub async fn json_result_from_call<T: serde::de::DeserializeOwned>(
         &self,
         method: &'static str,
@@ -65,7 +63,6 @@ impl RPCRequestClient {
 
     /// Accepts response text from an RPC call
     /// Returns `Ok` with a deserialized `result` value in the expected type, or an error report.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     fn json_result_from_response_text<T: serde::de::DeserializeOwned>(
         response_text: &str,
     ) -> Result<T> {
