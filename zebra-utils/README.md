@@ -20,7 +20,7 @@ To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`,
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils
+cargo install --locked --features zebra-checkpoints --git https://github.com/ZcashFoundation/zebra zebra-utils
 ```
 
 Then update the checkpoints using these commands:
