@@ -10,12 +10,12 @@ use color_eyre::{eyre::eyre, Result};
 
 /// An HTTP client for making JSON-RPC requests.
 #[derive(Clone, Debug)]
-pub struct RPCRequestClient {
+pub struct RpcRequestClient {
     client: Client,
     rpc_address: SocketAddr,
 }
 
-impl RPCRequestClient {
+impl RpcRequestClient {
     /// Creates new RPCRequestSender
     pub fn new(rpc_address: SocketAddr) -> Self {
         Self {

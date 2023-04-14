@@ -24,7 +24,7 @@ use zebra_chain::{
 use zebra_state::{ChainTipChange, LatestChainTip};
 
 use crate::common::config::testdir;
-use crate::common::rpc_client::RPCRequestClient;
+use crate::common::rpc_client::RpcRequestClient;
 
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
@@ -230,7 +230,7 @@ pub async fn get_raw_future_blocks(
     )?;
 
     // Create an http client
-    let rpc_client = RPCRequestClient::new(rpc_address);
+    let rpc_client = RpcRequestClient::new(rpc_address);
 
     let blockchain_info: serde_json::Value = serde_json::from_str(
         &rpc_client

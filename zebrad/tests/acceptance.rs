@@ -144,7 +144,7 @@ use zebra_chain::{
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_node_services::rpc_client::RPCRequestClient;
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
@@ -1366,7 +1366,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     )?;
 
     // Create an http client
-    let client = RPCRequestClient::new(config.rpc.listen_addr.unwrap());
+    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
     // Make the call to the `getinfo` RPC method
     let res = client.call("getinfo", "[]".to_string()).await?;
@@ -1434,7 +1434,7 @@ fn non_blocking_logger() -> Result<()> {
         )?;
 
         // Create an http client
-        let client = RPCRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(zebra_rpc_address);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
@@ -2057,7 +2057,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
-    let client = RPCRequestClient::new(zebra_rpc_address);
+    let client = RpcRequestClient::new(zebra_rpc_address);
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
