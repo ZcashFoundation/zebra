@@ -8,12 +8,12 @@ use std::{
 
 use tempfile::TempDir;
 
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::prelude::*;
 
 use crate::common::{
     launch::ZebradTestDirExt,
     lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-    rpc_client::RpcRequestClient,
     test_type::TestType,
 };
 

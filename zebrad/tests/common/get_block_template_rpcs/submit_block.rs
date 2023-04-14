@@ -11,11 +11,11 @@
 use color_eyre::eyre::{Context, Result};
 
 use zebra_chain::parameters::Network;
+use zebra_node_services::rpc_client::RpcRequestClient;
 
 use crate::common::{
     cached_state::get_raw_future_blocks,
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
-    rpc_client::RpcRequestClient,
     test_type::TestType,
 };
 

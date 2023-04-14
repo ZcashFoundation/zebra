@@ -27,10 +27,12 @@ impl RpcRequestClient {
     /// Builds rpc request
     pub async fn call(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> reqwest::Result<reqwest::Response> {
-        let params = params.into();
+        let method = method.as_ref();
+        let params = params.as_ref();
+
         self.client
             .post(format!("http://{}", &self.rpc_address))
             .body(format!(
@@ -44,8 +46,8 @@ impl RpcRequestClient {
     /// Builds rpc request and gets text from response
     pub async fn text_from_call(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> reqwest::Result<String> {
         self.call(method, params).await?.text().await
     }
@@ -57,8 +59,8 @@ impl RpcRequestClient {
     /// Returns an error if the call or result deserialization fail.
     pub async fn json_result_from_call<T: serde::de::DeserializeOwned>(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> Result<T> {
         Self::json_result_from_response_text(&self.text_from_call(method, params).await?)
     }
