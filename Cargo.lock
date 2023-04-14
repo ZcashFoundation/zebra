@@ -5938,6 +5938,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde-big-array",
+ "serde_json",
  "serde_with 2.3.2",
  "sha2 0.9.9",
  "spandoc",
