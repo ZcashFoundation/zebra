@@ -245,7 +245,7 @@ where
 /// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
 pub async fn fetch_mempool_transactions<Mempool>(
     mempool: Mempool,
-    (chain_tip_hash, chain_tip_height): (block::Hash, block::Height),
+    chain_tip_hash: block::Hash,
 ) -> Result<Option<Vec<VerifiedUnminedTx>>>
 where
     Mempool: Service<
@@ -265,24 +265,13 @@ where
         })?;
 
     let mempool::Response::FullTransactions {
-        mut transactions,
+        transactions,
         last_seen_tip_hash,
     } = response else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
     };
 
-    // Check that the mempool and state were in sync when we made the requests
-    let valid_transactions = if last_seen_tip_hash == chain_tip_hash {
-        let next_block_height = (chain_tip_height + 1).expect("tip is far below Height::MAX");
-
-        // Filter out that mempool transactions' transparent coinbase spends will be mature at the next block height
-        transactions.retain(|tx| tx.is_mature_at(next_block_height));
-        Some(transactions)
-    } else {
-        None
-    };
-
-    Ok(valid_transactions)
+    Ok((last_seen_tip_hash == chain_tip_hash).then_some(transactions))
 }
 
 // - Response processing

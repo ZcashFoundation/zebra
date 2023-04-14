@@ -229,24 +229,16 @@ impl Request {
 
     /// Returns lowest height at which all transparent coinbase spends will be valid,
     /// or None if this transaction has no transparent coinbase spends.
-    pub fn maturity_height(
+    pub fn check_maturity_height(
         &self,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Option<block::Height> {
-        match self {
-            // TODO: return an error for Request::Block to replace this check in the state (#2336)
-            Request::Block { .. } => None,
-
-            Request::Mempool {
-                transaction,
-                height,
-            } => check::tx_transparent_coinbase_spends_maturity(
-                transaction.transaction.clone(),
-                *height,
-                Default::default(),
-                spent_utxos,
-            ),
-        }
+    ) -> Result<(), TransactionError> {
+        check::tx_transparent_coinbase_spends_maturity(
+            self.transaction(),
+            self.height(),
+            self.known_utxos(),
+            spent_utxos,
+        )
     }
 }
 
@@ -475,7 +467,12 @@ where
             }
 
             let legacy_sigop_count = cached_ffi_transaction.legacy_sigop_count()?;
-            let maturity_height = req.maturity_height(&spent_utxos);
+
+            // TODO: Return an error for Request::Block as well to replace this check in
+            //       the state once #2336 has been implemented?
+            if req.is_mempool() {
+                req.check_maturity_height(&spent_utxos)?;
+            }
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
@@ -490,7 +487,6 @@ where
                             "unexpected mempool coinbase transaction: should have already rejected",
                         ),
                         legacy_sigop_count,
-                        maturity_height,
                     ),
                 },
             };

@@ -1271,95 +1271,66 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         }
     };
 
-    // get a block with a non-coinbase transaction
-    let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
+    let get_block_template_fut = get_block_template_rpc.get_block_template(None);
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        make_mock_mempool_request_handler(vec![], fake_tip_hash),
+        make_mock_read_state_request_handler(),
+    );
 
-    // use first non-coinbase transaction
-    let unmined_transaction: UnminedTx = block
-        .transactions
-        .into_iter()
-        .find(|tx| !tx.is_coinbase())
-        .expect("at least one non-coinbase transaction")
-        .into();
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
-    let make_fake_mempool_tx = |maturity_height| {
-        VerifiedUnminedTx::new(
-            unmined_transaction.clone(),
-            Amount::zero(),
-            0,
-            maturity_height,
+    assert_eq!(
+        get_block_template.capabilities,
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.to_vec()
+    );
+    assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
+    assert!(get_block_template.transactions.is_empty());
+    assert_eq!(
+        get_block_template.target,
+        ExpandedDifficulty::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001"
         )
-    };
+        .expect("test vector is valid")
+    );
+    assert_eq!(get_block_template.min_time, fake_min_time);
+    assert_eq!(
+        get_block_template.mutable,
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
+    );
+    assert_eq!(
+        get_block_template.nonce_range,
+        GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD
+    );
+    assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
+    assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
+    assert_eq!(get_block_template.cur_time, fake_cur_time);
+    assert_eq!(
+        get_block_template.bits,
+        CompactDifficulty::from_hex("01010000").expect("test vector is valid")
+    );
+    assert_eq!(get_block_template.height, 1687105); // nu5 height
+    assert_eq!(get_block_template.max_time, fake_max_time);
 
-    let fake_mempool_txs = vec![
-        make_fake_mempool_tx(None),
-        make_fake_mempool_tx(Some(Height::MAX)),
-    ];
-
-    for (num_expected_txs, mempool_txs) in [(0, vec![]), (1, fake_mempool_txs)] {
-        let get_block_template_fut = get_block_template_rpc.get_block_template(None);
-        let (get_block_template, ..) = tokio::join!(
-            get_block_template_fut,
-            make_mock_mempool_request_handler(mempool_txs, fake_tip_hash),
-            make_mock_read_state_request_handler(),
-        );
-
-        let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-            .expect("unexpected error in getblocktemplate RPC call") else {
-                panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-            };
-
-        assert_eq!(
-            get_block_template.capabilities,
-            GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.to_vec()
-        );
-        assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
-        assert_eq!(get_block_template.transactions.len(), num_expected_txs);
-        assert_eq!(
-            get_block_template.target,
-            ExpandedDifficulty::from_hex(
-                "0000000000000000000000000000000000000000000000000000000000000001"
-            )
-            .expect("test vector is valid")
-        );
-        assert_eq!(get_block_template.min_time, fake_min_time);
-        assert_eq!(
-            get_block_template.mutable,
-            GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
-        );
-        assert_eq!(
-            get_block_template.nonce_range,
-            GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD
-        );
-        assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
-        assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-        assert_eq!(get_block_template.cur_time, fake_cur_time);
-        assert_eq!(
-            get_block_template.bits,
-            CompactDifficulty::from_hex("01010000").expect("test vector is valid")
-        );
-        assert_eq!(get_block_template.height, 1687105); // nu5 height
-        assert_eq!(get_block_template.max_time, fake_max_time);
-
-        // Coinbase transaction checks.
-        assert!(get_block_template.coinbase_txn.required);
-        assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
-        assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-        if use_p2pkh {
-            // there is one sig operation if miner address is p2pkh.
-            assert_eq!(get_block_template.coinbase_txn.sigops, 1);
-        } else {
-            // everything in the coinbase is p2sh.
-            assert_eq!(get_block_template.coinbase_txn.sigops, 0);
-        }
-        // Coinbase transaction checks for empty blocks.
-        assert_eq!(
-            get_block_template.coinbase_txn.fee,
-            Amount::<NonNegative>::zero()
-        );
+    // Coinbase transaction checks.
+    assert!(get_block_template.coinbase_txn.required);
+    assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
+    assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
+    if use_p2pkh {
+        // there is one sig operation if miner address is p2pkh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 1);
+    } else {
+        // everything in the coinbase is p2sh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 0);
     }
+    // Coinbase transaction checks for empty blocks.
+    assert_eq!(
+        get_block_template.coinbase_txn.fee,
+        Amount::<NonNegative>::zero()
+    );
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
@@ -1457,7 +1428,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         legacy_sigop_count: 0,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
-        maturity_height: None,
     };
 
     let next_fake_tip_hash =

@@ -535,9 +535,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-) -> Option<Height> {
-    let mut maturity_height = None;
-
+) -> Result<(), TransactionError> {
     for spend in tx.spent_outpoints() {
         let utxo = block_new_outputs
             .get(&spend)
@@ -547,29 +545,8 @@ pub fn tx_transparent_coinbase_spends_maturity(
 
         let spend_restriction = tx.coinbase_spend_restriction(height);
 
-        let check_coinbase_spend_result =
-            transparent_coinbase_spend_maturity(spend, spend_restriction, utxo);
-
-        match check_coinbase_spend_result {
-            Err(TransactionError::ImmatureTransparentCoinbaseSpend {
-                min_spend_height, ..
-            })
-            | Err(TransactionError::UnshieldedTransparentCoinbaseSpend {
-                min_spend_height, ..
-            }) if maturity_height
-                .map(|h| h < min_spend_height)
-                .unwrap_or(true) =>
-            {
-                maturity_height = Some(min_spend_height);
-            }
-
-            Err(TransactionError::ImmatureTransparentCoinbaseSpend { .. })
-            | Err(TransactionError::UnshieldedTransparentCoinbaseSpend { .. })
-            | Ok(()) => {}
-
-            Err(_other) => panic!("unexpected error from transparent_coinbase_spend_maturity"),
-        };
+        transparent_coinbase_spend_maturity(spend, spend_restriction, utxo)?;
     }
 
-    maturity_height
+    Ok(())
 }

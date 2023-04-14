@@ -25,7 +25,7 @@ use zebra_chain::{
         },
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseData, MIN_TRANSPARENT_COINBASE_MATURITY},
+    transparent::{self, CoinbaseData},
 };
 
 use zebra_test::mock_service::MockService;
@@ -635,14 +635,10 @@ async fn mempool_response_maturity_height_correct() {
         })
         .await;
 
-    let Ok(super::Response::Mempool { transaction }) = verifier_response else {
-        panic!("expected successful verification, got: {verifier_response:?}");
-    };
-
-    let expected_maturity_height =
-        coinbase_spend_height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
-
-    assert_eq!(transaction.maturity_height, expected_maturity_height, "maturity_height should be MIN_TRANSPARENT_COINBASE_MATURITY ahead the spent coinbase tx height")
+    assert!(
+        verifier_response.is_err(),
+        "expected to fail verification, got: {verifier_response:?}"
+    );
 }
 
 #[test]

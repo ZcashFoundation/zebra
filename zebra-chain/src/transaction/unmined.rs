@@ -19,7 +19,6 @@ use std::{fmt, sync::Arc};
 
 use crate::{
     amount::{Amount, NonNegative},
-    block::Height,
     serialization::ZcashSerialize,
     transaction::{
         AuthDigest, Hash,
@@ -323,10 +322,6 @@ pub struct VerifiedUnminedTx {
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
     pub fee_weight_ratio: f32,
-
-    /// The earliest/lowest block height at which this transaction's transparent coinbase
-    /// spends will be valid, if this transaction contains any transparent coinbase spends.
-    pub maturity_height: Option<Height>,
 }
 
 impl fmt::Display for VerifiedUnminedTx {
@@ -348,7 +343,6 @@ impl VerifiedUnminedTx {
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
-        maturity_height: Option<Height>,
     ) -> Self {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
@@ -359,7 +353,6 @@ impl VerifiedUnminedTx {
             legacy_sigop_count,
             fee_weight_ratio,
             unpaid_actions,
-            maturity_height,
         }
     }
 
@@ -368,13 +361,6 @@ impl VerifiedUnminedTx {
     /// [ZIP-317]: https://zips.z.cash/zip-0317#mempool-size-limiting
     pub fn pays_conventional_fee(&self) -> bool {
         self.miner_fee >= self.transaction.conventional_fee
-    }
-
-    /// Returns `true` if the transaction will be mature at the given block height.
-    pub fn is_mature_at(&self, height: Height) -> bool {
-        self.maturity_height
-            .map(|maturity_height| maturity_height <= height)
-            .unwrap_or(true)
     }
 
     /// The cost in bytes of the transaction, as defined in [ZIP-401].

@@ -501,6 +501,8 @@ where
                 let chain_tip_and_local_time @ zebra_state::GetBlockTemplateChainInfo {
                     tip_hash,
                     tip_height,
+                    max_time,
+                    cur_time,
                     ..
                 } = fetch_state_tip_and_local_time(state.clone()).await?;
 
@@ -515,7 +517,7 @@ where
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
                 let Some(mempool_txs) =
-                    fetch_mempool_transactions(mempool.clone(), (tip_hash, tip_height))
+                    fetch_mempool_transactions(mempool.clone(), tip_hash)
                         .await?
                         // If the mempool and state responses are out of sync:
                         // - if we are not long polling, omit mempool transactions from the template,
@@ -526,9 +528,9 @@ where
 
                 // - Long poll ID calculation
                 let server_long_poll_id = LongPollInput::new(
-                    chain_tip_and_local_time.tip_height,
-                    chain_tip_and_local_time.tip_hash,
-                    chain_tip_and_local_time.max_time,
+                    tip_height,
+                    tip_hash,
+                    max_time,
                     mempool_txs.iter().map(|tx| tx.transaction.id),
                 )
                 .generate_id();
@@ -585,9 +587,7 @@ where
                 // It can also be zero if cur_time was clamped to max_time. In that case,
                 // we want to wait for another change, and ignore this timeout. So we use an
                 // `OptionFuture::None`.
-                let duration_until_max_time = chain_tip_and_local_time
-                    .max_time
-                    .saturating_duration_since(chain_tip_and_local_time.cur_time);
+                let duration_until_max_time = max_time.saturating_duration_since(cur_time);
                 let wait_for_max_time: OptionFuture<_> = if duration_until_max_time.seconds() > 0 {
                     Some(tokio::time::sleep(duration_until_max_time.to_std()))
                 } else {
@@ -610,8 +610,8 @@ where
                     // This timer elapses every few seconds
                     _elapsed = wait_for_mempool_request => {
                         tracing::info!(
-                            max_time = ?chain_tip_and_local_time.max_time,
-                            cur_time = ?chain_tip_and_local_time.cur_time,
+                            ?max_time,
+                            ?cur_time,
                             ?server_long_poll_id,
                             ?client_long_poll_id,
                             GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
@@ -624,8 +624,8 @@ where
                         match tip_changed_result {
                             Ok(()) => {
                                 tracing::info!(
-                                    max_time = ?chain_tip_and_local_time.max_time,
-                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?max_time,
+                                    ?cur_time,
                                     ?server_long_poll_id,
                                     ?client_long_poll_id,
                                     "returning from long poll because state has changed"
@@ -637,8 +637,8 @@ where
                                 // it will help with debugging.
                                 tracing::info!(
                                     ?recv_error,
-                                    max_time = ?chain_tip_and_local_time.max_time,
-                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?max_time,
+                                    ?cur_time,
                                     ?server_long_poll_id,
                                     ?client_long_poll_id,
                                     "returning from long poll due to a state error.\
@@ -660,8 +660,8 @@ where
                         // This log should stay at info when the others go to debug,
                         // it's very rare.
                         tracing::info!(
-                            max_time = ?chain_tip_and_local_time.max_time,
-                            cur_time = ?chain_tip_and_local_time.cur_time,
+                            ?max_time,
+                            ?cur_time,
                             ?server_long_poll_id,
                             ?client_long_poll_id,
                             "returning from long poll because max time was reached"
