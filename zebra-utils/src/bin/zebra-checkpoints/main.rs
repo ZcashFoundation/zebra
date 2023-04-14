@@ -87,7 +87,7 @@ fn main() -> Result<()> {
         .0
         .checked_sub(MIN_TRANSPARENT_COINBASE_MATURITY)
         .map(block::Height)
-        .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
+        .expect("node has some mature blocks: wait for it to sync more blocks");
 
     let starting_height = args::Args::from_args().last_checkpoint.map(block::Height);
     if starting_height.is_some() {
@@ -100,7 +100,7 @@ fn main() -> Result<()> {
 
     assert!(
         starting_height < height_limit.0,
-        "No mature blocks after the last checkpoint: wait for zcashd to sync more blocks"
+        "No mature blocks after the last checkpoint: wait for node to sync more blocks"
     );
 
     // set up counters
@@ -130,12 +130,14 @@ fn main() -> Result<()> {
                 (hash, response_height, size)
             }
             args::Backend::Zebrad => {
-                // get block data from zebrad by deserializing the raw block
+                // get block data from zebrad (or zcashd) by deserializing the raw block
                 cmd.args(["getblock", &request_height.to_string(), "0"]);
                 let output = cmd_output(&mut cmd)?;
 
                 let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
 
+                // TODO: is it faster to call `getblock height 1`,
+                //       rather than deserializing the block and calculating its hash?
                 let block = block_bytes
                     .zcash_deserialize_into::<block::Block>()
                     .expect("obtained block should deserialize");
