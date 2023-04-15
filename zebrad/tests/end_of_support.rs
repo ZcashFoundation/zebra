@@ -1,7 +1,8 @@
 //! Testing the end of support feature.
+
 use std::str::FromStr;
 
-use crate::components::sync;
+use zebrad::components::sync;
 
 /// Test that the `end_of_support` function is working as expected.
 #[test]
@@ -23,7 +24,7 @@ fn end_of_support_panic() {
 /// Test that the `end_of_support` function is working as expected.
 #[test]
 #[tracing_test::traced_test]
- fn end_of_support_function() {
+fn end_of_support_function() {
     let release_date: chrono::DateTime<chrono::Utc> =
         chrono::DateTime::from_str(zebra_network::constants::RELEASE_DATE).unwrap();
 
@@ -35,7 +36,10 @@ fn end_of_support_panic() {
         .unwrap();
 
     sync::progress::end_of_support(no_warn);
-    assert!(logs_contain("Checking if Zebra release is too old"));
+    assert!(logs_contain(
+        "Checking if Zebra release is inside support range ..."
+    ));
+    assert!(logs_contain("Zebra release is under support"));
 
     // We are in warn range
     let warn = release_date
@@ -45,7 +49,9 @@ fn end_of_support_panic() {
         .unwrap();
 
     sync::progress::end_of_support(warn);
-    assert!(logs_contain("Checking if Zebra release is too old"));
+    assert!(logs_contain(
+        "Checking if Zebra release is inside support range ..."
+    ));
     assert!(logs_contain(
         "Your Zebra release is too old and it will stop running in"
     ));
@@ -61,9 +67,10 @@ fn end_of_support_date() {
     let now = chrono::Utc::now();
 
     sync::progress::end_of_support(now);
-    assert!(logs_contain("Checking if Zebra release is too old"));
+    assert!(logs_contain(
+        "Checking if Zebra release is inside support range ..."
+    ));
     assert!(!logs_contain(
         "Your Zebra release is too old and it will stop running in"
     ));
 }
-

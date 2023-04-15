@@ -2207,20 +2207,18 @@ async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
-/// Check that the the end oif support code is called.
+/// Check that the the end of support code is called at least once.
 #[test]
-fn end_of_support_is_checked() -> Result<()> {
+fn end_of_support_is_checked_once() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-
-    // Run extra time to ensure eos code is called.
-    std::thread::sleep(Duration::from_secs(120));
+    // Give enough time to start up and for the progress bar to run at least once.
+    // (progress bar runs every 1 minute or so).
+    std::thread::sleep(Duration::from_secs(80));
 
     child.kill(false)?;
 
@@ -2230,7 +2228,10 @@ fn end_of_support_is_checked() -> Result<()> {
     output.stdout_line_contains("Starting zebrad")?;
 
     // Make sure the check for eos is done.
-    output.stdout_line_contains("Checking if Zebra release is too old")?;
+    output.stdout_line_contains("Checking if Zebra release is inside support range ...")?;
+
+    // And that we are in range.
+    output.stdout_line_contains("Zebra release is under support")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;

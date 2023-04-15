@@ -113,6 +113,11 @@ pub async fn show_block_chain_progress(
         let now = Utc::now();
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
+        // Check for the end of support of this release.
+        if let Some(block_tip_time) = latest_chain_tip.best_tip_block_time() {
+            end_of_support(block_tip_time);
+        }
+
         if let Some(estimated_height) =
             latest_chain_tip.estimate_network_chain_tip_height(network, now)
         {
@@ -122,11 +127,6 @@ pub async fn show_block_chain_progress(
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
             let network_upgrade = NetworkUpgrade::current(network, current_height);
-
-            // Check for the end of support of this release.
-            if let Some(block_tip_time) = latest_chain_tip.best_tip_block_time() {
-                end_of_support(block_tip_time);
-            }
 
             // Work out the sync progress towards the estimated tip.
             let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
@@ -272,7 +272,7 @@ pub async fn show_block_chain_progress(
 
 /// Check if the current release is too old and panic if so.
 pub fn end_of_support(block_tip_time: chrono::DateTime<chrono::Utc>) {
-    debug!("Checking if Zebra release is too old");
+    info!("Checking if Zebra release is inside support range ...");
 
     let release_date: chrono::DateTime<chrono::Utc> =
         chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
@@ -295,5 +295,7 @@ pub fn end_of_support(block_tip_time: chrono::DateTime<chrono::Utc>) {
             \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
         );
+    } else {
+        info!("Zebra release is under support");
     }
 }

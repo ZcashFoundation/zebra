@@ -28,7 +28,7 @@ use crate::{
 
 mod downloads;
 mod gossip;
-mod progress;
+pub mod progress;
 mod recent_sync_lengths;
 mod status;
 
