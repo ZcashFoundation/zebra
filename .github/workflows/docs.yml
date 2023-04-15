@@ -28,10 +28,10 @@ on:
       - '.github/workflows/docs.yml'
 
 env:
-  RUST_LOG: info
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
-        uses: actions/checkout@v3.5.0
+        uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
 

@@ -43,6 +43,14 @@ flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper"]
 
+progress-bar = [
+    "howudoin",
+    "indicatif",
+    "zebra-consensus/progress-bar",
+    "zebra-state/progress-bar",
+    "zebra-network/progress-bar",
+]
+
 prometheus = ["metrics-exporter-prometheus"]
 
 # Production features that modify dependency behaviour
@@ -108,10 +116,10 @@ chrono = { version = "0.4.24", default-features = false, features = ["clock", "s
 humantime-serde = "1.1.1"
 indexmap = "1.9.3"
 lazy_static = "1.4.0"
-serde = { version = "1.0.159", features = ["serde_derive"] }
+serde = { version = "1.0.160", features = ["serde_derive"] }
 toml = "0.7.3"
 
-futures = "0.3.27"
+futures = "0.3.28"
 rayon = "1.7.0"
 tokio = { version = "1.27.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
@@ -160,6 +168,10 @@ metrics-exporter-prometheus = { version = "0.11.0", default-features = false, fe
 # we only use `log` to set and print the static log levels in transitive dependencies
 log = "0.4.17"
 
+# prod feature progress-bar
+howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
+indicatif = { version = "0.17.3", optional = true }
+
 # test feature proptest-impl
 proptest = { version = "1.1.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
@@ -171,7 +183,7 @@ console-subscriber = { version = "0.1.8", optional = true }
 vergen = { version = "7.5.1", default-features = false, features = ["cargo", "git"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { version = "0.8.0", optional = true }
+tonic-build = { version = "0.9.1", optional = true }
 
 [dev-dependencies]
 abscissa_core = { version = "0.5", features = ["testing"] }
@@ -182,8 +194,8 @@ regex = "1.7.3"
 semver = "1.0.17"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.94", features = ["preserve_order"] }
-tempfile = "3.4.0"
+serde_json = { version = "1.0.96", features = ["preserve_order"] }
+tempfile = "3.5.0"
 
 hyper = { version = "0.14.25", features = ["http1", "http2", "server"]}
 reqwest = "0.11.16"
@@ -193,8 +205,8 @@ tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.12"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.11.8"
-tonic = "0.8.0"
+prost = "0.11.9"
+tonic = "0.9.1"
 
 proptest = "1.1.0"
 proptest-derive = "0.3.0"

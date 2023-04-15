@@ -24,7 +24,7 @@ use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
 use zebra_network as zn;
@@ -56,7 +56,7 @@ pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 
 /// The maximum height difference between Zebra's state tip and a downloaded block.
 /// Blocks higher than this will get dropped and return an error.
-pub const VERIFICATION_PIPELINE_DROP_LIMIT: i32 = 50_000;
+pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -388,10 +388,10 @@ where
                 let (lookahead_drop_height, lookahead_pause_height, lookahead_reset_height) = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
-                    let lookahead_pause = i32::try_from(
+                    let lookahead_pause = HeightDiff::try_from(
                         lookahead_limit + lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
                     )
-                        .expect("fits in i32");
+                        .expect("fits in HeightDiff");
 
 
                     ((tip_height + VERIFICATION_PIPELINE_DROP_LIMIT).expect("tip is much lower than Height::MAX"),

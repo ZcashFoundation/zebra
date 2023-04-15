@@ -1,6 +1,6 @@
 //! Randomised property tests for the mempool.
 
-use std::{env, fmt};
+use std::{env, fmt, sync::Arc};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
@@ -10,15 +10,17 @@ use tokio::time;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    block,
+    block::{self, Block},
     fmt::DisplayToDebug,
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
     transaction::VerifiedUnminedTx,
 };
 use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
+use zs::FinalizedBlock;
 
 use crate::components::{
     mempool::{config::Config, Mempool},
@@ -193,7 +195,7 @@ proptest! {
                 mut state_service,
                 mut tx_verifier,
                 mut recent_syncs,
-                _chain_tip_sender,
+                mut chain_tip_sender,
             ) = setup(network);
 
             time::pause();
@@ -217,6 +219,9 @@ proptest! {
             // This time a call to `poll_ready` should clear the storage.
             mempool.dummy_call().await;
 
+            // sends a new fake chain tip so that the mempool can be enabled
+            chain_tip_sender.set_finalized_tip(block1_chain_tip());
+
             // Enable the mempool again so the storage can be accessed.
             mempool.enable(&mut recent_syncs).await;
 
@@ -229,6 +234,22 @@ proptest! {
             Ok(())
         })?;
     }
+}
+
+fn genesis_chain_tip() -> Option<ChainTipBlock> {
+    zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .map(FinalizedBlock::from)
+        .map(ChainTipBlock::from)
+        .ok()
+}
+
+fn block1_chain_tip() -> Option<ChainTipBlock> {
+    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .map(FinalizedBlock::from)
+        .map(ChainTipBlock::from)
+        .ok()
 }
 
 /// Create a new [`Mempool`] instance using mocked services.
@@ -247,7 +268,8 @@ fn setup(
     let tx_verifier = MockService::build().for_prop_tests();
 
     let (sync_status, recent_syncs) = SyncStatus::new();
-    let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, network);
+    let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
+        ChainTipSender::new(None, network);
 
     let (mempool, _transaction_receiver) = Mempool::new(
         &Config {
@@ -261,6 +283,9 @@ fn setup(
         latest_chain_tip,
         chain_tip_change,
     );
+
+    // sends a fake chain tip so that the mempool can be enabled
+    chain_tip_sender.set_finalized_tip(genesis_chain_tip());
 
     (
         mempool,

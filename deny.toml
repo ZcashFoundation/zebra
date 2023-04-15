@@ -78,6 +78,9 @@ skip-tree = [
 
     # Test-only dependencies
 
+    # wait for console-api -> console-subscriber to upgrade
+    { name = "tonic", version = "=0.8.3" },
+
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
 
@@ -87,7 +90,7 @@ skip-tree = [
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
-    
+
     # wait for proptest's rusty-fork dependency to upgrade quick-error
     { name = "quick-error", version = "=1.2.3" },
 

@@ -34,7 +34,7 @@ bench = ["zebra-test"]
 
 # Cryptography
 bitvec = "1.0.1"
-bitflags = "2.0.2"
+bitflags = "2.1.0"
 bitflags-serde-legacy = "0.1.0"
 blake2b_simd = "1.0.1"
 blake2s_simd = "1.0.1"
@@ -74,12 +74,12 @@ tracing = "0.1.37"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.159", features = ["serde_derive", "rc"] }
-serde_with = "2.3.1"
+serde = { version = "1.0.160", features = ["serde_derive", "rc"] }
+serde_with = "2.3.2"
 serde-big-array = "0.5.1"
 
 # Processing
-futures = "0.3.27"
+futures = "0.3.28"
 itertools = "0.10.5"
 rayon = "1.7.0"
 

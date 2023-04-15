@@ -1167,6 +1167,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
         serialization::DateTime32,
+        transaction::VerifiedUnminedTx,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -1190,7 +1191,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    let mut read_state = MockService::build().for_unit_tests();
+    let read_state = MockService::build().for_unit_tests();
     let chain_verifier = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
@@ -1238,36 +1239,43 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     // Fake the ChainInfo response
-    let mock_read_state_request_handler = async move {
-        read_state
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
-            .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
-            }));
+    let make_mock_read_state_request_handler = || {
+        let mut read_state = read_state.clone();
+
+        async move {
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: fake_max_time,
+                    history_tree: fake_history_tree(Mainnet),
+                }));
+        }
     };
 
-    let mock_mempool_request_handler = {
+    let make_mock_mempool_request_handler = |transactions, last_seen_tip_hash| {
         let mut mempool = mempool.clone();
         async move {
             mempool
                 .expect_request(mempool::Request::FullTransactions)
                 .await
-                .respond(mempool::Response::FullTransactions(vec![]));
+                .respond(mempool::Response::FullTransactions {
+                    transactions,
+                    last_seen_tip_hash,
+                });
         }
     };
 
     let get_block_template_fut = get_block_template_rpc.get_block_template(None);
     let (get_block_template, ..) = tokio::join!(
         get_block_template_fut,
-        mock_mempool_request_handler,
-        mock_read_state_request_handler,
+        make_mock_mempool_request_handler(vec![], fake_tip_hash),
+        make_mock_read_state_request_handler(),
     );
 
     let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
@@ -1323,8 +1331,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         get_block_template.coinbase_txn.fee,
         Amount::<NonNegative>::zero()
     );
-
-    mempool.expect_no_requests().await;
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
@@ -1400,6 +1406,53 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+
+    // Try getting mempool transactions with a different tip hash
+
+    let tx = Arc::new(Transaction::V1 {
+        inputs: vec![],
+        outputs: vec![],
+        lock_time: transaction::LockTime::unlocked(),
+    });
+
+    let unmined_tx = UnminedTx {
+        transaction: tx.clone(),
+        id: tx.unmined_id(),
+        size: tx.zcash_serialized_size(),
+        conventional_fee: 0.try_into().unwrap(),
+    };
+
+    let verified_unmined_tx = VerifiedUnminedTx {
+        transaction: unmined_tx,
+        miner_fee: 0.try_into().unwrap(),
+        legacy_sigop_count: 0,
+        unpaid_actions: 0,
+        fee_weight_ratio: 1.0,
+    };
+
+    let next_fake_tip_hash =
+        Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
+
+    mock_sync_status.set_is_close_to_tip(true);
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_rpc.get_block_template(None),
+        make_mock_mempool_request_handler(vec![verified_unmined_tx], next_fake_tip_hash),
+        make_mock_read_state_request_handler(),
+    );
+
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
+
+    // mempool transactions should be omitted if the tip hash in the GetChainInfo response from the state
+    // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
+    assert!(get_block_template.transactions.is_empty());
+
+    mempool.expect_no_requests().await;
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]

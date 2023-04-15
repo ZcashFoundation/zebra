@@ -31,7 +31,9 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::Height, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
+    block::{self, Height},
+    chain_sync_status::ChainSyncStatus,
+    chain_tip::ChainTip,
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
@@ -61,7 +63,7 @@ pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
 pub use queue_checker::QueueChecker;
 pub use storage::{
-    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError, Storage,
 };
 
 #[cfg(test)]
@@ -100,10 +102,15 @@ enum ActiveState {
         ///
         /// Only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
-        storage: storage::Storage,
+        storage: Storage,
 
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
+
+        /// Last seen chain tip hash that mempool transactions have been verified against.
+        ///
+        /// In some tests, this is initialized to the latest chain tip, then updated in `poll_ready()` before each request.
+        last_seen_tip_hash: block::Hash,
     },
 }
 
@@ -120,6 +127,7 @@ impl ActiveState {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
+                ..
             } => {
                 let mut transactions = Vec::new();
 
@@ -131,6 +139,57 @@ impl ActiveState {
 
                 transactions
             }
+        }
+    }
+
+    /// Returns the number of pending transactions waiting for download or verify,
+    /// or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn queued_transaction_count(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { tx_downloads, .. } => tx_downloads.in_flight(),
+        }
+    }
+
+    /// Returns the number of transactions in storage, or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn transaction_count(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.transaction_count(),
+        }
+    }
+
+    /// Returns the cost of the transactions in the mempool, according to ZIP-401.
+    /// Returns zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn total_cost(&self) -> u64 {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_cost(),
+        }
+    }
+
+    /// Returns the total serialized size of the verified transactions in the set,
+    /// or zero if the mempool is disabled.
+    ///
+    /// See [`Storage::total_serialized_size()`] for details.
+    #[cfg(feature = "progress-bar")]
+    pub fn total_serialized_size(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_serialized_size(),
+        }
+    }
+
+    /// Returns the number of rejected transaction hashes in storage,
+    /// or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn rejected_transaction_count(&mut self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.rejected_transaction_count(),
         }
     }
 }
@@ -175,6 +234,28 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    // Diagnostics
+    //
+    /// Queued transactions pending download or verification transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    queued_count_bar: Option<howudoin::Tx>,
+
+    /// Number of mempool transactions transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    transaction_count_bar: Option<howudoin::Tx>,
+
+    /// Mempool transaction cost transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    transaction_cost_bar: Option<howudoin::Tx>,
+
+    /// Rejected transactions transmitter.
+    /// Only displayed after the mempool's first activation.
+    #[cfg(feature = "progress-bar")]
+    rejected_count_bar: Option<howudoin::Tx>,
 }
 
 impl Mempool {
@@ -201,11 +282,19 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            #[cfg(feature = "progress-bar")]
+            queued_count_bar: None,
+            #[cfg(feature = "progress-bar")]
+            transaction_count_bar: None,
+            #[cfg(feature = "progress-bar")]
+            transaction_cost_bar: None,
+            #[cfg(feature = "progress-bar")]
+            rejected_count_bar: None,
         };
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state();
+        service.update_state(None);
 
         (service, transaction_receiver)
     }
@@ -241,41 +330,47 @@ impl Mempool {
     /// Update the mempool state (enabled / disabled) depending on how close to
     /// the tip is the synchronization, including side effects to state changes.
     ///
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash` field
+    /// when enabling the mempool state, it will not enable the mempool if this is None.
+    ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self) -> bool {
+    fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
         let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
 
-        if self.is_enabled() == is_close_to_tip {
-            // the active state is up to date
-            return false;
-        }
+        match (is_close_to_tip, self.is_enabled(), tip_action) {
+            // the active state is up to date, or there is no tip action to activate the mempool
+            (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
-        // Update enabled / disabled state
-        if is_close_to_tip {
-            info!(
-                tip_height = ?self.latest_chain_tip.best_tip_height(),
-                "activating mempool: Zebra is close to the tip"
-            );
+            // Enable state - there should be a chain tip when Zebra is close to the network tip
+            (true, false, Some(tip_action)) => {
+                let (last_seen_tip_hash, tip_height) = tip_action.best_tip_hash_and_height();
 
-            let tx_downloads = Box::pin(TxDownloads::new(
-                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state.clone(),
-            ));
-            self.active_state = ActiveState::Enabled {
-                storage: storage::Storage::new(&self.config),
-                tx_downloads,
-            };
-        } else {
-            info!(
-                tip_height = ?self.latest_chain_tip.best_tip_height(),
-                "deactivating mempool: Zebra is syncing lots of blocks"
-            );
+                info!(?tip_height, "activating mempool: Zebra is close to the tip");
 
-            // This drops the previous ActiveState::Enabled, cancelling its download tasks.
-            // We don't preserve the previous transactions, because we are syncing lots of blocks.
-            self.active_state = ActiveState::Disabled
-        }
+                let tx_downloads = Box::pin(TxDownloads::new(
+                    Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                    Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                    self.state.clone(),
+                ));
+                self.active_state = ActiveState::Enabled {
+                    storage: storage::Storage::new(&self.config),
+                    tx_downloads,
+                    last_seen_tip_hash,
+                };
+            }
+
+            // Disable state
+            (false, true, _) => {
+                info!(
+                    tip_height = ?self.latest_chain_tip.best_tip_height(),
+                    "deactivating mempool: Zebra is syncing lots of blocks"
+                );
+
+                // This drops the previous ActiveState::Enabled, cancelling its download tasks.
+                // We don't preserve the previous transactions, because we are syncing lots of blocks.
+                self.active_state = ActiveState::Disabled;
+            }
+        };
 
         true
     }
@@ -298,6 +393,118 @@ impl Mempool {
             .copied()
             .collect()
     }
+
+    /// Update metrics for the mempool.
+    fn update_metrics(&mut self) {
+        // Shutdown if needed
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.disable_metrics();
+            return;
+        }
+
+        // Initialize if just activated
+        #[cfg(feature = "progress-bar")]
+        if self.is_enabled()
+            && (self.queued_count_bar.is_none()
+                || self.transaction_count_bar.is_none()
+                || self.transaction_cost_bar.is_none()
+                || self.rejected_count_bar.is_none())
+        {
+            let max_transaction_count = self.config.tx_cost_limit
+                / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
+
+            self.queued_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Queue")
+                    .set_pos(0u64)
+                    .set_len(
+                        u64::try_from(downloads::MAX_INBOUND_CONCURRENCY).expect("fits in u64"),
+                    ),
+            );
+
+            self.transaction_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Txs")
+                    .set_pos(0u64)
+                    .set_len(max_transaction_count),
+            );
+
+            self.transaction_cost_bar = Some(
+                howudoin::new()
+                    .label("Mempool Cost")
+                    .set_pos(0u64)
+                    .set_len(self.config.tx_cost_limit)
+                    .fmt_as_bytes(true),
+            );
+
+            self.rejected_count_bar = Some(
+                howudoin::new()
+                    .label("Mempool Rejects")
+                    .set_pos(0u64)
+                    .set_len(
+                        u64::try_from(storage::MAX_EVICTION_MEMORY_ENTRIES).expect("fits in u64"),
+                    ),
+            );
+        }
+
+        // Update if the mempool has ever been active
+        #[cfg(feature = "progress-bar")]
+        if let (
+            Some(queued_count_bar),
+            Some(transaction_count_bar),
+            Some(transaction_cost_bar),
+            Some(rejected_count_bar),
+        ) = (
+            self.queued_count_bar,
+            self.transaction_count_bar,
+            self.transaction_cost_bar,
+            self.rejected_count_bar,
+        ) {
+            let queued_count = self.active_state.queued_transaction_count();
+            let transaction_count = self.active_state.transaction_count();
+
+            let transaction_cost = self.active_state.total_cost();
+            let transaction_size = self.active_state.total_serialized_size();
+            let transaction_size =
+                indicatif::HumanBytes(transaction_size.try_into().expect("fits in u64"));
+
+            let rejected_count = self.active_state.rejected_transaction_count();
+
+            queued_count_bar.set_pos(u64::try_from(queued_count).expect("fits in u64"));
+
+            transaction_count_bar.set_pos(u64::try_from(transaction_count).expect("fits in u64"));
+
+            // Display the cost and cost limit, with the actual size as a description.
+            //
+            // Costs can be much higher than the transaction size due to the
+            // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
+            transaction_cost_bar
+                .set_pos(transaction_cost)
+                .desc(format!("Actual size {transaction_size}"));
+
+            rejected_count_bar.set_pos(u64::try_from(rejected_count).expect("fits in u64"));
+        }
+    }
+
+    /// Disable metrics for the mempool.
+    fn disable_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        {
+            if let Some(bar) = self.queued_count_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.transaction_count_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.transaction_cost_bar {
+                bar.close()
+            }
+            if let Some(bar) = self.rejected_count_bar {
+                bar.close()
+            }
+        }
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -307,26 +514,24 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let is_state_changed = self.update_state();
+        let tip_action = self.chain_tip_change.last_tip_change();
+        let is_state_changed = self.update_state(tip_action.as_ref());
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
-            return Poll::Ready(Ok(()));
-        }
+            self.update_metrics();
 
-        let tip_action = self.chain_tip_change.last_tip_change();
-
-        // If the mempool was just freshly enabled,
-        // skip resetting and removing mined transactions for this tip.
-        if is_state_changed {
             return Poll::Ready(Ok(()));
         }
 
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
-        if matches!(tip_action, Some(TipAction::Reset { .. })) {
+        //
+        // But if the mempool was just freshly enabled,
+        // skip resetting and removing mined transactions for this tip.
+        if !is_state_changed && matches!(tip_action, Some(TipAction::Reset { .. })) {
             info!(
                 tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
@@ -344,7 +549,7 @@ impl Service<Request> for Mempool {
             std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
-            self.update_state();
+            self.update_state(tip_action.as_ref());
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
@@ -361,12 +566,15 @@ impl Service<Request> for Mempool {
                 }
             }
 
+            self.update_metrics();
+
             return Poll::Ready(Ok(()));
         }
 
         if let ActiveState::Enabled {
             storage,
             tx_downloads,
+            last_seen_tip_hash,
         } = &mut self.active_state
         {
             // Collect inserted transaction ids.
@@ -416,6 +624,7 @@ impl Service<Request> for Mempool {
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
+                *last_seen_tip_hash = block.hash;
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -457,6 +666,8 @@ impl Service<Request> for Mempool {
             }
         }
 
+        self.update_metrics();
+
         Poll::Ready(Ok(()))
     }
 
@@ -470,6 +681,10 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                last_seen_tip_hash,
+                #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -512,11 +727,16 @@ impl Service<Request> for Mempool {
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
-                    let res: Vec<_> = storage.full_transactions().cloned().collect();
+                    let transactions: Vec<_> = storage.full_transactions().cloned().collect();
 
-                    trace!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 
-                    async move { Ok(Response::FullTransactions(res)) }.boxed()
+                    let response = Response::FullTransactions {
+                        transactions,
+                        last_seen_tip_hash: *last_seen_tip_hash,
+                    };
+
+                    async move { Ok(response) }.boxed()
                 }
 
                 Request::RejectedTransactionIds(ref ids) => {
@@ -543,6 +763,10 @@ impl Service<Request> for Mempool {
                         })
                         .map(|result| result.map_err(BoxError::from))
                         .collect();
+
+                    // We've added transactions to the queue
+                    self.update_metrics();
+
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
 
@@ -562,6 +786,7 @@ impl Service<Request> for Mempool {
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
+
                 let resp = match req {
                     // Return empty responses for queries.
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
@@ -569,7 +794,12 @@ impl Service<Request> for Mempool {
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     #[cfg(feature = "getblocktemplate-rpcs")]
-                    Request::FullTransactions => Response::FullTransactions(Default::default()),
+                    Request::FullTransactions => {
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
+                    }
 
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
@@ -593,8 +823,15 @@ impl Service<Request> for Mempool {
                         Response::CheckedForVerifiedTransactions
                     }
                 };
+
                 async move { Ok(resp) }.boxed()
             }
         }
+    }
+}
+
+impl Drop for Mempool {
+    fn drop(&mut self) {
+        self.disable_metrics();
     }
 }

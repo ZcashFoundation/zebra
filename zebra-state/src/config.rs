@@ -44,6 +44,13 @@ pub struct Config {
     /// | macOS   | `$HOME/Library/Caches/zebra`                    | `/Users/Alice/Library/Caches/zebra`  |
     /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | `C:\Users\Alice\AppData\Local\zebra` |
     /// | Other   | `std::env::current_dir()/cache/zebra`           | `/cache/zebra`                       |
+    ///
+    /// # Security
+    ///
+    /// If you are running Zebra with elevated permissions ("root"), create the
+    /// directory for this file before running Zebra, and make sure the Zebra user
+    /// account has exclusive access to that directory, and other users can't modify
+    /// its parent directories.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.

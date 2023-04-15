@@ -19,6 +19,6 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - 'C-trivial'
-      - 'A-infrastructure'
+      - 'A-devops'
       - 'A-dependencies'
       - 'P-Low :snowflake:'

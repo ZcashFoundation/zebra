@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use zebra_chain::{
-    amount, block,
+    amount,
     transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
 };
 
@@ -152,25 +152,19 @@ fn transparent_spend_chain_order(
         });
     }
 
-    match (
-        non_finalized_chain_unspent_utxos.get(&spend),
-        finalized_state.utxo(&spend),
-    ) {
-        (None, None) => {
-            // we don't keep spent UTXOs in the finalized state,
-            // so all we can say is that it's missing from both
-            // the finalized and non-finalized chains
-            // (it might have been spent in the finalized state,
-            // or it might never have existed in this chain)
-            Err(MissingTransparentOutput {
-                outpoint: spend,
-                location: "the non-finalized and finalized chain",
-            })
-        }
-
-        (Some(utxo), _) => Ok(utxo.clone()),
-        (_, Some(utxo)) => Ok(utxo),
-    }
+    non_finalized_chain_unspent_utxos
+        .get(&spend)
+        .cloned()
+        .or_else(|| finalized_state.utxo(&spend))
+        // we don't keep spent UTXOs in the finalized state,
+        // so all we can say is that it's missing from both
+        // the finalized and non-finalized chains
+        // (it might have been spent in the finalized state,
+        // or it might never have existed in this chain)
+        .ok_or(MissingTransparentOutput {
+            outpoint: spend,
+            location: "the non-finalized and finalized chain",
+        })
 }
 
 /// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.
@@ -200,7 +194,7 @@ pub fn transparent_coinbase_spend(
     match spend_restriction {
         OnlyShieldedOutputs { spend_height } => {
             let min_spend_height =
-                utxo.utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
+                utxo.utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.try_into().unwrap();
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
             if spend_height >= min_spend_height {

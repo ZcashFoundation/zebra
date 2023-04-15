@@ -1,8 +1,5 @@
 //! Zebrad Abscissa Application
 
-mod entry_point;
-use self::entry_point::EntryPoint;
-
 use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
@@ -17,6 +14,9 @@ use zebra_network::constants::{EOS_PANIC_MESSAGE_HEADER, PORT_IN_USE_ERROR};
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
+
+mod entry_point;
+use entry_point::EntryPoint;
 
 /// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit
@@ -313,10 +313,14 @@ impl Application for ZebradApp {
                         return false;
                     }
 
+                    // Don't ask users to create bug reports for known timeouts, duplicate blocks,
+                    // full disks, or updated binaries.
                     let error_str = error.to_string();
                     !error_str.contains("timed out")
                         && !error_str.contains("duplicate hash")
                         && !error_str.contains("No space left on device")
+                        // abscissa panics like this when the running zebrad binary has been updated
+                        && !error_str.contains("error canonicalizing application path")
                 }
             });
 

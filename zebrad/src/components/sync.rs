@@ -15,7 +15,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
@@ -165,7 +165,7 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(2 * 
 /// The number of blocks after the final checkpoint that get the shorter timeout.
 ///
 /// We've only seen this error on the first few blocks after the final checkpoint.
-const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: i32 = 100;
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///

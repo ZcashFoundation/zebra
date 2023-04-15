@@ -16,11 +16,11 @@ on:
   pull_request:
 
 env:
-  CARGO_INCREMENTAL: 0
-  RUST_LOG: info
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
   changed-files:
@@ -30,14 +30,14 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@V35.7.8
+        uses: tj-actions/changed-files@v35.8.0
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@V35.7.8
+        uses: tj-actions/changed-files@v35.8.0
         with:
           files: |
             .github/workflows/*.yml
@@ -62,7 +62,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
 
@@ -113,7 +113,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
 
@@ -154,7 +154,7 @@ jobs:
       RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
         with:
           persist-credentials: false
 
@@ -182,8 +182,8 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v3.5.0
-      - uses: reviewdog/action-actionlint@v1.36.0
+      - uses: actions/checkout@v3.5.1
+      - uses: reviewdog/action-actionlint@v1.37.0
         with:
           level: warning
           fail_on_error: false
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.1
       - uses: plettich/action-codespell@master
         with:
           github_token: ${{ secrets.github_token }}

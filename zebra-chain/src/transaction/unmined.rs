@@ -54,7 +54,7 @@ mod zip317;
 /// > transparent transactions because of their size.
 ///
 /// [ZIP-401]: https://zips.z.cash/zip-0401
-const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
+pub const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 
 /// When a transaction pays a fee less than the conventional fee,
 /// this low fee penalty is added to its cost for mempool eviction.
