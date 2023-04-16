@@ -54,18 +54,6 @@ pub struct OrderedUtxo {
     pub tx_index_in_block: usize,
 }
 
-impl<'a> From<&'a OrderedUtxo> for &'a Utxo {
-    fn from(ordered_utxo: &'a OrderedUtxo) -> Self {
-        &ordered_utxo.utxo
-    }
-}
-
-impl From<OrderedUtxo> for Utxo {
-    fn from(ordered_utxo: OrderedUtxo) -> Self {
-        ordered_utxo.utxo
-    }
-}
-
 impl AsRef<Utxo> for OrderedUtxo {
     fn as_ref(&self) -> &Utxo {
         &self.utxo
