@@ -54,13 +54,13 @@ mod zip317;
 /// > transparent transactions because of their size.
 ///
 /// [ZIP-401]: https://zips.z.cash/zip-0401
-pub const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
+pub const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 10_000;
 
 /// When a transaction pays a fee less than the conventional fee,
 /// this low fee penalty is added to its cost for mempool eviction.
 ///
 /// See [VerifiedUnminedTx::eviction_weight()] for details.
-const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 16_000;
+const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 40_000;
 
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
