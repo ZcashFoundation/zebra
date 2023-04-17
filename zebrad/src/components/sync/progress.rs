@@ -1,6 +1,6 @@
 //! Progress tracking for blockchain syncing.
 
-use std::{cmp::min, ops::Add, str::FromStr, time::Duration};
+use std::{cmp::min, ops::Add, time::Duration};
 
 use chrono::{TimeZone, Utc};
 use num_integer::div_ceil;
@@ -14,7 +14,8 @@ use zebra_chain::{
 };
 use zebra_consensus::CheckpointList;
 use zebra_network::constants::{
-    EOS_PANIC_AFTER, EOS_PANIC_MESSAGE_HEADER, EOS_WARN_AFTER, RELEASE_DATE, RELEASE_NAME,
+    EOS_PANIC_AFTER, EOS_PANIC_MESSAGE_HEADER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
+    RELEASE_NAME,
 };
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
@@ -135,8 +136,8 @@ pub async fn show_block_chain_progress(
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
         // Check for the end of support of this release.
-        if let Some(block_tip_time) = latest_chain_tip.best_tip_block_time() {
-            end_of_support(block_tip_time);
+        if let Some(tip_height) = latest_chain_tip.best_tip_height() {
+            end_of_support(tip_height);
         }
 
         if let Some(estimated_height) =
@@ -338,29 +339,23 @@ pub async fn show_block_chain_progress(
 }
 
 /// Check if the current release is too old and panic if so.
-pub fn end_of_support(block_tip_time: chrono::DateTime<chrono::Utc>) {
+pub fn end_of_support(tip_height: Height) {
     info!("Checking if Zebra release is inside support range ...");
 
-    let release_date: chrono::DateTime<chrono::Utc> =
-        chrono::DateTime::from_str(RELEASE_DATE).expect("Release date must be valid");
-    let max_time_panic = release_date
-        .checked_add_days(chrono::Days::new(EOS_PANIC_AFTER))
-        .expect("`EOS_DURATION_PANIC` should never be that big to overflow");
-    let max_time_warning = release_date
-        .checked_add_days(chrono::Days::new(EOS_WARN_AFTER))
-        .expect("`EOS_DURATION_WARNING` should never be that big to overflow");
+    let panic_height = Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152));
+    let warn_height = Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * 1152));
 
-    if block_tip_time > max_time_panic {
+    if tip_height > panic_height {
         panic!(
             "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
-            \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
+            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
         );
-    } else if block_tip_time > max_time_warning {
+    } else if tip_height > warn_height {
         warn!(
-            "Your Zebra release is too old and it will stop running in {max_time_panic}. \
-            \nRelease name: {RELEASE_NAME}, Release date: {RELEASE_DATE} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
+            "Your Zebra release is too old and it will stop running in block {}. \
+            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
         );
     } else {
         info!("Zebra release is under support");

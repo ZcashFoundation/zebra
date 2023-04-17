@@ -26,20 +26,19 @@ use zebra_chain::{
 // TODO: generate this from crate metadata (#2375)
 pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
 
-/// The date of the current Zebra release.
-///
-/// This must be a valid `chrono::DateTime` with timezone string.
-pub const RELEASE_DATE: &str = "2023-03-23 00:00:00 +00:00";
+/// The estimated height that this release started to run.
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
 
-/// The maximum number of days after `RELEASE_DATE` where a Zebra server runs.
+/// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server runs.
 ///
 /// Notes:
 ///
-/// - Zebra will exit with a panic if the current date is bigger than the `RELEASE_DATE` date plus this number of days.
-pub const EOS_PANIC_AFTER: u64 = 180;
+/// - Zebra will exit with a panic if the current tip height is bigger than the `ESTIMATED_RELEASE_HEIGHT`
+///  plus this number of days.
+pub const EOS_PANIC_AFTER: u32 = 180;
 
 /// The number of days before the end of support where Zebra will display warnings.
-pub const EOS_WARN_AFTER: u64 = EOS_PANIC_AFTER - 5;
+pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 5;
 
 /// A string which is part of the panic that will be displayed if Zebra release is too old.
 pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";
