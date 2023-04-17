@@ -38,7 +38,7 @@ pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
 pub const EOS_PANIC_AFTER: u32 = 180;
 
 /// The number of days before the end of support where Zebra will display warnings.
-pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 5;
+pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
 
 /// A string which is part of the panic that will be displayed if Zebra release is too old.
 pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";
