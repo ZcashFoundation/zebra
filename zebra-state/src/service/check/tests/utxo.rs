@@ -55,9 +55,10 @@ fn accept_shielded_mature_coinbase_utxo_spend() {
     let result =
         check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, ordered_utxo.as_ref());
 
-    assert!(
-        result.is_ok(),
-        "transparent coinbase spend check should return Ok"
+    assert_eq!(
+        result,
+        Ok(()),
+        "mature transparent coinbase spend check should return Ok(())"
     );
 }
 

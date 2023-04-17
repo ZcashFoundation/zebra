@@ -5,7 +5,6 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    convert::TryFrom,
     hash::Hash,
     sync::Arc,
 };
@@ -470,12 +469,11 @@ fn validate_expiry_height_mined(
     Ok(())
 }
 
-/// Accepts a transaction, UTXOs in the same block, and spent UTXOs from the chain.
+/// Accepts a transaction, block height, block UTXOs, and
+/// the transaction's spent UTXOs from the chain.
 ///
-/// Returns the lowest/earlier height at which every transparent coinbase spend
-/// in the provided [`Transaction`] will be mature,
-///
-/// Returns None if the transaction has no transparent coinbase spends.
+/// Returns `Ok(())` if spent transparent coinbase outputs are
+/// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
     tx: Arc<Transaction>,
     height: Height,
@@ -491,7 +489,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
 
         let spend_restriction = tx.coinbase_spend_restriction(height);
 
-        zebra_state::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
+        zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }
 
     Ok(())

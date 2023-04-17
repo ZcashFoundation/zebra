@@ -564,8 +564,10 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
     );
 }
 
+/// Tests that calls to the transaction verifier with a mempool request that spends
+/// immature coinbase outputs will return an error.
 #[tokio::test]
-async fn mempool_response_maturity_height_correct() {
+async fn mempool_request_with_immature_spent_is_rejected() {
     let _init_guard = zebra_test::init();
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -592,7 +594,25 @@ async fn mempool_response_maturity_height_correct() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
+    let spend_restriction = tx.coinbase_spend_restriction(height);
+
     let coinbase_spend_height = Height(5);
+
+    let utxo = known_utxos
+        .get(&input_outpoint)
+        .map(|utxo| {
+            let mut utxo = utxo.utxo.clone();
+            utxo.height = coinbase_spend_height;
+            utxo.from_coinbase = true;
+            utxo
+        })
+        .expect("known_utxos should contain the outpoint");
+
+    let expected_error =
+        zebra_state::check::transparent_coinbase_spend(input_outpoint, spend_restriction, &utxo)
+            .map_err(Box::new)
+            .map_err(TransactionError::ValidateContextError)
+            .expect_err("check should fail");
 
     tokio::spawn(async move {
         state
@@ -633,10 +653,11 @@ async fn mempool_response_maturity_height_correct() {
             transaction: tx.into(),
             height,
         })
-        .await;
+        .await
+        .expect_err("verification of transaction with immature spend should fail");
 
-    assert!(
-        verifier_response.is_err(),
+    assert_eq!(
+        verifier_response, expected_error,
         "expected to fail verification, got: {verifier_response:?}"
     );
 }

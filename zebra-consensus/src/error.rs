@@ -190,7 +190,7 @@ pub enum TransactionError {
     #[error("could not validate nullifiers and anchors on best chain")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
-    ValidateNullifiersAndAnchorsError(Box<ValidateContextError>),
+    ValidateContextError(Box<ValidateContextError>),
 
     #[error("could not validate mempool transaction lock time on best chain")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
@@ -225,7 +225,7 @@ pub enum TransactionError {
 
 impl From<ValidateContextError> for TransactionError {
     fn from(err: ValidateContextError) -> Self {
-        TransactionError::ValidateNullifiersAndAnchorsError(Box::new(err))
+        TransactionError::ValidateContextError(Box::new(err))
     }
 }
 

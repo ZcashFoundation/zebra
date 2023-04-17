@@ -271,6 +271,7 @@ where
         unreachable!("unmatched response to a mempool::FullTransactions request")
     };
 
+    // Check that the mempool and state were in sync when we made the requests
     Ok((last_seen_tip_hash == chain_tip_hash).then_some(transactions))
 }
 

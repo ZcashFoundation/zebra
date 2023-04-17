@@ -226,20 +226,6 @@ impl Request {
     pub fn is_mempool(&self) -> bool {
         matches!(self, Request::Mempool { .. })
     }
-
-    /// Returns lowest height at which all transparent coinbase spends will be valid,
-    /// or None if this transaction has no transparent coinbase spends.
-    pub fn check_maturity_height(
-        &self,
-        spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<(), TransactionError> {
-        check::tx_transparent_coinbase_spends_maturity(
-            self.transaction(),
-            self.height(),
-            self.known_utxos(),
-            spent_utxos,
-        )
-    }
 }
 
 impl Response {
@@ -388,6 +374,12 @@ where
                 Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
             let (spent_utxos, spent_outputs) = load_spent_utxos_fut.await?;
 
+            // WONTFIX: Return an error for Request::Block as well to replace this check in
+            //       the state once #2336 has been implemented?
+            if req.is_mempool() {
+                Self::check_maturity_height(&req, &spent_utxos)?;
+            }
+
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
 
@@ -467,12 +459,6 @@ where
             }
 
             let legacy_sigop_count = cached_ffi_transaction.legacy_sigop_count()?;
-
-            // TODO: Return an error for Request::Block as well to replace this check in
-            //       the state once #2336 has been implemented?
-            if req.is_mempool() {
-                req.check_maturity_height(&spent_utxos)?;
-            }
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
@@ -585,6 +571,28 @@ where
             }
         }
         Ok((spent_utxos, spent_outputs))
+    }
+
+    /// Accepts `request`, a transaction verifier [`&Request`](Request),
+    /// and `spent_utxos`, a HashMap of UTXOs in the chain that are spent by this transaction.
+    ///
+    /// Gets the `transaction`, `height`, and `known_utxos` for the request and checks calls
+    /// [`check::tx_transparent_coinbase_spends_maturity`] to verify that every transparent
+    /// coinbase output spent by the transaction will have matured by `height`.
+    ///
+    /// Returns `Ok(())` if every transparent coinbase output spent by the transaction is
+    /// mature and valid for the request height, or a [`TransactionError`] if the transaction
+    /// spends transparent coinbase outputs that are immature and invalid for the request height.
+    pub fn check_maturity_height(
+        request: &Request,
+        spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<(), TransactionError> {
+        check::tx_transparent_coinbase_spends_maturity(
+            request.transaction(),
+            request.height(),
+            request.known_utxos(),
+            spent_utxos,
+        )
     }
 
     /// Verify a V4 transaction.
