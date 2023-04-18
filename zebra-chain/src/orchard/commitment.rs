@@ -2,9 +2,13 @@
 
 use std::{fmt, io};
 
-use group::{ff::PrimeField, prime::PrimeCurveAffine, GroupEncoding};
+use group::{
+    ff::{FromUniformBytes, PrimeField},
+    prime::PrimeCurveAffine,
+    GroupEncoding,
+};
 use halo2::{
-    arithmetic::{Coordinates, CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine},
     pasta::pallas,
 };
 use lazy_static::lazy_static;
@@ -29,7 +33,7 @@ where
     let mut bytes = [0u8; 64];
     csprng.fill_bytes(&mut bytes);
     // pallas::Scalar::from_bytes_wide() reduces the input modulo q_P under the hood.
-    pallas::Scalar::from_bytes_wide(&bytes)
+    pallas::Scalar::from_uniform_bytes(&bytes)
 }
 
 /// The randomness used in the Simsemilla hash for note commitment.

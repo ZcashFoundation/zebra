@@ -1,10 +1,13 @@
 //! Randomised data generation for Orchard types.
 
-use group::{ff::PrimeField, prime::PrimeCurveAffine};
-use halo2::{arithmetic::FieldExt, pasta::pallas};
-use proptest::{arbitrary::any, array, collection::vec, prelude::*};
-
+use group::{
+    ff::{FromUniformBytes, PrimeField},
+    prime::PrimeCurveAffine,
+};
+use halo2::pasta::pallas;
 use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, VerificationKeyBytes};
+
+use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use super::{
     keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment,
@@ -42,7 +45,7 @@ impl Arbitrary for note::Nullifier {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                Self::try_from(pallas::Scalar::from_bytes_wide(&bytes).to_repr())
+                Self::try_from(pallas::Scalar::from_uniform_bytes(&bytes).to_repr())
                     .expect("a valid generated nullifier")
             })
             .boxed()
@@ -98,7 +101,7 @@ impl Arbitrary for SpendAuthVerificationKeyBytes {
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
                 // Convert to a scalar
-                let sk_scalar = pallas::Scalar::from_bytes_wide(&bytes);
+                let sk_scalar = pallas::Scalar::from_uniform_bytes(&bytes);
                 // Convert that back to a (canonical) encoding
                 let sk_bytes = sk_scalar.to_repr();
                 // Decode it into a signing key
@@ -129,7 +132,7 @@ impl Arbitrary for tree::Root {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                Self::try_from(pallas::Base::from_bytes_wide(&bytes).to_repr())
+                Self::try_from(pallas::Base::from_uniform_bytes(&bytes).to_repr())
                     .expect("a valid generated Orchard note commitment tree root")
             })
             .boxed()
