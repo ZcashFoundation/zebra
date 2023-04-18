@@ -137,7 +137,7 @@ pub async fn show_block_chain_progress(
 
         // Check for the end of support of this release.
         if let Some(tip_height) = latest_chain_tip.best_tip_height() {
-            end_of_support(tip_height);
+            end_of_support(tip_height, network);
         }
 
         if let Some(estimated_height) =
@@ -339,11 +339,21 @@ pub async fn show_block_chain_progress(
 }
 
 /// Check if the current release is too old and panic if so.
-pub fn end_of_support(tip_height: Height) {
+pub fn end_of_support(tip_height: Height, network: Network) {
     info!("Checking if Zebra release is inside support range ...");
 
-    let panic_height = Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152));
-    let warn_height = Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * 1152));
+    // Get the current block spacing
+    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
+
+    // Get the number of blocks per day
+    let estimated_blocks_per_day =
+        u32::try_from(chrono::Duration::days(1).num_seconds() / target_block_spacing.num_seconds())
+            .expect("number is always small enough to fit");
+
+    let panic_height =
+        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * estimated_blocks_per_day));
+    let warn_height =
+        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * estimated_blocks_per_day));
 
     if tip_height > panic_height {
         panic!(
