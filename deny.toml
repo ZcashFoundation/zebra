@@ -64,12 +64,6 @@ skip-tree = [
     # wait for zcash_primitives to remove duplicated dependencies
     { name = "block-buffer", version = "=0.9.0" },
 
-    # wait for zcash_address to upgrade
-    { name = "bech32", version = "=0.8.1"},
-
-    # wait for zcash_proofs to upgrade `directories`
-    { name = "dirs-sys", version = "=0.3.7"},
-
     # zebra-utils dependencies
 
     # wait for structopt upgrade (or upgrade to clap 3)
