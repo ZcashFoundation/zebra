@@ -286,8 +286,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
 
-- Orchard proofs [fail to verify when Zebra is compiled with Rust 1.69 (nightly Rust)](https://github.com/zcash/halo2/issues/737). This will be resolved in the next Orchard release after 0.3.0.
-
 - Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent [#5502](https://github.com/ZcashFoundation/zebra/issues/5502). See the issue for details.
 
 ## Future Work
