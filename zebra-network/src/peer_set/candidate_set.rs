@@ -1,3 +1,5 @@
+//! Candidate peer selection for outbound connections using the [`CandidateSet`].
+
 use std::{cmp::min, sync::Arc};
 
 use chrono::Utc;
@@ -361,7 +363,8 @@ where
     ///
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
-    /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
+    /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
+    /// apart.
     ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
@@ -397,7 +400,7 @@ where
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;
-        self.min_next_handshake = Instant::now() + constants::MIN_PEER_CONNECTION_INTERVAL;
+        self.min_next_handshake = Instant::now() + constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL;
 
         Some(next_peer)
     }
