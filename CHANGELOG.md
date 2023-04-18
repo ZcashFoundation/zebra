@@ -12,14 +12,14 @@ This release features a security fix for unbounded memory use in zebra-network, 
 ### Security
 
 - Limit the number of leftover nonces in the self-connection nonce set ([#6534](https://github.com/ZcashFoundation/zebra/pull/6534))
-- fix(net): Allow each initial peer to send one inbound request before disconnecting any peers ([#6520](https://github.com/ZcashFoundation/zebra/pull/6520))
-- security(state): Limit the number of non-finalized chains tracked by Zebra ([#6447](https://github.com/ZcashFoundation/zebra/pull/6447))
-- change(deps): Update dependencies that only appear in the lock file ([#6217](https://github.com/ZcashFoundation/zebra/pull/6217))
+- Allow each initial peer to send one inbound request before disconnecting any peers ([#6520](https://github.com/ZcashFoundation/zebra/pull/6520))
+- Limit the number of non-finalized chains tracked by Zebra ([#6447](https://github.com/ZcashFoundation/zebra/pull/6447))
+- Update dependencies that only appear in the lock file ([#6217](https://github.com/ZcashFoundation/zebra/pull/6217))
 
 ### Added
 
-- change(rpc): Add confirmations to getrawtransaction method response ([#6287](https://github.com/ZcashFoundation/zebra/pull/6287))
-- feat(log): Add a config for writing logs to a file ([#6449](https://github.com/ZcashFoundation/zebra/pull/6449))
+- Add confirmations to getrawtransaction method response ([#6287](https://github.com/ZcashFoundation/zebra/pull/6287))
+- Add a config for writing logs to a file ([#6449](https://github.com/ZcashFoundation/zebra/pull/6449))
 - Add an experimental terminal-based progress bar feature to Zebra, which is off by default ([#6235](https://github.com/ZcashFoundation/zebra/pull/6235))
 - Create DockerHub image with mining enabled after each Zebra release ([#6228](https://github.com/ZcashFoundation/zebra/pull/6228))
 
@@ -27,19 +27,19 @@ This release features a security fix for unbounded memory use in zebra-network, 
 
 - Increase ZIP-401 mempool cost thresholds for Orchard transactions ([#6521](https://github.com/ZcashFoundation/zebra/pull/6521))
 - Suggest making sure the RPC endpoint is enabled for checkpointing ([#6375](https://github.com/ZcashFoundation/zebra/pull/6375))
-- change(chain): Refactor the handling of height differences ([#6330](https://github.com/ZcashFoundation/zebra/pull/6330))
-- change(deps): Upgrade shared dependencies to match `zcashd` 5.5.0 ([#6536](https://github.com/ZcashFoundation/zebra/pull/6536))
-- change(state): Lookup unspent UTXOs in non-finalized state before checking disk ([#6513](https://github.com/ZcashFoundation/zebra/pull/6513))
-- change(state): Stop re-downloading blocks that are in non-finalized side chains ([#6335](https://github.com/ZcashFoundation/zebra/pull/6335))
+- Refactor the handling of height differences ([#6330](https://github.com/ZcashFoundation/zebra/pull/6330))
+- Upgrade shared dependencies to match `zcashd` 5.5.0 ([#6536](https://github.com/ZcashFoundation/zebra/pull/6536))
+- Lookup unspent UTXOs in non-finalized state before checking disk ([#6513](https://github.com/ZcashFoundation/zebra/pull/6513))
+- Stop re-downloading blocks that are in non-finalized side chains ([#6335](https://github.com/ZcashFoundation/zebra/pull/6335))
 
 ### Fixed
 
-- fix(chain): Validate header versions when serializing blocks ([#6475](https://github.com/ZcashFoundation/zebra/pull/6475))
-- fix(mempool): Stop ignoring new transactions after the mempool is newly activated ([#6448](https://github.com/ZcashFoundation/zebra/pull/6448))
-- fix(net): Fix off-by-one error in DNS seed peer retries, and clarify logs ([#6460](https://github.com/ZcashFoundation/zebra/pull/6460))
-- fix(rpc): Check that mempool transactions are valid for the state's chain info in getblocktemplate ([#6416](https://github.com/ZcashFoundation/zebra/pull/6416))
+- Validate header versions when serializing blocks ([#6475](https://github.com/ZcashFoundation/zebra/pull/6475))
+- Stop ignoring new transactions after the mempool is newly activated ([#6448](https://github.com/ZcashFoundation/zebra/pull/6448))
+- Fix off-by-one error in DNS seed peer retries, and clarify logs ([#6460](https://github.com/ZcashFoundation/zebra/pull/6460))
+- Check that mempool transactions are valid for the state's chain info in getblocktemplate ([#6416](https://github.com/ZcashFoundation/zebra/pull/6416))
 - Remove transactions with immature transparent coinbase spends from the mempool and block templates ([#6510](https://github.com/ZcashFoundation/zebra/pull/6510))
-- fix(ux): Disable issue URLs for a known shutdown panic in abscissa ([#6486](https://github.com/ZcashFoundation/zebra/pull/6486))
+- Disable issue URLs for a known shutdown panic in abscissa ([#6486](https://github.com/ZcashFoundation/zebra/pull/6486))
 
 ### Contributors
 
