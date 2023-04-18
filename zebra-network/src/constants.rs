@@ -158,7 +158,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 /// connections are only initiated after this minimum time has elapsed.
 ///
 /// It also enforces a minimum per-peer reconnection interval, and filters failed outbound peers.
-pub const MIN_OUTBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(50);
+pub const MIN_OUTBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The minimum time between _successful_ inbound peer connections, implemented by
 /// `peer_set::initialize::accept_inbound_connections`.
@@ -398,8 +398,8 @@ mod tests {
                 / (u32::try_from(MAX_ADDRS_IN_ADDRESS_BOOK).expect("fits in u32")
                     * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL)
                     .as_secs() as f32
-                >= 0.5,
-            "most peers should get a connection attempt in each connection interval",
+                >= 0.2,
+            "some peers should get a connection attempt in each connection interval",
         );
 
         assert!(
