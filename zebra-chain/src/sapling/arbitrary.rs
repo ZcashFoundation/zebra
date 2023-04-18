@@ -1,10 +1,11 @@
-use std::convert::TryInto;
+//! Randomised data generation for sapling types.
 
 use group::Group;
 use jubjub::{AffinePoint, ExtendedPoint};
-use proptest::{arbitrary::any, collection::vec, prelude::*};
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
+
+use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use crate::primitives::Groth16Proof;
 
