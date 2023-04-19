@@ -166,6 +166,7 @@ jobs:
           --create-disk=name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
+          --network-interface=subnet=projects/zfnd-dev-net-spoke-0/regions/us-east1/subnetworks/dev-default-ue1 \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
@@ -409,6 +410,7 @@ jobs:
           --create-disk=image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
+          --network-interface=subnet=projects/zfnd-dev-net-spoke-0/regions/us-east1/subnetworks/dev-default-ue1 \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
