@@ -36,7 +36,7 @@ where
         .try_fill_bytes(&mut bytes)
         .map_err(|_| RandError::FillBytes)?;
     // pallas::Scalar::from_uniform_bytes() reduces the input modulo q_P under the hood.
-    ok(pallas::Scalar::from_uniform_bytes(&bytes))
+    Ok(pallas::Scalar::from_uniform_bytes(&bytes))
 }
 
 /// The randomness used in the Simsemilla hash for note commitment.
