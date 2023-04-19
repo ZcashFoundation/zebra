@@ -504,7 +504,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     // Change the header hash
     let mut bad_block0 = good_block0.clone();
     let bad_block0_mut = Arc::make_mut(&mut bad_block0);
-    Arc::make_mut(&mut bad_block0_mut.header).version = 0;
+    Arc::make_mut(&mut bad_block0_mut.header).version = 5;
 
     // Make a checkpoint list containing the genesis block checkpoint
     let genesis_checkpoint_list: BTreeMap<block::Height, block::Hash> =

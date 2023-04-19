@@ -43,7 +43,6 @@ on:
       - '.github/workflows/zcash-lightwalletd.yml'
 
 env:
-  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   IMAGE_NAME: lightwalletd
 
 jobs:
@@ -55,13 +54,13 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.2
         with:
           repository: adityapk00/lightwalletd
           ref: 'master'
           persist-credentials: false
 
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.2
         with:
           path: zebra
           persist-credentials: false
@@ -74,11 +73,11 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.3.0
+        uses: docker/metadata-action@v4.4.0
         with:
           # list of Docker images to use as base name for tags
           images: |
-            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
+            ${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}
           # generate Docker tags based on the following events/attributes
           # set latest tag for default branch
           tags: |
@@ -112,11 +111,11 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v1.1.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
           token_format: 'access_token'
 
       - name: Set up Cloud SDK
@@ -143,5 +142,5 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: true
-          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ vars.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max

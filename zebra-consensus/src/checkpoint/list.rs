@@ -201,4 +201,21 @@ impl CheckpointList {
     pub fn iter(&self) -> impl Iterator<Item = (&block::Height, &block::Hash)> {
         self.0.iter()
     }
+
+    /// Returns the checkpoint at `height`, as a zero-based index.
+    /// If `height` is not a checkpoint height, returns the checkpoint immediately before that height.
+    pub fn prev_checkpoint_index(&self, height: block::Height) -> usize {
+        self.0
+            .keys()
+            .rposition(|&key| key <= height)
+            .expect("checkpoints must start at the genesis block height 0")
+    }
+
+    /// Returns the number of checkpoints in the list.
+    //
+    // Checkpoint lists are never empty by construction.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }

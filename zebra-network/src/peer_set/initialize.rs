@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     net::SocketAddr,
     sync::Arc,
+    time::Duration,
 };
 
 use futures::{
@@ -175,6 +176,7 @@ where
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
+        constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
     );
@@ -259,7 +261,10 @@ where
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
 
-    let mut active_outbound_connections = ActiveConnectionCounter::new_counter();
+    let mut active_outbound_connections = ActiveConnectionCounter::new_counter_with(
+        config.peerset_outbound_connection_limit(),
+        "Outbound Connections",
+    );
 
     info!(
         initial_peer_count = ?initial_peers.len(),
@@ -270,9 +275,7 @@ where
     // # Security
     //
     // Resists distributed denial of service attacks by making sure that
-    // new peer connections are initiated at least
-    // [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL]
-    // apart.
+    // new peer connections are initiated at least `MIN_OUTBOUND_PEER_CONNECTION_INTERVAL` apart.
     //
     // # Correctness
     //
@@ -294,9 +297,13 @@ where
             // Spawn a new task to make the outbound connection.
             tokio::spawn(
                 async move {
-                    // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
-                    // sleeping for an interval according to its index in the list.
-                    sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
+                    // Only spawn one outbound connector per
+                    // `MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`,
+                    // by sleeping for the interval multiplied by the peer's index in the list.
+                    sleep(
+                        constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32),
+                    )
+                    .await;
 
                     // As soon as we create the connector future,
                     // the handshake starts running as a spawned task.
@@ -504,11 +511,13 @@ pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) 
 /// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
 /// the [`peer::Client`] result over `peerset_tx`.
 ///
-/// Limit the number of active inbound connections based on `config`.
+/// Limits the number of active inbound connections based on `config`,
+/// and waits `min_inbound_peer_connection_interval` between connections.
 #[instrument(skip(config, listener, handshaker, peerset_tx), fields(listener_addr = ?listener.local_addr()))]
 async fn accept_inbound_connections<S>(
     config: Config,
     listener: TcpListener,
+    min_inbound_peer_connection_interval: Duration,
     mut handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
@@ -517,7 +526,10 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
-    let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
+    let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
+        config.peerset_inbound_connection_limit(),
+        "Inbound Connections",
+    );
 
     let mut handshakes = FuturesUnordered::new();
     // Keeping an unresolved future in the pool means the stream never terminates.
@@ -590,28 +602,35 @@ where
                 handshakes.push(Box::pin(handshake_task));
             }
 
-            // Only spawn one inbound connection handshake per `MIN_PEER_CONNECTION_INTERVAL`.
-            // But clear out failed connections as fast as possible.
+            // Rate-limit inbound connection handshakes.
+            // But sleep longer after a successful connection,
+            // so we can clear out failed connections at a higher rate.
             //
             // If there is a flood of connections,
             // this stops Zebra overloading the network with handshake data.
             //
             // Zebra can't control how many queued connections are waiting,
             // but most OSes also limit the number of queued inbound connections on a listener port.
-            tokio::time::sleep(constants::MIN_PEER_CONNECTION_INTERVAL).await;
+            tokio::time::sleep(min_inbound_peer_connection_interval).await;
         } else {
+            // Allow invalid connections to be cleared quickly,
+            // but still put a limit on our CPU and network usage from failed connections.
             debug!(?inbound_result, "error accepting inbound connection");
+            tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
         }
 
         // Security: Let other tasks run after each connection is processed.
         //
-        // Avoids remote peers starving other Zebra tasks using inbound connection successes or errors.
+        // Avoids remote peers starving other Zebra tasks using inbound connection successes or
+        // errors.
+        //
+        // Preventing a denial of service is important in this code, so we want to sleep *and* make
+        // the next connection after other tasks have run. (Sleeps are not guaranteed to do that.)
         tokio::task::yield_now().await;
     }
 }
 
 /// An action that the peer crawler can take.
-#[allow(dead_code)]
 enum CrawlerAction {
     /// Drop the demand signal because there are too many pending handshakes.
     DemandDrop,

@@ -117,7 +117,6 @@ fn progress_from_tip(
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
-#[derive(Debug)]
 pub struct CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -156,6 +155,30 @@ where
     /// A channel to send requests to reset the verifier,
     /// passing the tip of the state.
     reset_sender: mpsc::Sender<Option<(block::Height, block::Hash)>>,
+
+    /// Queued block height progress transmitter.
+    #[cfg(feature = "progress-bar")]
+    queued_blocks_bar: howudoin::Tx,
+
+    /// Verified checkpoint progress transmitter.
+    #[cfg(feature = "progress-bar")]
+    verified_checkpoint_bar: howudoin::Tx,
+}
+
+impl<S> std::fmt::Debug for CheckpointVerifier<S>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckpointVerifier")
+            .field("checkpoint_list", &self.checkpoint_list)
+            .field("network", &self.network)
+            .field("initial_tip_hash", &self.initial_tip_hash)
+            .field("queued", &self.queued)
+            .field("verifier_progress", &self.verifier_progress)
+            .finish()
+    }
 }
 
 impl<S> CheckpointVerifier<S>
@@ -240,7 +263,14 @@ where
             progress_from_tip(&checkpoint_list, initial_tip);
 
         let (sender, receiver) = mpsc::channel();
-        CheckpointVerifier {
+
+        #[cfg(feature = "progress-bar")]
+        let queued_blocks_bar = howudoin::new().label("Queued Checkpoint Blocks");
+
+        #[cfg(feature = "progress-bar")]
+        let verified_checkpoint_bar = howudoin::new().label("Verified Checkpoints");
+
+        let verifier = CheckpointVerifier {
             checkpoint_list,
             network,
             initial_tip_hash,
@@ -249,6 +279,82 @@ where
             verifier_progress,
             reset_receiver: receiver,
             reset_sender: sender,
+            #[cfg(feature = "progress-bar")]
+            queued_blocks_bar,
+            #[cfg(feature = "progress-bar")]
+            verified_checkpoint_bar,
+        };
+
+        if verifier_progress.is_final_checkpoint() {
+            verifier.finish_diagnostics();
+        } else {
+            verifier.verified_checkpoint_diagnostics(verifier_progress.height());
+        }
+
+        verifier
+    }
+
+    /// Update diagnostics for queued blocks.
+    fn queued_block_diagnostics(&self, height: block::Height, hash: block::Hash) {
+        let max_queued_height = self
+            .queued
+            .keys()
+            .next_back()
+            .expect("queued has at least one entry");
+
+        metrics::gauge!("checkpoint.queued.max.height", max_queued_height.0 as f64);
+
+        let is_checkpoint = self.checkpoint_list.contains(height);
+        tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
+
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.finish_diagnostics();
+        } else {
+            self.queued_blocks_bar
+                .set_pos(max_queued_height.0)
+                .set_len(u64::from(self.checkpoint_list.max_height().0));
+        }
+    }
+
+    /// Update diagnostics for verified checkpoints.
+    fn verified_checkpoint_diagnostics(&self, verified_height: impl Into<Option<block::Height>>) {
+        let Some(verified_height) = verified_height.into() else {
+            // We don't know if we have already finished, or haven't started yet,
+            // so don't register any progress
+            return;
+        };
+
+        metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
+
+        let checkpoint_index = self.checkpoint_list.prev_checkpoint_index(verified_height);
+        let checkpoint_count = self.checkpoint_list.len();
+
+        metrics::gauge!("checkpoint.verified.count", checkpoint_index as f64);
+
+        tracing::debug!(
+            ?verified_height,
+            ?checkpoint_index,
+            ?checkpoint_count,
+            "verified checkpoint",
+        );
+
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.finish_diagnostics();
+        } else {
+            self.verified_checkpoint_bar
+                .set_pos(u64::try_from(checkpoint_index).expect("fits in u64"))
+                .set_len(u64::try_from(checkpoint_count).expect("fits in u64"));
+        }
+    }
+
+    /// Finish checkpoint verifier diagnostics.
+    fn finish_diagnostics(&self) {
+        #[cfg(feature = "progress-bar")]
+        {
+            self.queued_blocks_bar.close();
+            self.verified_checkpoint_bar.close();
         }
     }
 
@@ -257,6 +363,8 @@ where
         let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
         self.initial_tip_hash = initial_tip_hash;
         self.verifier_progress = verifier_progress;
+
+        self.verified_checkpoint_diagnostics(verifier_progress.height());
     }
 
     /// Return the current verifier's progress.
@@ -452,18 +560,21 @@ where
 
         // Ignore heights that aren't checkpoint heights
         if verified_height == self.checkpoint_list.max_height() {
-            metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = FinalCheckpoint;
 
             tracing::info!(
                 final_checkpoint_height = ?verified_height,
                 "verified final checkpoint: starting full validation",
             );
+
+            self.verified_checkpoint_diagnostics(verified_height);
+            self.finish_diagnostics();
         } else if self.checkpoint_list.contains(verified_height) {
-            metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = PreviousCheckpoint(verified_height);
             // We're done with the initial tip hash now
             self.initial_tip_hash = None;
+
+            self.verified_checkpoint_diagnostics(verified_height);
         }
     }
 
@@ -568,17 +679,7 @@ where
         qblocks.reserve_exact(1);
         qblocks.push(new_qblock);
 
-        metrics::gauge!(
-            "checkpoint.queued.max.height",
-            self.queued
-                .keys()
-                .next_back()
-                .expect("queued has at least one entry")
-                .0 as f64,
-        );
-
-        let is_checkpoint = self.checkpoint_list.contains(height);
-        tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
+        self.queued_block_diagnostics(height, hash);
 
         Ok(req_block)
     }
@@ -818,6 +919,8 @@ where
     /// We can't implement `Drop` on QueuedBlock, because `send()` consumes
     /// `tx`. And `tx` doesn't implement `Copy` or `Default` (for `take()`).
     fn drop(&mut self) {
+        self.finish_diagnostics();
+
         let drop_keys: Vec<_> = self.queued.keys().cloned().collect();
         for key in drop_keys {
             let mut qblocks = self

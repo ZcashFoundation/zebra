@@ -9,6 +9,10 @@ edition = "2021"
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
+progress-bar = [
+    "howudoin",
+]
+
 # Experimental mining RPC support
 getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
@@ -42,7 +46,7 @@ mset = "0.1.1"
 regex = "1.7.3"
 rlimit = "0.9.1"
 rocksdb = { version = "0.20.1", default_features = false, features = ["lz4"] }
-serde = { version = "1.0.159", features = ["serde_derive"] }
+serde = { version = "1.0.160", features = ["serde_derive"] }
 tempfile = "3.5.0"
 thiserror = "1.0.40"
 
@@ -53,11 +57,15 @@ tracing = "0.1.37"
 
 # elasticsearch specific dependencies.
 elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional = true }
-serde_json = { version = "1.0.95", package = "serde_json", optional = true }
+serde_json = { version = "1.0.96", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
-zebra-test = { path = "../zebra-test/", optional = true }
 
+# prod feature progress-bar
+howudoin = { version = "0.1.2", optional = true }
+
+# test feature proptest-impl
+zebra-test = { path = "../zebra-test/", optional = true }
 proptest = { version = "1.1.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
@@ -76,8 +84,8 @@ insta = { version = "1.29.0", features = ["ron"] }
 proptest = "1.1.0"
 proptest-derive = "0.3.0"
 
-halo2 = { package = "halo2_proofs", version = "0.2.0" }
-jubjub = "0.9.0"
+halo2 = { package = "halo2_proofs", version = "0.3.0" }
+jubjub = "0.10.0"
 
 tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 

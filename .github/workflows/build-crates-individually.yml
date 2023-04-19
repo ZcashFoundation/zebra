@@ -37,11 +37,11 @@ on:
       - '.github/workflows/build-crates-individually.yml'
 
 env:
-  CARGO_INCREMENTAL: 0
-  RUST_LOG: info
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
   matrix:
@@ -50,7 +50,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.2
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -106,7 +106,7 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
 

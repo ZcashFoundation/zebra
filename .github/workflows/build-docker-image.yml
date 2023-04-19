@@ -68,7 +68,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.0
+      - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
 
@@ -80,11 +80,11 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.3.0
+        uses: docker/metadata-action@v4.4.0
         with:
           # list of Docker images to use as base name for tags
           images: |
-            us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
+            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
             zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
           # appends inputs.tag_suffix to image tags/names
           flavor: |
@@ -116,11 +116,11 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v1.1.0
         with:
           retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
           token_format: 'access_token'
           # Some builds might take over an hour, and Google's default lifetime duration for
           # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
@@ -177,7 +177,7 @@ jobs:
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-to: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

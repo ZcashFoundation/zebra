@@ -31,6 +31,8 @@ pub(crate) mod difficulty;
 pub(crate) mod nullifier;
 pub(crate) mod utxo;
 
+pub use utxo::transparent_coinbase_spend;
+
 #[cfg(test)]
 mod tests;
 
