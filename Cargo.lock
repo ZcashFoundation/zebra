@@ -5924,6 +5924,7 @@ dependencies = [
  "itertools",
  "jubjub 0.10.0",
  "lazy_static",
+ "num-integer",
  "orchard 0.4.0",
  "primitive-types",
  "proptest",
