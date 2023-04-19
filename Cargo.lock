@@ -5984,6 +5984,7 @@ dependencies = [
  "jubjub 0.10.0",
  "lazy_static",
  "metrics",
+ "num-integer",
  "once_cell",
  "orchard 0.4.0",
  "proptest",
