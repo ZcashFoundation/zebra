@@ -730,6 +730,7 @@ where
     // maliciously remove nonces, and force us to make self-connections.
     let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
+        info!(?connected_addr, "rejecting self-connection attempt");
         Err(HandshakeError::RemoteNonceReuse)?;
     }
 
