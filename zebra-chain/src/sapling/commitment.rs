@@ -12,7 +12,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::{Amount, NonNegative},
-    error::{AffinePointError, CryptoError, RandError},
+    error::{NoteCommitmentError, RandError},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
@@ -107,7 +107,7 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-    ) -> Result<(CommitmentRandomness, Self), CryptoError>
+    ) -> Result<(CommitmentRandomness, Self), NoteCommitmentError>
     where
         T: RngCore + CryptoRng,
     {
@@ -124,7 +124,7 @@ impl NoteCommitment {
         // calling `DiversifyHash` implicitly.
 
         let g_d_bytes = jubjub::AffinePoint::try_from(diversifier)
-            .map_err(|_| CryptoError::Affine(AffinePointError::FromDiversifier))?
+            .map_err(|_| NoteCommitmentError::InvalidDiversifier)?
             .to_bytes();
 
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
