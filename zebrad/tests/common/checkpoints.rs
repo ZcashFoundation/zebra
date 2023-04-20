@@ -19,7 +19,7 @@ use tempfile::TempDir;
 
 use zebra_chain::{
     block::{Height, HeightDiff, TryIntoHeight},
-    parameters::Network::{self, *},
+    parameters::Network,
     transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
@@ -31,9 +31,7 @@ use zebra_test::{
 };
 
 use crate::common::{
-    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
-    sync::SYNC_FINISHED_REGEX,
-    test_type::TestType::*,
+    launch::spawn_zebrad_for_rpc, sync::SYNC_FINISHED_REGEX, test_type::TestType::*,
 };
 
 use super::{
@@ -49,28 +47,14 @@ use super::{
 pub async fn run(network: Network) -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // We want a Zebra state dir on Mainnet,
-    // but we don't need `lightwalletd`.
-    let mut test_type = UpdateZebraCachedStateWithRpc;
+    // We want a Zebra state dir, but we don't need `lightwalletd`.
+    let test_type = UpdateZebraCachedStateWithRpc;
     let test_name = "zebra_checkpoints_test";
 
-    // For testnet, also allow a full sync instead.
-    let alt_testnet_test_type = FullSyncFromGenesis {
-        needs_zebra_rpc_server: true,
-        launches_lightwalletd: false,
-        allow_lightwalletd_cached_state: false,
+    // Skip the test unless the user supplied the correct cached state env vars
+    let Some(zebrad_state_path) = test_type.zebrad_state_path(test_name) else {
+        return Ok(());
     };
-
-    // Skip the test unless the user supplied the correct cached state
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
-        if network == Testnet && can_spawn_zebrad_for_rpc(test_name, alt_testnet_test_type) {
-            test_type = alt_testnet_test_type;
-        } else {
-            return Ok(());
-        }
-    }
-
-    let zebrad_state_path = test_type.zebrad_state_path(test_name);
 
     tracing::info!(
         ?network,
