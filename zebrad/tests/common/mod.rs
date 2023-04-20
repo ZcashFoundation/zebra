@@ -11,6 +11,7 @@
 
 pub mod cached_state;
 pub mod check;
+pub mod checkpoints;
 pub mod config;
 pub mod failure_messages;
 pub mod launch;

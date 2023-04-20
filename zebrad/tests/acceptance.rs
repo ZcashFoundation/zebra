@@ -2209,3 +2209,22 @@ async fn get_block_template() -> Result<()> {
 async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
+
+/// Test `zebra-checkpoints` on mainnet.
+///
+/// See [`common::checkpoints`] for more information.
+#[tokio::test]
+#[ignore]
+async fn checkpoints_mainnet() -> Result<()> {
+    common::checkpoints::run(Mainnet).await
+}
+
+/// Test `zebra-checkpoints` on testnet.
+/// This test might fail if testnet is unstable.
+///
+/// See [`common::checkpoints`] for more information.
+#[tokio::test]
+#[ignore]
+async fn checkpoints_testnet() -> Result<()> {
+    common::checkpoints::run(Testnet).await
+}
