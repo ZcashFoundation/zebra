@@ -104,10 +104,10 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # This is the caching Docker layer for Rust!
 #
 # TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features "sentry ${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
+RUN cargo chef cook --release --features "sentry zebra-checkpoints ${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
 COPY . .
-RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
+RUN cargo test --locked --release --features "zebra-checkpoints ${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
