@@ -84,6 +84,8 @@ ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="sentry"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
+# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# separately from the test and production image builds.
 ENV ENTRYPOINT_FEATURES "$TEST_FEATURES $FEATURES"
 
 ARG NETWORK
