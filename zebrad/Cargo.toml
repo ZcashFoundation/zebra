@@ -80,6 +80,11 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
+# Build the zebra-checkpoints utility for checkpoint generation tests
+zebra-checkpoints = [
+    "zebra-utils/zebra-checkpoints",
+]
+
 # The gRPC tests also need an installed lightwalletd binary
 lightwalletd-grpc-tests = ["tonic-build"]
 
@@ -219,3 +224,7 @@ zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-node-services = { path = "../zebra-node-services", features = ["rpc-client"] }
 
 zebra-test = { path = "../zebra-test" }
+
+# Use for the checkpoint generation tests via the zebra-checkpoints feature
+# (the binaries in this crate won't be built unless their features are enabled)
+zebra-utils = { path = "../zebra-utils" }

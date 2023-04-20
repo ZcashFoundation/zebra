@@ -2215,6 +2215,7 @@ async fn submit_block() -> Result<()> {
 /// See [`common::checkpoints`] for more information.
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "zebra-checkpoints")]
 async fn checkpoints_mainnet() -> Result<()> {
     common::checkpoints::run(Mainnet).await
 }
@@ -2225,6 +2226,7 @@ async fn checkpoints_mainnet() -> Result<()> {
 /// See [`common::checkpoints`] for more information.
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "zebra-checkpoints")]
 async fn checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Testnet).await
 }

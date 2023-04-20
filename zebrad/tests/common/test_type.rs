@@ -31,6 +31,7 @@ pub enum TestType {
     /// Do a full sync from an empty lightwalletd state.
     ///
     /// This test requires a cached Zebra state.
+    #[allow(dead_code)]
     FullSyncFromGenesis {
         /// Configures whether the test needs a Zebra RPC server.
         needs_zebra_rpc_server: bool,
@@ -60,6 +61,7 @@ pub enum TestType {
     /// Launch `zebrad` and sync it to the tip, but don't launch `lightwalletd`.
     ///
     /// This test requires a cached Zebra state.
+    #[allow(dead_code)]
     UpdateZebraCachedStateWithRpc,
 }
 
