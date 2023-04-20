@@ -35,6 +35,12 @@ pub enum TestType {
     // Only used with `--features=lightwalletd-grpc-tests`.
     #[allow(dead_code)]
     FullSyncFromGenesis {
+        /// Configures whether the test needs a Zebra RPC server.
+        needs_zebra_rpc_server: bool,
+
+        /// Configures whether the test uses lightwalletd.
+        launches_lightwalletd: bool,
+
         /// Should the test allow a cached lightwalletd state?
         ///
         /// If `false`, the test fails if the lightwalletd state is populated.
@@ -80,10 +86,13 @@ impl TestType {
     /// Does this test need a Zebra rpc server?
     pub fn needs_zebra_rpc_server(&self) -> bool {
         match self {
-            UpdateZebraCachedStateWithRpc | LaunchWithEmptyState { .. } => true,
-            UpdateZebraCachedStateNoRpc | FullSyncFromGenesis { .. } | UpdateCachedState => {
-                self.launches_lightwalletd()
-            }
+            UpdateZebraCachedStateNoRpc => false,
+            UpdateZebraCachedStateWithRpc => true,
+            FullSyncFromGenesis {
+                needs_zebra_rpc_server,
+                ..
+            } => *needs_zebra_rpc_server || self.launches_lightwalletd(),
+            LaunchWithEmptyState { .. } | UpdateCachedState => self.launches_lightwalletd(),
         }
     }
 
@@ -91,9 +100,13 @@ impl TestType {
     pub fn launches_lightwalletd(&self) -> bool {
         match self {
             UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => false,
-            FullSyncFromGenesis { .. } | UpdateCachedState => true,
+            UpdateCachedState => true,
             LaunchWithEmptyState {
                 launches_lightwalletd,
+            }
+            | FullSyncFromGenesis {
+                launches_lightwalletd,
+                ..
             } => *launches_lightwalletd,
         }
     }
@@ -119,7 +132,9 @@ impl TestType {
             LaunchWithEmptyState { .. } => false,
             FullSyncFromGenesis {
                 allow_lightwalletd_cached_state,
-            } => *allow_lightwalletd_cached_state,
+                launches_lightwalletd,
+                ..
+            } => *launches_lightwalletd && *allow_lightwalletd_cached_state,
             UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => true,
         }
     }

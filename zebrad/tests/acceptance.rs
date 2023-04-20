@@ -1526,6 +1526,8 @@ fn lightwalletd_update_sync() -> Result<()> {
 #[cfg(feature = "lightwalletd-grpc-tests")]
 fn lightwalletd_full_sync() -> Result<()> {
     lightwalletd_integration_test(FullSyncFromGenesis {
+        needs_zebra_rpc_server: true,
+        launches_lightwalletd: true,
         allow_lightwalletd_cached_state: false,
     })
 }
@@ -1571,6 +1573,8 @@ async fn lightwalletd_test_suite() -> Result<()> {
         // Only runs when ZEBRA_CACHED_STATE_DIR is set.
         // When manually running the test suite, allow cached state in the full sync test.
         lightwalletd_integration_test(FullSyncFromGenesis {
+            needs_zebra_rpc_server: true,
+            launches_lightwalletd: true,
             allow_lightwalletd_cached_state: true,
         })?;
 

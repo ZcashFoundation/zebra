@@ -59,11 +59,6 @@ use crate::common::{
 };
 
 /// The test entry point.
-//
-// TODO:
-// - check output of zebrad and lightwalletd in different threads,
-//   to avoid test hangs due to full output pipes
-//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 

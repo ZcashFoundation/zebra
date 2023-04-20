@@ -148,7 +148,7 @@ pub fn can_spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 }
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
-/// directory for `zebrad`.
+/// directory for `lightwalletd`.
 pub trait LightWalletdTestDirExt: ZebradTestDirExt
 where
     Self: AsRef<Path> + Sized,
