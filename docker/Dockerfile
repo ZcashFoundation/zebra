@@ -109,6 +109,7 @@ RUN cargo chef cook --release --features "sentry ${TEST_FEATURES} ${FEATURES}" -
 COPY . .
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
+RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
