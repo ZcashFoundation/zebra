@@ -6,7 +6,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::{Amount, NonNegative},
-    error::RandError,
+    error::{NoteError, RandError},
 };
 
 use super::{address::Address, sinsemilla::extract_p};
@@ -62,16 +62,22 @@ impl From<Nullifier> for Rho {
 }
 
 impl Rho {
-    pub fn new<T>(csprng: &mut T) -> Result<Self, RandError>
+    pub fn new<T>(csprng: &mut T) -> Result<Self, NoteError>
     where
         T: RngCore + CryptoRng,
     {
         let mut bytes = [0u8; 32];
         csprng
             .try_fill_bytes(&mut bytes)
-            .map_err(|_| RandError::FillBytes)?;
+            .map_err(|_| NoteError::from(RandError::FillBytes))?;
 
-        Ok(Self(extract_p(pallas::Point::from_bytes(&bytes).unwrap())))
+        let possible_point = pallas::Point::from_bytes(&bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(extract_p(possible_point.unwrap())))
+        } else {
+            Err(NoteError::InvalidRho)
+        }
     }
 }
 

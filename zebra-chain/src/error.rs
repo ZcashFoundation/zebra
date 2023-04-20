@@ -9,6 +9,17 @@ pub enum RandError {
     FillBytes,
 }
 
+/// An error type pertaining to shielded notes.
+#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+pub enum NoteError {
+    /// Errors of type `RandError`.
+    #[error("Randomness generation failure")]
+    InsufficientRandomness(#[from] RandError),
+    /// Error of `pallas::Point::from_bytes()` for new rho randomness.
+    #[error("failed to generate an Orchard note's rho.")]
+    InvalidRho,
+}
+
 /// An error type pertaining to note commitments.
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteCommitmentError {
