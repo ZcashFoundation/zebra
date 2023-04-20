@@ -4,7 +4,10 @@ use group::{ff::PrimeField, GroupEncoding};
 use halo2::pasta::pallas;
 use rand_core::{CryptoRng, RngCore};
 
-use crate::amount::{Amount, NonNegative};
+use crate::{
+    amount::{Amount, NonNegative},
+    error::{NoteError, RandError},
+};
 
 use super::{address::Address, sinsemilla::extract_p};
 
@@ -22,13 +25,15 @@ mod arbitrary;
 pub struct SeedRandomness(pub(crate) [u8; 32]);
 
 impl SeedRandomness {
-    pub fn new<T>(csprng: &mut T) -> Self
+    pub fn new<T>(csprng: &mut T) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
         let mut bytes = [0u8; 32];
-        csprng.fill_bytes(&mut bytes);
-        Self(bytes)
+        csprng
+            .try_fill_bytes(&mut bytes)
+            .map_err(|_| RandError::FillBytes)?;
+        Ok(Self(bytes))
     }
 }
 
@@ -57,14 +62,22 @@ impl From<Nullifier> for Rho {
 }
 
 impl Rho {
-    pub fn new<T>(csprng: &mut T) -> Self
+    pub fn new<T>(csprng: &mut T) -> Result<Self, NoteError>
     where
         T: RngCore + CryptoRng,
     {
         let mut bytes = [0u8; 32];
-        csprng.fill_bytes(&mut bytes);
+        csprng
+            .try_fill_bytes(&mut bytes)
+            .map_err(|_| NoteError::from(RandError::FillBytes))?;
 
-        Self(extract_p(pallas::Point::from_bytes(&bytes).unwrap()))
+        let possible_point = pallas::Point::from_bytes(&bytes);
+
+        if possible_point.is_some().into() {
+            Ok(Self(extract_p(possible_point.unwrap())))
+        } else {
+            Err(NoteError::InvalidRho)
+        }
     }
 }
 
@@ -108,15 +121,15 @@ impl Note {
         address: Address,
         value: Amount<NonNegative>,
         nf_old: Nullifier,
-    ) -> Self
+    ) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
-        Self {
+        Ok(Self {
             address,
             value,
             rho: nf_old.into(),
-            rseed: SeedRandomness::new(csprng),
-        }
+            rseed: SeedRandomness::new(csprng)?,
+        })
     }
 }
