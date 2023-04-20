@@ -80,6 +80,8 @@ ARG CHECKPOINT_SYNC
 ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 
 # Build zebrad with these features
+# Keep these in sync with:
+# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="sentry"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ENV ENTRYPOINT_FEATURES "$TEST_FEATURES $FEATURES"
