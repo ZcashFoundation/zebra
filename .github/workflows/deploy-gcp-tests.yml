@@ -1551,6 +1551,7 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
+    environment: development
     needs: [ test-result, setup-with-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
@@ -1754,6 +1755,7 @@ jobs:
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
+    environment: development
     needs: [ create-state-image ]
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
