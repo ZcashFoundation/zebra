@@ -2209,16 +2209,13 @@ async fn submit_block() -> Result<()> {
 
 /// Check that the the end of support code is called at least once.
 #[test]
-fn end_of_support_is_checked_once() -> Result<()> {
+fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-
     let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Give enough time to start up and for the progress bar to run at least once.
-    // (progress bar runs every 1 minute or so).
-    std::thread::sleep(Duration::from_secs(80));
+    // Give enough time to start up the eos task and make sure it checks at least once.
+    std::thread::sleep(Duration::from_secs(30));
 
     child.kill(false)?;
 

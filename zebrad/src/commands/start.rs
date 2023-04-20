@@ -232,8 +232,16 @@ impl StartCmd {
         );
 
         let progress_task_handle = tokio::spawn(
-            show_block_chain_progress(config.network.network, latest_chain_tip, sync_status)
-                .in_current_span(),
+            show_block_chain_progress(
+                config.network.network,
+                latest_chain_tip.clone(),
+                sync_status,
+            )
+            .in_current_span(),
+        );
+
+        let end_of_support_task_handle = tokio::spawn(
+            sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
         );
 
         let mut old_databases_task_handle =
@@ -252,6 +260,7 @@ impl StartCmd {
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
+        pin!(end_of_support_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -319,6 +328,11 @@ impl StartCmd {
                         .expect("unexpected panic in the chain progress task");
                 }
 
+                end_of_support_result = &mut end_of_support_task_handle => end_of_support_result
+                    .expect("unexpected panic in the end of support task")
+                    .map(|_| info!("end of support task exited")),
+
+
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
                 groth16_download_result = &mut groth16_download_handle_fused => {
                     groth16_download_result
@@ -374,6 +388,7 @@ impl StartCmd {
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
+        end_of_support_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();

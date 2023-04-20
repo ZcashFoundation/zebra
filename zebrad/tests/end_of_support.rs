@@ -1,12 +1,17 @@
 //! Testing the end of support feature.
 
-use zebra_chain::{block::Height, parameters::Network};
+use std::time::Duration;
+
+use color_eyre::eyre::Result;
+use tokio::time::timeout;
+
+use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
 
 use zebra_consensus::CheckpointList;
 
-use zebrad::components::sync;
-
 use zebra_network::constants::{EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
+
+use zebrad::components::sync::end_of_support;
 
 //
 const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
@@ -18,7 +23,7 @@ fn end_of_support_panic() {
     // We are in panic
     let panic = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY) + 1;
 
-    sync::progress::end_of_support(Height(panic), Network::Mainnet);
+    end_of_support::check(Height(panic), Network::Mainnet);
 }
 
 /// Test that the `end_of_support` function is working as expected.
@@ -29,7 +34,7 @@ fn end_of_support_function() {
     let no_warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY)
         - (30 * ESTIMATED_BLOCKS_PER_DAY);
 
-    sync::progress::end_of_support(Height(no_warn), Network::Mainnet);
+    end_of_support::check(Height(no_warn), Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));
@@ -38,7 +43,7 @@ fn end_of_support_function() {
     // We are in warn range
     let warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152) - (3 * ESTIMATED_BLOCKS_PER_DAY);
 
-    sync::progress::end_of_support(Height(warn), Network::Mainnet);
+    end_of_support::check(Height(warn), Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));
@@ -59,11 +64,31 @@ fn end_of_support_date() {
     //
     let higher_checkpoint = list.max_height();
 
-    sync::progress::end_of_support(higher_checkpoint, Network::Mainnet);
+    end_of_support::check(higher_checkpoint, Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));
     assert!(!logs_contain(
         "Your Zebra release is too old and it will stop running in"
     ));
+}
+
+/// Check that the the end of support task is working.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn end_of_support_task() -> Result<()> {
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    latest_chain_tip_sender.send_best_tip_height(Height(10));
+
+    let eos_future = end_of_support::start(Network::Mainnet, latest_chain_tip);
+
+    let _ = timeout(Duration::from_secs(15), eos_future).await.ok();
+
+    assert!(logs_contain(
+        "Checking if Zebra release is inside support range ..."
+    ));
+
+    assert!(logs_contain("Zebra release is under support"));
+
+    Ok(())
 }

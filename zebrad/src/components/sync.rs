@@ -27,6 +27,7 @@ use crate::{
 };
 
 mod downloads;
+pub mod end_of_support;
 mod gossip;
 pub mod progress;
 mod recent_sync_lengths;

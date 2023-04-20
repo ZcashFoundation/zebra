@@ -13,10 +13,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_consensus::CheckpointList;
-use zebra_network::constants::{
-    EOS_PANIC_AFTER, EOS_PANIC_MESSAGE_HEADER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
-    RELEASE_NAME,
-};
+
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::components::sync::SyncStatus;
@@ -134,11 +131,6 @@ pub async fn show_block_chain_progress(
     loop {
         let now = Utc::now();
         let is_syncer_stopped = sync_status.is_close_to_tip();
-
-        // Check for the end of support of this release.
-        if let Some(tip_height) = latest_chain_tip.best_tip_height() {
-            end_of_support(tip_height, network);
-        }
 
         if let Some(estimated_height) =
             latest_chain_tip.estimate_network_chain_tip_height(network, now)
@@ -335,39 +327,5 @@ pub async fn show_block_chain_progress(
         }
 
         tokio::time::sleep(min(LOG_INTERVAL, PROGRESS_BAR_INTERVAL)).await;
-    }
-}
-
-/// Check if the current release is too old and panic if so.
-pub fn end_of_support(tip_height: Height, network: Network) {
-    info!("Checking if Zebra release is inside support range ...");
-
-    // Get the current block spacing
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
-
-    // Get the number of blocks per day
-    let estimated_blocks_per_day =
-        u32::try_from(chrono::Duration::days(1).num_seconds() / target_block_spacing.num_seconds())
-            .expect("number is always small enough to fit");
-
-    let panic_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * estimated_blocks_per_day));
-    let warn_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * estimated_blocks_per_day));
-
-    if tip_height > panic_height {
-        panic!(
-            "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
-            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
-        );
-    } else if tip_height > warn_height {
-        warn!(
-            "Your Zebra release is too old and it will stop running in block {}. \
-            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
-        );
-    } else {
-        info!("Zebra release is under support");
     }
 }
