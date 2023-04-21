@@ -13,7 +13,6 @@ echo "ZEBRA_TEST_LIGHTWALLETD=$ZEBRA_TEST_LIGHTWALLETD"
 echo "Hard-coded Zebra full sync directory: /zebrad-cache"
 echo "ZEBRA_CACHED_STATE_DIR=$ZEBRA_CACHED_STATE_DIR"
 echo "LIGHTWALLETD_DATA_DIR=$LIGHTWALLETD_DATA_DIR"
-echo "FEATURES=$FEATURES"
 echo "ENTRYPOINT_FEATURES=$ENTRYPOINT_FEATURES"
 
 case "$1" in
@@ -60,6 +59,9 @@ case "$1" in
 
         elif [[ "$GENERATE_CHECKPOINTS_MAINNET" -eq "1" ]]; then
             # Generate checkpoints after syncing Zebra from a cached state on mainnet.
+            #
+            # TODO: disable or filter out logs like:
+            # test generate_checkpoints_mainnet has been running for over 60 seconds
             #
             # List directory used by test
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")

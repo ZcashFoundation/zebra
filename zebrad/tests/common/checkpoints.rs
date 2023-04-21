@@ -163,11 +163,10 @@ pub fn spawn_zebra_checkpoints_direct(
             zebra_checkpoints_ignore_messages,
         );
 
-    // zebra-checkpoints does not log anything when it launches, it just prints checkpoints.
-    // Mainnet and testnet checkpoints always have at least one leading zero in their hash.
+    // zebra-checkpoints logs to stderr when it launches.
     //
     // This log happens very quickly, so it is ok to block for a short while here.
-    zebra_checkpoints.expect_stdout_line_matches(regex::escape(" 0"))?;
+    zebra_checkpoints.expect_stderr_line_matches(regex::escape("calculating checkpoints"))?;
 
     Ok(zebra_checkpoints)
 }
