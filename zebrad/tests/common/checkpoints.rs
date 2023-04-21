@@ -10,7 +10,7 @@
 use std::{
     env,
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -192,7 +192,20 @@ where
         // apply user provided arguments
         args.merge_with(extra_args);
 
-        self.spawn_child_with_command("zebra-checkpoints", args)
+        // Assume zebra-checkpoints is in the same directory as zebrad
+        let mut zebra_checkpoints_path: PathBuf = env!("CARGO_BIN_EXE_zebrad").into();
+        assert!(
+            zebra_checkpoints_path.pop(),
+            "must have at least one path component"
+        );
+        zebra_checkpoints_path.push("zebra-checkpoints");
+
+        self.spawn_child_with_command(
+            zebra_checkpoints_path
+                .to_str()
+                .expect("TODO: change this method to take OsStr instead"),
+            args,
+        )
     }
 }
 
