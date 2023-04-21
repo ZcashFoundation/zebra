@@ -694,7 +694,7 @@ impl<T> TestChild<T> {
     }
 
     /// Checks each line of the child's stdout against `success_regex`, and returns Ok
-    /// if a line matches.
+    /// if a line matches. Prints all stdout lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
@@ -711,7 +711,7 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout") {
+        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout", true) {
             Ok(()) => {
                 // Replace the log lines for the next check
                 self.stdout = Some(lines);
@@ -726,7 +726,7 @@ impl<T> TestChild<T> {
     }
 
     /// Checks each line of the child's stderr against `success_regex`, and returns Ok
-    /// if a line matches.
+    /// if a line matches. Prints all stderr lines to stdout.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
@@ -743,7 +743,71 @@ impl<T> TestChild<T> {
             .take()
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
-        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr") {
+        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr", true) {
+            Ok(()) => {
+                // Replace the log lines for the next check
+                self.stderr = Some(lines);
+                Ok(self)
+            }
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stderr = Some(lines);
+                Err(report).context_from(self)
+            }
+        }
+    }
+
+    /// Checks each line of the child's stdout against `success_regex`, and returns Ok
+    /// if a line matches. Does not print any output.
+    ///
+    /// Kills the child on error, or after the configured timeout has elapsed.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
+    #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
+    pub fn expect_stdout_line_matches_silent<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    where
+        R: ToRegex + Debug,
+    {
+        self.apply_failure_regexes_to_outputs();
+
+        let mut lines = self
+            .stdout
+            .take()
+            .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
+
+        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout", false) {
+            Ok(()) => {
+                // Replace the log lines for the next check
+                self.stdout = Some(lines);
+                Ok(self)
+            }
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stdout = Some(lines);
+                Err(report).context_from(self)
+            }
+        }
+    }
+
+    /// Checks each line of the child's stderr against `success_regex`, and returns Ok
+    /// if a line matches. Does not print any output.
+    ///
+    /// Kills the child on error, or after the configured timeout has elapsed.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
+    #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
+    pub fn expect_stderr_line_matches_silent<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    where
+        R: ToRegex + Debug,
+    {
+        self.apply_failure_regexes_to_outputs();
+
+        let mut lines = self
+            .stderr
+            .take()
+            .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
+
+        match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr", false) {
             Ok(()) => {
                 // Replace the log lines for the next check
                 self.stderr = Some(lines);
@@ -767,6 +831,7 @@ impl<T> TestChild<T> {
         lines: &mut L,
         success_regexes: R,
         stream_name: &str,
+        write_to_logs: bool,
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
@@ -776,7 +841,7 @@ impl<T> TestChild<T> {
             .to_regex_set()
             .expect("regexes must be valid");
 
-        self.expect_line_matching_regexes(lines, success_regexes, stream_name)
+        self.expect_line_matching_regexes(lines, success_regexes, stream_name, write_to_logs)
     }
 
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
@@ -788,6 +853,7 @@ impl<T> TestChild<T> {
         lines: &mut L,
         success_regexes: I,
         stream_name: &str,
+        write_to_logs: bool,
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
@@ -797,7 +863,7 @@ impl<T> TestChild<T> {
             .collect_regex_set()
             .expect("regexes must be valid");
 
-        self.expect_line_matching_regexes(lines, success_regexes, stream_name)
+        self.expect_line_matching_regexes(lines, success_regexes, stream_name, write_to_logs)
     }
 
     /// Checks each line in `lines` against `success_regexes`, and returns Ok if a line
@@ -814,6 +880,7 @@ impl<T> TestChild<T> {
         lines: &mut L,
         success_regexes: RegexSet,
         stream_name: &str,
+        write_to_logs: bool,
     ) -> Result<()>
     where
         L: Iterator<Item = std::io::Result<String>>,
@@ -831,8 +898,10 @@ impl<T> TestChild<T> {
                 break;
             };
 
-            // Since we're about to discard this line write it to stdout.
-            Self::write_to_test_logs(&line, self.bypass_test_capture);
+            if write_to_logs {
+                // Since we're about to discard this line write it to stdout.
+                Self::write_to_test_logs(&line, self.bypass_test_capture);
+            }
 
             if success_regexes.is_match(&line) {
                 return Ok(());
