@@ -693,14 +693,14 @@ impl<T> TestChild<T> {
         self
     }
 
-    /// Checks each line of the child's stdout against `success_regex`, and returns Ok
-    /// if a line matches. Prints all stdout lines.
+    /// Checks each line of the child's stdout against `success_regex`,
+    /// and returns the first matching line. Prints all stdout lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     #[allow(clippy::unwrap_in_result)]
-    pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
         R: ToRegex + Debug,
     {
@@ -712,10 +712,10 @@ impl<T> TestChild<T> {
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout", true) {
-            Ok(()) => {
+            Ok(line) => {
                 // Replace the log lines for the next check
                 self.stdout = Some(lines);
-                Ok(self)
+                Ok(line)
             }
             Err(report) => {
                 // Read all the log lines for error context
@@ -725,14 +725,14 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line of the child's stderr against `success_regex`, and returns Ok
-    /// if a line matches. Prints all stderr lines to stdout.
+    /// Checks each line of the child's stderr against `success_regex`,
+    /// and returns the first matching line. Prints all stderr lines to stdout.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     #[allow(clippy::unwrap_in_result)]
-    pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
         R: ToRegex + Debug,
     {
@@ -744,10 +744,10 @@ impl<T> TestChild<T> {
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr", true) {
-            Ok(()) => {
+            Ok(line) => {
                 // Replace the log lines for the next check
                 self.stderr = Some(lines);
-                Ok(self)
+                Ok(line)
             }
             Err(report) => {
                 // Read all the log lines for error context
@@ -757,14 +757,14 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line of the child's stdout against `success_regex`, and returns Ok
-    /// if a line matches. Does not print any output.
+    /// Checks each line of the child's stdout against `success_regex`,
+    /// and returns the first matching line. Does not print any output.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     #[allow(clippy::unwrap_in_result)]
-    pub fn expect_stdout_line_matches_silent<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    pub fn expect_stdout_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
         R: ToRegex + Debug,
     {
@@ -776,10 +776,10 @@ impl<T> TestChild<T> {
             .expect("child must capture stdout to call expect_stdout_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout", false) {
-            Ok(()) => {
+            Ok(line) => {
                 // Replace the log lines for the next check
                 self.stdout = Some(lines);
-                Ok(self)
+                Ok(line)
             }
             Err(report) => {
                 // Read all the log lines for error context
@@ -789,14 +789,14 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line of the child's stderr against `success_regex`, and returns Ok
-    /// if a line matches. Does not print any output.
+    /// Checks each line of the child's stderr against `success_regex`,
+    /// and returns the first matching line. Does not print any output.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     #[allow(clippy::unwrap_in_result)]
-    pub fn expect_stderr_line_matches_silent<R>(&mut self, success_regex: R) -> Result<&mut Self>
+    pub fn expect_stderr_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
         R: ToRegex + Debug,
     {
@@ -808,10 +808,10 @@ impl<T> TestChild<T> {
             .expect("child must capture stderr to call expect_stderr_line_matches, and it can't be called again after an error");
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr", false) {
-            Ok(()) => {
+            Ok(line) => {
                 // Replace the log lines for the next check
                 self.stderr = Some(lines);
-                Ok(self)
+                Ok(line)
             }
             Err(report) => {
                 // Read all the log lines for error context
@@ -832,7 +832,7 @@ impl<T> TestChild<T> {
         success_regexes: R,
         stream_name: &str,
         write_to_logs: bool,
-    ) -> Result<()>
+    ) -> Result<String>
     where
         L: Iterator<Item = std::io::Result<String>>,
         R: ToRegexSet,
@@ -854,7 +854,7 @@ impl<T> TestChild<T> {
         success_regexes: I,
         stream_name: &str,
         write_to_logs: bool,
-    ) -> Result<()>
+    ) -> Result<String>
     where
         L: Iterator<Item = std::io::Result<String>>,
         I: CollectRegexSet,
@@ -881,7 +881,7 @@ impl<T> TestChild<T> {
         success_regexes: RegexSet,
         stream_name: &str,
         write_to_logs: bool,
-    ) -> Result<()>
+    ) -> Result<String>
     where
         L: Iterator<Item = std::io::Result<String>>,
     {
@@ -904,7 +904,7 @@ impl<T> TestChild<T> {
             }
 
             if success_regexes.is_match(&line) {
-                return Ok(());
+                return Ok(line);
             }
         }
 

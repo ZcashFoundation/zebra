@@ -31,7 +31,9 @@ use zebra_test::{
 };
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc, sync::SYNC_FINISHED_REGEX, test_type::TestType::*,
+    launch::spawn_zebrad_for_rpc,
+    sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
+    test_type::TestType::*,
 };
 
 use super::{
@@ -82,34 +84,66 @@ pub async fn run(network: Network) -> Result<()> {
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
 
     tracing::info!(
-        ?test_type,
+        ?network,
         ?zebra_rpc_address,
-        "spawned zebrad, waiting for zebrad to open its RPC port..."
+        "spawned zebrad, waiting for it to load compiled-in checkpoints...",
+    );
+
+    let last_checkpoint = zebrad.expect_stdout_line_matches(CHECKPOINT_VERIFIER_REGEX)?;
+    // TODO: do this with a regex?
+    let (_prefix, last_checkpoint) = last_checkpoint
+        .split_once("max_checkpoint_height")
+        .expect("just checked log format");
+    let (_prefix, last_checkpoint) = last_checkpoint
+        .split_once("(")
+        .expect("unexpected log format");
+    let (last_checkpoint, _suffix) = last_checkpoint
+        .split_once(")")
+        .expect("unexpected log format");
+
+    tracing::info!(
+        ?network,
+        ?zebra_rpc_address,
+        ?last_checkpoint,
+        "found zebrad's current last checkpoint",
+    );
+
+    tracing::info!(
+        ?network,
+        ?zebra_rpc_address,
+        "waiting for zebrad to open its RPC port...",
     );
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
     tracing::info!(
+        ?network,
         ?zebra_rpc_address,
         "zebrad opened its RPC port, waiting for it to sync...",
     );
+
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
 
     tracing::info!(
+        ?network,
         ?zebra_rpc_address,
         ?zebra_tip_height,
+        ?last_checkpoint,
         "zebrad synced to the tip, launching zebra-checkpoints...",
     );
-    let zebra_checkpoints = spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address)?;
+    let zebra_checkpoints =
+        spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, &last_checkpoint)?;
 
     tracing::info!(
         "zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug"
     );
     tracing::info!(
+        ?network,
         ?zebra_rpc_address,
         ?zebra_tip_height,
-        "spawned zebra-checkpoints connected to zebrad, checkpoints should appear here..."
+        ?last_checkpoint,
+        "spawned zebra-checkpoints connected to zebrad, checkpoints should appear here...",
     );
     println!("\n\n");
 
@@ -121,7 +155,12 @@ pub async fn run(network: Network) -> Result<()> {
         env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok(),
     )?;
 
-    tracing::info!("\n\nfinished generating zebra-checkpoints",);
+    tracing::info!(
+        ?network,
+        ?zebra_tip_height,
+        ?last_checkpoint,
+        "\n\nfinished generating Zebra checkpoints",
+    );
 
     Ok(())
 }
@@ -136,11 +175,13 @@ pub fn spawn_zebra_checkpoints_direct(
     network: Network,
     test_type: TestType,
     zebrad_rpc_address: SocketAddr,
+    last_checkpoint: &str,
 ) -> Result<TestChild<TempDir>> {
+    let zebrad_rpc_address = zebrad_rpc_address.to_string();
+
     let arguments = args![
-        "--addr": zebrad_rpc_address.to_string(),
-        // TODO: get checkpoints out of `zebrad` or git somehow
-        //"--last-checkpoint": last_checkpoint,
+        "--addr": zebrad_rpc_address,
+        "--last-checkpoint": last_checkpoint,
     ];
 
     // TODO: add logs for different kinds of zebra_checkpoints failures
@@ -200,7 +241,7 @@ where
         let mut zebra_checkpoints_path: PathBuf = env!("CARGO_BIN_EXE_zebrad").into();
         assert!(
             zebra_checkpoints_path.pop(),
-            "must have at least one path component"
+            "must have at least one path component",
         );
         zebra_checkpoints_path.push("zebra-checkpoints");
 
@@ -241,7 +282,7 @@ pub fn wait_for_zebra_checkpoints_generation<
     let zebrad_wait_fn = || -> Result<_> {
         tracing::debug!(
             ?test_type,
-            "zebrad is waiting for zebra-checkpoints to generate checkpoints..."
+            "zebrad is waiting for zebra-checkpoints to generate checkpoints...",
         );
         while !is_zebra_checkpoints_finished.load(Ordering::SeqCst) {
             // Just keep silently checking the Zebra logs for errors,
@@ -266,7 +307,7 @@ pub fn wait_for_zebra_checkpoints_generation<
     let zebra_checkpoints_wait_fn = || -> Result<_> {
         tracing::debug!(
             ?test_type,
-            "waiting for zebra_checkpoints to generate checkpoints..."
+            "waiting for zebra_checkpoints to generate checkpoints...",
         );
 
         // zebra-checkpoints does not log anything when it finishes, it just prints checkpoints.
