@@ -686,7 +686,7 @@ impl<T> TestChild<T> {
         self
     }
 
-    /// Configures testrunner to forward stdout and stderr to the true stdout,
+    /// Configures this test runner to forward stdout and stderr to the true stdout,
     /// rather than the fakestdout used by cargo tests.
     pub fn bypass_test_capture(mut self, cond: bool) -> Self {
         self.bypass_test_capture = cond;
