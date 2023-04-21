@@ -139,13 +139,15 @@ where
 #[tokio::main]
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 async fn main() -> Result<()> {
+    eprintln!("zebra-checkpoints launched");
+
     // initialise
     init_tracing();
     color_eyre::install()?;
 
     let args = args::Args::from_args();
 
-    eprintln!("zebra-checkpoints launched with: {args:?}");
+    eprintln!("Command-line arguments: {args:?}");
     eprintln!("Fetching block info and calculating checkpoints...\n\n");
 
     // get the current block count
