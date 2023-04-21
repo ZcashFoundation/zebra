@@ -92,8 +92,7 @@ pub async fn run(network: Network) -> Result<()> {
         ?zebra_rpc_address,
         "zebrad opened its RPC port, waiting for it to sync...",
     );
-    // TODO: don't commit this change
-    //zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
 
