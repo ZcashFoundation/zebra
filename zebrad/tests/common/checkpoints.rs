@@ -102,8 +102,10 @@ pub async fn run(network: Network) -> Result<()> {
     tracing::info!(
         ?zebra_rpc_address,
         ?zebra_tip_height,
-        "spawned zebra-checkpoints connected to zebrad, checkpoints should appear here...\n\
-         zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug\n\n",
+        "spawned zebra-checkpoints connected to zebrad, checkpoints should appear here..."
+    );
+    tracing::info!(
+        "zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug\n\n"
     );
 
     let (_zebra_checkpoints, _zebrad) = wait_for_zebra_checkpoints_generation(
@@ -156,7 +158,7 @@ pub fn spawn_zebra_checkpoints_direct(
         );
 
     // zebra-checkpoints does not log anything when it launches, it just prints checkpoints.
-    // Mainnet and testnet heckpoints always have at least one leading zero in their hash.
+    // Mainnet and testnet checkpoints always have at least one leading zero in their hash.
     //
     // This log happens very quickly, so it is ok to block for a short while here.
     zebra_checkpoints.expect_stdout_line_matches(regex::escape(" 0"))?;
