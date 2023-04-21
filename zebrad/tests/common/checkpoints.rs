@@ -95,10 +95,10 @@ pub async fn run(network: Network) -> Result<()> {
         .split_once("max_checkpoint_height")
         .expect("just checked log format");
     let (_prefix, last_checkpoint) = last_checkpoint
-        .split_once("(")
+        .split_once('(')
         .expect("unexpected log format");
     let (last_checkpoint, _suffix) = last_checkpoint
-        .split_once(")")
+        .split_once(')')
         .expect("unexpected log format");
 
     tracing::info!(
@@ -133,7 +133,7 @@ pub async fn run(network: Network) -> Result<()> {
         "zebrad synced to the tip, launching zebra-checkpoints...",
     );
     let zebra_checkpoints =
-        spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, &last_checkpoint)?;
+        spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, last_checkpoint)?;
 
     tracing::info!(
         "zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug"
