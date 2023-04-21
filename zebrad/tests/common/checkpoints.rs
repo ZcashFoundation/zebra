@@ -1,11 +1,7 @@
 //! Test generating checkpoints using `zebra-checkpoints` directly connected to `zebrad`.
 //!
-//! When running on `Mainnet`, this test requires a cached chain state that is synchronized
-//! close to the network chain tip height. It will finish the sync and update the cached chain
-//! state.
-//!
-//! When running on `Testnet`, the cached chain state is optional, but it does speed up the test
-//! significantly.
+//! This test requires a cached chain state that is synchronized close to the network chain tip
+//! height. It will finish the sync and update the cached chain state.
 
 use std::{
     env,
