@@ -190,7 +190,7 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 jsonrpc-core = "18.0.0"
 once_cell = "1.17.1"
-regex = "1.7.3"
+regex = "1.8.1"
 semver = "1.0.17"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
