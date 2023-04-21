@@ -14,20 +14,19 @@ use zebra_network::constants::{
     RELEASE_NAME,
 };
 
-/// The amount of time between progress logs.
+/// The amount of time between end of support checks.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Wait for a bit at startup so `best_tip_height` is set.
+/// Wait for a bit at startup so `best_tip_height` is always `Some`.
 const INITIAL_WAIT: Duration = Duration::from_secs(10);
 
-/// Task for checking if the current running zebra is under support.
+/// Start the end of support checking task.
 pub async fn start(
     network: Network,
     latest_chain_tip: impl ChainTip + std::fmt::Debug,
 ) -> Result<(), Report> {
-
     info!("Starting end of support task");
-    //
+
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {

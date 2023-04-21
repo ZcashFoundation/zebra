@@ -58,10 +58,10 @@ fn end_of_support_function() {
 #[test]
 #[tracing_test::traced_test]
 fn end_of_support_date() {
-    //
+    // Get the list of checkpoints.
     let list = CheckpointList::new(Network::Mainnet);
 
-    //
+    // Get the last one we have and use it as tip.
     let higher_checkpoint = list.max_height();
 
     end_of_support::check(higher_checkpoint, Network::Mainnet);
