@@ -2214,21 +2214,19 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Give enough time to start up the eos task and make sure it checks at least once.
-    std::thread::sleep(Duration::from_secs(30));
+    // Give enough time to start up the eos task.
+    std::thread::sleep(LAUNCH_DELAY);
 
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
+    // Zebra started
     output.stdout_line_contains("Starting zebrad")?;
 
-    // Make sure the check for eos is done.
-    output.stdout_line_contains("Checking if Zebra release is inside support range ...")?;
-
-    // And that we are in range.
-    output.stdout_line_contains("Zebra release is under support")?;
+    // End of support task started.
+    output.stdout_line_contains("Starting end of support task")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;

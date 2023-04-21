@@ -25,6 +25,8 @@ pub async fn start(
     network: Network,
     latest_chain_tip: impl ChainTip + std::fmt::Debug,
 ) -> Result<(), Report> {
+
+    info!("Starting end of support task");
     //
     tokio::time::sleep(INITIAL_WAIT).await;
 
