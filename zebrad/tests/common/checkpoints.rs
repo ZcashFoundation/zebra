@@ -155,11 +155,12 @@ pub async fn run(network: Network) -> Result<()> {
         env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok(),
     )?;
 
+    println!("\n\n");
     tracing::info!(
         ?network,
         ?zebra_tip_height,
         ?last_checkpoint,
-        "\n\nfinished generating Zebra checkpoints",
+        "finished generating Zebra checkpoints",
     );
 
     Ok(())
@@ -238,6 +239,8 @@ where
         args.merge_with(extra_args);
 
         // Assume zebra-checkpoints is in the same directory as zebrad
+        //
+        // TODO: fall back to searching $PATH by using just "zebra-checkpoints"?
         let mut zebra_checkpoints_path: PathBuf = env!("CARGO_BIN_EXE_zebrad").into();
         assert!(
             zebra_checkpoints_path.pop(),
@@ -320,6 +323,9 @@ pub fn wait_for_zebra_checkpoints_generation<
         let expected_final_checkpoint =
             format!("{expected_final_checkpoint_prefix}[0-9][0-9][0-9] 0");
         zebra_checkpoints_mut.expect_stdout_line_matches(&expected_final_checkpoint)?;
+
+        // Write the rest of the checkpoints: there can be 0-2 more checkpoints.
+        while zebra_checkpoints_mut.wait_for_stdout_line(None) {}
 
         // Tell the other thread that `zebra_checkpoints` has finished
         is_zebra_checkpoints_finished.store(true, Ordering::SeqCst);

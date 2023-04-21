@@ -559,7 +559,7 @@ impl<T> TestChild<T> {
     /// Waits until a line of standard output is available, then consumes it.
     ///
     /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
-    /// Then writes the line to the test logs.
+    /// Always writes the line to the test logs.
     ///
     /// Returns `true` if a line was available,
     /// or `false` if the standard output has finished.
@@ -592,7 +592,7 @@ impl<T> TestChild<T> {
     /// Waits until a line of standard error is available, then consumes it.
     ///
     /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
-    /// Then writes the line to the test logs.
+    /// Always writes the line to the test logs.
     ///
     /// Returns `true` if a line was available,
     /// or `false` if the standard error has finished.
