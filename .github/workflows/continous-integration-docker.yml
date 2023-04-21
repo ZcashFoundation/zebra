@@ -79,6 +79,7 @@ on:
 jobs:
   get-available-disks:
     runs-on: ubuntu-latest
+    environment: development
     name: Find available cached state disks
     outputs:
       lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk }}
@@ -184,6 +185,7 @@ jobs:
   test-all:
     name: Test all
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -206,6 +208,7 @@ jobs:
   test-all-getblocktemplate-rpcs:
     name: Test all with getblocktemplate-rpcs feature
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -231,6 +234,7 @@ jobs:
   test-fake-activation-heights:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -252,6 +256,7 @@ jobs:
   test-empty-sync:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -271,6 +276,7 @@ jobs:
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -291,6 +297,7 @@ jobs:
     name: Test Zebra default Docker config file
     timeout-minutes: 5
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -314,6 +321,7 @@ jobs:
     name: Test Zebra custom Docker config file
     timeout-minutes: 5
     runs-on: ubuntu-latest
+    environment: development
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
