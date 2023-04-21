@@ -63,7 +63,7 @@ case "$1" in
             #
             # List directory used by test
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored checkpoints_mainnet
+            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored generate_checkpoints_mainnet
         elif [[ "$GENERATE_CHECKPOINTS_TESTNET" -eq "1" ]]; then
             # Generate checkpoints after syncing Zebra on testnet.
             # The cached state is optional: it makes the test finish in minutes rather than hours.
@@ -72,7 +72,7 @@ case "$1" in
             #
             # List directory used by test
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored checkpoints_testnet
+            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored generate_checkpoints_testnet
 
         elif [[ "$TEST_LWD_RPC_CALL" -eq "1" ]]; then
             # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
