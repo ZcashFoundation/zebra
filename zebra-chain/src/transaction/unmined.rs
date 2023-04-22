@@ -36,7 +36,7 @@ use proptest_derive::Arbitrary;
 #[allow(unused_imports)]
 use crate::block::MAX_BLOCK_BYTES;
 
-mod zip317;
+pub mod zip317;
 
 /// The minimum cost value for a transaction in the mempool.
 ///
@@ -335,6 +335,9 @@ impl fmt::Display for VerifiedUnminedTx {
             .finish()
     }
 }
+/// The ZIP-317 recommended limit on the number of unpaid actions per block.
+/// `block_unpaid_action_limit` in ZIP-317.
+pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from an unmined transaction,
@@ -343,17 +346,25 @@ impl VerifiedUnminedTx {
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
-    ) -> Self {
+    ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
-        Self {
+        // Make the mempool checks.
+        zip317::mempool_checks(
+            unpaid_actions,
+            BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT,
+            miner_fee,
+            transaction.conventional_fee,
+        )?;
+
+        Ok(Self {
             transaction,
             miner_fee,
             legacy_sigop_count,
             fee_weight_ratio,
             unpaid_actions,
-        }
+        })
     }
 
     /// Returns `true` if the transaction pays at least the [ZIP-317] conventional fee.

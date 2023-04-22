@@ -7,6 +7,7 @@ use proptest::{collection::vec, prelude::*};
 use tower::ServiceExt;
 
 use zebra_chain::{
+    amount::Amount,
     block,
     parameters::{Network, NetworkUpgrade},
     serialization::arbitrary::{datetime_full, datetime_u32},
@@ -387,8 +388,12 @@ fn mock_transparent_transfers(
             .try_into()
             .expect("too many mock transparent transfers requested");
 
-        let (input, output, new_utxos) =
-            mock_transparent_transfer(fake_source_fund_height, true, outpoint_index);
+        let (input, output, new_utxos) = mock_transparent_transfer(
+            fake_source_fund_height,
+            true,
+            outpoint_index,
+            Amount::try_from(1).expect("invalid value"),
+        );
 
         inputs.push(input);
         outputs.push(output);

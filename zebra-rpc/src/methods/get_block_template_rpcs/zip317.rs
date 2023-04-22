@@ -15,7 +15,7 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::VerifiedUnminedTx,
+    transaction::{VerifiedUnminedTx, BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT},
     transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -23,10 +23,6 @@ use zebra_consensus::MAX_BLOCK_SIGOPS;
 use crate::methods::get_block_template_rpcs::{
     get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
 };
-
-/// The ZIP-317 recommended limit on the number of unpaid actions per block.
-/// `block_unpaid_action_limit` in ZIP-317.
-pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.

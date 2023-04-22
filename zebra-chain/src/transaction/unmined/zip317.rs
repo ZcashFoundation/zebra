@@ -4,12 +4,17 @@
 
 use std::cmp::max;
 
+use thiserror::Error;
+
 use crate::{
     amount::{Amount, NonNegative},
     block::MAX_BLOCK_BYTES,
     serialization::ZcashSerialize,
     transaction::{Transaction, UnminedTx},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
 //
@@ -152,4 +157,35 @@ fn div_ceil(quotient: usize, divisor: usize) -> usize {
     // `ceil(quotient/divisor)`
     // as long as the addition doesn't overflow or underflow.
     (quotient + divisor - 1) / divisor
+}
+
+/// Make ZIP-317 checks before inserting a transaction into the mempool.
+pub fn mempool_checks(
+    unpaid_actions: u32,
+    unpaid_action_limit: u32,
+    miner_fee: Amount<NonNegative>,
+    conventional_fee: Amount<NonNegative>,
+) -> Result<(), Error> {
+    // Check unpaid actions is below the thershold.
+    if unpaid_actions > unpaid_action_limit {
+        return Err(Error::UnpaidActions);
+    }
+
+    // Check the fee is not below the calculated conventional fee for the transaction.
+    if miner_fee < conventional_fee {
+        return Err(Error::MinerFee);
+    }
+
+    Ok(())
+}
+
+/// Errors related to ZIP-317.
+#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum Error {
+    #[error("Unpaid actions is higher than the limit")]
+    UnpaidActions,
+
+    #[error("Transaction fee is too low")]
+    MinerFee,
 }

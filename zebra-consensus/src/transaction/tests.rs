@@ -23,7 +23,7 @@ use zebra_chain::{
             fake_v5_transactions_for_network, insert_fake_orchard_shielded_data, test_transactions,
             transactions_from_blocks,
         },
-        Hash, HashType, JoinSplitData, LockTime, Transaction,
+        zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData},
 };
@@ -240,7 +240,12 @@ async fn mempool_request_with_present_input_is_accepted() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let tx = Transaction::V4 {
@@ -302,7 +307,12 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let tx = Transaction::V4 {
@@ -376,7 +386,12 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let tx = Transaction::V4 {
@@ -438,7 +453,12 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
-    let (mut input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (mut input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
 
     // Ignore the lock time.
     input.set_sequence(u32::MAX);
@@ -503,7 +523,12 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let tx = Transaction::V4 {
@@ -738,7 +763,12 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -783,7 +813,12 @@ async fn v4_transaction_with_last_valid_expiry_height() {
         .activation_height(Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let transaction = Transaction::V4 {
@@ -867,7 +902,12 @@ async fn v4_transaction_with_too_low_expiry_height() {
         .expect("Canopy activation height is specified");
 
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // This expiry height is too low so that the tx should seem expired to the verifier.
     let expiry_height = (block_height - 1).expect("original block height is too small");
@@ -912,7 +952,12 @@ async fn v4_transaction_with_exceeding_expiry_height() {
     let block_height = block::Height::MAX;
 
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // This expiry height exceeds the maximum defined by the specification.
     let expiry_height = block::Height(500_000_000);
@@ -1065,7 +1110,12 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should not succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        false,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -1115,7 +1165,12 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V4 transaction
     let transaction = Transaction::V4 {
@@ -1303,7 +1358,12 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V5 transaction
     let transaction = Transaction::V5 {
@@ -1349,7 +1409,12 @@ async fn v5_transaction_with_last_valid_expiry_height() {
         .activation_height(Network::Testnet)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a non-coinbase V5 tx with the last valid expiry height.
     let transaction = Transaction::V5 {
@@ -1504,7 +1569,12 @@ async fn v5_transaction_with_too_low_expiry_height() {
         .activation_height(Network::Testnet)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // This expiry height is too low so that the tx should seem expired to the verifier.
     let expiry_height = (block_height - 1).expect("original block height is too small");
@@ -1550,7 +1620,12 @@ async fn v5_transaction_with_exceeding_expiry_height() {
     let block_height = block::Height::MAX;
 
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // This expiry height exceeds the maximum defined by the specification.
     let expiry_height = block::Height(500_000_000);
@@ -1655,7 +1730,12 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should not succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, false, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        false,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V5 transaction
     let transaction = Transaction::V5 {
@@ -1707,7 +1787,12 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
         (transaction_block_height - 1).expect("fake source fund block height is too small");
 
     // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(fake_source_fund_height, true, 0);
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
 
     // Create a V4 transaction
     let transaction = Transaction::V5 {
@@ -2165,6 +2250,7 @@ fn mock_transparent_transfer(
     previous_utxo_height: block::Height,
     script_should_succeed: bool,
     outpoint_index: u32,
+    previous_output_value: Amount<NonNegative>,
 ) -> (
     transparent::Input,
     transparent::Output,
@@ -2188,7 +2274,7 @@ fn mock_transparent_transfer(
     };
 
     let previous_output = transparent::Output {
-        value: Amount::try_from(1).expect("1 is an invalid amount"),
+        value: previous_output_value,
         lock_script,
     };
 
@@ -2627,4 +2713,146 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
             Err(TransactionError::CoinbaseOutputsNotDecryptable)
         );
     }
+}
+
+#[tokio::test]
+async fn mempool_zip317_error() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Nu5
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+
+    // Will produce a small enough miner fee to fail the check.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        network_upgrade: NetworkUpgrade::Nu5,
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    // Mempool refuse to add this transaction into storage.
+    assert!(verifier_response.is_err());
+    assert_eq!(
+        verifier_response.err(),
+        Some(TransactionError::Zip317(zip317::Error::MinerFee))
+    );
+}
+
+#[tokio::test]
+async fn mempool_zip317_ok() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Nu5
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+
+    // Will produce a small enough miner fee to fail the check.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        network_upgrade: NetworkUpgrade::Nu5,
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
 }

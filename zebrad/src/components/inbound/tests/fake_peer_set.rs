@@ -168,7 +168,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
-        )));
+        ).expect("verification should pass")));
     });
 
     let (push_response, _) = futures::join!(request, verification);
@@ -270,7 +270,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
-        )));
+        ).expect("verification should pass")));
     });
 
     let (advertise_response, _, _) = futures::join!(request, peer_set_responder, verification);
@@ -369,7 +369,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
-        )));
+        ).expect("verification should pass")));
     });
 
     let (push_response, _) = futures::join!(request, verification);
@@ -503,7 +503,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             transaction,
             Amount::zero(),
             0,
-        )));
+        ).expect("verification should pass")));
     });
 
     let (push_response, _) = futures::join!(request, verification);
