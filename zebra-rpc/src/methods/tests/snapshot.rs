@@ -267,7 +267,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
-                assert_eq!(value.as_str().unwrap().to_string(), USER_AGENT.to_string());
+                assert_eq!(value.as_str().unwrap(), USER_AGENT);
                 // replace with:
                 "[SubVersion]"
             }),
