@@ -21,28 +21,6 @@ use zebra_chain::{
     serialization::Duration32,
 };
 
-/// The name of the current Zebra release.
-//
-// TODO: generate this from crate metadata (#2375)
-pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
-
-/// The estimated height that this release started to run.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
-
-/// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server runs.
-///
-/// Notes:
-///
-/// - Zebra will exit with a panic if the current tip height is bigger than the `ESTIMATED_RELEASE_HEIGHT`
-///  plus this number of days.
-pub const EOS_PANIC_AFTER: u32 = 180;
-
-/// The number of days before the end of support where Zebra will display warnings.
-pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
-
-/// A string which is part of the panic that will be displayed if Zebra release is too old.
-pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";
-
 /// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
 /// When it starts up, Zebra opens [`Config.peerset_initial_target_size`]
@@ -257,6 +235,15 @@ pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
 /// messages from each of our peers.
 pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 
+/// The User-Agent string provided by the node.
+///
+/// This must be a valid [BIP 14] user agent.
+///
+/// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+//
+// TODO: generate this from crate metadata (#2375)
+pub const USER_AGENT: &str = "/Zebra:1.0.0-rc.6/";
+
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
 ///
@@ -315,13 +302,6 @@ lazy_static! {
     } else {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
-
-    /// The User-Agent string provided by the node.
-    ///
-    /// This must be a valid [BIP 14] user agent.
-    ///
-    /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
-    pub static ref USER_AGENT: String = format!("/{RELEASE_NAME}/");
 }
 
 /// The timeout for DNS lookups.

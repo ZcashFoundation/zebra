@@ -10,10 +10,14 @@ use abscissa_core::{
     Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
-use zebra_network::constants::{EOS_PANIC_MESSAGE_HEADER, PORT_IN_USE_ERROR};
+use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
-use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
+use crate::{
+    commands::ZebradCmd,
+    components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
+    config::ZebradConfig,
+};
 
 mod entry_point;
 use entry_point::EntryPoint;

@@ -9,9 +9,7 @@ use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Netw
 
 use zebra_consensus::CheckpointList;
 
-use zebra_network::constants::{EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
-
-use zebrad::components::sync::end_of_support;
+use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
 //
 const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
