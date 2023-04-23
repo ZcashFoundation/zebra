@@ -176,6 +176,22 @@ impl StartCmd {
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
             .service(mempool);
 
+        info!("fully initializing inbound peer request handler");
+        // Fully start the inbound service as soon as possible
+        let setup_data = InboundSetupData {
+            address_book: address_book.clone(),
+            block_download_peer_set: peer_set.clone(),
+            block_verifier: chain_verifier.clone(),
+            mempool: mempool.clone(),
+            state,
+            latest_chain_tip: latest_chain_tip.clone(),
+        };
+        setup_tx
+            .send(setup_data)
+            .map_err(|_| eyre!("could not send setup data to inbound service"))?;
+        // And give it time to clear its queue
+        tokio::task::yield_now().await;
+
         // Launch RPC server
         let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc,
@@ -186,27 +202,14 @@ impl StartCmd {
             app_version(),
             mempool.clone(),
             read_only_state_service,
-            chain_verifier.clone(),
+            chain_verifier,
             sync_status.clone(),
-            address_book.clone(),
+            address_book,
             latest_chain_tip.clone(),
             config.network.network,
         );
 
-        let setup_data = InboundSetupData {
-            address_book,
-            block_download_peer_set: peer_set.clone(),
-            block_verifier: chain_verifier,
-            mempool: mempool.clone(),
-            state,
-            latest_chain_tip: latest_chain_tip.clone(),
-        };
-        setup_tx
-            .send(setup_data)
-            .map_err(|_| eyre!("could not send setup data to inbound service"))?;
-
-        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
-
+        // Start concurrent tasks which don't add load to other tasks
         let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
@@ -216,28 +219,40 @@ impl StartCmd {
             .in_current_span(),
         );
 
-        let mempool_crawler_task_handle = mempool::Crawler::spawn(
-            &config.mempool,
-            peer_set.clone(),
-            mempool.clone(),
-            sync_status.clone(),
-            chain_tip_change,
-        );
-
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set)
-                .in_current_span(),
-        );
-
-        let progress_task_handle = tokio::spawn(
-            show_block_chain_progress(config.network.network, latest_chain_tip, sync_status)
+            mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set.clone())
                 .in_current_span(),
         );
 
         let mut old_databases_task_handle =
             zebra_state::check_and_delete_old_databases(config.state.clone());
+
+        let progress_task_handle = tokio::spawn(
+            show_block_chain_progress(
+                config.network.network,
+                latest_chain_tip,
+                sync_status.clone(),
+            )
+            .in_current_span(),
+        );
+
+        // Give the inbound service more time to clear its queue,
+        // then start concurrent tasks that can add load to the inbound service
+        // (by opening more peer connections, so those peers send us requests)
+        tokio::task::yield_now().await;
+
+        // The crawler only activates immediately in tests that use mempool debug mode
+        let mempool_crawler_task_handle = mempool::Crawler::spawn(
+            &config.mempool,
+            peer_set,
+            mempool.clone(),
+            sync_status,
+            chain_tip_change,
+        );
+
+        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         info!("spawned initial Zebra tasks");
 
