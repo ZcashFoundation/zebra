@@ -532,8 +532,14 @@ impl<T> TestChild<T> {
         // Read unread child output.
         //
         // This checks for failure logs, and prevents some test hangs and deadlocks.
+        let binary_name = self
+            .cmd
+            .split_ascii_whitespace()
+            .next()
+            .expect("command must have binary");
+
         if self.child.is_some() || self.stdout.is_some() {
-            let wrote_lines = self.wait_for_stdout_line("\nChild Stdout:".to_string());
+            let wrote_lines = self.wait_for_stdout_line(format!("\n{} Child Stdout:", binary_name));
 
             while self.wait_for_stdout_line(None) {}
 
@@ -544,7 +550,7 @@ impl<T> TestChild<T> {
         }
 
         if self.child.is_some() || self.stderr.is_some() {
-            let wrote_lines = self.wait_for_stderr_line("\nChild Stderr:".to_string());
+            let wrote_lines = self.wait_for_stderr_line(format!("\n{} Child Stderr:", binary_name));
 
             while self.wait_for_stderr_line(None) {}
 
@@ -1364,8 +1370,13 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
             }
         }
 
-        self.section(stdout_buf.header("Unread Stdout:"))
-            .section(stderr_buf.header("Unread Stderr:"))
+        let binary_name = source
+            .cmd
+            .split_ascii_whitespace()
+            .next()
+            .expect("command must have binary");
+        self.section(stdout_buf.header(format!("{} Unread Stdout:", binary_name)))
+            .section(stderr_buf.header(format!("{} Unread Stderr:", binary_name)))
     }
 }
 
@@ -1382,6 +1393,7 @@ impl ContextFrom<&Output> for Report {
     type Return = Report;
 
     fn context_from(self, source: &Output) -> Self::Return {
+        // TODO: add binary_name before Stdout and Stderr headers
         let stdout = || {
             String::from_utf8_lossy(&source.stdout)
                 .into_owned()

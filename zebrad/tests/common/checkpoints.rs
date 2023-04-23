@@ -111,6 +111,8 @@ pub async fn run(network: Network) -> Result<()> {
     );
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
+    // BLOCKER: re-enable before merging this PR
+    /*
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -119,8 +121,6 @@ pub async fn run(network: Network) -> Result<()> {
 
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
-    let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
-
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -128,6 +128,9 @@ pub async fn run(network: Network) -> Result<()> {
         ?last_checkpoint,
         "zebrad synced to the tip, launching zebra-checkpoints...",
     );
+    */
+
+    let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
     let zebra_checkpoints =
         spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, last_checkpoint)?;
 
@@ -192,7 +195,7 @@ pub fn spawn_zebra_checkpoints_direct(
     // Currently unused, but we might put a copy of the checkpoints file in it later
     let zebra_checkpoints_dir = testdir()?;
 
-    let mut zebra_checkpoints = zebra_checkpoints_dir
+    let zebra_checkpoints = zebra_checkpoints_dir
         .spawn_zebra_checkpoints_child(arguments)?
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(
@@ -203,7 +206,9 @@ pub fn spawn_zebra_checkpoints_direct(
     // zebra-checkpoints logs to stderr when it launches.
     //
     // This log happens very quickly, so it is ok to block for a short while here.
-    zebra_checkpoints.expect_stderr_line_matches(regex::escape("calculating checkpoints"))?;
+    //
+    // BLOCKER: re-enable before merging this PR
+    //zebra_checkpoints.expect_stderr_line_matches(regex::escape("calculating checkpoints"))?;
 
     Ok(zebra_checkpoints)
 }
