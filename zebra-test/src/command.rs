@@ -52,8 +52,8 @@ pub trait CommandExt {
     fn output2(&mut self) -> Result<TestOutput<NoDir>, Report>;
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
-    /// reports
-    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report>;
+    /// reports using the original `command_path`
+    fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report>;
 }
 
 impl CommandExt for Command {
@@ -89,18 +89,19 @@ impl CommandExt for Command {
     }
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
-    /// reports
-    fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report> {
-        let cmd = format!("{self:?}");
+    /// reports using the original `command_path`
+    fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report> {
+        let command_and_args = format!("{self:?}");
         let child = self.spawn();
 
         let child = child
             .wrap_err("failed to execute process")
-            .with_section(|| cmd.clone().header("Command:"))?;
+            .with_section(|| command_and_args.clone().header("Command:"))?;
 
         Ok(TestChild {
             dir: Some(dir),
-            cmd,
+            cmd: command_and_args,
+            command_path: command_path.to_string(),
             child: Some(child),
             stdout: None,
             stderr: None,
@@ -133,14 +134,18 @@ where
     Self: AsRef<Path> + Sized,
 {
     #[allow(clippy::unwrap_in_result)]
-    fn spawn_child_with_command(self, cmd: &str, args: Arguments) -> Result<TestChild<Self>> {
-        let mut cmd = test_cmd(cmd, self.as_ref())?;
+    fn spawn_child_with_command(
+        self,
+        command_path: &str,
+        args: Arguments,
+    ) -> Result<TestChild<Self>> {
+        let mut cmd = test_cmd(command_path, self.as_ref())?;
 
         Ok(cmd
             .args(args.into_arguments())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn2(self)
+            .spawn2(self, command_path)
             .unwrap())
     }
 }
@@ -183,8 +188,11 @@ pub struct TestChild<T> {
     /// and its output has been taken.
     pub dir: Option<T>,
 
-    /// The original command string.
+    /// The full command string, including arguments and working directory.
     pub cmd: String,
+
+    /// The path of the command, as passed to spawn2().
+    pub command_path: String,
 
     /// The child process itself.
     ///
@@ -532,14 +540,9 @@ impl<T> TestChild<T> {
         // Read unread child output.
         //
         // This checks for failure logs, and prevents some test hangs and deadlocks.
-        let binary_name = self
-            .cmd
-            .split_ascii_whitespace()
-            .next()
-            .expect("command must have binary");
-
         if self.child.is_some() || self.stdout.is_some() {
-            let wrote_lines = self.wait_for_stdout_line(format!("\n{} Child Stdout:", binary_name));
+            let wrote_lines =
+                self.wait_for_stdout_line(format!("\n{} Child Stdout:", self.command_path));
 
             while self.wait_for_stdout_line(None) {}
 
@@ -550,7 +553,8 @@ impl<T> TestChild<T> {
         }
 
         if self.child.is_some() || self.stderr.is_some() {
-            let wrote_lines = self.wait_for_stderr_line(format!("\n{} Child Stderr:", binary_name));
+            let wrote_lines =
+                self.wait_for_stderr_line(format!("\n{} Child Stderr:", self.command_path));
 
             while self.wait_for_stderr_line(None) {}
 
@@ -1370,13 +1374,8 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
             }
         }
 
-        let binary_name = source
-            .cmd
-            .split_ascii_whitespace()
-            .next()
-            .expect("command must have binary");
-        self.section(stdout_buf.header(format!("{} Unread Stdout:", binary_name)))
-            .section(stderr_buf.header(format!("{} Unread Stderr:", binary_name)))
+        self.section(stdout_buf.header(format!("{} Unread Stdout:", source.command_path)))
+            .section(stderr_buf.header(format!("{} Unread Stderr:", source.command_path)))
     }
 }
 
@@ -1393,7 +1392,7 @@ impl ContextFrom<&Output> for Report {
     type Return = Report;
 
     fn context_from(self, source: &Output) -> Self::Return {
-        // TODO: add binary_name before Stdout and Stderr headers
+        // TODO: add TestChild.command_path before Stdout and Stderr header names
         let stdout = || {
             String::from_utf8_lossy(&source.stdout)
                 .into_owned()
