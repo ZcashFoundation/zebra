@@ -227,4 +227,8 @@ zebra-test = { path = "../zebra-test" }
 
 # Use for the checkpoint generation tests via the zebra-checkpoints feature
 # (the binaries in this crate won't be built unless their features are enabled)
+#
+# Enable when `-Z bindeps` is stabilised:
+# https://github.com/rust-lang/cargo/issues/9096
+# artifact = "bin:zebra-checkpoints"
 zebra-utils = { path = "../zebra-utils" }
