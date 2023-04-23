@@ -226,22 +226,39 @@ where
     fn spawn_zebra_checkpoints_child(self, extra_args: Arguments) -> Result<TestChild<Self>>;
 }
 
-impl<T> ZebraCheckpointsTestDirExt for T
-where
-    Self: TestDirExt + AsRef<Path> + Sized,
-{
+impl ZebraCheckpointsTestDirExt for TempDir {
     #[allow(clippy::unwrap_in_result)]
-    fn spawn_zebra_checkpoints_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
+    fn spawn_zebra_checkpoints_child(mut self, extra_args: Arguments) -> Result<TestChild<Self>> {
         // By default, launch an instance that connects directly to `zebrad`.
         let mut args = Arguments::new();
         args.set_parameter("--transport", "direct");
 
-        // apply user provided arguments
+        // Apply user provided arguments
         args.merge_with(extra_args);
 
-        // Assume zebra-checkpoints is in the same directory as zebrad
-        //
-        // TODO: fall back to searching $PATH by using just "zebra-checkpoints"?
+        // Create debugging info
+        let temp_dir = self.as_ref().display().to_string();
+
+        // Try searching the system $PATH first, that's what the test Docker image uses
+        let zebra_checkpoints_path = "zebra-checkpoints";
+
+        tracing::info!(
+            ?zebra_checkpoints_path,
+            ?args,
+            ?temp_dir,
+            system_path = ?env::var("PATH"),
+            // TODO: disable when the tests are working well
+            usr_local_zebra_checkpoints_info = ?fs::metadata("/usr/local/bin/zebra-checkpoints"),
+            "Trying to launch zebra-checkpoints by searching system $PATH...",
+        );
+
+        let zebra_checkpoints = self.spawn_child_with_command(zebra_checkpoints_path, args.clone());
+
+        let Err(system_path_error) = zebra_checkpoints else  {
+            return zebra_checkpoints;
+        };
+
+        // Fall back to assuming zebra-checkpoints is in the same directory as zebrad
         let mut zebra_checkpoints_path: PathBuf = env!("CARGO_BIN_EXE_zebrad").into();
         assert!(
             zebra_checkpoints_path.pop(),
@@ -250,41 +267,45 @@ where
         zebra_checkpoints_path.push("zebra-checkpoints");
 
         if zebra_checkpoints_path.exists() {
+            // Create a new temporary directory, because the old one has been used up.
+            //
+            // TODO: instead, return the TempDir from spawn_child_with_command() on error.
+            self = testdir()?;
+
+            // Create debugging info
+            let temp_dir = self.as_ref().display().to_string();
+
             tracing::info!(
                 ?zebra_checkpoints_path,
                 ?args,
-                temp_dir = ?self.as_ref(),
+                ?temp_dir,
+                ?system_path_error,
                 // TODO: disable when the tests are working well
                 zebra_checkpoints_info = ?fs::metadata(&zebra_checkpoints_path),
-                "Trying to launch zebra-checkpoints from cargo path...",
+                "Launching from system $PATH failed, \
+                 trying to launch zebra-checkpoints from cargo path...",
             );
+
+            self.spawn_child_with_command(
+                zebra_checkpoints_path.to_str().expect(
+                    "internal test harness error: path is not UTF-8 \
+                     TODO: change spawn child methods to take &OsStr not &str",
+                ),
+                args,
+            )
         } else {
-            // The cargo path failed, try searching the system $PATH
-            let missing_cargo_path = zebra_checkpoints_path;
-            zebra_checkpoints_path = "zebra-checkpoints".into();
-
             tracing::info!(
-                ?zebra_checkpoints_path,
-                ?args,
-                temp_dir = ?self.as_ref(),
-                system_path = ?env::var("PATH"),
-                ?missing_cargo_path,
+                cargo_path = ?zebra_checkpoints_path,
+                ?system_path_error,
                 // TODO: disable when the tests are working well
-                maybe_zebra_checkpoints_info = ?fs::metadata("/usr/local/bin/zebra-checkpoints"),
-                "Cargo path does not exist, trying to launch zebra-checkpoints \
-                 by searching system $PATH...",
+                cargo_path_info = ?fs::metadata(&zebra_checkpoints_path),
+                "Launching from system $PATH failed, \
+                 and zebra-checkpoints cargo path does not exist...",
             );
+
+            // Return the original error
+            Err(system_path_error)
         }
-
-        let zebra_checkpoints = self.spawn_child_with_command(
-            zebra_checkpoints_path.to_str().expect(
-                "internal test harness error: path is not UTF-8 \
-                         TODO: change spawn child methods to take &OsStr not &str",
-            ),
-            args,
-        );
-
-        zebra_checkpoints
     }
 }
 
