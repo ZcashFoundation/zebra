@@ -9,14 +9,8 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
 };
-//use zebra_network::constants::{
-//    EOS_PANIC_AFTER, EOS_PANIC_MESSAGE_HEADER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
-//    RELEASE_NAME,
-//};
 
 /// The name of the current Zebra release.
-//
-// TODO: generate this from crate metadata (#2375)
 pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
 
 /// The estimated height that this release started to run.
@@ -37,9 +31,9 @@ pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
 pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";
 
 /// The amount of time between end of support checks.
-const CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// Wait for a bit at startup so `best_tip_height` is always `Some`.
+/// Wait a few seconds at startup so `best_tip_height` is always `Some`.
 const INITIAL_WAIT: Duration = Duration::from_secs(10);
 
 /// Start the end of support checking task.
@@ -61,7 +55,7 @@ pub async fn start(
 
 /// Check if the current release is too old and panic if so.
 pub fn check(tip_height: Height, network: Network) {
-    info!("Checking if Zebra release is inside support range ...");
+    debug!("Checking if Zebra release is inside support range ...");
 
     // Get the current block spacing
     let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
@@ -84,11 +78,11 @@ pub fn check(tip_height: Height, network: Network) {
         );
     } else if tip_height > warn_height {
         warn!(
-            "Your Zebra release is too old and it will stop running in block {}. \
+            "Your Zebra release is too old and it will stop running at block {}. \
             \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
         );
     } else {
-        info!("Zebra release is under support");
+        debug!("Zebra release is under support");
     }
 }

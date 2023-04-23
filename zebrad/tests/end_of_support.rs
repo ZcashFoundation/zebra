@@ -46,7 +46,7 @@ fn end_of_support_function() {
         "Checking if Zebra release is inside support range ..."
     ));
     assert!(logs_contain(
-        "Your Zebra release is too old and it will stop running in"
+        "Your Zebra release is too old and it will stop running at block"
     ));
 
     // Panic is tested in `end_of_support_panic`
