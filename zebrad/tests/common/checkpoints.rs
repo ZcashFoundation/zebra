@@ -7,7 +7,6 @@ use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -24,7 +23,7 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
-    prelude::{CommandExt, TestChild},
+    prelude::TestChild,
 };
 
 use crate::common::{
@@ -249,6 +248,7 @@ where
             tracing::info!(
                 ?zebra_checkpoints_path,
                 ?args,
+                temp_dir = ?self.as_ref(),
                 "Trying to launch zebra-checkpoints from cargo path...",
             );
         } else {
@@ -259,6 +259,7 @@ where
             tracing::info!(
                 ?zebra_checkpoints_path,
                 ?args,
+                temp_dir = ?self.as_ref(),
                 system_path = ?env::var("PATH"),
                 ?missing_cargo_path,
                 "Cargo path does not exist, trying to launch zebra-checkpoints \
@@ -266,24 +267,14 @@ where
             );
         }
 
-        /* TODO: add a spawn_child_with_command()/test_cmd() mode that doesn't change directories
-        self.spawn_child_with_command(
+        let zebra_checkpoints = self.spawn_child_with_command(
             zebra_checkpoints_path
                 .to_str()
                 .expect("TODO: change this method to take OsStr instead"),
             args,
-        )
-        */
-        let mut cmd = Command::new(zebra_checkpoints_path);
+        );
 
-        let zebra_checkpoints = cmd
-            .args(args.clone().into_arguments())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn2(self)
-            .expect("unexpected error launching command");
-
-        Ok(zebra_checkpoints)
+        zebra_checkpoints
     }
 }
 
