@@ -4,7 +4,7 @@
 //! height. It will finish the sync and update the cached chain state.
 
 use std::{
-    env,
+    env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
@@ -249,6 +249,8 @@ where
                 ?zebra_checkpoints_path,
                 ?args,
                 temp_dir = ?self.as_ref(),
+                // TODO: disable when the tests are working well
+                zebra_checkpoints_info = ?fs::metadata(&zebra_checkpoints_path),
                 "Trying to launch zebra-checkpoints from cargo path...",
             );
         } else {
@@ -262,15 +264,18 @@ where
                 temp_dir = ?self.as_ref(),
                 system_path = ?env::var("PATH"),
                 ?missing_cargo_path,
+                // TODO: disable when the tests are working well
+                maybe_zebra_checkpoints_info = ?fs::metadata("/usr/local/bin/zebra-checkpoints"),
                 "Cargo path does not exist, trying to launch zebra-checkpoints \
                  by searching system $PATH...",
             );
         }
 
         let zebra_checkpoints = self.spawn_child_with_command(
-            zebra_checkpoints_path
-                .to_str()
-                .expect("TODO: change this method to take OsStr instead"),
+            zebra_checkpoints_path.to_str().expect(
+                "internal test harness error: path is not UTF-8 \
+                         TODO: change spawn child methods to take &OsStr not &str",
+            ),
             args,
         );
 
