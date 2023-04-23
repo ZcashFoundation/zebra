@@ -134,9 +134,13 @@ pub async fn run(network: Network) -> Result<()> {
     let zebra_checkpoints =
         spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, last_checkpoint)?;
 
-    tracing::info!(
-        "zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug"
-    );
+    let show_zebrad_logs = env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok();
+    if !show_zebrad_logs {
+        tracing::info!(
+            "zebrad logs are hidden, show them using {LOG_ZEBRAD_CHECKPOINTS}=1 and RUST_LOG=debug"
+        );
+    }
+
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -151,7 +155,7 @@ pub async fn run(network: Network) -> Result<()> {
         zebrad,
         zebra_tip_height,
         test_type,
-        env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok(),
+        show_zebrad_logs,
     )?;
 
     println!("\n\n");
