@@ -1140,8 +1140,7 @@ async fn self_connections_should_fail() {
     .await;
 
     // Insert our own address into the address book, and make sure it works
-    // BEGIN CRITICAL SECTION
-    let real_self_listener = {
+    let (real_self_listener, updated_addr) = {
         let mut unlocked_address_book = address_book
             .lock()
             .expect("unexpected panic in address book");
@@ -1158,37 +1157,35 @@ async fn self_connections_should_fail() {
         );
 
         std::mem::drop(unlocked_address_book);
-        // END CRITICAL SECTION
 
-        // Make sure we modified the address book correctly
-        assert!(
-            updated_addr.is_some(),
-            "inserting our own address into the address book failed: {real_self_listener:?}"
-        );
-        assert_eq!(
-            updated_addr.unwrap().addr(),
-            real_self_listener.addr(),
-            "wrong address inserted into address book"
-        );
-        assert_ne!(
-            updated_addr.unwrap().addr().ip(),
-            Ipv4Addr::UNSPECIFIED,
-            "invalid address inserted into address book: ip must be valid for inbound connections"
-        );
-        assert_ne!(
-            updated_addr.unwrap().addr().port(),
-            0,
-            "invalid address inserted into address book: port must be valid for inbound connections"
-        );
-
-        real_self_listener
+        (real_self_listener, updated_addr)
     };
+
+    // Make sure we modified the address book correctly
+    assert!(
+        updated_addr.is_some(),
+        "inserting our own address into the address book failed: {real_self_listener:?}"
+    );
+    assert_eq!(
+        updated_addr.unwrap().addr(),
+        real_self_listener.addr(),
+        "wrong address inserted into address book"
+    );
+    assert_ne!(
+        updated_addr.unwrap().addr().ip(),
+        Ipv4Addr::UNSPECIFIED,
+        "invalid address inserted into address book: ip must be valid for inbound connections"
+    );
+    assert_ne!(
+        updated_addr.unwrap().addr().port(),
+        0,
+        "invalid address inserted into address book: port must be valid for inbound connections"
+    );
 
     // Wait until the crawler has tried at least one self-connection
     tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
 
     // Check that the self-connection failed
-    // BEGIN CRITICAL SECTION
     let self_connection_status = {
         let mut unlocked_address_book = address_book
             .lock()
@@ -1199,7 +1196,6 @@ async fn self_connections_should_fail() {
             .expect("unexpected dropped listener address in address book");
 
         std::mem::drop(unlocked_address_book);
-        // END CRITICAL SECTION
 
         self_connection_status
     };

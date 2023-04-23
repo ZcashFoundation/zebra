@@ -595,8 +595,6 @@ where
     // It is ok to wait for the lock here, because handshakes have a short
     // timeout, and the async mutex will be released when the task times
     // out.
-    //
-    // START CRITICAL SECTION
     {
         let mut locked_nonces = nonces.lock().await;
 
@@ -627,7 +625,6 @@ where
 
         std::mem::drop(locked_nonces);
     }
-    // END CRITICAL SECTION
 
     // Don't leak our exact clock skew to our peers. On the other hand,
     // we can't deviate too much, or zcashd will get confused.
