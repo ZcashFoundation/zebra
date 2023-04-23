@@ -1396,7 +1396,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     );
 }
 
-/// Initialize a peer set with`peerset_initial_target_size`, `inbound_service`, and `network`.
+/// Initialize a peer set with `peerset_initial_target_size`, `inbound_service`, and `network`.
 ///
 /// If `force_listen_addr` is set, binds the network listener to that address.
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
