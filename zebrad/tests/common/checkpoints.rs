@@ -393,7 +393,11 @@ pub fn wait_for_zebra_checkpoints_generation<
         });
 
         let zebra_checkpoints_thread = s.spawn(|| {
-            zebra_checkpoints_wait_fn()
+            let zebra_checkpoints_result = zebra_checkpoints_wait_fn();
+
+            is_zebra_checkpoints_finished.store(true, Ordering::SeqCst);
+
+            zebra_checkpoints_result
                 .expect("test failed while waiting for zebra_checkpoints to sync.");
         });
 
