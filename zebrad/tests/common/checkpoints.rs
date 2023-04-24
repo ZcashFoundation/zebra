@@ -246,6 +246,37 @@ impl ZebraCheckpointsTestDirExt for TempDir {
         // Try searching the system $PATH first, that's what the test Docker image uses
         let zebra_checkpoints_path = "zebra-checkpoints";
 
+        // BLOCKING: delete this before merging PR
+        // Find out what is actually in the binary
+        {
+            let mut args = Arguments::new();
+            args.set_argument("--help");
+
+            let help_dir = testdir()?;
+
+            tracing::info!(
+                ?zebra_checkpoints_path,
+                ?args,
+                ?help_dir,
+                system_path = ?env::var("PATH"),
+                // TODO: disable when the tests are working well
+                usr_local_zebra_checkpoints_info = ?fs::metadata("/usr/local/bin/zebra-checkpoints"),
+                "Trying to launch `zebra-checkpoints --help` by searching system $PATH...",
+            );
+
+            let zebra_checkpoints = help_dir.spawn_child_with_command(zebra_checkpoints_path, args);
+
+            if let Err(help_error) = zebra_checkpoints {
+                tracing::info!(?help_error, "Failed to launch `zebra-checkpoints --help`");
+            } else {
+                let mut zebra_checkpoints = zebra_checkpoints.unwrap();
+
+                // Get the help output
+                while zebra_checkpoints.wait_for_stdout_line(None) {}
+                while zebra_checkpoints.wait_for_stderr_line(None) {}
+            }
+        }
+
         tracing::info!(
             ?zebra_checkpoints_path,
             ?args,
