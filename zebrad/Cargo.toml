@@ -225,10 +225,13 @@ zebra-node-services = { path = "../zebra-node-services", features = ["rpc-client
 
 zebra-test = { path = "../zebra-test" }
 
-# Use for the checkpoint generation tests via the zebra-checkpoints feature
-# (the binaries in this crate won't be built unless their features are enabled)
+# Used by the checkpoint generation tests via the zebra-checkpoints feature
+# (the binaries in this crate won't be built unless their features are enabled).
 #
-# Enable when `-Z bindeps` is stabilised:
+# Currently, we use zebra-utils/tests/build_utils_for_zebrad_tests.rs as a workaround
+# to build the zebra-checkpoints utility for the zebrad acceptance tests.
+#
+# When `-Z bindeps` is stabilised, enable this binary dependency instead:
 # https://github.com/rust-lang/cargo/issues/9096
-# artifact = "bin:zebra-checkpoints"
+# zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
 zebra-utils = { path = "../zebra-utils" }
