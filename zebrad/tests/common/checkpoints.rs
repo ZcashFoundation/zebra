@@ -111,8 +111,6 @@ pub async fn run(network: Network) -> Result<()> {
     );
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
-    // BLOCKER: re-enable before merging this PR
-    /*
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -121,6 +119,7 @@ pub async fn run(network: Network) -> Result<()> {
 
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
+    let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -128,9 +127,7 @@ pub async fn run(network: Network) -> Result<()> {
         ?last_checkpoint,
         "zebrad synced to the tip, launching zebra-checkpoints...",
     );
-    */
 
-    let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
     let zebra_checkpoints =
         spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, last_checkpoint)?;
 
@@ -199,7 +196,7 @@ pub fn spawn_zebra_checkpoints_direct(
     // Currently unused, but we might put a copy of the checkpoints file in it later
     let zebra_checkpoints_dir = testdir()?;
 
-    let zebra_checkpoints = zebra_checkpoints_dir
+    let mut zebra_checkpoints = zebra_checkpoints_dir
         .spawn_zebra_checkpoints_child(arguments)?
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(
@@ -210,9 +207,7 @@ pub fn spawn_zebra_checkpoints_direct(
     // zebra-checkpoints logs to stderr when it launches.
     //
     // This log happens very quickly, so it is ok to block for a short while here.
-    //
-    // BLOCKER: re-enable before merging this PR
-    //zebra_checkpoints.expect_stderr_line_matches(regex::escape("calculating checkpoints"))?;
+    zebra_checkpoints.expect_stderr_line_matches(regex::escape("calculating checkpoints"))?;
 
     Ok(zebra_checkpoints)
 }
@@ -246,9 +241,13 @@ impl ZebraCheckpointsTestDirExt for TempDir {
         // Try searching the system $PATH first, that's what the test Docker image uses
         let zebra_checkpoints_path = "zebra-checkpoints";
 
-        // BLOCKING: delete this before merging PR
-        // Find out what is actually in the binary
-        {
+        // Make sure we have the right zebra-checkpoints binary.
+        //
+        // When we were creating this test, we spent a lot of time debugging a build issue where
+        // `zebra-checkpoints` had an empty `main()` function. This check makes sure that doesn't
+        // happen again.
+        let debug_checkpoints = env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok();
+        if debug_checkpoints {
             let mut args = Arguments::new();
             args.set_argument("--help");
 
@@ -269,14 +268,29 @@ impl ZebraCheckpointsTestDirExt for TempDir {
             if let Err(help_error) = zebra_checkpoints {
                 tracing::info!(?help_error, "Failed to launch `zebra-checkpoints --help`");
             } else {
+                tracing::info!("Launched `zebra-checkpoints --help`, output is:");
+
                 let mut zebra_checkpoints = zebra_checkpoints.unwrap();
+                let mut output_is_empty = true;
 
                 // Get the help output
-                while zebra_checkpoints.wait_for_stdout_line(None) {}
-                while zebra_checkpoints.wait_for_stderr_line(None) {}
+                while zebra_checkpoints.wait_for_stdout_line(None) {
+                    output_is_empty = false;
+                }
+                while zebra_checkpoints.wait_for_stderr_line(None) {
+                    output_is_empty = false;
+                }
+
+                if output_is_empty {
+                    tracing::info!(
+                        "`zebra-checkpoints --help` did not log any output. \
+                         Is the binary being built during tests? Are its required-features active?"
+                    );
+                }
             }
         }
 
+        // Try the `zebra-checkpoints` binary the Docker image copied just after it built the tests.
         tracing::info!(
             ?zebra_checkpoints_path,
             ?args,
@@ -293,7 +307,7 @@ impl ZebraCheckpointsTestDirExt for TempDir {
             return zebra_checkpoints;
         };
 
-        // Fall back to assuming zebra-checkpoints is in the same directory as zebrad
+        // Fall back to assuming zebra-checkpoints is in the same directory as zebrad.
         let mut zebra_checkpoints_path: PathBuf = env!("CARGO_BIN_EXE_zebrad").into();
         assert!(
             zebra_checkpoints_path.pop(),
