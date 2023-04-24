@@ -81,7 +81,7 @@ spandoc = "0.2.2"
 
 tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
-tracing-subscriber = "0.3.16"
+tracing-subscriber = "0.3.17"
 
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
