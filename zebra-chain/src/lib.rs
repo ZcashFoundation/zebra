@@ -23,6 +23,7 @@ pub mod block;
 pub mod chain_sync_status;
 pub mod chain_tip;
 pub mod diagnostic;
+pub mod error;
 pub mod fmt;
 pub mod history_tree;
 pub mod orchard;

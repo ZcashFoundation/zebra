@@ -30,14 +30,14 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.1
+      - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v1.1.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
@@ -182,14 +182,14 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.1
+      - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v1.1.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'

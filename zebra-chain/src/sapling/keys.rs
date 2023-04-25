@@ -15,6 +15,7 @@ use std::{fmt, io};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
+    error::{AddressError, RandError},
     primitives::redjubjub::{self, SpendAuth},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
@@ -180,18 +181,24 @@ impl Diversifier {
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
     /// <https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash>
-    pub fn new<T>(csprng: &mut T) -> Self
+    pub fn new<T>(csprng: &mut T) -> Result<Self, AddressError>
     where
         T: RngCore + CryptoRng,
     {
-        loop {
+        /// Number of times a `diversify_hash` will try to obtain a diversified base point.
+        const DIVERSIFY_HASH_TRIES: u8 = 2;
+
+        for _ in 0..DIVERSIFY_HASH_TRIES {
             let mut bytes = [0u8; 11];
-            csprng.fill_bytes(&mut bytes);
+            csprng
+                .try_fill_bytes(&mut bytes)
+                .map_err(|_| AddressError::from(RandError::FillBytes))?;
 
             if diversify_hash(bytes).is_some() {
-                break Self(bytes);
+                return Ok(Self(bytes));
             }
         }
+        Err(AddressError::DiversifierGenerationFailure)
     }
 }
 

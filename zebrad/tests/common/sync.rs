@@ -59,10 +59,16 @@ pub const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
 /// The maximum amount of time Zebra should take to sync a few hundred blocks.
 ///
 /// Usually the small checkpoint is much shorter than this.
-pub const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
+//
+// Tempoaraily increased to 4 minutes to get more diagnostic info in failed tests.
+// TODO: reduce to 120 when #6506 is fixed
+pub const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// The maximum amount of time Zebra should take to sync a thousand blocks.
-pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
+//
+// Tempoaraily increased to 4 minutes to get more diagnostic info in failed tests.
+// TODO: reduce to 180 when #6506 is fixed
+pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
 /// partially synchronized state.

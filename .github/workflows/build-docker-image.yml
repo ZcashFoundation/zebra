@@ -68,7 +68,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.1
+      - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
 
@@ -80,7 +80,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.3.0
+        uses: docker/metadata-action@v4.4.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -116,7 +116,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v1.1.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'

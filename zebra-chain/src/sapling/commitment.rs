@@ -12,6 +12,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::{Amount, NonNegative},
+    error::{NoteCommitmentError, RandError},
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
@@ -34,14 +35,16 @@ use pedersen_hashes::*;
 /// trapdoor generators.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#jubjub>
-pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
+pub fn generate_trapdoor<T>(csprng: &mut T) -> Result<jubjub::Fr, RandError>
 where
     T: RngCore + CryptoRng,
 {
     let mut bytes = [0u8; 64];
-    csprng.fill_bytes(&mut bytes);
+    csprng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| RandError::FillBytes)?;
     // Fr::from_bytes_wide() reduces the input modulo r via Fr::from_u512()
-    jubjub::Fr::from_bytes_wide(&bytes)
+    Ok(jubjub::Fr::from_bytes_wide(&bytes))
 }
 
 /// The randomness used in the Pedersen Hash for note commitment.
@@ -104,7 +107,7 @@ impl NoteCommitment {
         diversifier: Diversifier,
         transmission_key: TransmissionKey,
         value: Amount<NonNegative>,
-    ) -> Option<(CommitmentRandomness, Self)>
+    ) -> Result<(CommitmentRandomness, Self), NoteCommitmentError>
     where
         T: RngCore + CryptoRng,
     {
@@ -120,11 +123,9 @@ impl NoteCommitment {
         // The `TryFrom<Diversifier>` impls for the `jubjub::*Point`s handles
         // calling `DiversifyHash` implicitly.
 
-        let g_d_bytes: [u8; 32] = if let Ok(g_d) = jubjub::AffinePoint::try_from(diversifier) {
-            g_d.to_bytes()
-        } else {
-            return None;
-        };
+        let g_d_bytes = jubjub::AffinePoint::try_from(diversifier)
+            .map_err(|_| NoteCommitmentError::InvalidDiversifier)?
+            .to_bytes();
 
         let pk_d_bytes = <[u8; 32]>::from(transmission_key);
         let v_bytes = value.to_bytes();
@@ -133,9 +134,9 @@ impl NoteCommitment {
         s.extend(pk_d_bytes);
         s.extend(v_bytes);
 
-        let rcm = CommitmentRandomness(generate_trapdoor(csprng));
+        let rcm = CommitmentRandomness(generate_trapdoor(csprng)?);
 
-        Some((
+        Ok((
             rcm,
             NoteCommitment::from(windowed_pedersen_commitment(rcm.0, &s)),
         ))
@@ -265,13 +266,13 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
-    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
+    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
-        let rcv = generate_trapdoor(csprng);
+        let rcv = generate_trapdoor(csprng)?;
 
-        Self::new(rcv, value)
+        Ok(Self::new(rcv, value))
     }
 
     /// Generate a new _ValueCommitment_ from an existing _rcv_ on a _value_.

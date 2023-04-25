@@ -308,18 +308,20 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         prop_assert!(empty_tree.is_none());
 
         // TODO: fix this test or the code so the full_chain temporary trees aren't overwritten
-        let chain = chain.iter().filter(|block| block.height != Height(0));
+        let chain = chain.iter()
+            .filter(|block| block.height != Height(0))
+            .map(ContextuallyValidBlock::test_with_zero_spent_utxos);
 
-        // use `end_count` as the number of non-finalized blocks at the end of the chain
-        let finalized_count = chain.clone().count() - end_count;
+        // use `end_count` as the number of non-finalized blocks at the end of the chain,
+        // make sure this test pushes at least 1 block in the partial chain.
+        let finalized_count = 1.max(chain.clone().count() - end_count);
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
 
         let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, fake_value_pool);
         for block in chain
             .clone()
-            .take(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .take(finalized_count) {
                 full_chain = full_chain.push(block)?;
             }
 
@@ -334,14 +336,12 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         );
         for block in chain
             .clone()
-            .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .skip(finalized_count) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
 
         for block in chain
-            .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .skip(finalized_count) {
                 full_chain = full_chain.push(block.clone())?;
             }
 

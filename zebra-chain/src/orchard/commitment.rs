@@ -2,9 +2,13 @@
 
 use std::{fmt, io};
 
-use group::{ff::PrimeField, prime::PrimeCurveAffine, GroupEncoding};
+use group::{
+    ff::{FromUniformBytes, PrimeField},
+    prime::PrimeCurveAffine,
+    GroupEncoding,
+};
 use halo2::{
-    arithmetic::{Coordinates, CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine},
     pasta::pallas,
 };
 use lazy_static::lazy_static;
@@ -12,6 +16,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::Amount,
+    error::RandError,
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
@@ -22,14 +27,16 @@ use super::sinsemilla::*;
 /// Generates a random scalar from the scalar field 𝔽_{q_P}.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
-pub fn generate_trapdoor<T>(csprng: &mut T) -> pallas::Scalar
+pub fn generate_trapdoor<T>(csprng: &mut T) -> Result<pallas::Scalar, RandError>
 where
     T: RngCore + CryptoRng,
 {
     let mut bytes = [0u8; 64];
-    csprng.fill_bytes(&mut bytes);
-    // pallas::Scalar::from_bytes_wide() reduces the input modulo q_P under the hood.
-    pallas::Scalar::from_bytes_wide(&bytes)
+    csprng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| RandError::FillBytes)?;
+    // pallas::Scalar::from_uniform_bytes() reduces the input modulo q_P under the hood.
+    Ok(pallas::Scalar::from_uniform_bytes(&bytes))
 }
 
 /// The randomness used in the Simsemilla hash for note commitment.
@@ -223,13 +230,13 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
+    pub fn randomized<T>(csprng: &mut T, value: Amount) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
-        let rcv = generate_trapdoor(csprng);
+        let rcv = generate_trapdoor(csprng)?;
 
-        Self::new(rcv, value)
+        Ok(Self::new(rcv, value))
     }
 
     /// Generate a new `ValueCommitment` from an existing `rcv on a `value`.

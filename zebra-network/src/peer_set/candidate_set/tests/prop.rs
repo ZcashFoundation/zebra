@@ -1,3 +1,5 @@
+//! Randomised property tests for candidate peer selection.
+
 use std::{
     env,
     net::SocketAddr,
@@ -13,7 +15,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
-    constants::MIN_PEER_CONNECTION_INTERVAL,
+    constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
     meta_addr::{MetaAddr, MetaAddrChange},
     AddressBook, BoxError, Request, Response,
 };
@@ -75,7 +77,7 @@ proptest! {
             //
             // Check that it takes less than the peer set candidate delay,
             // and hope that is enough time for test machines with high CPU load.
-            let less_than_min_interval = MIN_PEER_CONNECTION_INTERVAL - Duration::from_millis(1);
+            let less_than_min_interval = MIN_OUTBOUND_PEER_CONNECTION_INTERVAL - Duration::from_millis(1);
             assert_eq!(runtime.block_on(timeout(less_than_min_interval, candidate_set.next())), Ok(None));
         }
     }
@@ -112,7 +114,7 @@ proptest! {
             // Check rate limiting for initial peers
             check_candidates_rate_limiting(&mut candidate_set, initial_candidates).await;
             // Sleep more than the rate limiting delay
-            sleep(MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL).await;
+            sleep(MAX_TEST_CANDIDATES * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL).await;
             // Check that the next peers are still respecting the rate limiting, without causing a
             // burst of reconnections
             check_candidates_rate_limiting(&mut candidate_set, extra_candidates).await;
@@ -121,7 +123,7 @@ proptest! {
         // Allow enough time for the maximum number of candidates,
         // plus some extra time for test machines with high CPU load.
         // (The max delay asserts usually fail before hitting this timeout.)
-        let max_rate_limit_sleep = 3 * MAX_TEST_CANDIDATES * MIN_PEER_CONNECTION_INTERVAL;
+        let max_rate_limit_sleep = 3 * MAX_TEST_CANDIDATES * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL;
         let max_extra_delay = (2 * MAX_TEST_CANDIDATES + 1) * MAX_SLEEP_EXTRA_DELAY;
         assert!(runtime.block_on(timeout(max_rate_limit_sleep + max_extra_delay, checks)).is_ok());
     }
@@ -161,7 +163,8 @@ where
             "rate-limited candidates should not be delayed too long: now: {now:?} max: {maximum_reconnect_instant:?}. Hint: is the test machine overloaded?",
         );
 
-        minimum_reconnect_instant = now + MIN_PEER_CONNECTION_INTERVAL;
-        maximum_reconnect_instant = now + MIN_PEER_CONNECTION_INTERVAL + MAX_SLEEP_EXTRA_DELAY;
+        minimum_reconnect_instant = now + MIN_OUTBOUND_PEER_CONNECTION_INTERVAL;
+        maximum_reconnect_instant =
+            now + MIN_OUTBOUND_PEER_CONNECTION_INTERVAL + MAX_SLEEP_EXTRA_DELAY;
     }
 }

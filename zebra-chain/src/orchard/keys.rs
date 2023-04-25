@@ -13,8 +13,11 @@ use halo2::{
 };
 use rand_core::{CryptoRng, RngCore};
 
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    error::RandError,
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
 };
 
 use super::sinsemilla::*;
@@ -102,14 +105,16 @@ impl Diversifier {
     /// Generate a new `Diversifier`.
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    pub fn new<T>(csprng: &mut T) -> Self
+    pub fn new<T>(csprng: &mut T) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
         let mut bytes = [0u8; 11];
-        csprng.fill_bytes(&mut bytes);
+        csprng
+            .try_fill_bytes(&mut bytes)
+            .map_err(|_| RandError::FillBytes)?;
 
-        Self::from(bytes)
+        Ok(Self::from(bytes))
     }
 }
 
