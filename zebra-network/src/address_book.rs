@@ -209,6 +209,12 @@ impl AddressBook {
         self.address_metrics_tx.subscribe()
     }
 
+    /// Set the local listener address. Only for use in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_local_listener(&mut self, addr: SocketAddr) {
+        self.local_listener = addr;
+    }
+
     /// Get the local listener address.
     ///
     /// This address contains minimal state, but it is not sanitized.
