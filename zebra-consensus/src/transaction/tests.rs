@@ -2825,7 +2825,7 @@ async fn mempool_zip317_error() {
 
     let height = NetworkUpgrade::Nu5
         .activation_height(Network::Mainnet)
-        .expect("Canopy activation height is specified");
+        .expect("Nu5 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
 
     // Will produce a small enough miner fee to fail the check.
@@ -2836,7 +2836,7 @@ async fn mempool_zip317_error() {
         Amount::try_from(10).expect("invalid value"),
     );
 
-    // Create a non-coinbase V4 tx with the last valid expiry height.
+    // Create a non-coinbase V5 tx.
     let tx = Transaction::V5 {
         inputs: vec![input],
         outputs: vec![output],
@@ -2882,7 +2882,7 @@ async fn mempool_zip317_error() {
         })
         .await;
 
-    // Mempool refuse to add this transaction into storage.
+    // Mempool refuses to add this transaction into storage.
     assert!(verifier_response.is_err());
     assert_eq!(
         verifier_response.err(),
@@ -2897,10 +2897,10 @@ async fn mempool_zip317_ok() {
 
     let height = NetworkUpgrade::Nu5
         .activation_height(Network::Mainnet)
-        .expect("Canopy activation height is specified");
+        .expect("Nu5 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
 
-    // Will produce a small enough miner fee to fail the check.
+    // Will produce a big enough miner fee to pass the check.
     let (input, output, known_utxos) = mock_transparent_transfer(
         fund_height,
         true,
@@ -2908,7 +2908,7 @@ async fn mempool_zip317_ok() {
         Amount::try_from(10001).expect("invalid value"),
     );
 
-    // Create a non-coinbase V4 tx with the last valid expiry height.
+    // Create a non-coinbase V5 tx.
     let tx = Transaction::V5 {
         inputs: vec![input],
         outputs: vec![output],
