@@ -43,24 +43,34 @@ pub mod zip317;
 /// Contributes to the randomized, weighted eviction of transactions from the
 /// mempool when it reaches a max size, also based on the total cost.
 ///
+/// # Standard Rule
+///
 /// > Each transaction has a cost, which is an integer defined as:
 /// >
-/// > max(serialized transaction size in bytes, 4000)
+/// > max(memory size in bytes, 10000)
 /// >
-/// > The threshold 4000 for the cost function is chosen so that the size in bytes
-/// > of a typical fully shielded Sapling transaction (with, say, 2 shielded outputs
-/// > and up to 5 shielded inputs) will fall below the threshold. This has the effect
+/// > The memory size is an estimate of the size that a transaction occupies in the
+/// > memory of a node. It MAY be approximated as the serialized transaction size in
+/// > bytes.
+/// >
+/// > ...
+/// >
+/// > The threshold 10000 for the cost function is chosen so that the size in bytes of
+/// > a minimal fully shielded Orchard transaction with 2 shielded actions (having a
+/// > serialized size of 9165 bytes) will fall below the threshold. This has the effect
 /// > of ensuring that such transactions are not evicted preferentially to typical
-/// > transparent transactions because of their size.
+/// > transparent or Sapling transactions because of their size.
 ///
 /// [ZIP-401]: https://zips.z.cash/zip-0401
-pub const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
+pub const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 10_000;
 
 /// When a transaction pays a fee less than the conventional fee,
 /// this low fee penalty is added to its cost for mempool eviction.
 ///
 /// See [VerifiedUnminedTx::eviction_weight()] for details.
-const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 16_000;
+///
+/// [ZIP-401]: https://zips.z.cash/zip-0401
+const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 40_000;
 
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
@@ -380,9 +390,7 @@ impl VerifiedUnminedTx {
     /// and signature verification; networking overheads; size of in-memory data
     /// structures).
     ///
-    /// > Each transaction has a cost, which is an integer defined as:
-    /// >
-    /// > max(serialized transaction size in bytes, 4000)
+    /// > Each transaction has a cost, which is an integer defined as...
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
@@ -395,11 +403,12 @@ impl VerifiedUnminedTx {
     /// The computed _eviction weight_ of a verified unmined transaction as part
     /// of the mempool set, as defined in [ZIP-317] and [ZIP-401].
     ///
-    /// Standard rule:
+    /// # Standard Rule
     ///
-    /// > Each transaction also has an eviction weight, which is cost +
-    /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
-    /// > a fee less than the conventional fee, otherwise 0.
+    /// > Each transaction also has an *eviction weight*, which is *cost* + *low_fee_penalty*,
+    /// > where *low_fee_penalty* is 40000 if the transaction pays a fee less than the
+    /// > conventional fee, otherwise 0. The conventional fee is currently defined in
+    /// > [ZIP-317].
     ///
     /// > zcashd and zebrad limit the size of the mempool as described in [ZIP-401].
     /// > This specifies a low fee penalty that is added to the "eviction weight" if the transaction

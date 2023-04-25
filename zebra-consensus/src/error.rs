@@ -8,7 +8,10 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use zebra_chain::{amount, block, orchard, sapling, sprout, transparent};
+use zebra_chain::{
+    amount, block, orchard, sapling, sprout,
+    transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
+};
 use zebra_state::ValidateContextError;
 
 use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
@@ -187,12 +190,37 @@ pub enum TransactionError {
     #[error("could not validate nullifiers and anchors on best chain")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
-    ValidateNullifiersAndAnchorsError(Box<ValidateContextError>),
+    ValidateContextError(Box<ValidateContextError>),
 
     #[error("could not validate mempool transaction lock time on best chain")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // TODO: turn this into a typed error
     ValidateMempoolLockTimeError(String),
+
+    #[error(
+        "immature transparent coinbase spend: \
+        attempt to spend {outpoint:?} at {spend_height:?}, \
+        but spends are invalid before {min_spend_height:?}, \
+        which is {MIN_TRANSPARENT_COINBASE_MATURITY:?} blocks \
+        after it was created at {created_height:?}"
+    )]
+    #[non_exhaustive]
+    ImmatureTransparentCoinbaseSpend {
+        outpoint: transparent::OutPoint,
+        spend_height: block::Height,
+        min_spend_height: block::Height,
+        created_height: block::Height,
+    },
+
+    #[error(
+        "unshielded transparent coinbase spend: {outpoint:?} \
+         must be spent in a transaction which only has shielded outputs"
+    )]
+    #[non_exhaustive]
+    UnshieldedTransparentCoinbaseSpend {
+        outpoint: transparent::OutPoint,
+        min_spend_height: block::Height,
+    },
 
     #[error("failed to verify ZIP-317 transaction rules, transaction was not inserted to mempool")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
@@ -201,7 +229,7 @@ pub enum TransactionError {
 
 impl From<ValidateContextError> for TransactionError {
     fn from(err: ValidateContextError) -> Self {
-        TransactionError::ValidateNullifiersAndAnchorsError(Box::new(err))
+        TransactionError::ValidateContextError(Box::new(err))
     }
 }
 

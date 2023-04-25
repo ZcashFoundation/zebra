@@ -2,7 +2,6 @@
 
 use std::{
     cmp::min,
-    collections::HashSet,
     fmt,
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -14,6 +13,7 @@ use std::{
 
 use chrono::{TimeZone, Utc};
 use futures::{channel::oneshot, future, pin_mut, FutureExt, SinkExt, StreamExt};
+use indexmap::IndexSet;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::broadcast,
@@ -48,6 +48,9 @@ use crate::{
     BoxError, Config, VersionMessage,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A [`Service`] that handshakes with a remote peer and constructs a
 /// client/server pair.
 ///
@@ -71,7 +74,7 @@ where
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
-    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
 
     parent_span: Span,
 }
@@ -515,7 +518,7 @@ where
             let (tx, _rx) = tokio::sync::mpsc::channel(1);
             tx
         });
-        let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
+        let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
@@ -572,7 +575,7 @@ pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
     config: Config,
-    nonces: Arc<futures::lock::Mutex<HashSet<Nonce>>>,
+    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
@@ -583,12 +586,45 @@ where
 {
     // Create a random nonce for this connection
     let local_nonce = Nonce::default();
+
+    // Insert the nonce for this handshake into the shared nonce set.
+    // Each connection has its own connection state, and handshakes execute concurrently.
+    //
     // # Correctness
     //
     // It is ok to wait for the lock here, because handshakes have a short
     // timeout, and the async mutex will be released when the task times
     // out.
-    nonces.lock().await.insert(local_nonce);
+    {
+        let mut locked_nonces = nonces.lock().await;
+
+        // Duplicate nonces are very rare, because they require a 64-bit random number collision,
+        // and the nonce set is limited to a few hundred entries.
+        let is_unique_nonce = locked_nonces.insert(local_nonce);
+        if !is_unique_nonce {
+            return Err(HandshakeError::LocalDuplicateNonce);
+        }
+
+        // # Security
+        //
+        // Limit the amount of memory used for nonces.
+        // Nonces can be left in the set if the connection fails or times out between
+        // the nonce being inserted, and it being removed.
+        //
+        // Zebra has strict connection limits, so we limit the number of nonces to
+        // the configured connection limit.
+        // This is a tradeoff between:
+        // - avoiding memory denial of service attacks which make large numbers of connections,
+        //   for example, 100 failed inbound connections takes 1 second.
+        // - memory usage: 16 bytes per `Nonce`, 3.2 kB for 200 nonces
+        // - collision probability: two hundred 64-bit nonces have a very low collision probability
+        //   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
+        while locked_nonces.len() > config.peerset_total_connection_limit() {
+            locked_nonces.shift_remove_index(0);
+        }
+
+        std::mem::drop(locked_nonces);
+    }
 
     // Don't leak our exact clock skew to our peers. On the other hand,
     // we can't deviate too much, or zcashd will get confused.
@@ -684,18 +720,20 @@ where
     // We must wait for the lock before we continue with the connection, to avoid
     // self-connection. If the connection times out, the async lock will be
     // released.
-    let nonce_reuse = {
-        let mut locked_nonces = nonces.lock().await;
-        let nonce_reuse = locked_nonces.contains(&remote.nonce);
-        // Regardless of whether we observed nonce reuse, clean up the nonce set.
-        locked_nonces.remove(&local_nonce);
-        nonce_reuse
-    };
+    //
+    // # Security
+    //
+    // We don't remove the nonce here, because peers that observe our network traffic could
+    // maliciously remove nonces, and force us to make self-connections.
+    let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
-        Err(HandshakeError::NonceReuse)?;
+        info!(?connected_addr, "rejecting self-connection attempt");
+        Err(HandshakeError::RemoteNonceReuse)?;
     }
 
-    // SECURITY: Reject connections to peers on old versions, because they might not know about all
+    // # Security
+    //
+    // Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
     if remote.version < min_version {

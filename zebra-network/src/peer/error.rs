@@ -226,7 +226,11 @@ pub enum HandshakeError {
     UnexpectedMessage(Box<crate::protocol::external::Message>),
     /// The peer connector detected handshake nonce reuse, possibly indicating self-connection.
     #[error("Detected nonce reuse, possible self-connection")]
-    NonceReuse,
+    RemoteNonceReuse,
+    /// The peer connector created a duplicate random nonce. This is very unlikely,
+    /// because the range of the data type is 2^64.
+    #[error("Unexpectedly created a duplicate random local nonce")]
+    LocalDuplicateNonce,
     /// The remote peer closed the connection.
     #[error("Peer closed connection")]
     ConnectionClosed,

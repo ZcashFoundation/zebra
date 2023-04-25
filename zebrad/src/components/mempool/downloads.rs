@@ -78,7 +78,8 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// The maximum number of concurrent inbound download and verify tasks.
 ///
 /// We expect the mempool crawler to download and verify most mempool transactions, so this bound
-/// can be small.
+/// can be small. But it should be at least the default `network.peerset_initial_target_size` config,
+/// to avoid disconnecting peers on startup.
 ///
 /// ## Security
 ///
@@ -95,7 +96,9 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-pub const MAX_INBOUND_CONCURRENCY: usize = 10;
+//
+// TODO: replace with the configured value of network.peerset_initial_target_size
+pub const MAX_INBOUND_CONCURRENCY: usize = 25;
 
 /// A marker struct for the oneshot channels which cancel a pending download and verify.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

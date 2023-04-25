@@ -322,10 +322,20 @@ where
                         unreachable!("unexpected response type: {response:?} from state request")
                     }
                     Err(e) => {
+                        #[cfg(not(test))]
                         tracing::warn!(
                             "unexpected error: {e:?} in state request while verifying previous \
-                             state checkpoints"
-                        )
+                             state checkpoints. Is Zebra shutting down?"
+                        );
+                        // This error happens a lot in some tests.
+                        //
+                        // TODO: fix the tests so they don't cause this error,
+                        //       or change the tracing filter
+                        #[cfg(test)]
+                        tracing::debug!(
+                            "unexpected error: {e:?} in state request while verifying previous \
+                             state checkpoints. Is Zebra shutting down?"
+                        );
                     }
                 }
             }

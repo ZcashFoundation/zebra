@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.22"
+version = "1.0.0-beta.23"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -23,7 +23,7 @@ progress-bar = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.1.0"
+bitflags = "2.2.1"
 byteorder = "1.4.3"
 bytes = "1.4.0"
 chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
@@ -35,7 +35,7 @@ ordered-map = "0.4.2"
 pin-project = "1.0.12"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
-regex = "1.7.3"
+regex = "1.8.1"
 serde = { version = "1.0.160", features = ["serde_derive"] }
 thiserror = "1.0.40"
 
@@ -45,7 +45,7 @@ tokio-stream = { version = "0.1.12", features = ["sync", "time"] }
 tokio-util = { version = "0.7.7", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.20.1"
+metrics = "0.21.0"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.37"

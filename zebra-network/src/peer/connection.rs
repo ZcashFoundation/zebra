@@ -388,7 +388,7 @@ impl Handler {
 pub(super) enum State {
     /// Awaiting a client request or a peer message.
     AwaitingRequest,
-    /// Awaiting a peer message we can interpret as a client request.
+    /// Awaiting a peer message we can interpret as a response to a client request.
     AwaitingResponse {
         handler: Handler,
         tx: MustUseClientResponseSender,
@@ -451,7 +451,6 @@ pub struct Connection<S, Tx> {
     /// The metadata for the connected peer `service`.
     ///
     /// This field is used for debugging.
-    #[allow(dead_code)]
     pub connection_info: Arc<ConnectionInfo>,
 
     /// The state of this connection's current request or response.
@@ -1242,7 +1241,18 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
-                    tracing::info!("inbound service is overloaded, closing connection");
+                    tracing::info!(
+                        remote_user_agent = ?self.connection_info.remote.user_agent,
+                        negotiated_version = ?self.connection_info.negotiated_version,
+                        peer = ?self.metrics_label,
+                        last_peer_state = ?self.last_metrics_state,
+                        // TODO: remove this detailed debug info once #6506 is fixed
+                        remote_height = ?self.connection_info.remote.start_height,
+                        cached_addrs = ?self.cached_addrs.len(),
+                        connection_state = ?self.state,
+                        "inbound service is overloaded, closing connection",
+                    );
+
                     metrics::counter!("pool.closed.loadshed", 1);
                     self.fail_with(PeerError::Overloaded);
                 } else {
@@ -1250,10 +1260,12 @@ where
                     // them to disconnect, and we might be using them to sync blocks.
                     // For similar reasons, we don't want to fail_with() here - we
                     // only close the connection if the peer is doing something wrong.
-                    info!(%e,
-                          connection_state = ?self.state,
-                          client_receiver = ?self.client_rx,
-                          "error processing peer request");
+                    info!(
+                        %e,
+                        connection_state = ?self.state,
+                        client_receiver = ?self.client_rx,
+                        "error processing peer request",
+                    );
                 }
                 return;
             }

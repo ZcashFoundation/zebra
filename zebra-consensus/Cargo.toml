@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.22"
+version = "1.0.0-beta.23"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -27,10 +27,10 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 
 [dependencies]
 blake2b_simd = "1.0.1"
-bellman = "0.13.0"
-bls12_381 = "0.7.0"
-halo2 = { package = "halo2_proofs", version = "0.2.0" }
-jubjub = "0.9.0"
+bellman = "0.14.0"
+bls12_381 = "0.8.0"
+halo2 = { package = "halo2_proofs", version = "0.3.0" }
+jubjub = "0.10.0"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
 
@@ -42,16 +42,16 @@ serde = { version = "1.0.160", features = ["serde_derive"] }
 
 futures = "0.3.28"
 futures-util = "0.3.28"
-metrics = "0.20.1"
+metrics = "0.21.0"
 thiserror = "1.0.40"
 tokio = { version = "1.27.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
-orchard = "0.3.0"
+orchard = "0.4.0"
 
-zcash_proofs = { version = "0.10.0", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
@@ -81,7 +81,7 @@ spandoc = "0.2.2"
 
 tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
-tracing-subscriber = "0.3.16"
+tracing-subscriber = "0.3.17"
 
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

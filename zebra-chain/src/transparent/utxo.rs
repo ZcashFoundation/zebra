@@ -54,6 +54,12 @@ pub struct OrderedUtxo {
     pub tx_index_in_block: usize,
 }
 
+impl AsRef<Utxo> for OrderedUtxo {
+    fn as_ref(&self) -> &Utxo {
+        &self.utxo
+    }
+}
+
 impl Utxo {
     /// Create a new UTXO from its fields.
     pub fn new(output: transparent::Output, height: block::Height, from_coinbase: bool) -> Utxo {
