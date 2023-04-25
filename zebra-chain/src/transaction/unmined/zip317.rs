@@ -166,7 +166,7 @@ pub fn mempool_checks(
     miner_fee: Amount<NonNegative>,
     conventional_fee: Amount<NonNegative>,
 ) -> Result<(), Error> {
-    // Check unpaid actions is below the thershold.
+    // Check unpaid actions is below the threshold.
     if unpaid_actions > unpaid_action_limit {
         return Err(Error::UnpaidActions);
     }
