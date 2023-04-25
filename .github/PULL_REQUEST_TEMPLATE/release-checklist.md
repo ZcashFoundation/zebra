@@ -39,7 +39,8 @@ Once you know which versions you want to increment, you can find them in the:
 
 zebrad (rc):
 - [ ] zebrad `Cargo.toml`
-- [ ] `zebra-network` protocol release name: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
+- [ ] `zebra-network` protocol user agent: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
+- [ ] `zebrad` end of support component release name: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs
 - [ ] `README.md`
 - [ ] `book/src/user/docker.md`
 
@@ -123,13 +124,19 @@ From "Keep a Changelog":
 
 </details>
 
-## Release hardcoded constants
+## Release support constants
 
-Zebra needs release information constants to be updated so it can  know if a release is too old. Please update the top constants [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs):
+Needed for the end of support feature. Please update the top constants [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs):
 
 - [ ] `RELEASE_NAME` (required) - Replace with the new release name here, for example `Zebra 1.0.0-rc.6` if `fastmod` didn't made the change already.
-- [ ] `RELEASE_DATE` (required) - Replace with the estimated date where the release will be created, for example `2023-03-23 00:00:00 +00:00`
-- [ ] `RELEASE_DURATION_DAYS` (optional) - Replace if you want the release to be valid for a different numbers of days into the future.
+- [ ] `ESTIMATED_RELEASE_HEIGHT` (required) - Replace with the estimated height you estimate the release will be tagged.
+      <details>
+      - Find where the Zcash blockchain tip is now by using a Zcash explorer or other tool.
+      -  Consider there are aprox `1152` blocks per day (with the current Zcash `75` seconds spacing).
+      - So for example if you think the release will be tagged somewhere in the next 3 days you can add `1152 * 3` to the current tip height and use that value here.
+      </details>
+
+- [ ] `EOS_PANIC_AFTER` (optional) - Replace if you want the release to be valid for a different numbers of days into the future. The default here is 120 days.
 
 ## Create the Release
 
