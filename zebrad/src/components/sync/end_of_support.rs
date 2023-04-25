@@ -28,8 +28,11 @@ pub const EOS_PANIC_AFTER: u32 = 120;
 /// The number of days before the end of support where Zebra will display warnings.
 pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
 
-/// A string which is part of the panic that will be displayed if Zebra release is too old.
+/// A string which is part of the panic that will be displayed if Zebra halts.
 pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";
+
+/// A string which is part of the warning that will be displayed if Zebra release is close to halting.
+pub const EOS_WARN_MESSAGE_HEADER: &str = "Your Zebra release is too old and it will stop running";
 
 /// The amount of time between end of support checks.
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -79,7 +82,7 @@ pub fn check(tip_height: Height, network: Network) {
         );
     } else if tip_height > warn_height {
         warn!(
-            "Your Zebra release is too old and it will stop running at block {}. \
+            "{EOS_WARN_MESSAGE_HEADER} at block {}. \
             \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
         );

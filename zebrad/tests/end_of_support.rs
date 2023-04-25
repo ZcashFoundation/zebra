@@ -11,7 +11,7 @@ use zebra_consensus::CheckpointList;
 
 use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
-//
+// Estimated blocks per day with the current 75 seconds block spacing.
 const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
 
 /// Test that the `end_of_support` function is working as expected.
