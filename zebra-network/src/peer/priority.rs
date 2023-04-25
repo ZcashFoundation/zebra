@@ -123,9 +123,11 @@ fn address_is_valid_for_outbound_connections(
             return Err(
                 "invalid peer port: port is for Regtest, but Zebra does not support that network",
             );
-        } else if [16125, 26125].contains(&peer_addr.port()) {
-            // 16125/26125 is used by Flux/ZelCash, which uses the same network magic numbers as Zcash,
-            // so we have to reject it by port
+        } else if [8033, 18033, 16125, 26125].contains(&peer_addr.port()) {
+            // These coins use the same network magic numbers as Zcash, so we have to reject them by port:
+            // - ZClassic: 8033/18033
+            //   https://github.com/ZclassicCommunity/zclassic/blob/504362bbf72400f51acdba519e12707da44138c2/src/chainparams.cpp#L130
+            // - Flux/ZelCash: 16125/26125
             return Err("invalid peer port: port is for a non-Zcash network");
         }
     }
