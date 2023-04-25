@@ -16,13 +16,14 @@ pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
 /// The estimated height that this release started to run.
 pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
 
-/// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server runs.
+/// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
+/// without halting.
 ///
 /// Notes:
 ///
 /// - Zebra will exit with a panic if the current tip height is bigger than the `ESTIMATED_RELEASE_HEIGHT`
 ///  plus this number of days.
-pub const EOS_PANIC_AFTER: u32 = 180;
+pub const EOS_PANIC_AFTER: u32 = 120;
 
 /// The number of days before the end of support where Zebra will display warnings.
 pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
@@ -55,7 +56,7 @@ pub async fn start(
 
 /// Check if the current release is too old and panic if so.
 pub fn check(tip_height: Height, network: Network) {
-    debug!("Checking if Zebra release is inside support range ...");
+    info!("Checking if Zebra release is inside support range ...");
 
     // Get the current block spacing
     let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
@@ -83,6 +84,6 @@ pub fn check(tip_height: Height, network: Network) {
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
         );
     } else {
-        debug!("Zebra release is under support");
+        info!("Zebra release is under support");
     }
 }
