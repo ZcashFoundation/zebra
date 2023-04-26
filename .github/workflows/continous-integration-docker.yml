@@ -77,9 +77,6 @@ on:
       - '.github/workflows/build-docker-image.yml'
 
 jobs:
-  # Find the cached state disks used by the tests
-  #
-  # TODO: turn this into a reusable workflow, so it can be called for Mainnet and Testnet
   get-available-disks:
     runs-on: ubuntu-latest
     name: Find available cached state disks
@@ -159,7 +156,6 @@ jobs:
               echo "zebra_checkpoint_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
-  # Build the docker image used by the tests
   build:
     name: Build CI Docker
     uses: ./.github/workflows/build-docker-image.yml
