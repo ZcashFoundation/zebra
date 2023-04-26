@@ -88,7 +88,7 @@ impl PeerPreference {
 /// used to permanently reject entire [`MetaAddr`]s.
 ///
 /// [`MetaAddr`]: crate::meta_addr::MetaAddr
-fn address_is_valid_for_outbound_connections(
+pub fn address_is_valid_for_outbound_connections(
     peer_addr: &SocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
