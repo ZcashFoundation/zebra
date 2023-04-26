@@ -39,8 +39,7 @@ Once you know which versions you want to increment, you can find them in the:
 
 zebrad (rc):
 - [ ] zebrad `Cargo.toml`
-- [ ] `zebra-network` protocol user agent: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
-- [ ] `zebrad` end of support component release name: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs
+- [ ] `zebra-network` release version (`RELEASE_VERSION`): https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
 - [ ] `README.md`
 - [ ] `book/src/user/docker.md`
 
@@ -126,9 +125,8 @@ From "Keep a Changelog":
 
 ## Release support constants
 
-Needed for the end of support feature. Please update the top constants [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs):
+Needed for the end of support feature. Please update the following constants [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs):
 
-- [ ] `RELEASE_NAME` (required) - Replace with the new release name here, for example `Zebra 1.0.0-rc.6` if `fastmod` didn't made the change already.
 - [ ] `ESTIMATED_RELEASE_HEIGHT` (required) - Replace with the estimated height you estimate the release will be tagged.
       <details>
       - Find where the Zcash blockchain tip is now by using a Zcash explorer or other tool.

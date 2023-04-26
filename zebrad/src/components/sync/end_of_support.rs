@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use color_eyre::Report;
+use lazy_static::lazy_static;
 
 use zebra_chain::{
     block::Height,
@@ -10,8 +11,12 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-/// The name of the current Zebra release.
-pub const RELEASE_NAME: &str = "Zebra:1.0.0-rc.6";
+use zebra_network::constants::RELEASE_VERSION;
+
+lazy_static! {
+    /// The name of the current Zebra release.
+    pub static ref RELEASE_NAME: String = format!("Zebra {}", RELEASE_VERSION);
+}
 
 /// The estimated height that this release started to run.
 pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
@@ -77,14 +82,15 @@ pub fn check(tip_height: Height, network: Network) {
     if tip_height > panic_height {
         panic!(
             "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
-            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest"
+            \nRelease name: {}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest",
+            RELEASE_NAME.to_string()
         );
     } else if tip_height > warn_height {
         warn!(
             "{EOS_WARN_MESSAGE_HEADER} at block {}. \
-            \nRelease name: {RELEASE_NAME}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0
+            \nRelease name: {}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0, RELEASE_NAME.to_string()
         );
     } else {
         info!("Zebra release is under support");

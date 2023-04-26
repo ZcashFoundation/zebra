@@ -2215,7 +2215,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(Duration::from_secs(30));
 
     child.kill(false)?;
 
