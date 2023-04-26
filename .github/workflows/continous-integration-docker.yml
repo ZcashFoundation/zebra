@@ -26,7 +26,7 @@ on:
       run-full-sync:
         type: boolean
         default: false
-        description: 'Just run a Zebra full sync and update tip disks'
+        description: 'Just run a Zebra full sync on mainnet, and update tip disks'
         required: true
       run-lwd-sync:
         type: boolean
@@ -82,7 +82,7 @@ jobs:
 
   # Check if the cached state disks used by the tests are available for the default network.
   #
-  # The default network is Mainnet unless a manually triggered workflow or repository variable
+  # The default network is mainnet unless a manually triggered workflow or repository variable
   # is configured differently.
   #
   # The outputs for this job have the same names as the workflow outputs in find-cached-disks.yml
@@ -92,19 +92,19 @@ jobs:
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
-  # Check if the cached state disks used by the tests are available for Testnet.
+  # Check if the cached state disks used by the tests are available for testnet.
   #
   # The outputs for this job have the same names as the workflow outputs in find-cached-disks.yml
-  # Some outputs are ignored, because we don't run those jobs on Testnet.
+  # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
-    name: Check if cached state disks exist for Testnet
+    name: Check if cached state disks exist for testnet
     uses: ./.github/workflows/find-cached-disks.yml
     with:
       network: 'Testnet'
 
   # Build the docker image used by the tests.
   #
-  # The default network in the Zebra config in the image is Mainnet, unless a manually triggered
+  # The default network in the Zebra config in the image is mainnet, unless a manually triggered
   # workflow or repository variable is configured differently. Testnet jobs change that config to
   # testnet when running the image.
   build:
@@ -338,12 +338,14 @@ jobs:
 
   # zebrad cached tip state tests
 
-  # Test that Zebra can run a full mainnet sync,
+  # Test that Zebra can run a full sync on mainnet,
   # and regenerate chain tip Zebra cached state disks.
+  #
+  # This test always runs on mainnet.
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update, but only if there's no available disk matching the actual state version from constants.rs
+  # - on every PR update, but only if the state version in constants.rs has no cached disk
   # - on request, using workflow_dispatch with run-full-sync
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
@@ -360,7 +362,9 @@ jobs:
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
+      # TODO: update the test to use {{ input.network }} instead?
       test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0'
+      network: 'Mainnet'
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -411,10 +415,12 @@ jobs:
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
 
-  # zebra checkpoint generation tests
+  # zebra mainnet checkpoint generation tests
 
   # Test that Zebra can generate mainnet checkpoints after syncing to the chain tip,
   # using a cached Zebra tip state,
+  #
+  # This test always runs on mainnet.
   #
   # Runs:
   # - after every PR is merged to `main`
@@ -431,7 +437,9 @@ jobs:
       app_name: zebrad
       test_id: generate-checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
+      # TODO: update the test to use {{ input.network }} instead?
       test_variables: '-e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: 'Mainnet'
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
