@@ -93,6 +93,6 @@ pub fn check(tip_height: Height, network: Network) {
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0, RELEASE_NAME.to_string()
         );
     } else {
-        info!("Zebra release is under support");
+        info!("Zebra release is supported until block {}, please report bugs at https://github.com/ZcashFoundation/zebra/issues", panic_height.0);
     }
 }
