@@ -3,6 +3,9 @@
 pub mod constants;
 pub mod mempool;
 
+#[cfg(any(test, feature = "rpc-client"))]
+pub mod rpc_client;
+
 /// Error type alias to make working with tower traits easier.
 ///
 /// Note: the 'static lifetime bound means that the *type* cannot have any
