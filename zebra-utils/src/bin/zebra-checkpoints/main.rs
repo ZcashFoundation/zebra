@@ -14,7 +14,7 @@ use std::{ffi::OsString, process::Stdio};
 use std::os::unix::process::ExitStatusExt;
 
 use color_eyre::{
-    eyre::{ensure, Result},
+    eyre::{ensure, eyre, Result},
     Help,
 };
 use itertools::Itertools;
@@ -161,8 +161,14 @@ async fn main() -> Result<()> {
     // Zcash reorg limit.
     let height_limit = height_limit
         - HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY).expect("constant fits in i32");
-    let height_limit =
-        height_limit.expect("node has some mature blocks: wait for it to sync more blocks");
+    let height_limit = height_limit
+        .ok_or_else(|| {
+            eyre!(
+                "checkpoint generation needs at least {:?} blocks",
+                MIN_TRANSPARENT_COINBASE_MATURITY
+            )
+        })
+        .with_suggestion(|| "Hint: wait for the node to sync more blocks")?;
 
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
@@ -175,7 +181,8 @@ async fn main() -> Result<()> {
 
     assert!(
         starting_height < height_limit,
-        "No mature blocks after the last checkpoint: wait for node to sync more blocks"
+        "checkpoint generation needs more blocks than the starting height {starting_height:?}. \
+         Hint: wait for the node to sync more blocks"
     );
 
     // set up counters
@@ -227,15 +234,19 @@ async fn main() -> Result<()> {
 
                 let block_bytes: Vec<u8> = hex::decode(block_bytes)?;
 
-                // TODO: is it faster to call both `getblock height 0` and `getblock height 1`,
-                //       rather than deserializing the block and calculating its hash?
+                // TODO: is it faster to call both `getblock height version=0`
+                //       and `getblock height version=1`, rather than deserializing the block
+                //       and calculating its hash?
+                //
+                // It seems to be fast enough for checkpoint updates for now,
+                // but generating the full list takes more than an hour.
                 let block: Block = block_bytes.zcash_deserialize_into()?;
 
                 (
                     block.hash(),
                     block
                         .coinbase_height()
-                        .expect("block has always a coinbase height"),
+                        .expect("valid blocks always have a coinbase height"),
                     block_bytes.len().try_into()?,
                 )
             }
