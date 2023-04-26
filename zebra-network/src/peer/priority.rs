@@ -105,7 +105,7 @@ fn address_is_valid_for_outbound_connections(
         );
     }
 
-    // Ignore ports used by similar networks: Flux/ZelCash and misconfigured Zcash.
+    // Ignore ports used by potentially compatible nodes: misconfigured Zcash ports.
     if let Some(network) = network.into() {
         if peer_addr.port() == network.default_port() {
             return Ok(());
@@ -119,17 +119,20 @@ fn address_is_valid_for_outbound_connections(
             return Err(
                 "invalid peer port: port is for Testnet, but this node is configured for Mainnet",
             );
-        } else if peer_addr.port() == 18344 {
-            return Err(
-                "invalid peer port: port is for Regtest, but Zebra does not support that network",
-            );
-        } else if [8033, 18033, 16125, 26125].contains(&peer_addr.port()) {
-            // These coins use the same network magic numbers as Zcash, so we have to reject them by port:
-            // - ZClassic: 8033/18033
-            //   https://github.com/ZclassicCommunity/zclassic/blob/504362bbf72400f51acdba519e12707da44138c2/src/chainparams.cpp#L130
-            // - Flux/ZelCash: 16125/26125
-            return Err("invalid peer port: port is for a non-Zcash network");
         }
+    }
+
+    // Ignore ports used by potentially compatible nodes: other coins and unsupported Zcash regtest.
+    if peer_addr.port() == 18344 {
+        return Err(
+            "invalid peer port: port is for Regtest, but Zebra does not support that network",
+        );
+    } else if [8033, 18033, 16125, 26125].contains(&peer_addr.port()) {
+        // These coins use the same network magic numbers as Zcash, so we have to reject them by port:
+        // - ZClassic: 8033/18033
+        //   https://github.com/ZclassicCommunity/zclassic/blob/504362bbf72400f51acdba519e12707da44138c2/src/chainparams.cpp#L130
+        // - Flux/ZelCash: 16125/26125
+        return Err("invalid peer port: port is for a non-Zcash coin");
     }
 
     Ok(())
