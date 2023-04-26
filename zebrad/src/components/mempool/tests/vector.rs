@@ -806,8 +806,12 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
 
             // Set a dummy fee and sigops.
             responder.respond(transaction::Response::from(
-                VerifiedUnminedTx::new(transaction, Amount::zero(), 0)
-                    .expect("verification should pass"),
+                VerifiedUnminedTx::new(
+                    transaction,
+                    Amount::try_from(1_000_000).expect("invalid value"),
+                    0,
+                )
+                .expect("verification should pass"),
             ));
         })
         .await;
@@ -862,8 +866,12 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
 
             // Set a dummy fee and sigops.
             responder.respond(transaction::Response::from(
-                VerifiedUnminedTx::new(transaction, Amount::zero(), 0)
-                    .expect("verification should pass"),
+                VerifiedUnminedTx::new(
+                    transaction,
+                    Amount::try_from(1_000_000).expect("invalid value"),
+                    0,
+                )
+                .expect("verification should pass"),
             ));
         })
         .await;

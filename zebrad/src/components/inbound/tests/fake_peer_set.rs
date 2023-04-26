@@ -270,8 +270,12 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
         // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(
-            VerifiedUnminedTx::new(transaction, Amount::zero(), 0)
-                .expect("verification should pass"),
+            VerifiedUnminedTx::new(
+                transaction,
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
         ));
     });
 
@@ -368,8 +372,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
         // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(
-            VerifiedUnminedTx::new(transaction, Amount::zero(), 0)
-                .expect("verification should pass"),
+            VerifiedUnminedTx::new(
+                transaction,
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
         ));
     });
 
@@ -501,8 +509,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
         // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(
-            VerifiedUnminedTx::new(transaction, Amount::zero(), 0)
-                .expect("verification should pass"),
+            VerifiedUnminedTx::new(
+                transaction,
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
         ));
     });
 
