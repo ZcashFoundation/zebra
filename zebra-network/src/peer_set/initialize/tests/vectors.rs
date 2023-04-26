@@ -32,7 +32,7 @@ use zebra_test::net::random_known_port;
 use crate::{
     address_book_updater::AddressBookUpdater,
     constants, init,
-    meta_addr::MetaAddr,
+    meta_addr::{MetaAddr, PeerAddrState},
     peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
         initialize::{
@@ -180,7 +180,8 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(0, unreachable_inbound_service, Mainnet).await;
+    let address_book =
+        init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
         0,
@@ -201,7 +202,8 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(0, unreachable_inbound_service, Testnet).await;
+    let address_book =
+        init_with_peer_limit(0, unreachable_inbound_service, Testnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
         0,
@@ -221,7 +223,7 @@ async fn peer_limit_one_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet).await;
+    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -240,7 +242,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Testnet).await;
+    let _ = init_with_peer_limit(1, nil_inbound_service, Testnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -259,7 +261,7 @@ async fn peer_limit_two_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet).await;
+    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -278,7 +280,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Testnet).await;
+    let _ = init_with_peer_limit(2, nil_inbound_service, Testnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -1095,6 +1097,124 @@ async fn add_initial_peers_is_rate_limited() {
     );
 }
 
+/// Test that self-connections fail.
+//
+// TODO:
+// - add a unit test that makes sure the error is a nonce reuse error
+// - add a unit test that makes sure connections that replay nonces also get rejected
+#[tokio::test]
+async fn self_connections_should_fail() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    const TEST_PEERSET_INITIAL_TARGET_SIZE: usize = 3;
+    const TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(1);
+
+    // If we get an inbound request from a peer, the test has a bug,
+    // because self-connections should fail at the handshake stage.
+    let unreachable_inbound_service =
+        service_fn(|_| async { unreachable!("inbound service should never be called") });
+
+    let force_listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+    let no_initial_peers_config = Config {
+        crawl_new_peer_interval: TEST_CRAWL_NEW_PEER_INTERVAL,
+
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+
+        ..Config::default()
+    };
+
+    let address_book = init_with_peer_limit(
+        TEST_PEERSET_INITIAL_TARGET_SIZE,
+        unreachable_inbound_service,
+        Mainnet,
+        force_listen_addr,
+        no_initial_peers_config,
+    )
+    .await;
+
+    // Insert our own address into the address book, and make sure it works
+    let (real_self_listener, updated_addr) = {
+        let mut unlocked_address_book = address_book
+            .lock()
+            .expect("unexpected panic in address book");
+
+        let real_self_listener = unlocked_address_book.local_listener_meta_addr();
+
+        // Set a fake listener to get past the check for adding our own address
+        unlocked_address_book.set_local_listener("192.168.0.0:1".parse().unwrap());
+
+        let updated_addr = unlocked_address_book.update(
+            real_self_listener
+                .new_gossiped_change()
+                .expect("change is valid"),
+        );
+
+        std::mem::drop(unlocked_address_book);
+
+        (real_self_listener, updated_addr)
+    };
+
+    // Make sure we modified the address book correctly
+    assert!(
+        updated_addr.is_some(),
+        "inserting our own address into the address book failed: {real_self_listener:?}"
+    );
+    assert_eq!(
+        updated_addr.unwrap().addr(),
+        real_self_listener.addr(),
+        "wrong address inserted into address book"
+    );
+    assert_ne!(
+        updated_addr.unwrap().addr().ip(),
+        Ipv4Addr::UNSPECIFIED,
+        "invalid address inserted into address book: ip must be valid for inbound connections"
+    );
+    assert_ne!(
+        updated_addr.unwrap().addr().port(),
+        0,
+        "invalid address inserted into address book: port must be valid for inbound connections"
+    );
+
+    // Wait until the crawler has tried at least one self-connection
+    tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
+
+    // Check that the self-connection failed
+    let self_connection_status = {
+        let mut unlocked_address_book = address_book
+            .lock()
+            .expect("unexpected panic in address book");
+
+        let self_connection_status = unlocked_address_book
+            .get(&real_self_listener.addr())
+            .expect("unexpected dropped listener address in address book");
+
+        std::mem::drop(unlocked_address_book);
+
+        self_connection_status
+    };
+
+    // Make sure we fetched from the address book correctly
+    assert_eq!(
+        self_connection_status.addr(),
+        real_self_listener.addr(),
+        "wrong address fetched from address book"
+    );
+
+    // Make sure the self-connection failed
+    assert_eq!(
+        self_connection_status.last_connection_state,
+        PeerAddrState::Failed,
+        "self-connection should have failed"
+    );
+}
+
 /// Test that the number of nonces is limited when peers send an invalid response or
 /// if handshakes time out and are dropped.
 #[tokio::test]
@@ -1103,7 +1223,10 @@ async fn remnant_nonces_from_outbound_connections_are_limited() {
 
     let _init_guard = zebra_test::init();
 
-    // This test should not require network access.
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
 
     const TEST_PEERSET_INITIAL_TARGET_SIZE: usize = 3;
 
@@ -1273,14 +1396,19 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     );
 }
 
-/// Initialize a peer set with `peerset_initial_target_size` and `inbound_service` on `network`.
-/// Returns the newly created [`AddressBook`] for testing.
+/// Initialize a peer set with `peerset_initial_target_size`, `inbound_service`, and `network`.
 ///
-/// Binds the network listener to an unused port on all network interfaces.
+/// If `force_listen_addr` is set, binds the network listener to that address.
+/// Otherwise, binds the network listener to an unused port on all network interfaces.
+/// Uses `default_config` or Zebra's defaults for the rest of the configuration.
+///
+/// Returns the newly created [`AddressBook`] for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
+    force_listen_addr: impl Into<Option<SocketAddr>>,
+    default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -1290,13 +1418,15 @@ where
     // (localhost should be enough).
     let unused_v4 = "0.0.0.0:0".parse().unwrap();
 
+    let default_config = default_config.into().unwrap_or_default();
+
     let config = Config {
         peerset_initial_target_size,
 
         network,
-        listen_addr: unused_v4,
+        listen_addr: force_listen_addr.into().unwrap_or(unused_v4),
 
-        ..Config::default()
+        ..default_config
     };
 
     let (_peer_service, address_book) = init(config, inbound_service, NoChainTip).await;
