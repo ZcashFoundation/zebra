@@ -129,7 +129,7 @@ Needed for the end of support feature. Please update the following constants [in
 
 - [ ] `ESTIMATED_RELEASE_HEIGHT` (required) - Replace with the estimated height you estimate the release will be tagged.
       <details>
-      - Find where the Zcash blockchain tip is now by using a Zcash explorer or other tool.
+      - Find where the Zcash blockchain tip is now by using a [Zcash explorer](https://zcashblockexplorer.com/blocks) or other tool.
       -  Consider there are aprox `1152` blocks per day (with the current Zcash `75` seconds spacing).
       - So for example if you think the release will be tagged somewhere in the next 3 days you can add `1152 * 3` to the current tip height and use that value here.
       </details>
