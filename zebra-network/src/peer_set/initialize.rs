@@ -35,7 +35,7 @@ use crate::{
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
-        self, address_is_valid_for_outbound_connections, HandshakeRequest, MinimumPeerVersion,
+        self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
@@ -469,7 +469,7 @@ async fn limit_initial_peers(
 pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
     if let Err(wrong_addr) =
-        address_is_valid_for_outbound_connections(&config.listen_addr, config.network)
+        address_is_valid_for_inbound_listeners(&config.listen_addr, config.network)
     {
         warn!(
             "We are configured with address {} on {:?}, but it could cause network issues. \
