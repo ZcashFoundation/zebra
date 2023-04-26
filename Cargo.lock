@@ -5924,6 +5924,7 @@ dependencies = [
  "itertools",
  "jubjub 0.10.0",
  "lazy_static",
+ "num-integer",
  "orchard 0.4.0",
  "primitive-types",
  "proptest",
@@ -5938,6 +5939,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde-big-array",
+ "serde_json",
  "serde_with 2.3.2",
  "sha2 0.9.9",
  "spandoc",
@@ -5982,6 +5984,7 @@ dependencies = [
  "jubjub 0.10.0",
  "lazy_static",
  "metrics",
+ "num-integer",
  "once_cell",
  "orchard 0.4.0",
  "proptest",
@@ -6049,6 +6052,11 @@ dependencies = [
 name = "zebra-node-services"
 version = "1.0.0-beta.23"
 dependencies = [
+ "color-eyre",
+ "jsonrpc-core",
+ "reqwest",
+ "serde",
+ "serde_json",
  "zebra-chain",
 ]
 
@@ -6170,6 +6178,7 @@ version = "1.0.0-beta.23"
 dependencies = [
  "color-eyre",
  "hex",
+ "itertools",
  "regex",
  "reqwest",
  "serde_json",
@@ -6217,7 +6226,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "regex",
- "reqwest",
  "semver 1.0.17",
  "sentry",
  "serde",

@@ -2,7 +2,10 @@
 
 use std::ops::{Add, Sub};
 
-use crate::serialization::SerializationError;
+use crate::{serialization::SerializationError, BoxError};
+
+#[cfg(feature = "json-conversion")]
+pub mod json_conversion;
 
 /// The length of the chain back to the genesis block.
 ///
@@ -70,6 +73,9 @@ impl Height {
 /// even if they are outside the valid height range (for example, in buggy RPC code).
 pub type HeightDiff = i64;
 
+// We don't implement TryFrom<u64>, because it causes type inference issues for integer constants.
+// Instead, use 1u64.try_into_height().
+
 impl TryFrom<u32> for Height {
     type Error = &'static str;
 
@@ -81,6 +87,47 @@ impl TryFrom<u32> for Height {
         } else {
             Err("heights must be less than or equal to Height::MAX")
         }
+    }
+}
+
+/// Convenience trait for converting a type into a valid Zcash [`Height`].
+pub trait TryIntoHeight {
+    /// The error type returned by [`Height`] conversion failures.
+    type Error;
+
+    /// Convert `self` to a `Height`, if possible.
+    fn try_into_height(&self) -> Result<Height, Self::Error>;
+}
+
+impl TryIntoHeight for u64 {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        u32::try_from(*self)?.try_into().map_err(Into::into)
+    }
+}
+
+impl TryIntoHeight for usize {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        u32::try_from(*self)?.try_into().map_err(Into::into)
+    }
+}
+
+impl TryIntoHeight for str {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        self.parse().map_err(Into::into)
+    }
+}
+
+impl TryIntoHeight for String {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        self.as_str().try_into_height()
     }
 }
 
