@@ -75,6 +75,7 @@ on:
       - '.github/workflows/continous-integration-docker.yml'
       - '.github/workflows/deploy-gcp-tests.yml'
       - '.github/workflows/build-docker-image.yml'
+      - '.github/workflows/find-cached-disks.yml'
 
 jobs:
 
