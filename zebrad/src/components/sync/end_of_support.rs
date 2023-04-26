@@ -84,7 +84,7 @@ pub fn check(tip_height: Height, network: Network) {
             "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
             \nRelease name: {}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest",
-            RELEASE_NAME.to_string()
+            *RELEASE_NAME
         );
     } else if tip_height > warn_height {
         warn!(
