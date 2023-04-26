@@ -46,7 +46,7 @@ metrics = "0.21.0"
 thiserror = "1.0.40"
 tokio = { version = "1.27.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
-tracing = "0.1.37"
+tracing = "0.1.38"
 tracing-futures = "0.2.5"
 
 orchard = "0.4.0"

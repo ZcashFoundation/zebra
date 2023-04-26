@@ -53,7 +53,7 @@ thiserror = "1.0.40"
 rayon = "1.7.0"
 tokio = { version = "1.27.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
-tracing = "0.1.37"
+tracing = "0.1.38"
 
 # elasticsearch specific dependencies.
 elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional = true }
