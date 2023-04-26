@@ -45,7 +45,7 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Wait a few seconds at startup so `best_tip_height` is always `Some`.
 const INITIAL_WAIT: Duration = Duration::from_secs(10);
 
-/// Start the end of support checking task.
+/// Start the end of support checking task for Mainnet.
 pub async fn start(
     network: Network,
     latest_chain_tip: impl ChainTip + std::fmt::Debug,
@@ -55,8 +55,12 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        if let Some(tip_height) = latest_chain_tip.best_tip_height() {
-            check(tip_height, network);
+        if network == Network::Mainnet {
+            if let Some(tip_height) = latest_chain_tip.best_tip_height() {
+                check(tip_height, network);
+            }
+        } else {
+            info!("Release always valid in Testnet");
         }
         tokio::time::sleep(CHECK_INTERVAL).await;
     }
