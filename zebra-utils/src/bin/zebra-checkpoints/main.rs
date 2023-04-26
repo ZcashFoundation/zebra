@@ -8,39 +8,106 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
-use std::process::Stdio;
+use std::{ffi::OsString, process::Stdio};
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
-use color_eyre::eyre::{ensure, Result};
-use hex::FromHex;
+use color_eyre::{
+    eyre::{ensure, Result},
+    Help,
+};
+use itertools::Itertools;
 use serde_json::Value;
 use structopt::StructOpt;
 
 use zebra_chain::{
-    block, serialization::ZcashDeserializeInto, transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+    block::{self, Block, Height, HeightDiff, TryIntoHeight},
+    serialization::ZcashDeserializeInto,
+    transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
-use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
+use zebra_node_services::{
+    constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
+    rpc_client::RpcRequestClient,
+};
 use zebra_utils::init_tracing;
 
-mod args;
+pub mod args;
 
-/// Return a new `zcash-cli` command, including the `zebra-checkpoints`
-/// passthrough arguments.
-fn passthrough_cmd() -> std::process::Command {
-    let args = args::Args::from_args();
-    let mut cmd = std::process::Command::new(&args.cli);
+use args::{Args, Backend, Transport};
 
-    if !args.zcli_args.is_empty() {
-        cmd.args(&args.zcli_args);
+/// Make an RPC call based on `our_args` and `rpc_command`, and return the response as a [`Value`].
+async fn rpc_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
+where
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
+{
+    match our_args.transport {
+        Transport::Cli => cli_output(our_args, method, params),
+        Transport::Direct => direct_output(our_args, method, params).await,
     }
-    cmd
 }
 
-/// Run `cmd` and return its output as a string.
-fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
-    // Capture stdout, but send stderr to the user
+/// Connect to the node with `our_args` and `rpc_command`, and return the response as a [`Value`].
+///
+/// Only used if the transport is [`Direct`](Transport::Direct).
+async fn direct_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
+where
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
+{
+    // Get a new RPC client that will connect to our node
+    let addr = our_args
+        .addr
+        .unwrap_or_else(|| "127.0.0.1:8232".parse().expect("valid address"));
+    let client = RpcRequestClient::new(addr);
+
+    // Launch a request with the RPC method and arguments
+    //
+    // The params are a JSON array with typed arguments.
+    // TODO: accept JSON value arguments, and do this formatting using serde_json
+    let params = format!("[{}]", params.into_iter().join(", "));
+    let response = client.text_from_call(method, params).await?;
+
+    // Extract the "result" field from the RPC response
+    let mut response: Value = serde_json::from_str(&response)?;
+    let response = response["result"].take();
+
+    Ok(response)
+}
+
+/// Run `cmd` with `our_args` and `rpc_command`, and return its output as a [`Value`].
+///
+/// Only used if the transport is [`Cli`](Transport::Cli).
+fn cli_output<M, I>(our_args: &Args, method: M, params: I) -> Result<Value>
+where
+    M: AsRef<str>,
+    I: IntoIterator<Item = String>,
+{
+    // Get a new `zcash-cli` command configured for our node,
+    // including the `zebra-checkpoints` passthrough arguments.
+    let mut cmd = std::process::Command::new(&our_args.cli);
+    cmd.args(&our_args.zcli_args);
+
+    // Turn the address into command-line arguments
+    if let Some(addr) = our_args.addr {
+        cmd.arg(format!("-rpcconnect={}", addr.ip()));
+        cmd.arg(format!("-rpcport={}", addr.port()));
+    }
+
+    // Add the RPC method and arguments
+    let method: OsString = method.as_ref().into();
+    cmd.arg(method);
+
+    for param in params {
+        // Remove JSON string/int type formatting, because zcash-cli will add it anyway
+        // TODO: accept JSON value arguments, and do this formatting using serde_json?
+        let param = param.trim_matches('"');
+        let param: OsString = param.into();
+        cmd.arg(param);
+    }
+
+    // Launch a CLI request, capturing stdout, but sending stderr to the user
     let output = cmd.stderr(Stdio::inherit()).output()?;
 
     // Make sure the command was successful
@@ -58,87 +125,111 @@ fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
         output.status.code()
     );
 
-    // Make sure the output is valid UTF-8
-    let s = String::from_utf8(output.stdout)?;
-    Ok(s)
+    // Make sure the output is valid UTF-8 JSON
+    let response = String::from_utf8(output.stdout)?;
+    // zcash-cli returns raw strings without JSON type info.
+    // As a workaround, assume that invalid responses are strings.
+    let response: Value = serde_json::from_str(&response)
+        .unwrap_or_else(|_error| Value::String(response.trim().to_string()));
+
+    Ok(response)
 }
 
 /// Process entry point for `zebra-checkpoints`
+#[tokio::main]
 #[allow(clippy::print_stdout)]
-fn main() -> Result<()> {
+async fn main() -> Result<()> {
     // initialise
     init_tracing();
     color_eyre::install()?;
 
-    // get the current block count
-    let mut cmd = passthrough_cmd();
-    cmd.arg("getblockchaininfo");
+    let args = args::Args::from_args();
 
-    let output = cmd_output(&mut cmd)?;
-    let get_block_chain_info: Value = serde_json::from_str(&output)?;
+    // get the current block count
+    let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None)
+        .await
+        .with_suggestion(|| {
+            "Is the RPC server address and port correct? Is authentication configured correctly?"
+        })?;
 
     // calculate the maximum height
-    let height_limit = block::Height(get_block_chain_info["blocks"].as_u64().unwrap() as u32);
+    let height_limit = get_block_chain_info["blocks"]
+        .try_into_height()
+        .expect("height: unexpected invalid value, missing field, or field type");
 
-    assert!(height_limit <= block::Height::MAX);
     // Checkpoints must be on the main chain, so we skip blocks that are within the
     // Zcash reorg limit.
     let height_limit = height_limit
-        .0
-        .checked_sub(MIN_TRANSPARENT_COINBASE_MATURITY)
-        .map(block::Height)
-        .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
+        - HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY).expect("constant fits in i32");
+    let height_limit =
+        height_limit.expect("node has some mature blocks: wait for it to sync more blocks");
 
-    let starting_height = args::Args::from_args().last_checkpoint.map(block::Height);
-    if starting_height.is_some() {
-        // Since we're about to add 1, height needs to be strictly less than the maximum
-        assert!(starting_height.unwrap() < block::Height::MAX);
-    }
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
-    let starting_height = starting_height.map_or(0, |block::Height(h)| h + 1);
+    let starting_height = if let Some(last_checkpoint) = args.last_checkpoint {
+        (last_checkpoint + 1)
+            .expect("invalid last checkpoint height, must be less than the max height")
+    } else {
+        Height::MIN
+    };
 
     assert!(
-        starting_height < height_limit.0,
-        "No mature blocks after the last checkpoint: wait for zcashd to sync more blocks"
+        starting_height < height_limit,
+        "No mature blocks after the last checkpoint: wait for node to sync more blocks"
     );
 
     // set up counters
     let mut cumulative_bytes: u64 = 0;
-    let mut height_gap: block::Height = block::Height(0);
+    let mut last_checkpoint_height = args.last_checkpoint.unwrap_or(Height::MIN);
+    let max_checkpoint_height_gap =
+        HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
 
     // loop through all blocks
-    for x in starting_height..height_limit.0 {
-        // unfortunately we need to create a process for each block
-        let mut cmd = passthrough_cmd();
+    for request_height in starting_height.0..height_limit.0 {
+        // In `Cli` transport mode we need to create a process for each block
 
-        let (hash, height, size) = match args::Args::from_args().backend {
-            args::Backend::Zcashd => {
+        let (hash, response_height, size) = match args.backend {
+            Backend::Zcashd => {
                 // get block data from zcashd using verbose=1
-                cmd.args(["getblock", &x.to_string(), "1"]);
-                let output = cmd_output(&mut cmd)?;
-
-                // parse json
-                let v: Value = serde_json::from_str(&output)?;
+                let get_block = rpc_output(
+                    &args,
+                    "getblock",
+                    [format!(r#""{request_height}""#), 1.to_string()],
+                )
+                .await?;
 
                 // get the values we are interested in
-                let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-                let height = block::Height(v["height"].as_u64().unwrap() as u32);
+                let hash: block::Hash = get_block["hash"]
+                    .as_str()
+                    .expect("hash: unexpected missing field or field type")
+                    .parse()?;
+                let response_height: Height = get_block["height"]
+                    .try_into_height()
+                    .expect("height: unexpected invalid value, missing field, or field type");
 
-                let size = v["size"].as_u64().unwrap();
+                let size = get_block["size"]
+                    .as_u64()
+                    .expect("size: unexpected invalid value, missing field, or field type");
 
-                (hash, height, size)
+                (hash, response_height, size)
             }
-            args::Backend::Zebrad => {
-                // get block data from zebrad by deserializing the raw block
-                cmd.args(["getblock", &x.to_string(), "0"]);
-                let output = cmd_output(&mut cmd)?;
+            Backend::Zebrad => {
+                // get block data from zebrad (or zcashd) by deserializing the raw block
+                let block_bytes = rpc_output(
+                    &args,
+                    "getblock",
+                    [format!(r#""{request_height}""#), 0.to_string()],
+                )
+                .await?;
+                let block_bytes = block_bytes
+                    .as_str()
+                    .expect("block bytes: unexpected missing field or field type");
 
-                let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
+                let block_bytes: Vec<u8> = hex::decode(block_bytes)?;
 
-                let block = block_bytes
-                    .zcash_deserialize_into::<block::Block>()
-                    .expect("obtained block should deserialize");
+                // TODO: is it faster to call both `getblock height 0` and `getblock height 1`,
+                //       rather than deserializing the block and calculating its hash?
+                let block: Block = block_bytes.zcash_deserialize_into()?;
 
                 (
                     block.hash(),
@@ -150,24 +241,27 @@ fn main() -> Result<()> {
             }
         };
 
-        assert!(height <= block::Height::MAX);
-        assert_eq!(x, height.0);
+        assert_eq!(
+            request_height, response_height.0,
+            "node returned a different block than requested"
+        );
 
-        // compute
+        // compute cumulative totals
         cumulative_bytes += size;
-        height_gap = block::Height(height_gap.0 + 1);
 
-        // check if checkpoint
-        if height == block::Height(0)
+        let height_gap = response_height - last_checkpoint_height;
+
+        // check if this block should be a checkpoint
+        if response_height == Height::MIN
             || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap.0 >= MAX_CHECKPOINT_HEIGHT_GAP as u32
+            || height_gap >= max_checkpoint_height_gap
         {
             // print to output
-            println!("{} {hash}", height.0);
+            println!("{} {hash}", response_height.0);
 
-            // reset counters
+            // reset cumulative totals
             cumulative_bytes = 0;
-            height_gap = block::Height(0);
+            last_checkpoint_height = response_height;
         }
     }
 

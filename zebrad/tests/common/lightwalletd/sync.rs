@@ -8,12 +8,12 @@ use std::{
 
 use tempfile::TempDir;
 
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::prelude::*;
 
 use crate::common::{
     launch::ZebradTestDirExt,
     lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-    rpc_client::RPCRequestClient,
     test_type::TestType,
 };
 
@@ -183,7 +183,7 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let lightwalletd_tip_height = lightwalletd_tip_block.height;
 
         // Get the block tip from zebrad
-        let client = RPCRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(zebra_rpc_address);
         let zebrad_blockchain_info = client
             .text_from_call("getblockchaininfo", "[]".to_string())
             .await?;

@@ -5,30 +5,27 @@
 
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
-
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Result};
 use tempfile::TempDir;
 use tokio::fs;
 use tower::{util::BoxService, Service};
 
-use zebra_chain::block::Block;
-use zebra_chain::serialization::ZcashDeserializeInto;
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Block, Height},
     chain_tip::ChainTip,
     parameters::Network,
+    serialization::ZcashDeserializeInto,
 };
-use zebra_state::{ChainTipChange, LatestChainTip};
-
-use crate::common::config::testdir;
-use crate::common::rpc_client::RPCRequestClient;
-
-use zebra_state::MAX_BLOCK_REORG_HEIGHT;
+use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_state::{ChainTipChange, LatestChainTip, MAX_BLOCK_REORG_HEIGHT};
 
 use crate::common::{
+    config::testdir,
     launch::spawn_zebrad_for_rpc,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
@@ -230,7 +227,7 @@ pub async fn get_raw_future_blocks(
     )?;
 
     // Create an http client
-    let rpc_client = RPCRequestClient::new(rpc_address);
+    let rpc_client = RpcRequestClient::new(rpc_address);
 
     let blockchain_info: serde_json::Value = serde_json::from_str(
         &rpc_client
