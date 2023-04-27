@@ -46,7 +46,7 @@ jobs:
       tag_suffix: .experimental
       network: Testnet
       rpc_port: '18232'
-      features: "getblocktemplate-rpcs"
+      features: "sentry getblocktemplate-rpcs"
       test_features: ""
       checkpoint_sync: true
       rust_backtrace: '1'
