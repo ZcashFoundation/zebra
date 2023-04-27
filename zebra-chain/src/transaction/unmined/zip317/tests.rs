@@ -7,6 +7,7 @@ fn zip317_unpaid_actions_err() {
         51,
         Amount::try_from(1).unwrap(),
         Amount::try_from(10000).unwrap(),
+        1,
     );
 
     assert!(check.is_err());
@@ -14,13 +15,27 @@ fn zip317_unpaid_actions_err() {
 }
 
 #[test]
-fn zip317_miner_fee_err() {
+fn zip317_convetional_fee_err() {
     let check = mempool_checks(
         50,
         Amount::try_from(1).unwrap(),
         Amount::try_from(10000).unwrap(),
+        1,
     );
 
     assert!(check.is_err());
-    assert_eq!(check.err(), Some(Error::MinerFee));
+    assert_eq!(check.err(), Some(Error::FeeBelowConventional));
+}
+
+#[test]
+fn zip317_minimum_rate_fee_err() {
+    let check = mempool_checks(
+        50,
+        Amount::try_from(1).unwrap(),
+        Amount::try_from(1).unwrap(),
+        1000,
+    );
+
+    assert!(check.is_err());
+    assert_eq!(check.err(), Some(Error::FeeBelowMinimumRate));
 }

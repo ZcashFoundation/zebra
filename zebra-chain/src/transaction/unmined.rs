@@ -357,7 +357,12 @@ impl VerifiedUnminedTx {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
-        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.conventional_fee)?;
+        zip317::mempool_checks(
+            unpaid_actions,
+            miner_fee,
+            transaction.conventional_fee,
+            transaction.size,
+        )?;
 
         Ok(Self {
             transaction,
