@@ -11,6 +11,10 @@ structure, and documentation for all of the config options can be found
 
 * `zebrad start` starts a full node.
 
+## Supported versions
+
+Always make sure your version is under support and that you upgrade regularly to avoid halting. [More information](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#supported-releases).
+
 ## Return Codes
 
 - `0`: Application exited successfully
