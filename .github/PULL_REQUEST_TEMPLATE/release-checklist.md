@@ -85,9 +85,8 @@ You can use a command like:
 
 ## Checkpoints
 
-With every release and for performance reasons, we want to update the Zebra checkpoints. More information on how to do this can be found in [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/README.md).
-
-To do this you will need a synchronized `zcashd` node. You can request help from other zebra team members to submit this PR if you can't make it yourself at the moment of the release.
+For performance and security, we want to update the Zebra checkpoints in every release.
+You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
 
 ## Missed Dependency Updates
 
