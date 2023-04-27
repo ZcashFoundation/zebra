@@ -203,6 +203,14 @@ pub fn mempool_checks(
     // <https://github.com/ZcashFoundation/zebra/issues/5336#issuecomment-1506748801>
     const KILOBYTE: usize = 1000;
 
+    // This calculation can't overflow, because transactions are limited to 2 MB,
+    // and usize is at least 4 GB.
+    assert!(
+        MIN_MEMPOOL_TX_FEE_RATE
+            < usize::MAX / usize::try_from(MAX_BLOCK_BYTES).expect("constant fits in usize"),
+        "the fee rate multiplication must never overflow",
+    );
+
     let min_fee = (MIN_MEMPOOL_TX_FEE_RATE * transaction_size / KILOBYTE)
         .clamp(MIN_MEMPOOL_TX_FEE_RATE, MEMPOOL_TX_FEE_REQUIREMENT_CAP);
     let min_fee: u64 = min_fee
