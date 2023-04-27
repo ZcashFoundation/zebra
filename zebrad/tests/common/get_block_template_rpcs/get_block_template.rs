@@ -10,7 +10,9 @@ use std::time::Duration;
 use color_eyre::eyre::{eyre, Context, Result};
 
 use futures::FutureExt;
+
 use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::get_block_template_rpcs::{
     get_block_template::{
         proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
@@ -20,7 +22,6 @@ use zebra_rpc::methods::get_block_template_rpcs::{
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
-    rpc_client::RPCRequestClient,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
 };
@@ -90,7 +91,7 @@ pub(crate) async fn run() -> Result<()> {
         true,
     )?;
 
-    let client = RPCRequestClient::new(rpc_address);
+    let client = RpcRequestClient::new(rpc_address);
 
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
@@ -135,7 +136,7 @@ pub(crate) async fn run() -> Result<()> {
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")
 }
 
-/// Accepts an [`RPCRequestClient`], calls getblocktemplate in template mode,
+/// Accepts an [`RpcRequestClient`], calls getblocktemplate in template mode,
 /// deserializes and transforms the block template in the response into block proposal data,
 /// then calls getblocktemplate RPC in proposal mode with the serialized and hex-encoded data.
 ///
@@ -148,7 +149,7 @@ pub(crate) async fn run() -> Result<()> {
 /// If an RPC call returns a failure
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
-async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
+async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
     let mut response_json_result: GetBlockTemplate = client
         .json_result_from_call("getblocktemplate", "[]".to_string())
         .await

@@ -75,6 +75,7 @@ color-eyre = "0.6.2"
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 hex = "0.4.3"
+num-integer = "0.1.45"
 proptest = "1.1.0"
 proptest-derive = "0.3.0"
 spandoc = "0.2.2"

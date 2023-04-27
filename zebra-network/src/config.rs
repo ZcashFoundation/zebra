@@ -335,7 +335,7 @@ impl<'de> Deserialize<'de> for Config {
             fn default() -> Self {
                 let config = Config::default();
                 Self {
-                    listen_addr: config.listen_addr.to_string(),
+                    listen_addr: "0.0.0.0".to_string(),
                     network: config.network,
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
