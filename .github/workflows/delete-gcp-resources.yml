@@ -46,7 +46,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
 
-      # Deletes all instances older than $DELETE_INSTANCE_DAYS days.
+      # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
@@ -80,7 +80,7 @@ jobs:
             gcloud compute instance-templates delete "${TEMPLATE}" || continue
           done
 
-      # Deletes all the disks older than $DELETE_AGE_DAYS days.
+      # Deletes all mainnet and testnet disks older than $DELETE_AGE_DAYS days.
       #
       # Disks that are attached to an instance template can't be deleted, so it is safe to try to delete all disks here.
       #
@@ -175,6 +175,8 @@ jobs:
 
   # We're using a generic approach here, which allows multiple registries to be included,
   # even those not related to GCP. Enough reason to create a separate job.
+  #
+  # The same artifacts are used for both mainnet and testnet.
   clean-registries:
     name: Delete unused artifacts in registry
     runs-on: ubuntu-latest
