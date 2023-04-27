@@ -6253,6 +6253,7 @@ dependencies = [
  "zebra-rpc",
  "zebra-state",
  "zebra-test",
+ "zebra-utils",
 ]
 
 [[package]]
