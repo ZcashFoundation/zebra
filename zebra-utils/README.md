@@ -15,6 +15,22 @@ Binaries are easier to use if they are located in your system execution path.
 
 This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
+#### Automatic Checkpoint Generation in CI
+
+Zebra's GitHub workflows automatically generate checkpoints after every `main` branch update.
+These checkpoints can be copied into the `main-checkpoints.txt` and `test-checkpoints.txt` files.
+
+To find the latest checkpoints on the `main` branch:
+1. Find the [latest completed `CI Docker` workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml?query=branch%3Amain).
+   Due to GitHub UI issues, some runs will show as waiting, cancelled, or failed,
+   but the checkpoints have still been generated.
+2. Go to the `Result of generate-checkpoints-mainnet` step in the
+   `Run generate-checkpoints-mainnet` job, in the `Generate checkpoints mainnet` job
+3. Scroll down until you see the list of checkpoints, it should start around line 200
+4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
+5. Repeat steps 2 to 4 for `testnet`
+6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
+
 #### Manual Checkpoint Generation
 
 To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
