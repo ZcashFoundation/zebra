@@ -15,7 +15,7 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{VerifiedUnminedTx, BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT},
+    transaction::{zip317::BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
