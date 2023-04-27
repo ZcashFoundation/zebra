@@ -15,7 +15,18 @@ Binaries are easier to use if they are located in your system execution path.
 
 This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
-To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`, and the `zcash-cli` RPC client.
+#### Manual Checkpoint Generation
+
+To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
+`zebrad` can be queried directly or via an installed `zcash-cli` RPC client.
+`zcashd` must be queried via `zcash-cli`, which performs the correct RPC authentication.
+
+#### Checkpoint Generation Setup
+
+Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
+and synced to the network tip.
+
+If you are on a Debian system, `zcash-cli` [can be installed as a package](https://zcash.readthedocs.io/en/latest/rtd_pages/install_debian_bin_packages.html).
 
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
@@ -23,12 +34,23 @@ To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`,
 cargo install --locked --features zebra-checkpoints --git https://github.com/ZcashFoundation/zebra zebra-utils
 ```
 
-Then update the checkpoints using these commands:
+#### Checkpoint Generation Commands
+
+You can update the checkpoints using these commands:
 ```sh
 zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
 zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
 wait
 ```
+
+When updating the lists there is no need to start from the genesis block. The program option
+`--last-checkpoint` will let you specify at what block height you want to start. Usually, the
+maintainers will copy the last height from each list, and start from there.
+
+Other useful options are:
+- `--transport direct`: connect directly to a `zebrad` instance
+- `--addr`: supply a custom RPC address and port for the node
+- `-- -testnet`: connect the `zcash-cli` binary to a testnet node instance
 
 You can see all the `zebra-checkpoints` options using:
 
@@ -36,7 +58,24 @@ You can see all the `zebra-checkpoints` options using:
 target/release/zebra-checkpoints --help
 ```
 
-For more details, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+
+#### Checkpoint Generation for Testnet
+
+To update the testnet checkpoints, `zebra-checkpoints` needs to connect to a testnet node.
+
+To launch a testnet node, you can either:
+- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.network), or
+- run `zcashd -testnet`.
+
+Then use the commands above to renegerate the checkpoints.
+
+#### Submit new checkpoints as pull request
+
+- If you started from the last checkpoint in the current list, add the checkpoint list to the end
+  of the existing checkpoint file. If you started from genesis, replace the entire file.
+- Open a pull request with the updated Mainnet and Testnet lists at:
+  https://github.com/ZcashFoundation/zebra/pulls
 
 ### zebrad-hash-lookup
 
