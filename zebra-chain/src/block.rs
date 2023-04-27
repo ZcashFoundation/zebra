@@ -35,7 +35,7 @@ pub use commitment::{
 };
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header, ZCASH_BLOCK_VERSION};
-pub use height::{Height, HeightDiff};
+pub use height::{Height, HeightDiff, TryIntoHeight};
 pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
 
 #[cfg(any(test, feature = "proptest-impl"))]

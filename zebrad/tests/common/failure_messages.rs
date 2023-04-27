@@ -118,3 +118,26 @@ pub const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
     // but we expect Zebra to start with an empty state.
     r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
 ];
+
+/// Failure log messages from `zebra-checkpoints`.
+///
+/// These `zebra-checkpoints` messages show that checkpoint generation has failed.
+/// So when we see them in the logs, we make the test fail.
+#[cfg(feature = "zebra-checkpoints")]
+pub const ZEBRA_CHECKPOINTS_FAILURE_MESSAGES: &[&str] = &[
+    // Rust-specific panics
+    "The application panicked",
+    // RPC port errors
+    "Unable to start RPC server",
+    // RPC argument errors: parsing and data
+    //
+    // These logs are produced by jsonrpc_core inside Zebra,
+    // but it doesn't log them yet.
+    //
+    // TODO: log these errors in Zebra, and check for them in the Zebra logs?
+    "Invalid params",
+    "Method not found",
+    // Incorrect command-line arguments
+    "USAGE",
+    "Invalid value",
+];

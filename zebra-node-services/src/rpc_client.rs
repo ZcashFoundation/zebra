@@ -1,20 +1,21 @@
-//! A client for calling Zebra's Json-RPC methods
+//! A client for calling Zebra's JSON-RPC methods.
+//!
+//! Only used in tests and tools.
 
 use std::net::SocketAddr;
 
 use reqwest::Client;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use color_eyre::{eyre::eyre, Result};
 
-/// An http client for making Json-RPC requests
+/// An HTTP client for making JSON-RPC requests.
 #[derive(Clone, Debug)]
-pub struct RPCRequestClient {
+pub struct RpcRequestClient {
     client: Client,
     rpc_address: SocketAddr,
 }
 
-impl RPCRequestClient {
+impl RpcRequestClient {
     /// Creates new RPCRequestSender
     pub fn new(rpc_address: SocketAddr) -> Self {
         Self {
@@ -26,10 +27,12 @@ impl RPCRequestClient {
     /// Builds rpc request
     pub async fn call(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> reqwest::Result<reqwest::Response> {
-        let params = params.into();
+        let method = method.as_ref();
+        let params = params.as_ref();
+
         self.client
             .post(format!("http://{}", &self.rpc_address))
             .body(format!(
@@ -43,8 +46,8 @@ impl RPCRequestClient {
     /// Builds rpc request and gets text from response
     pub async fn text_from_call(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> reqwest::Result<String> {
         self.call(method, params).await?.text().await
     }
@@ -54,18 +57,16 @@ impl RPCRequestClient {
     ///
     /// Returns Ok with json result from response if successful.
     /// Returns an error if the call or result deserialization fail.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub async fn json_result_from_call<T: serde::de::DeserializeOwned>(
         &self,
-        method: &'static str,
-        params: impl Into<String>,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
     ) -> Result<T> {
         Self::json_result_from_response_text(&self.text_from_call(method, params).await?)
     }
 
     /// Accepts response text from an RPC call
     /// Returns `Ok` with a deserialized `result` value in the expected type, or an error report.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     fn json_result_from_response_text<T: serde::de::DeserializeOwned>(
         response_text: &str,
     ) -> Result<T> {
