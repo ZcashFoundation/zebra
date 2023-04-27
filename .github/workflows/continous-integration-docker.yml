@@ -26,7 +26,7 @@ on:
       run-full-sync:
         type: boolean
         default: false
-        description: 'Just run a Zebra full sync on mainnet, and update tip disks'
+        description: 'Just run a Zebra full sync on `network`, and update tip disks'
         required: true
       run-lwd-sync:
         type: boolean
@@ -346,7 +346,7 @@ jobs:
   # Runs:
   # - after every PR is merged to `main`
   # - on every PR update, but only if the state version in constants.rs has no cached disk
-  # - on request, using workflow_dispatch with run-full-sync
+  # - in manual workflow runs, when run-full-sync is 'true' and network is 'Mainnet'
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
@@ -356,7 +356,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || github.event.inputs.run-full-sync == 'true' }}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Mainnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip
@@ -460,10 +460,8 @@ jobs:
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update
-  # - in manual workflow runs, but only if the state version in constants.rs has no cached disk
-  # TODO: move to the main branch if it's too slow:
   # - on every PR update, but only if the state version in constants.rs has no cached disk
+  # - in manual workflow runs, when run-full-sync is 'true' and network is 'Testnet'
   #
   # Note: the output from get-available-disks-testnet should match with the caller workflow inputs
   test-full-sync-testnet:
@@ -473,11 +471,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    #
-    # to only run on the main branch:
-    #if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || github.event.inputs.run-full-sync == 'true' }}
-    # Runs on every PR, and in manual runs if the disks are missing
-    if: ${{ (github.event_name == 'push' || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Testnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip-testnet
@@ -485,7 +479,7 @@ jobs:
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: '-e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
       network: 'Testnet'
-      # This test should be quick, only an hour or so
+      # A full testnet sync took about 2 hours in April 2023
       is_long_test: false
       needs_zebra_state: false
       saves_to_disk: true
