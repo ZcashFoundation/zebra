@@ -15,7 +15,9 @@ Zebra follows [semantic versioning](https://semver.org). Semantic versions look 
 
 The [draft `zebrad` changelog](https://github.com/ZcashFoundation/zebra/releases) will have an automatic version bump. This version is based on [the labels on the PRs in the release](https://github.com/ZcashFoundation/zebra/blob/main/.github/release-drafter.yml).
 
-Check that the automatic `zebrad` version increment is correct:
+Check that the automatic `zebrad` version increment matches the changes in the release:
+
+<details>
 
 If we're releasing a mainnet network upgrade, it is a `major` release:
 1. Increment the `major` version of _*all*_ the Zebra crates.
@@ -32,6 +34,8 @@ Otherwise, it is a `patch` release:
 3. Increment the `patch` version of the tower crates.
 
 Zebra's Rust API is not stable or supported, so we keep all the crates on the same beta `pre-release` version.
+
+</details>
 
 ### Version Locations
 
@@ -175,8 +179,13 @@ If the release contains new features (`major` or `minor`), or high-priority bug 
 ## Release Failures
 
 If building or running fails after tagging:
+
+<details>
+
 1. Fix the bug that caused the failure
 2. Increment versions again, following these instructions from the start
 3. Update the code and documentation with a **new** git tag
 4. Update `CHANGELOG.md` with details about the fix
 5. Tag a **new** release
+
+</details>
