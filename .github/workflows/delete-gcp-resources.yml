@@ -133,9 +133,9 @@ jobs:
           # zebrad-cache-6039-merge-62c8ecc-v25-mainnet-checkpoint-053559
           #
           # Mainnet zebrad checkpoint
-          ZEBRAD_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_MAINNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_CHECKPOINT_IMAGES
+          for IMAGE in $ZEBRAD_MAINNET_CHECKPOINT_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
@@ -148,9 +148,9 @@ jobs:
           done
 
           # Testnet zebrad checkpoint
-          ZEBRAD_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_TESTNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_CHECKPOINT_IMAGES
+          for IMAGE in $ZEBRAD_TESTNET_CHECKPOINT_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
@@ -166,9 +166,9 @@ jobs:
           # zebrad-cache-6556-merge-a2ca4de-v25-mainnet-tip(-u)?-140654
           #
           # Mainnet zebrad tip
-          ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_TIP_IMAGES
+          for IMAGE in $ZEBRAD_MAINNET_TIP_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
@@ -181,9 +181,9 @@ jobs:
           done
 
           # Testnet zebrad tip
-          ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_TIP_IMAGES
+          for IMAGE in $ZEBRAD_TESTNET_TIP_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
@@ -199,9 +199,9 @@ jobs:
           # lwd-cache-main-fb3fec0-v25-mainnet-tip(-u)?-061314
           #
           # Mainnet lightwalletd tip
-          LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          LWD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $LWD_TIP_IMAGES
+          for IMAGE in $LWD_MAINNET_TIP_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
@@ -214,9 +214,9 @@ jobs:
           done
 
           # Testnet lightwalletd tip
-          LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          LWD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $LWD_TIP_IMAGES
+          for IMAGE in $LWD_TESTNET_TIP_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
             then
