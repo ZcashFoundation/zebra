@@ -18,5 +18,8 @@ pub mod lightwalletd;
 pub mod sync;
 pub mod test_type;
 
+#[cfg(feature = "zebra-checkpoints")]
+pub mod checkpoints;
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;

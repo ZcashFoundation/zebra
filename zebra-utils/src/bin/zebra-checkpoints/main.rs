@@ -137,13 +137,18 @@ where
 
 /// Process entry point for `zebra-checkpoints`
 #[tokio::main]
-#[allow(clippy::print_stdout)]
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 async fn main() -> Result<()> {
+    eprintln!("zebra-checkpoints launched");
+
     // initialise
     init_tracing();
     color_eyre::install()?;
 
     let args = args::Args::from_args();
+
+    eprintln!("Command-line arguments: {args:?}");
+    eprintln!("Fetching block info and calculating checkpoints...\n\n");
 
     // get the current block count
     let get_block_chain_info = rpc_output(&args, "getblockchaininfo", None)

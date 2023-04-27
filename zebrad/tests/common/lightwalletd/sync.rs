@@ -132,11 +132,17 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     std::thread::scope(|s| {
         // Launch the sync-waiting threads
         let zebrad_thread = s.spawn(|| {
-            zebrad_wait_fn().expect("test failed while waiting for zebrad to sync");
+            let zebrad_result = zebrad_wait_fn();
+            is_zebrad_finished.store(true, Ordering::SeqCst);
+
+            zebrad_result.expect("test failed while waiting for zebrad to sync");
         });
 
         let lightwalletd_thread = s.spawn(|| {
-            lightwalletd_wait_fn().expect("test failed while waiting for lightwalletd to sync.");
+            let lightwalletd_result = lightwalletd_wait_fn();
+            is_lightwalletd_finished.store(true, Ordering::SeqCst);
+
+            lightwalletd_result.expect("test failed while waiting for lightwalletd to sync.");
         });
 
         // Mark the sync-waiting threads as finished if they fail or panic.
