@@ -345,9 +345,6 @@ impl fmt::Display for VerifiedUnminedTx {
             .finish()
     }
 }
-/// The ZIP-317 recommended limit on the number of unpaid actions per block.
-/// `block_unpaid_action_limit` in ZIP-317.
-pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from an unmined transaction,
@@ -360,12 +357,7 @@ impl VerifiedUnminedTx {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
-        zip317::mempool_checks(
-            unpaid_actions,
-            BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT,
-            miner_fee,
-            transaction.conventional_fee,
-        )?;
+        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.conventional_fee)?;
 
         Ok(Self {
             transaction,

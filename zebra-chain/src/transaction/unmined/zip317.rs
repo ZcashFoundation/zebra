@@ -40,6 +40,10 @@ const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 4.0;
 /// This avoids special handling for transactions with zero weight.
 const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
 
+/// The ZIP-317 recommended limit on the number of unpaid actions per block.
+/// `block_unpaid_action_limit` in ZIP-317.
+pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
+
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
@@ -162,12 +166,11 @@ fn div_ceil(quotient: usize, divisor: usize) -> usize {
 /// Make ZIP-317 checks before inserting a transaction into the mempool.
 pub fn mempool_checks(
     unpaid_actions: u32,
-    unpaid_action_limit: u32,
     miner_fee: Amount<NonNegative>,
     conventional_fee: Amount<NonNegative>,
 ) -> Result<(), Error> {
     // Check unpaid actions is below the threshold.
-    if unpaid_actions > unpaid_action_limit {
+    if unpaid_actions > BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT {
         return Err(Error::UnpaidActions);
     }
 

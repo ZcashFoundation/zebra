@@ -5,7 +5,6 @@ use super::{mempool_checks, Amount, Error};
 fn zip317_unpaid_actions_err() {
     let check = mempool_checks(
         51,
-        50,
         Amount::try_from(1).unwrap(),
         Amount::try_from(10000).unwrap(),
     );
@@ -17,7 +16,6 @@ fn zip317_unpaid_actions_err() {
 #[test]
 fn zip317_miner_fee_err() {
     let check = mempool_checks(
-        50,
         50,
         Amount::try_from(1).unwrap(),
         Amount::try_from(10000).unwrap(),

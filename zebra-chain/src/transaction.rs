@@ -35,8 +35,7 @@ pub use serialize::{
 };
 pub use sighash::{HashType, SigHash};
 pub use unmined::{
-    zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT,
-    MEMPOOL_TRANSACTION_COST_THRESHOLD,
+    zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
 
 use crate::{
