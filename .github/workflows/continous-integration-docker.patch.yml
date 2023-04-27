@@ -90,6 +90,12 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  generate-checkpoints-mainnet:
+    name: Generate checkpoints mainnet / Run generate-checkpoints-mainnet test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
     runs-on: ubuntu-latest

@@ -8,12 +8,12 @@ use std::{
 
 use tempfile::TempDir;
 
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::prelude::*;
 
 use crate::common::{
     launch::ZebradTestDirExt,
     lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-    rpc_client::RPCRequestClient,
     test_type::TestType,
 };
 
@@ -132,11 +132,17 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     std::thread::scope(|s| {
         // Launch the sync-waiting threads
         let zebrad_thread = s.spawn(|| {
-            zebrad_wait_fn().expect("test failed while waiting for zebrad to sync");
+            let zebrad_result = zebrad_wait_fn();
+            is_zebrad_finished.store(true, Ordering::SeqCst);
+
+            zebrad_result.expect("test failed while waiting for zebrad to sync");
         });
 
         let lightwalletd_thread = s.spawn(|| {
-            lightwalletd_wait_fn().expect("test failed while waiting for lightwalletd to sync.");
+            let lightwalletd_result = lightwalletd_wait_fn();
+            is_lightwalletd_finished.store(true, Ordering::SeqCst);
+
+            lightwalletd_result.expect("test failed while waiting for lightwalletd to sync.");
         });
 
         // Mark the sync-waiting threads as finished if they fail or panic.
@@ -183,7 +189,7 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let lightwalletd_tip_height = lightwalletd_tip_block.height;
 
         // Get the block tip from zebrad
-        let client = RPCRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(zebra_rpc_address);
         let zebrad_blockchain_info = client
             .text_from_call("getblockchaininfo", "[]".to_string())
             .await?;

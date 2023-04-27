@@ -75,28 +75,28 @@
 //! $ cargo test lightwalletd_integration -- --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
 //! $ cargo test lightwalletd_update_sync -- --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! $ cargo test lightwalletd_full_sync -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ cargo test lightwalletd_test_suite -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! $ cargo test fully_synced_rpc_test -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
 //! $ cargo test sending_transactions_using_lightwalletd --features lightwalletd-grpc-tests -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
 //! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
@@ -106,16 +106,24 @@
 //! Example of how to run the get_block_template test:
 //!
 //! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test get_block_template --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test get_block_template --features getblocktemplate-rpcs --release  -- --ignored --nocapture
 //! ```
 //!
 //! Example of how to run the submit_block test:
 //!
 //! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Checkpoint Generation Tests
+//!
+//! Generate checkpoints on mainnet and testnet using a cached state:
+//! ```console
+//! GENERATE_CHECKPOINTS_MAINNET=1 ENTRYPOINT_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! GENERATE_CHECKPOINTS_TESTNET=1 ENTRYPOINT_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! ```
 //!
 //! ## Disk Space for Testing
 //!
@@ -144,6 +152,7 @@ use zebra_chain::{
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
@@ -166,8 +175,6 @@ use common::{
     },
     test_type::TestType::{self, *},
 };
-
-use crate::common::rpc_client::RPCRequestClient;
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
@@ -1367,7 +1374,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     )?;
 
     // Create an http client
-    let client = RPCRequestClient::new(config.rpc.listen_addr.unwrap());
+    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
     // Make the call to the `getinfo` RPC method
     let res = client.call("getinfo", "[]".to_string()).await?;
@@ -1435,7 +1442,7 @@ fn non_blocking_logger() -> Result<()> {
         )?;
 
         // Create an http client
-        let client = RPCRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(zebra_rpc_address);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
@@ -2058,7 +2065,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
-    let client = RPCRequestClient::new(zebra_rpc_address);
+    let client = RpcRequestClient::new(zebra_rpc_address);
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
@@ -2232,4 +2239,26 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     output.assert_was_killed()?;
 
     Ok(())
+}
+/// Test `zebra-checkpoints` on mainnet.
+///
+/// If you want to run this test individually, see the module documentation.
+/// See [`common::checkpoints`] for more information.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "zebra-checkpoints")]
+async fn generate_checkpoints_mainnet() -> Result<()> {
+    common::checkpoints::run(Mainnet).await
+}
+
+/// Test `zebra-checkpoints` on testnet.
+/// This test might fail if testnet is unstable.
+///
+/// If you want to run this test individually, see the module documentation.
+/// See [`common::checkpoints`] for more information.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "zebra-checkpoints")]
+async fn generate_checkpoints_testnet() -> Result<()> {
+    common::checkpoints::run(Testnet).await
 }

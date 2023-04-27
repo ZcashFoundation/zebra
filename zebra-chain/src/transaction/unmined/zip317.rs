@@ -4,6 +4,8 @@
 
 use std::cmp::max;
 
+use num_integer::div_ceil;
+
 use crate::{
     amount::{Amount, NonNegative},
     block::MAX_BLOCK_BYTES,
@@ -136,20 +138,4 @@ fn conventional_actions(transaction: &Transaction) -> u32 {
         .expect("transaction items are limited by serialized size limit");
 
     max(GRACE_ACTIONS, logical_actions)
-}
-
-/// Divide `quotient` by `divisor`, rounding the result up to the nearest integer.
-///
-/// # Correctness
-///
-/// `quotient + divisor` must be less than `usize::MAX`.
-/// `divisor` must not be zero.
-//
-// TODO: replace with usize::div_ceil() when int_roundings stabilises:
-// https://github.com/rust-lang/rust/issues/88581
-fn div_ceil(quotient: usize, divisor: usize) -> usize {
-    // Rust uses truncated integer division, so this is equivalent to:
-    // `ceil(quotient/divisor)`
-    // as long as the addition doesn't overflow or underflow.
-    (quotient + divisor - 1) / divisor
 }

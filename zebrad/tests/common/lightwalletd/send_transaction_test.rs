@@ -52,11 +52,6 @@ fn max_sent_transactions() -> usize {
 const MAX_NUM_FUTURE_BLOCKS: u32 = 50;
 
 /// The test entry point.
-//
-// TODO:
-// - check output of zebrad and lightwalletd in different threads,
-//   to avoid test hangs due to full output pipes
-//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 

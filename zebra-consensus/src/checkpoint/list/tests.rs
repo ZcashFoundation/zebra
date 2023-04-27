@@ -2,11 +2,14 @@
 
 use std::sync::Arc;
 
+use num_integer::div_ceil;
+
 use zebra_chain::{
-    block::{self, Block, HeightDiff},
+    block::{self, Block, HeightDiff, MAX_BLOCK_BYTES},
     parameters::{Network, Network::*},
     serialization::ZcashDeserialize,
 };
+use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 
 use super::*;
 
@@ -274,13 +277,20 @@ fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
     checkpoint_list_hard_coded_max_gap(Testnet)
 }
 
-/// Check that the hard-coded checkpoints are within `MAX_CHECKPOINT_HEIGHT_GAP`.
+/// Check that the hard-coded checkpoints are within [`MAX_CHECKPOINT_HEIGHT_GAP`],
+/// and a calculated minimum number of blocks. This also checks the heights are in order.
 ///
-/// We can't test the block byte limit, because we don't have access to the entire
-/// blockchain in the tests. But that's ok, because the byte limit only impacts
-/// performance.
+/// We can't test [`MAX_CHECKPOINT_BYTE_COUNT`] directly, because we don't have access to the
+/// entire blockchain in the tests. Instead, we check the number of maximum-size blocks in a
+/// checkpoint. (This is ok, because the byte count only impacts performance.)
 fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
+
+    let max_checkpoint_height_gap =
+        HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
+    let min_checkpoint_height_gap =
+        HeightDiff::try_from(div_ceil(MAX_CHECKPOINT_BYTE_COUNT, MAX_BLOCK_BYTES))
+            .expect("constant fits in HeightDiff");
 
     let list = CheckpointList::new(network);
     let mut heights = list.0.keys();
@@ -290,12 +300,27 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
     assert_eq!(heights.next(), Some(&previous_height));
 
     for height in heights {
-        let height_limit =
-            (previous_height + (crate::MAX_CHECKPOINT_HEIGHT_GAP as HeightDiff)).unwrap();
+        let height_upper_limit = (previous_height + max_checkpoint_height_gap)
+            .expect("checkpoint heights are valid blockchain heights");
+
+        let height_lower_limit = (previous_height + min_checkpoint_height_gap)
+            .expect("checkpoint heights are valid blockchain heights");
+
         assert!(
-            height <= &height_limit,
-            "Checkpoint gaps must be within MAX_CHECKPOINT_HEIGHT_GAP"
+            height <= &height_upper_limit,
+            "Checkpoint gaps must be MAX_CHECKPOINT_HEIGHT_GAP or less \
+             actually: {height:?} - {previous_height:?} = {} \
+             should be: less than or equal to {max_checkpoint_height_gap}",
+            *height - previous_height,
         );
+        assert!(
+            height >= &height_lower_limit,
+            "Checkpoint gaps must be ceil(MAX_CHECKPOINT_BYTE_COUNT/MAX_BLOCK_BYTES) or greater \
+             actually: {height:?} - {previous_height:?} = {} \
+             should be: greater than or equal to {min_checkpoint_height_gap}",
+            *height - previous_height,
+        );
+
         previous_height = *height;
     }
 

@@ -37,12 +37,15 @@ on:
         required: false
         type: string
         default: info
+      # keep these in sync with:
+      # https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile#L83
       features:
         required: false
+        default: "sentry"
         type: string
       test_features: 
         required: false
-        default: "lightwalletd-grpc-tests"
+        default: "lightwalletd-grpc-tests zebra-checkpoints"
         type: string
       rpc_port: 
         required: false
