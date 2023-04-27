@@ -239,8 +239,8 @@ async fn main() -> Result<()> {
 
                 let block_bytes: Vec<u8> = hex::decode(block_bytes)?;
 
-                // TODO: is it faster to call both `getblock height version=0`
-                //       and `getblock height version=1`, rather than deserializing the block
+                // TODO: is it faster to call both `getblock height verbosity=0`
+                //       and `getblock height verbosity=1`, rather than deserializing the block
                 //       and calculating its hash?
                 //
                 // It seems to be fast enough for checkpoint updates for now,
