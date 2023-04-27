@@ -154,12 +154,23 @@ pub fn mempool_checks(
     miner_fee: Amount<NonNegative>,
     conventional_fee: Amount<NonNegative>,
 ) -> Result<(), Error> {
-    // Check unpaid actions is below the threshold.
+    // # Standard Rule
+    //
+    // > If a transaction has more than `block_unpaid_action_limit` "unpaid actions" as defined by the
+    // > Recommended algorithm for block template construction, it will never be mined by that algorithm.
+    // > Nodes MAY drop these transactions.
+    //
+    // <https://zips.z.cash/zip-0317#transaction-relaying>
     if unpaid_actions > BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT {
         return Err(Error::UnpaidActions);
     }
 
-    // Check the fee is not below the calculated conventional fee for the transaction.
+    // # Standard Rule
+    //
+    // > Nodes that normally relay transactions are expected to do so for transactions that pay at least the
+    // > conventional fee as specified in this ZIP.
+    //
+    // <https://zips.z.cash/zip-0317#transaction-relaying>
     if miner_fee < conventional_fee {
         return Err(Error::MinerFee);
     }
