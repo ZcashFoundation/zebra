@@ -45,6 +45,23 @@ const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
 /// `block_unpaid_action_limit` in ZIP-317.
 pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 
+/// The minimum fee per kilobyte for Zebra mempool transactions.
+/// Also used as the minimum fee for a mempool transaction.
+///
+/// Based on `DEFAULT_MIN_RELAY_TX_FEE` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/f512291ff20098291442e83713de89bcddc07546/src/main.h#L71-L72>
+///
+/// This is a `usize` to simplify transaction size-based calculation code.
+pub const MIN_MEMPOOL_TX_FEE_RATE: usize = 100;
+
+/// The fee cap for [`MIN_MEMPOOL_TX_FEE_RATE`] minimum required mempool fees.
+///
+/// Based on `LEGACY_DEFAULT_FEE` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
+///
+/// This is a `usize` to simplify transaction size-based calculation code.
+pub const MEMPOOL_TX_FEE_REQUIREMENT_CAP: usize = 1000;
+
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
@@ -184,11 +201,16 @@ pub fn mempool_checks(
     // > with a maximum fee of 1000 zatoshis. In zcashd this is `DEFAULT_MIN_RELAY_TX_FEE`.
     //
     // <https://github.com/ZcashFoundation/zebra/issues/5336#issuecomment-1506748801>
-    let limit = std::cmp::min(
-        1000,
-        (f32::floor(100.0 * transaction_size as f32 / 1000.0)) as u64,
-    );
-    if miner_fee < Amount::<NonNegative>::try_from(limit).expect("limit value is invalid") {
+    const KILOBYTE: usize = 1000;
+
+    let min_fee = (MIN_MEMPOOL_TX_FEE_RATE * transaction_size / KILOBYTE)
+        .clamp(MIN_MEMPOOL_TX_FEE_RATE, MEMPOOL_TX_FEE_REQUIREMENT_CAP);
+    let min_fee: u64 = min_fee
+        .try_into()
+        .expect("clamped value always fits in u64");
+    let min_fee: Amount<NonNegative> = min_fee.try_into().expect("clamped value is positive");
+
+    if miner_fee < min_fee {
         return Err(Error::FeeBelowMinimumRate);
     }
 
