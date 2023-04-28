@@ -280,8 +280,8 @@ fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
 /// Check that the hard-coded checkpoints are within [`MAX_CHECKPOINT_HEIGHT_GAP`],
 /// and a calculated minimum number of blocks. This also checks the heights are in order.
 ///
-/// We can't test [`MAX_CHECKPOINT_BYTE_COUNT`] directly, because we don't have access to the
-/// entire blockchain in the tests. Instead, we check the number of maximum-size blocks in a
+/// We can't test [`MAX_CHECKPOINT_BYTE_COUNT`] directly, because we don't have access to a large
+/// enough blockchain in the tests. Instead, we check the number of maximum-size blocks in a
 /// checkpoint. (This is ok, because the byte count only impacts performance.)
 fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
