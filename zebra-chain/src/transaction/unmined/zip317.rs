@@ -169,7 +169,6 @@ fn conventional_actions(transaction: &Transaction) -> u32 {
 pub fn mempool_checks(
     unpaid_actions: u32,
     miner_fee: Amount<NonNegative>,
-    conventional_fee: Amount<NonNegative>,
     transaction_size: usize,
 ) -> Result<(), Error> {
     // # Standard Rule
@@ -189,18 +188,17 @@ pub fn mempool_checks(
     // > conventional fee as specified in this ZIP.
     //
     // <https://zips.z.cash/zip-0317#transaction-relaying>
-    if miner_fee < conventional_fee {
-        return Err(Error::FeeBelowConventional);
-    }
+    //
+    // In Zebra, we use a similar minimum fee rate to `zcashd` v5.5.0 and later.
+    // Transactions must pay a fee of at least 100 zatoshis per 1000 bytes of serialized size,
+    // with a maximum fee of 1000 zatoshis.
+    //
+    // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.cpp#L24-L37>
+    //
+    // In zcashd this is `DEFAULT_MIN_RELAY_TX_FEE` and `LEGACY_DEFAULT_FEE`:
+    // <https://github.com/zcash/zcash/blob/f512291ff20098291442e83713de89bcddc07546/src/main.h#L71-L72>
+    // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
 
-    // # Standard rule
-    //
-    // > Minimum Fee Rate
-    // >
-    // > Transactions must pay a fee of at least 100 zatoshis per 1000 bytes of serialized size,
-    // > with a maximum fee of 1000 zatoshis. In zcashd this is `DEFAULT_MIN_RELAY_TX_FEE`.
-    //
-    // <https://github.com/ZcashFoundation/zebra/issues/5336#issuecomment-1506748801>
     const KILOBYTE: usize = 1000;
 
     // This calculation can't overflow, because transactions are limited to 2 MB,
@@ -231,9 +229,6 @@ pub fn mempool_checks(
 pub enum Error {
     #[error("Unpaid actions is higher than the limit")]
     UnpaidActions,
-
-    #[error("Transaction fee is below the conventional fee for the transaction")]
-    FeeBelowConventional,
 
     #[error("Transaction fee is below the minimum fee rate")]
     FeeBelowMinimumRate,

@@ -2886,9 +2886,7 @@ async fn mempool_zip317_error() {
     assert!(verifier_response.is_err());
     assert_eq!(
         verifier_response.err(),
-        Some(TransactionError::Zip317(
-            zip317::Error::FeeBelowConventional
-        ))
+        Some(TransactionError::Zip317(zip317::Error::FeeBelowMinimumRate))
     );
 }
 
