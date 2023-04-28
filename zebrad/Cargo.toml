@@ -203,6 +203,8 @@ serde_json = { version = "1.0.96", features = ["preserve_order"] }
 tempfile = "3.5.0"
 
 hyper = { version = "0.14.26", features = ["http1", "http2", "server"]}
+tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
+
 tokio = { version = "1.27.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.14"
 
