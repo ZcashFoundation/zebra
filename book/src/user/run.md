@@ -13,7 +13,7 @@ structure, and documentation for all of the config options can be found
 
 ## Supported versions
 
-Always make sure your version is under support and that you upgrade regularly to avoid halting. [More information](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#supported-releases).
+Always run a supported version of Zebra, and upgrade it regularly, so it doesn't become unsupported and halt. [More information](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#supported-releases).
 
 ## Return Codes
 
