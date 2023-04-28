@@ -13,7 +13,11 @@ use abscissa_core::{
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
-use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
+use crate::{
+    commands::ZebradCmd,
+    components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
+    config::ZebradConfig,
+};
 
 mod entry_point;
 use entry_point::EntryPoint;
@@ -292,6 +296,10 @@ impl Application for ZebradApp {
                     }
                     // RocksDB lock file conflicts
                     if LOCK_FILE_ERROR.is_match(error_str) {
+                        return false;
+                    }
+                    // Don't ask users to report old version panics.
+                    if error_str.to_string().contains(EOS_PANIC_MESSAGE_HEADER) {
                         return false;
                     }
                     true

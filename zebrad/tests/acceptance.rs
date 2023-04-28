@@ -2214,6 +2214,32 @@ async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
+/// Check that the the end of support code is called at least once.
+#[test]
+fn end_of_support_is_checked_at_start() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let mut child = testdir.spawn_child(args!["start"])?;
+
+    // Give enough time to start up the eos task.
+    std::thread::sleep(Duration::from_secs(30));
+
+    child.kill(false)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Zebra started
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // End of support task started.
+    output.stdout_line_contains("Starting end of support task")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    Ok(())
+}
 /// Test `zebra-checkpoints` on mainnet.
 ///
 /// If you want to run this test individually, see the module documentation.
