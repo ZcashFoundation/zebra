@@ -466,14 +466,15 @@ where
                     miner_fee,
                     legacy_sigop_count,
                 },
-                Request::Mempool { transaction, .. } => Response::Mempool {
-                    transaction: VerifiedUnminedTx::new(
+                Request::Mempool { transaction, .. } => {
+                    let transaction = VerifiedUnminedTx::new(
                         transaction,
                         miner_fee.expect(
                             "unexpected mempool coinbase transaction: should have already rejected",
                         ),
                         legacy_sigop_count,
-                    ),
+                    )?;
+                    Response::Mempool { transaction }
                 },
             };
 

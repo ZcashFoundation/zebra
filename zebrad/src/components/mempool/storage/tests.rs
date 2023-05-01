@@ -37,5 +37,12 @@ pub fn unmined_transactions_in_blocks(
     selected_blocks
         .flat_map(|block| block.transactions)
         .map(UnminedTx::from)
-        .map(|transaction| VerifiedUnminedTx::new(transaction, Amount::zero(), 0))
+        .map(|transaction| {
+            VerifiedUnminedTx::new(
+                transaction,
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass")
+        })
 }

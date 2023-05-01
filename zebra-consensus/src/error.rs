@@ -221,6 +221,10 @@ pub enum TransactionError {
         outpoint: transparent::OutPoint,
         min_spend_height: block::Height,
     },
+
+    #[error("failed to verify ZIP-317 transaction rules, transaction was not inserted to mempool")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    Zip317(#[from] zebra_chain::transaction::zip317::Error),
 }
 
 impl From<ValidateContextError> for TransactionError {
