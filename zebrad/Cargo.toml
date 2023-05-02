@@ -145,7 +145,7 @@ tracing = "0.1.37"
 
 metrics = "0.21.0"
 
-dirs = "5.0.0"
+dirs = "5.0.1"
 atty = "0.2.14"
 
 num-integer = "0.1.45"
