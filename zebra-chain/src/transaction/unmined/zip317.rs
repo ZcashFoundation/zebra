@@ -5,6 +5,7 @@
 use std::cmp::max;
 
 use num_integer::div_ceil;
+use thiserror::Error;
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -12,6 +13,9 @@ use crate::{
     serialization::ZcashSerialize,
     transaction::{Transaction, UnminedTx},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
 //
@@ -36,6 +40,27 @@ const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 4.0;
 ///
 /// This avoids special handling for transactions with zero weight.
 const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
+
+/// The ZIP-317 recommended limit on the number of unpaid actions per block.
+/// `block_unpaid_action_limit` in ZIP-317.
+pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
+
+/// The minimum fee per kilobyte for Zebra mempool transactions.
+/// Also used as the minimum fee for a mempool transaction.
+///
+/// Based on `DEFAULT_MIN_RELAY_TX_FEE` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/f512291ff20098291442e83713de89bcddc07546/src/main.h#L71-L72>
+///
+/// This is a `usize` to simplify transaction size-based calculation code.
+pub const MIN_MEMPOOL_TX_FEE_RATE: usize = 100;
+
+/// The fee cap for [`MIN_MEMPOOL_TX_FEE_RATE`] minimum required mempool fees.
+///
+/// Based on `LEGACY_DEFAULT_FEE` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
+///
+/// This is a `usize` to simplify transaction size-based calculation code.
+pub const MEMPOOL_TX_FEE_REQUIREMENT_CAP: usize = 1000;
 
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
 ///
@@ -138,4 +163,73 @@ fn conventional_actions(transaction: &Transaction) -> u32 {
         .expect("transaction items are limited by serialized size limit");
 
     max(GRACE_ACTIONS, logical_actions)
+}
+
+/// Make ZIP-317 checks before inserting a transaction into the mempool.
+pub fn mempool_checks(
+    unpaid_actions: u32,
+    miner_fee: Amount<NonNegative>,
+    transaction_size: usize,
+) -> Result<(), Error> {
+    // # Standard Rule
+    //
+    // > If a transaction has more than `block_unpaid_action_limit` "unpaid actions" as defined by the
+    // > Recommended algorithm for block template construction, it will never be mined by that algorithm.
+    // > Nodes MAY drop these transactions.
+    //
+    // <https://zips.z.cash/zip-0317#transaction-relaying>
+    if unpaid_actions > BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT {
+        return Err(Error::UnpaidActions);
+    }
+
+    // # Standard Rule
+    //
+    // > Nodes that normally relay transactions are expected to do so for transactions that pay at least the
+    // > conventional fee as specified in this ZIP.
+    //
+    // <https://zips.z.cash/zip-0317#transaction-relaying>
+    //
+    // In Zebra, we use a similar minimum fee rate to `zcashd` v5.5.0 and later.
+    // Transactions must pay a fee of at least 100 zatoshis per 1000 bytes of serialized size,
+    // with a maximum fee of 1000 zatoshis.
+    //
+    // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.cpp#L24-L37>
+    //
+    // In zcashd this is `DEFAULT_MIN_RELAY_TX_FEE` and `LEGACY_DEFAULT_FEE`:
+    // <https://github.com/zcash/zcash/blob/f512291ff20098291442e83713de89bcddc07546/src/main.h#L71-L72>
+    // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
+
+    const KILOBYTE: usize = 1000;
+
+    // This calculation can't overflow, because transactions are limited to 2 MB,
+    // and usize is at least 4 GB.
+    assert!(
+        MIN_MEMPOOL_TX_FEE_RATE
+            < usize::MAX / usize::try_from(MAX_BLOCK_BYTES).expect("constant fits in usize"),
+        "the fee rate multiplication must never overflow",
+    );
+
+    let min_fee = (MIN_MEMPOOL_TX_FEE_RATE * transaction_size / KILOBYTE)
+        .clamp(MIN_MEMPOOL_TX_FEE_RATE, MEMPOOL_TX_FEE_REQUIREMENT_CAP);
+    let min_fee: u64 = min_fee
+        .try_into()
+        .expect("clamped value always fits in u64");
+    let min_fee: Amount<NonNegative> = min_fee.try_into().expect("clamped value is positive");
+
+    if miner_fee < min_fee {
+        return Err(Error::FeeBelowMinimumRate);
+    }
+
+    Ok(())
+}
+
+/// Errors related to ZIP-317.
+#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum Error {
+    #[error("Unpaid actions is higher than the limit")]
+    UnpaidActions,
+
+    #[error("Transaction fee is below the minimum fee rate")]
+    FeeBelowMinimumRate,
 }

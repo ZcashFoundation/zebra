@@ -36,7 +36,7 @@ use proptest_derive::Arbitrary;
 #[allow(unused_imports)]
 use crate::block::MAX_BLOCK_BYTES;
 
-mod zip317;
+pub mod zip317;
 
 /// The minimum cost value for a transaction in the mempool.
 ///
@@ -353,17 +353,19 @@ impl VerifiedUnminedTx {
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
-    ) -> Self {
+    ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
-        Self {
+        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size)?;
+
+        Ok(Self {
             transaction,
             miner_fee,
             legacy_sigop_count,
             fee_weight_ratio,
             unpaid_actions,
-        }
+        })
     }
 
     /// Returns `true` if the transaction pays at least the [ZIP-317] conventional fee.
