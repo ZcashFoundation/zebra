@@ -269,14 +269,12 @@ pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
 /// messages from each of our peers.
 pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 
-/// The User-Agent string provided by the node.
+/// Release version name is used to form user agent string.
+/// Can be also used in other parts of Zebra to identify the current release.
 ///
-/// This must be a valid [BIP 14] user agent.
-///
-/// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-rc.7/";
+pub const RELEASE_VERSION: &str = "1.0.0-rc.7";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
@@ -336,6 +334,13 @@ lazy_static! {
     } else {
         Regex::new("(access a socket in a way forbidden by its access permissions)|(Only one usage of each socket address)")
     }.expect("regex is valid");
+
+    /// The User-Agent string provided by the node.
+    ///
+    /// This must be a valid [BIP 14] user agent.
+    ///
+    /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+    pub static ref USER_AGENT: String = format!("/Zebra:{RELEASE_VERSION}/");
 }
 
 /// The timeout for DNS lookups.

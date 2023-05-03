@@ -46,7 +46,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.0
 
-      # Deletes all instances older than $DELETE_INSTANCE_DAYS days.
+      # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
@@ -80,7 +80,7 @@ jobs:
             gcloud compute instance-templates delete "${TEMPLATE}" || continue
           done
 
-      # Deletes all the disks older than $DELETE_AGE_DAYS days.
+      # Deletes all mainnet and testnet disks older than $DELETE_AGE_DAYS days.
       #
       # Disks that are attached to an instance template can't be deleted, so it is safe to try to delete all disks here.
       #
@@ -102,7 +102,7 @@ jobs:
             gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
             IFS=$'\n'
           done
-          
+
           IFS=$'\n'
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
           ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
@@ -115,66 +115,123 @@ jobs:
             IFS=$'\n'
           done
 
-      # Deletes cache images older than $DELETE_AGE_DAYS days.
+      # Deletes mainnet and testnet cache images older than $DELETE_AGE_DAYS days.
       #
       # Keeps all images younger than $DELETE_AGE_DAYS.
-      # Also keeps $KEEP_LATEST_IMAGE_COUNT older images of each type:
+      # Also keeps $KEEP_LATEST_IMAGE_COUNT older images of each type, for each network:
       # - zebrad checkpoint cache
       # - zebrad tip cache
       # - lightwalletd + zebrad tip cache
       #
       # TODO:
-      # - keep the latest $KEEP_LATEST_IMAGE_COUNT, if there are at least that many recent images, delete all the outdated images
-      # - when we add testnet to the workflows, keep the latest $KEEP_LATEST_IMAGE_COUNT testnet images, 
-      #   and the latest $KEEP_LATEST_IMAGE_COUNT mainnet images.
+      # - refactor out repeated shell script code
       - name: Delete old cache disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
 
-          ZEBRAD_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          # As of April 2023, these disk names look like:
+          # zebrad-cache-6039-merge-62c8ecc-v25-mainnet-checkpoint-053559
+          #
+          # Mainnet zebrad checkpoint
+          ZEBRAD_MAINNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_CHECKPOINT_IMAGES
+          for IMAGE in $ZEBRAD_MAINNET_CHECKPOINT_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
-            then              
+            then
               KEPT_IMAGES=$((KEPT_IMAGES+1))
               echo "Keeping image $KEPT_IMAGES named $IMAGE"
               continue
             fi
-            
+
             gcloud compute images delete "${IMAGE}" || continue
           done
 
-          ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          # Testnet zebrad checkpoint
+          ZEBRAD_TESTNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $ZEBRAD_TIP_IMAGES
+          for IMAGE in $ZEBRAD_TESTNET_CHECKPOINT_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
-            then              
+            then
               KEPT_IMAGES=$((KEPT_IMAGES+1))
               echo "Keeping image $KEPT_IMAGES named $IMAGE"
               continue
             fi
-            
+
             gcloud compute images delete "${IMAGE}" || continue
           done
-          
-          LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+
+          # As of April 2023, these disk names look like:
+          # zebrad-cache-6556-merge-a2ca4de-v25-mainnet-tip(-u)?-140654
+          #
+          # Mainnet zebrad tip
+          ZEBRAD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           KEPT_IMAGES=0
-          for IMAGE in $LWD_TIP_IMAGES
+          for IMAGE in $ZEBRAD_MAINNET_TIP_IMAGES
           do
             if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
-            then              
+            then
               KEPT_IMAGES=$((KEPT_IMAGES+1))
               echo "Keeping image $KEPT_IMAGES named $IMAGE"
               continue
             fi
-            
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # Testnet zebrad tip
+          ZEBRAD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_TESTNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # As of April 2023, these disk names look like:
+          # lwd-cache-main-fb3fec0-v25-mainnet-tip(-u)?-061314
+          #
+          # Mainnet lightwalletd tip
+          LWD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $LWD_MAINNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # Testnet lightwalletd tip
+          LWD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $LWD_TESTNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
             gcloud compute images delete "${IMAGE}" || continue
           done
 
   # We're using a generic approach here, which allows multiple registries to be included,
   # even those not related to GCP. Enough reason to create a separate job.
+  #
+  # The same artifacts are used for both mainnet and testnet.
   clean-registries:
     name: Delete unused artifacts in registry
     runs-on: ubuntu-latest

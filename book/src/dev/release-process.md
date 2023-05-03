@@ -33,10 +33,11 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 ### Supported Releases
 
-Older Zebra versions are always supported until the next Zebra major, minor or patch release. Initially, we can only guarantee support for the latest Zebra release.
-We might be able to provide support for earlier releases, or we might ask you to upgrade to the latest release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **16 weeks** but this can change from release to release.
 
-Our support periods will be extended as we gain experience with supporting Zebra releases.
+When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
+
+Our process is similar to `zcashd`: https://zcash.github.io/zcash/user/release-support.html
 
 Older Zebra versions that only support previous network upgrades will never be supported, because they are operating on an unsupported Zcash chain fork.
 

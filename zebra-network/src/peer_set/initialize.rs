@@ -28,13 +28,16 @@ use tower::{
 };
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::chain_tip::ChainTip;
 
 use crate::{
     address_book_updater::AddressBookUpdater,
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
-    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest, PeerPreference},
+    peer::{
+        self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
+        OutboundConnectorRequest, PeerPreference,
+    },
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -465,17 +468,14 @@ async fn limit_initial_peers(
 #[instrument(skip(config), fields(addr = ?config.listen_addr))]
 pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
-    use Network::*;
-    let wrong_net = match config.network {
-        Mainnet => Testnet,
-        Testnet => Mainnet,
-    };
-    if config.listen_addr.port() == wrong_net.default_port() {
+    if let Err(wrong_addr) =
+        address_is_valid_for_inbound_listeners(&config.listen_addr, config.network)
+    {
         warn!(
-            "We are configured with port {} for {:?}, but that port is the default port for {:?}. The default port for {:?} is {}.",
-            config.listen_addr.port(),
+            "We are configured with address {} on {:?}, but it could cause network issues. \
+             The default port for {:?} is {}. Error: {wrong_addr:?}",
+            config.listen_addr,
             config.network,
-            wrong_net,
             config.network,
             config.network.default_port(),
         );

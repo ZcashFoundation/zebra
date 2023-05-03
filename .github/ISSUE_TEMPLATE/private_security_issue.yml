@@ -1,0 +1,15 @@
+---
+name: Private Security Issue
+about: Zebra team use only
+title: 'Security Issue #NNN'
+labels: C-security, S-needs-triage
+assignees: ''
+
+---
+
+## Motivation
+
+This ticket is a public placeholder for a security issue that the Zebra team is fixing privately.
+The issue number is chosen by our internal tracker, it is not meaningful.
+
+Zebra developers must discuss the details of this issue using secure channels.
