@@ -102,7 +102,7 @@ pub fn release_version() -> String {
         .to_string()
         .split('+')
         .next()
-        .expect("infallible")
+        .expect("always at least 1 slice")
         .to_string()
 }
 
