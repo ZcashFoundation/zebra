@@ -371,7 +371,7 @@ where
         // [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
         let release_version = self
             .app_version
-            // remove everything after the `+` characater if any
+            // remove everything after the `+` character if any
             .split('+')
             .next()
             .expect("always at least 1 slice")
