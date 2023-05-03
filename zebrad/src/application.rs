@@ -96,6 +96,26 @@ pub fn app_version() -> Version {
     }
 }
 
+/// The Zebra current release version.
+pub fn release_version() -> String {
+    app_version()
+        .to_string()
+        .split('+')
+        .next()
+        .expect("infallible")
+        .to_string()
+}
+
+/// The User-Agent string provided by the node.
+///
+/// This must be a valid [BIP 14] user agent.
+///
+/// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+pub fn user_agent() -> String {
+    let release_version = release_version();
+    format!("/Zebra:{release_version}/")
+}
+
 /// Zebrad Application
 #[derive(Debug)]
 pub struct ZebradApp {
