@@ -2016,7 +2016,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
         .rev()
         .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
         .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
-        .expect("No transaction found with Groth16 JoinSplits");
+        .expect("There should be a tx with Groth16 JoinSplits.");
 
     let expected_error = Err(expected_error);
 
@@ -2032,7 +2032,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     // Initialize the verifier
     let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
+        service_fn(|_| async { unreachable!("State service should not be called.") });
     let verifier = Verifier::new(network, state_service);
 
     // Test the transaction verifier.
