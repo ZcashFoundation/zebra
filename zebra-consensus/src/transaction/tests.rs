@@ -2018,6 +2018,8 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
         .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
         .expect("No transaction found with Groth16 JoinSplits");
 
+    let expected_error = Err(expected_error);
+
     modify_joinsplit(
         Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
         modification,
@@ -2028,18 +2030,33 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
         service_fn(|_| async { unreachable!("State service should not be called") });
     let verifier = Verifier::new(network, state_service);
 
-    // Test the transaction verifier
-    let result = verifier
-        .clone()
-        .oneshot(Request::Block {
-            transaction,
-            known_utxos: Arc::new(HashMap::new()),
-            height,
-            time: DateTime::<Utc>::MAX_UTC,
-        })
-        .await;
+    // Test the transaction verifier.
+    //
+    // Note that modifying the JoinSplit data invalidates the tx signatures. The signatures are
+    // checked concurrently with the ZK proofs, and when a signature check finishes before the proof
+    // check, the verifier reports an invalid signature instead of invalid proof. This race
+    // condition happens only occasionaly, so we run the verifier in a loop with a small iteration
+    // threshold until it returns the correct error.
+    let mut i = 1;
+    let result = loop {
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction: transaction.clone(),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
 
-    assert_eq!(result, Err(expected_error));
+        if result == expected_error || i >= 10 {
+            break result;
+        }
+
+        i += 1;
+    };
+
+    assert_eq!(result, expected_error);
 }
 
 /// Test if a V4 transaction with Sapling spends is accepted by the verifier.
