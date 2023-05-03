@@ -39,7 +39,7 @@ Once you know which versions you want to increment, you can find them in the:
 
 zebrad (rc):
 - [ ] zebrad `Cargo.toml`
-- [ ] `zebra-network` protocol user agent: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
+- [ ] `zebra-network` release version (`RELEASE_VERSION`): https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
 - [ ] `README.md`
 - [ ] `book/src/user/docker.md`
 
@@ -123,6 +123,19 @@ From "Keep a Changelog":
 
 </details>
 
+## Release support constants
+
+Needed for the end of support feature. Please update the following constants [in this file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs):
+
+- [ ] `ESTIMATED_RELEASE_HEIGHT` (required) - Replace with the estimated height you estimate the release will be tagged.
+      <details>
+      - Find where the Zcash blockchain tip is now by using a [Zcash explorer](https://zcashblockexplorer.com/blocks) or other tool.
+      -  Consider there are aprox `1152` blocks per day (with the current Zcash `75` seconds spacing).
+      - So for example if you think the release will be tagged somewhere in the next 3 days you can add `1152 * 3` to the current tip height and use that value here.
+      </details>
+
+- [ ] `EOS_PANIC_AFTER` (optional) - Replace if you want the release to be valid for a different numbers of days into the future. The default here is 120 days.
+
 ## Create the Release
 
 ### Create the Release PR
@@ -131,7 +144,7 @@ After you have the version increments, the updated checkpoints, any missed depen
 and the updated changelog:
 
 - [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged
-- [ ] Push the version increments and the updated changelog into a branch
+- [ ] Push the version increments, the updated changelog and the release constants into a branch
       (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.

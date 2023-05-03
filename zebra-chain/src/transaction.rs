@@ -34,7 +34,9 @@ pub use serialize::{
     MIN_TRANSPARENT_TX_V5_SIZE,
 };
 pub use sighash::{HashType, SigHash};
-pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD};
+pub use unmined::{
+    zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
+};
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},

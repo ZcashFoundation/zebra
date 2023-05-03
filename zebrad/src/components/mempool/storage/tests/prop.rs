@@ -475,8 +475,20 @@ impl SpendConflictTestInput {
         };
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(
+                first.0.into(),
+                // make sure miner fee is big enough for all cases
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
+            VerifiedUnminedTx::new(
+                second.0.into(),
+                // make sure miner fee is big enough for all cases
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
         )
     }
 
@@ -493,8 +505,20 @@ impl SpendConflictTestInput {
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(
+                first.0.into(),
+                // make sure miner fee is big enough for all cases
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
+            VerifiedUnminedTx::new(
+                second.0.into(),
+                // make sure miner fee is big enough for all cases
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .expect("verification should pass"),
         )
     }
 

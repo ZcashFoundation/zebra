@@ -88,7 +88,7 @@ impl PeerPreference {
 /// used to permanently reject entire [`MetaAddr`]s.
 ///
 /// [`MetaAddr`]: crate::meta_addr::MetaAddr
-fn address_is_valid_for_outbound_connections(
+pub fn address_is_valid_for_outbound_connections(
     peer_addr: &SocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
@@ -105,29 +105,46 @@ fn address_is_valid_for_outbound_connections(
         );
     }
 
-    // Ignore ports used by similar networks: Flux/ZelCash and misconfigured Zcash.
+    address_is_valid_for_inbound_listeners(peer_addr, network)
+}
+
+/// Is the supplied [`SocketAddr`] valid for inbound listeners on `network`?
+///
+/// This is used to check Zebra's configured Zcash listener port.
+pub fn address_is_valid_for_inbound_listeners(
+    listener_addr: &SocketAddr,
+    network: impl Into<Option<Network>>,
+) -> Result<(), &'static str> {
+    // TODO: make private IP addresses an error unless a debug config is set (#3117)
+
+    // Ignore ports used by potentially compatible nodes: misconfigured Zcash ports.
     if let Some(network) = network.into() {
-        if peer_addr.port() == network.default_port() {
+        if listener_addr.port() == network.default_port() {
             return Ok(());
         }
 
-        if peer_addr.port() == 8232 {
+        if listener_addr.port() == 8232 {
             return Err(
                 "invalid peer port: port is for Mainnet, but this node is configured for Testnet",
             );
-        } else if peer_addr.port() == 18232 {
+        } else if listener_addr.port() == 18232 {
             return Err(
                 "invalid peer port: port is for Testnet, but this node is configured for Mainnet",
             );
-        } else if peer_addr.port() == 18344 {
-            return Err(
-                "invalid peer port: port is for Regtest, but Zebra does not support that network",
-            );
-        } else if [16125, 26125].contains(&peer_addr.port()) {
-            // 16125/26125 is used by Flux/ZelCash, which uses the same network magic numbers as Zcash,
-            // so we have to reject it by port
-            return Err("invalid peer port: port is for a non-Zcash network");
         }
+    }
+
+    // Ignore ports used by potentially compatible nodes: other coins and unsupported Zcash regtest.
+    if listener_addr.port() == 18344 {
+        return Err(
+            "invalid peer port: port is for Regtest, but Zebra does not support that network",
+        );
+    } else if [8033, 18033, 16125, 26125].contains(&listener_addr.port()) {
+        // These coins use the same network magic numbers as Zcash, so we have to reject them by port:
+        // - ZClassic: 8033/18033
+        //   https://github.com/ZclassicCommunity/zclassic/blob/504362bbf72400f51acdba519e12707da44138c2/src/chainparams.cpp#L130
+        // - Flux/ZelCash: 16125/26125
+        return Err("invalid peer port: port is for a non-Zcash coin");
     }
 
     Ok(())
