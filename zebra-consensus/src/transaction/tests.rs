@@ -2020,10 +2020,15 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     let expected_error = Err(expected_error);
 
-    modify_joinsplit(
-        Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
-        modification,
-    );
+    // Modify a JoinSplit in the transaction following the given modification type.
+    let tx = Arc::get_mut(&mut transaction).expect("The tx should have only one active reference.");
+    match tx {
+        Transaction::V4 {
+            joinsplit_data: Some(ref mut joinsplit_data),
+            ..
+        } => modify_joinsplit_data(joinsplit_data, modification),
+        _ => unreachable!("Transaction should have some JoinSplit shielded data."),
+    }
 
     // Initialize the verifier
     let state_service =
@@ -2511,17 +2516,6 @@ enum JoinSplitModification {
     CorruptProof,
     // Make a proof all-zeroes, making it malformed.
     ZeroProof,
-}
-
-/// Modify a JoinSplit in the transaction following the given modification type.
-fn modify_joinsplit(transaction: &mut Transaction, modification: JoinSplitModification) {
-    match transaction {
-        Transaction::V4 {
-            joinsplit_data: Some(ref mut joinsplit_data),
-            ..
-        } => modify_joinsplit_data(joinsplit_data, modification),
-        _ => unreachable!("Transaction has no JoinSplit shielded data"),
-    }
 }
 
 /// Modify a [`JoinSplitData`] following the given modification type.
