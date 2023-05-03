@@ -358,7 +358,7 @@ pub async fn run() -> Result<()> {
     // Make sure the subversion field is zebra the user agent
     assert_eq!(
         lightd_info.zcashd_subversion,
-        "/Zebra:RPC test/".to_string()
+        zebrad::application::user_agent()
     );
 
     Ok(())
