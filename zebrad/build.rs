@@ -41,9 +41,6 @@ fn main() {
     // - it matches the SemVer 2.0 format, using dot separators
     *config.git_mut().semver_dirty_mut() = Some(".modified");
 
-    // Disable env vars we aren't using right now
-    *config.cargo_mut().features_mut() = false;
-
     // Disable git if we're building with an invalid `zebra/.git`
     match vergen(config.clone()) {
         Ok(_) => {}

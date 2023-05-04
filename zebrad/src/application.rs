@@ -259,6 +259,7 @@ impl Application for ZebradApp {
             ("Zcash network", config.network.network.to_string()),
             // constants
             ("state version", DATABASE_FORMAT_VERSION.to_string()),
+            ("features", env!("VERGEN_CARGO_FEATURES").to_string()),
         ];
 
         // git env vars can be skipped if there is no `.git` during the
@@ -280,6 +281,8 @@ impl Application for ZebradApp {
 
         let build_metadata: Vec<_> = [
             ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+            ("rust compiler", env!("VERGEN_RUSTC_SEMVER")),
+            ("rust release date", env!("VERGEN_RUSTC_COMMIT_DATE")),
             ("build profile", env!("VERGEN_CARGO_PROFILE")),
         ]
         .iter()
