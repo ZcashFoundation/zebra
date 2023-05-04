@@ -366,7 +366,7 @@ where
 {
     #[allow(clippy::unwrap_in_result)]
     fn get_info(&self) -> Result<GetInfo> {
-        // Build a [BIP 14] valie user agent with release info.
+        // Build a [BIP 14] valid user agent with release info.
         //
         // [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
         let release_version = self
@@ -375,7 +375,7 @@ where
             .split('+')
             .next()
             .expect("always at least 1 slice")
-            // remove the previously added `v` character at start, this do not form part of the user agent.
+            // remove the previously added `v` character at the start since it's not a part of the user agent.
             .strip_prefix('v')
             .expect("we are always expecting the `v` prefix");
         let user_agent = format!("/Zebra:{release_version}/");
