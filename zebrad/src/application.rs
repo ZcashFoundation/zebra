@@ -141,7 +141,7 @@ impl ZebradApp {
     /// not match the compiled source code.
     pub fn git_commit() -> Option<&'static str> {
         const GIT_COMMIT_GCLOUD: Option<&str> = option_env!("SHORT_SHA");
-        const GIT_COMMIT_VERGEN: Option<&str> = option_env!("VERGEN_GIT_SHA_SHORT");
+        const GIT_COMMIT_VERGEN: Option<&str> = option_env!("VERGEN_GIT_SHA");
 
         GIT_COMMIT_GCLOUD.or(GIT_COMMIT_VERGEN)
     }
