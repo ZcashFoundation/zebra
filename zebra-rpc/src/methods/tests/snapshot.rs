@@ -14,7 +14,6 @@ use zebra_chain::{
     parameters::Network::{Mainnet, Testnet},
     serialization::ZcashDeserializeInto,
 };
-use zebra_network::constants::USER_AGENT;
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -267,7 +266,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
-                assert_eq!(value.as_str().unwrap(), USER_AGENT.to_string());
+                assert_eq!(value.as_str().unwrap(), format!("/Zebra:RPC test/"));
                 // replace with:
                 "[SubVersion]"
             }),

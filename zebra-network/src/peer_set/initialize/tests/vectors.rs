@@ -1245,7 +1245,7 @@ async fn remnant_nonces_from_outbound_connections_are_limited() {
     let hs = peer::Handshake::builder()
         .with_config(config.clone())
         .with_inbound_service(nil_inbound_service)
-        .with_user_agent(crate::constants::USER_AGENT.to_string())
+        .with_user_agent(("Test user agent").to_string())
         .with_latest_chain_tip(NoChainTip)
         .want_transactions(true)
         .finish()
@@ -1351,7 +1351,12 @@ async fn add_initial_peers_deadlock() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let init_future = init(config, nil_inbound_service, NoChainTip);
+    let init_future = init(
+        config,
+        nil_inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    );
 
     assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
 }
@@ -1372,7 +1377,13 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book) = init(config, inbound_service, NoChainTip).await;
+    let (_peer_service, address_book) = init(
+        config,
+        inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    )
+    .await;
     let local_listener = address_book.lock().unwrap().local_listener_meta_addr();
 
     if listen_addr.port() == 0 {
@@ -1429,7 +1440,13 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book) = init(config, inbound_service, NoChainTip).await;
+    let (_peer_service, address_book) = init(
+        config,
+        inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    )
+    .await;
 
     address_book
 }
