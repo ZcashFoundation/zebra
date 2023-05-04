@@ -283,7 +283,8 @@ impl Application for ZebradApp {
             ("target triple", env!("VERGEN_CARGO_TARGET_TRIPLE")),
             ("rust compiler", env!("VERGEN_RUSTC_SEMVER")),
             ("rust release date", env!("VERGEN_RUSTC_COMMIT_DATE")),
-            ("build profile", env!("VERGEN_CARGO_PROFILE")),
+            ("optimization level", env!("VERGEN_CARGO_OPT_LEVEL")),
+            ("debug checks", env!("VERGEN_CARGO_DEBUG")),
         ]
         .iter()
         .map(|(k, v)| (*k, v.to_string()))
