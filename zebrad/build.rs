@@ -13,7 +13,7 @@ use vergen::EmitBuilder;
 fn base_vergen_builder() -> EmitBuilder {
     let mut vergen = EmitBuilder::builder();
 
-    vergen.all_cargo().all_rustc().fail_on_error();
+    vergen.all_cargo().all_rustc();
 
     vergen
 }
@@ -29,7 +29,7 @@ fn main() {
     vergen.git_describe(true, true, Some("v*.*.*"));
 
     // Disable git if we're building with an invalid `zebra/.git`
-    match vergen.emit() {
+    match vergen.fail_on_error().emit() {
         Ok(_) => {}
         Err(e) => {
             eprintln!("git error in vergen build script: skipping git env vars: {e:?}",);
