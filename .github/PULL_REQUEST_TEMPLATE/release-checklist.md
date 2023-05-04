@@ -15,7 +15,9 @@ Zebra follows [semantic versioning](https://semver.org). Semantic versions look 
 
 The [draft `zebrad` changelog](https://github.com/ZcashFoundation/zebra/releases) will have an automatic version bump. This version is based on [the labels on the PRs in the release](https://github.com/ZcashFoundation/zebra/blob/main/.github/release-drafter.yml).
 
-Check that the automatic `zebrad` version increment is correct:
+Check that the automatic `zebrad` version increment matches the changes in the release:
+
+<details>
 
 If we're releasing a mainnet network upgrade, it is a `major` release:
 1. Increment the `major` version of _*all*_ the Zebra crates.
@@ -32,6 +34,8 @@ Otherwise, it is a `patch` release:
 3. Increment the `patch` version of the tower crates.
 
 Zebra's Rust API is not stable or supported, so we keep all the crates on the same beta `pre-release` version.
+
+</details>
 
 ### Version Locations
 
@@ -81,9 +85,8 @@ You can use a command like:
 
 ## Checkpoints
 
-With every release and for performance reasons, we want to update the Zebra checkpoints. More information on how to do this can be found in [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/README.md).
-
-To do this you will need a synchronized `zcashd` node. You can request help from other zebra team members to submit this PR if you can't make it yourself at the moment of the release.
+For performance and security, we want to update the Zebra checkpoints in every release.
+You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
 
 ## Missed Dependency Updates
 
@@ -188,8 +191,13 @@ If the release contains new features (`major` or `minor`), or high-priority bug 
 ## Release Failures
 
 If building or running fails after tagging:
+
+<details>
+
 1. Fix the bug that caused the failure
 2. Increment versions again, following these instructions from the start
 3. Update the code and documentation with a **new** git tag
 4. Update `CHANGELOG.md` with details about the fix
 5. Tag a **new** release
+
+</details>
