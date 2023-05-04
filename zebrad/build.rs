@@ -2,6 +2,9 @@
 //!
 //! Turns Zebra version information into build-time environmental variables,
 //! so that it can be compiled into `zebrad`, and used in diagnostics.
+//!
+//! When compiling the `lightwalletd` gRPC tests, also builds a gRPC client
+//! Rust API for `lightwalletd`.
 
 use vergen::EmitBuilder;
 
