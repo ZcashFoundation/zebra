@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use color_eyre::Report;
-use lazy_static::lazy_static;
 
 use zebra_chain::{
     block::Height,
@@ -11,12 +10,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use zebra_network::constants::RELEASE_VERSION;
-
-lazy_static! {
-    /// The name of the current Zebra release.
-    pub static ref RELEASE_NAME: String = format!("Zebra {}", RELEASE_VERSION);
-}
+use crate::application::release_version;
 
 /// The estimated height that this release started to run.
 pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
@@ -88,13 +82,13 @@ pub fn check(tip_height: Height, network: Network) {
             "{EOS_PANIC_MESSAGE_HEADER} if the release date is older than {EOS_PANIC_AFTER} days. \
             \nRelease name: {}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
             \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest",
-            *RELEASE_NAME
+            release_version()
         );
     } else if tip_height > warn_height {
         warn!(
             "{EOS_WARN_MESSAGE_HEADER} at block {}. \
             \nRelease name: {}, Estimated release height: {ESTIMATED_RELEASE_HEIGHT} \
-            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0, RELEASE_NAME.to_string()
+            \nHint: Download and install the latest Zebra release from: https://github.com/ZcashFoundation/zebra/releases/latest", panic_height.0, release_version()
         );
     } else {
         info!("Zebra release is supported until block {}, please report bugs at https://github.com/ZcashFoundation/zebra/issues", panic_height.0);

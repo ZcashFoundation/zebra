@@ -79,7 +79,7 @@ use zebra_consensus::chain::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
-    application::app_version,
+    application::{app_version, user_agent},
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
@@ -138,8 +138,13 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book) =
-            zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
+        let (peer_set, address_book) = zebra_network::init(
+            config.network.clone(),
+            inbound,
+            latest_chain_tip.clone(),
+            user_agent(),
+        )
+        .await;
 
         info!("initializing verifiers");
         let (chain_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =

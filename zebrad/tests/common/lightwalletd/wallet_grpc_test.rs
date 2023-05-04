@@ -43,8 +43,6 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 
-use zebra_network::constants::USER_AGENT;
-
 use crate::common::{
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
@@ -358,7 +356,10 @@ pub async fn run() -> Result<()> {
     let lightd_info = rpc_client.get_lightd_info(Empty {}).await?.into_inner();
 
     // Make sure the subversion field is zebra the user agent
-    assert_eq!(lightd_info.zcashd_subversion, USER_AGENT.to_string());
+    assert_eq!(
+        lightd_info.zcashd_subversion,
+        zebrad::application::user_agent()
+    );
 
     Ok(())
 }
