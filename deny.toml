@@ -57,7 +57,6 @@ skip-tree = [
     # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
     # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
     { name = "ahash", version = "=0.7.6" },
-    { name = "hashbrown", version = "=0.12.3" },
 
     # wait for ed25519-zebra to upgrade
     { name = "curve25519-dalek", version = "=3.2.0" },
@@ -96,7 +95,6 @@ skip-tree = [
     # upgrade abscissa (required dependency) and arti (optional dependency)
     { name = "darling", version = "=0.10.2" },
     { name = "semver", version = "=0.9.0" },
-    { name = "signal-hook", version = "=0.1.17" },
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # Elasticsearch dependencies
