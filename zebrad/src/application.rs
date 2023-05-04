@@ -59,32 +59,32 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 /// For details, see <https://semver.org/>
 pub fn app_version() -> Version {
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-    let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER_LIGHTWEIGHT");
+    let vergen_git_describe: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
-    match vergen_git_semver {
-        // change the git semver format to the semver 2.0 format
-        Some(mut vergen_git_semver) if !vergen_git_semver.is_empty() => {
+    match vergen_git_describe {
+        // change the git describe format to the semver 2.0 format
+        Some(mut vergen_git_describe) if !vergen_git_describe.is_empty() => {
             // strip the leading "v", if present
-            if &vergen_git_semver[0..1] == "v" {
-                vergen_git_semver = &vergen_git_semver[1..];
+            if &vergen_git_describe[0..1] == "v" {
+                vergen_git_describe = &vergen_git_describe[1..];
             }
 
             // split into tag, commit count, hash
-            let rparts: Vec<_> = vergen_git_semver.rsplitn(3, '-').collect();
+            let rparts: Vec<_> = vergen_git_describe.rsplitn(3, '-').collect();
 
             match rparts.as_slice() {
                 // assume it's a cargo package version or a git tag with no hash
-                [_] | [_, _] => vergen_git_semver.parse().unwrap_or_else(|_| {
+                [_] | [_, _] => vergen_git_describe.parse().unwrap_or_else(|_| {
                     panic!(
-                        "VERGEN_GIT_SEMVER without a hash {vergen_git_semver:?} must be valid semver 2.0"
+                        "VERGEN_GIT_DESCRIBE without a hash {vergen_git_describe:?} must be valid semver 2.0"
                     )
                 }),
 
-                // it's the "git semver" format, which doesn't quite match SemVer 2.0
+                // it's the "git describe" format, which doesn't quite match SemVer 2.0
                 [hash, commit_count, tag] => {
                     let semver_fix = format!("{tag}+{commit_count}.{hash}");
                     semver_fix.parse().unwrap_or_else(|_|
-                                                      panic!("Modified VERGEN_GIT_SEMVER {vergen_git_semver:?} -> {rparts:?} -> {semver_fix:?} must be valid. Note: CARGO_PKG_VERSION was {CARGO_PKG_VERSION:?}."))
+                                                      panic!("Modified VERGEN_GIT_DESCRIBE {vergen_git_describe:?} -> {rparts:?} -> {semver_fix:?} must be valid. Note: CARGO_PKG_VERSION was {CARGO_PKG_VERSION:?}."))
                 }
 
                 _ => unreachable!("split is limited to 3 parts"),
