@@ -86,7 +86,7 @@ const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 40_000;
 /// [ZIP-239]: https://zips.z.cash/zip-0239
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 /// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum UnminedTxId {
     /// A legacy unmined transaction identifier.
@@ -104,6 +104,24 @@ pub enum UnminedTxId {
     ///
     /// For more details, see [`WtxId`].
     Witnessed(WtxId),
+}
+
+impl fmt::Debug for UnminedTxId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Legacy(hash) => f.debug_tuple("Legacy").field(hash).finish(),
+            Self::Witnessed(id) => f.debug_tuple("Witnessed").field(id).finish(),
+        }
+    }
+}
+
+impl fmt::Display for UnminedTxId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Legacy(hash) => hash.fmt(f),
+            Witnessed(id) => id.fmt(f),
+        }
+    }
 }
 
 impl From<Transaction> for UnminedTxId {
@@ -137,15 +155,6 @@ impl From<WtxId> for UnminedTxId {
 impl From<&WtxId> for UnminedTxId {
     fn from(wtx_id: &WtxId) -> Self {
         (*wtx_id).into()
-    }
-}
-
-impl fmt::Display for UnminedTxId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Legacy(hash) => hash.fmt(f),
-            Witnessed(id) => id.fmt(f),
-        }
     }
 }
 
