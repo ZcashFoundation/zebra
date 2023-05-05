@@ -24,8 +24,9 @@ on:
       - '.github/workflows/build-docker-image.yml'
 
 jobs:
+  # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-available-disks:
-    name: Find available cached state disks
+    name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
