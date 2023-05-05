@@ -322,7 +322,9 @@ impl From<&Arc<Transaction>> for UnminedTx {
 /// A verified unmined transaction, and the corresponding transaction fee.
 ///
 /// This transaction has been fully verified, in the context of the mempool.
-#[derive(Clone, Eq, PartialEq)]
+//
+// This struct can't be `Eq`, because it contains a `f32`.
+#[derive(Clone, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct VerifiedUnminedTx {
     /// The unmined transaction.
