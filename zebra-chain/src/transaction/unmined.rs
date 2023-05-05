@@ -109,8 +109,10 @@ pub enum UnminedTxId {
 impl fmt::Debug for UnminedTxId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Legacy(hash) => f.debug_tuple("Legacy").field(hash).finish(),
-            Self::Witnessed(id) => f.debug_tuple("Witnessed").field(id).finish(),
+            // Logging unmined transaction IDs can leak sensitive user information,
+            // particularly when Zebra is being used as a `lightwalletd` backend.
+            Self::Legacy(_hash) => f.debug_tuple("Legacy").field(&self.to_string()).finish(),
+            Self::Witnessed(_id) => f.debug_tuple("Witnessed").field(&self.to_string()).finish(),
         }
     }
 }
@@ -118,8 +120,11 @@ impl fmt::Debug for UnminedTxId {
 impl fmt::Display for UnminedTxId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Legacy(hash) => hash.fmt(f),
-            Witnessed(id) => id.fmt(f),
+            Legacy(_hash) => f
+                .debug_tuple("transaction::Hash")
+                .field(&"private")
+                .finish(),
+            Witnessed(_id) => f.debug_tuple("WtxId").field(&"private").finish(),
         }
     }
 }
@@ -222,7 +227,7 @@ impl UnminedTxId {
 ///
 /// This transaction has been structurally verified.
 /// (But it might still need semantic or contextual verification.)
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct UnminedTx {
     /// The unmined transaction itself.
     pub transaction: Arc<Transaction>,
@@ -239,13 +244,17 @@ pub struct UnminedTx {
     pub conventional_fee: Amount<NonNegative>,
 }
 
+impl fmt::Debug for UnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Logging unmined transactions can leak sensitive user information,
+        // particularly when Zebra is being used as a `lightwalletd` backend.
+        f.debug_tuple("UnminedTx").field(&"private").finish()
+    }
+}
+
 impl fmt::Display for UnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UnminedTx")
-            .field("transaction", &self.transaction.to_string())
-            .field("serialized_size", &self.size)
-            .field("conventional_fee", &self.conventional_fee)
-            .finish()
+        f.debug_tuple("UnminedTx").field(&"private").finish()
     }
 }
 
@@ -313,7 +322,7 @@ impl From<&Arc<Transaction>> for UnminedTx {
 /// A verified unmined transaction, and the corresponding transaction fee.
 ///
 /// This transaction has been fully verified, in the context of the mempool.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct VerifiedUnminedTx {
     /// The unmined transaction.
@@ -343,14 +352,20 @@ pub struct VerifiedUnminedTx {
     pub fee_weight_ratio: f32,
 }
 
+impl fmt::Debug for VerifiedUnminedTx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Logging unmined transactions can leak sensitive user information,
+        // particularly when Zebra is being used as a `lightwalletd` backend.
+        f.debug_tuple("VerifiedUnminedTx")
+            .field(&"private")
+            .finish()
+    }
+}
+
 impl fmt::Display for VerifiedUnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("VerifiedUnminedTx")
-            .field("transaction", &self.transaction.to_string())
-            .field("miner_fee", &self.miner_fee)
-            .field("legacy_sigop_count", &self.legacy_sigop_count)
-            .field("unpaid_actions", &self.unpaid_actions)
-            .field("fee_weight_ratio", &self.fee_weight_ratio)
+        f.debug_tuple("VerifiedUnminedTx")
+            .field(&"private")
             .finish()
     }
 }
