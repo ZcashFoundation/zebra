@@ -648,6 +648,7 @@ async fn setup(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
+        "Zebra user agent".to_string(),
     )
     .await;
 

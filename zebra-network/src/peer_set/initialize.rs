@@ -87,6 +87,7 @@ pub async fn init<S, C>(
     config: Config,
     inbound_service: S,
     latest_chain_tip: C,
+    user_agent: String,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -131,7 +132,7 @@ where
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
-            .with_user_agent(crate::constants::USER_AGENT.to_string())
+            .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)
             .finish()

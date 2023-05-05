@@ -14,7 +14,6 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
     transparent,
 };
-use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
@@ -46,7 +45,7 @@ async fn rpc_getinfo() {
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
-    assert_eq!(get_info.subversion, USER_AGENT.to_string());
+    assert_eq!(get_info.subversion, format!("/Zebra:RPC test/"));
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;

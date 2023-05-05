@@ -43,7 +43,6 @@ Once you know which versions you want to increment, you can find them in the:
 
 zebrad (rc):
 - [ ] zebrad `Cargo.toml`
-- [ ] `zebra-network` release version (`RELEASE_VERSION`): https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
 - [ ] `README.md`
 - [ ] `book/src/user/docker.md`
 
