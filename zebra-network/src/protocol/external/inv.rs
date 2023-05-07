@@ -183,8 +183,8 @@ pub(crate) const MIN_INV_HASH_SIZE: usize = 36;
 /// We also use this limit for block inventory, because it is typically much smaller.
 ///
 /// Same as `MAX_INV_SZ` in `zcashd`:
-/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/net.h#L50>
-pub const MAX_TX_INV_IN_MESSAGE: u64 = 50_000;
+/// <https://github.com/zcash/zcash/pull/6643>
+pub const MAX_TX_INV_IN_MESSAGE: u64 = 25_000;
 
 impl TrustedPreallocate for InventoryHash {
     fn max_allocation() -> u64 {
