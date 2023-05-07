@@ -5,31 +5,37 @@
 
 use std::collections::HashSet;
 
-use tokio::sync::watch;
+use tokio::sync::broadcast::{
+    self,
+    error::{RecvError, TryRecvError},
+};
 use tower::{timeout::Timeout, Service, ServiceExt};
 
 use zebra_chain::transaction::UnminedTxId;
+use zebra_network::MAX_TX_INV_IN_MESSAGE;
+
 use zebra_network as zn;
 
 use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
 
-/// The maximum number of times we will delay sending because there is a new change.
+/// The maximum number of channel messages we will combine into a single peer broadcast.
 pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
 
 /// Runs continuously, gossiping new [`UnminedTxId`] to peers.
 ///
-/// Broadcasts any [`UnminedTxId`] that gets stored in the mempool to all ready
-/// peers.
-///
-/// [`UnminedTxId`]: zebra_chain::transaction::UnminedTxId
+/// Broadcasts any new [`UnminedTxId`]s that get stored in the mempool to multiple ready peers.
 pub async fn gossip_mempool_transaction_id<ZN>(
-    mut receiver: watch::Receiver<HashSet<UnminedTxId>>,
+    mut receiver: broadcast::Receiver<HashSet<UnminedTxId>>,
     broadcast_network: ZN,
 ) -> Result<(), BoxError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
 {
+    let max_tx_inv_in_message: usize = MAX_TX_INV_IN_MESSAGE
+        .try_into()
+        .expect("constant fits in usize");
+
     info!("initializing transaction gossip task");
 
     // use the same timeout as tips requests,
@@ -39,29 +45,45 @@ where
     loop {
         let mut combined_changes = 1;
 
-        // once we get new data in the channel, broadcast to peers,
-        // the mempool automatically combines some transactions that arrive close together
-        receiver.changed().await?;
-        let mut txs = receiver.borrow().clone();
-        tokio::task::yield_now().await;
+        // once we get new data in the channel, broadcast to peers
+        //
+        // the mempool automatically combines some transactions that arrive close together,
+        // and this task also combines the changes that are in the channel before sending
+        let mut txs = loop {
+            match receiver.recv().await {
+                Ok(txs) => break txs,
+                Err(RecvError::Lagged(skip_count)) => info!(
+                    ?skip_count,
+                    "dropped transactions before gossiping due to heavy mempool or network load"
+                ),
+                Err(closed @ RecvError::Closed) => Err(closed)?,
+            }
+        };
 
         // also combine transactions that arrived shortly after this one
-        while receiver.has_changed()? && combined_changes < MAX_CHANGES_BEFORE_SEND {
-            // Correctness
-            // - set the has_changed() flag to false using borrow_and_update()
-            // - clone() so we don't hold the watch channel lock while modifying txs
-            let extra_txs = receiver.borrow_and_update().clone();
-            txs.extend(extra_txs.iter());
+        while combined_changes <= MAX_CHANGES_BEFORE_SEND && txs.len() < max_tx_inv_in_message {
+            match receiver.try_recv() {
+                Ok(extra_txs) => txs.extend(extra_txs.iter()),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Lagged(skip_count)) => info!(
+                    ?skip_count,
+                    "dropped transactions before gossiping due to heavy mempool or network load"
+                ),
+                Err(closed @ TryRecvError::Closed) => Err(closed)?,
+            }
 
             combined_changes += 1;
+        }
 
-            tokio::task::yield_now().await;
+        if txs.len() > max_tx_inv_in_message {
+            // we are unlikely to reach this limit with the default mempool config,
+            // so it doesn't matter which transactions we drop here
+            txs = txs.into_iter().take(max_tx_inv_in_message).collect();
         }
 
         let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
-        // TODO: rate-limit this info level log?
         info!(%request, changes = %combined_changes, "sending mempool transaction broadcast");
         debug!(
             ?request,
@@ -73,5 +95,11 @@ where
         let _ = broadcast_network.ready().await?.call(request).await;
 
         metrics::counter!("mempool.gossiped.transactions.total", txs_len as u64);
+
+        // wait for at least the network timeout between gossips
+        //
+        // in practice, transactions arrive every 1-20 seconds,
+        // so waiting 6 seconds can delay transaction propagation, in order to reduce peer load
+        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
     }
 }
