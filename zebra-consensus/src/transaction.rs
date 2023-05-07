@@ -77,7 +77,7 @@ where
         Self {
             network,
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
-            script_verifier: script::Verifier::default(),
+            script_verifier: script::Verifier,
         }
     }
 }
