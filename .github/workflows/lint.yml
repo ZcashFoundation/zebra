@@ -81,27 +81,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v1
-        with:
-          # TODO: change to shared-key when we switch to Swatinem/rust-cache@v2
-          sharedKey: "clippy-cargo-lock"
-
-      - name: Run clippy action to produce annotations
-        uses: actions-rs/clippy-check@v1.0.7
-        if: ${{ steps.check_permissions.outputs.has-permission }}
-        with:
-          # GitHub displays the clippy job and its results as separate entries
-          name: Clippy (stable) Results
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
-
-      - uses: actions-rs/toolchain@v1.0.1
+      # Setup Rust with stable toolchain and default profile
+      - name: Setup Rust
         if: ${{ !steps.check_permissions.outputs.has-permission }}
-        with:
-          toolchain: stable
-          override: true
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
-      - name: Run clippy manually without annotations
+      - uses: Swatinem/rust-cache@v2.2.1
+        with:
+          shared-key: "clippy-cargo-lock"
+
+      - name: Run clippy
         if: ${{ !steps.check_permissions.outputs.has-permission }}
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -124,20 +114,18 @@ jobs:
           version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          toolchain: stable
-          components: rustfmt
-          override: true
+      # Setup Rust with stable toolchain and default profile
+      - name: Setup Rust
+        if: ${{ !steps.check_permissions.outputs.has-permission }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v1
+      #- uses: Swatinem/rust-cache@v2.2.1
 
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: fmt
-          args: --all -- --check
+      - run: |
+          cargo fmt --all -- --check
 
   docs:
     name: Rust doc
@@ -165,16 +153,14 @@ jobs:
           version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+      # Setup Rust with stable toolchain and default profile
+      - name: Setup Rust
+        if: ${{ !steps.check_permissions.outputs.has-permission }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: doc
-          args: --no-deps --document-private-items --all-features
+      - run: |
+          cargo doc --no-deps --document-private-items --all-features
 
   actionlint:
     runs-on: ubuntu-latest
