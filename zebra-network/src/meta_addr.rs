@@ -12,12 +12,15 @@ use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
     constants,
+    meta_addr::peer_addr::PeerSocketAddr,
     peer::PeerPreference,
     protocol::{external::canonical_socket_addr, types::PeerServices},
 };
 
 use MetaAddrChange::*;
 use PeerAddrState::*;
+
+pub mod peer_addr;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
