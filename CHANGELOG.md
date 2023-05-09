@@ -7,12 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.0-rc.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.8) - 2023-05-10
 
-This release adds end of support feature which will make `zebrad` binary to halt after the support time of 16 weeks has passed.
+Starting in this release, Zebra has implemented an "end of support" halt. Just like `zcashd`, the `zebrad` binary will stop running 16 weeks after the last release date.
 Also, this release adds the ZIP-317 rules to mempool transactions which should help with the Zcash network spam issue.
 
 ### Security
 
-- Add a template for private security issues ([#6594](https://github.com/ZcashFoundation/zebra/pull/6594))
 - Avoid inbound service overloads and fix failing tests ([#6537](https://github.com/ZcashFoundation/zebra/pull/6537))
 - Avoid a rare panic when a connection is dropped ([#6566](https://github.com/ZcashFoundation/zebra/pull/6566))
 - Avoid some self-connection nonce removal attacks ([#6410](https://github.com/ZcashFoundation/zebra/pull/6410))
@@ -27,8 +26,7 @@ Also, this release adds the ZIP-317 rules to mempool transactions which should h
 ### Fixed
 
 - Handle randomness generation and invalid random values as errors in cryptographic code ([#6385](https://github.com/ZcashFoundation/zebra/pull/6385))
-- Fix `listen_addr` default deserialization ([#6575](https://github.com/ZcashFoundation/zebra/pull/6575))
-- Avoid wrong test results for modified JoinSplits ([#6604](https://github.com/ZcashFoundation/zebra/pull/6604))
+- When configured for testnet, automatically use the correct testnet listener port ([#6575](https://github.com/ZcashFoundation/zebra/pull/6575))
 
 ### Contributors
 
