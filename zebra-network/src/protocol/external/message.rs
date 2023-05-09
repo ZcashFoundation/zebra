@@ -202,7 +202,11 @@ pub enum Message {
 
     /// A `tx` message.
     ///
-    /// This message is used to advertise unmined transactions for the mempool.
+    /// This message can be used to:
+    /// - send unmined transactions in response to `GetData` requests, and
+    /// - advertise unmined transactions for the mempool.
+    ///
+    /// Zebra chooses to advertise new transactions using `Inv(hash)` rather than `Tx(transaction)`.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#tx)
     Tx(UnminedTx),
