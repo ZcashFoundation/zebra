@@ -37,7 +37,7 @@ use crate::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
     },
-    BoxError, MAX_TX_INV_IN_MESSAGE,
+    BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 use InventoryResponse::*;
@@ -992,7 +992,7 @@ where
                     )
             }
             (AwaitingRequest, AdvertiseTransactionIds(hashes)) => {
-                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_MESSAGE
+                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
                     .try_into()
                     .expect("constant fits in usize");
 
@@ -1009,7 +1009,7 @@ where
                 // exact transactions we have isn't that important, so it's ok to drop arbitrary
                 // transaction hashes from our response.
                 if hashes.len() > max_tx_inv_in_message {
-                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_MESSAGE, "unusually large transaction ID gossip");
+                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID gossip");
                 }
 
                 let hashes = hashes.into_iter().take(max_tx_inv_in_message).map(Into::into).collect();
@@ -1373,7 +1373,7 @@ where
                 }
             }
             Response::TransactionIds(hashes) => {
-                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_MESSAGE
+                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
                     .try_into()
                     .expect("constant fits in usize");
 
@@ -1387,7 +1387,7 @@ where
                 // exact transactions we have isn't that important, so it's ok to drop arbitrary
                 // transaction hashes from our response.
                 if hashes.len() > max_tx_inv_in_message {
-                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_MESSAGE, "unusually large transaction ID reponse");
+                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID reponse");
                 }
 
                 let hashes = hashes

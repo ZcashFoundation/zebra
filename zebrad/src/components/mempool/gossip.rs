@@ -12,7 +12,7 @@ use tokio::sync::broadcast::{
 use tower::{timeout::Timeout, Service, ServiceExt};
 
 use zebra_chain::transaction::UnminedTxId;
-use zebra_network::MAX_TX_INV_IN_MESSAGE;
+use zebra_network::MAX_TX_INV_IN_SENT_MESSAGE;
 
 use zebra_network as zn;
 
@@ -32,7 +32,7 @@ where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
 {
-    let max_tx_inv_in_message: usize = MAX_TX_INV_IN_MESSAGE
+    let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
         .try_into()
         .expect("constant fits in usize");
 
