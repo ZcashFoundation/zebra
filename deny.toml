@@ -48,9 +48,8 @@ skip-tree = [
 
     # wait for zcashd and zcash_script to upgrade
     # https://github.com/ZcashFoundation/zcash_script/pulls
-    { name = "zcash_primitives", version = "=0.9.1" },
+    { name = "metrics", version = "=0.20.1" },
     { name = "sha2", version = "=0.9.9" },
-    { name = "reddsa", version = "=0.3.0" },
 
     # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
     # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
@@ -58,15 +57,12 @@ skip-tree = [
 
     # ECC crates
 
-    # Wait until `orchard` updates `aes`, which depends on `cipher`
-    { name = "cipher", version = "=0.3.0" },
-
     # wait for zcash_primitives to remove duplicated dependencies
     { name = "block-buffer", version = "=0.9.0" },
 
     # zebra-utils dependencies
 
-    # wait for structopt upgrade (or upgrade to clap 3)
+    # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
     { name = "heck", version = "=0.3.3" },
 
