@@ -426,6 +426,8 @@ impl Service<zn::Request> for Inbound {
                     let available = transactions.into_iter().map(Available);
                     let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
 
+                    // The network layer handles splitting this response into multiple `tx`
+                    // messages, and a `notfound` message if needed.
                     zn::Response::Transactions(available.chain(missing).collect())
                 }).boxed()
             }

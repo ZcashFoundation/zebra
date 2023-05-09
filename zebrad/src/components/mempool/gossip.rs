@@ -47,7 +47,7 @@ where
 
         // once we get new data in the channel, broadcast to peers
         //
-        // the mempool automatically combines some transactions that arrive close together,
+        // the mempool automatically combines some transaction IDs that arrive close together,
         // and this task also combines the changes that are in the channel before sending
         let mut txs = loop {
             match receiver.recv().await {
@@ -60,7 +60,9 @@ where
             }
         };
 
-        // also combine transactions that arrived shortly after this one
+        // also combine transaction IDs that arrived shortly after this one,
+        // but limit the number of changes and the number of transaction IDs
+        // (the network layer handles the actual limits, this just makes sure the loop terminates)
         while combined_changes <= MAX_CHANGES_BEFORE_SEND && txs.len() < max_tx_inv_in_message {
             match receiver.try_recv() {
                 Ok(extra_txs) => txs.extend(extra_txs.iter()),
@@ -73,12 +75,6 @@ where
             }
 
             combined_changes += 1;
-        }
-
-        if txs.len() > max_tx_inv_in_message {
-            // we are unlikely to reach this limit with the default mempool config,
-            // so it doesn't matter which transactions we drop here
-            txs = txs.into_iter().take(max_tx_inv_in_message).collect();
         }
 
         let txs_len = txs.len();
