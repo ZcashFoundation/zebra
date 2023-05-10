@@ -184,6 +184,7 @@ and the updated changelog:
 ## Telling Zebra Users
 
 - [ ] Post a summary of the important changes in the release in the `#arborist` and `#communications` Slack channels
+
 If the release contains new features (`major` or `minor`), or high-priority bug fixes:
 - [ ] Ask the team about doing a blog post
 
