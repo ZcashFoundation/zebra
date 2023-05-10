@@ -653,11 +653,8 @@ async fn setup(
     .await;
 
     // Inbound listener
-    let listen_addr = address_book
-        .lock()
-        .unwrap()
-        .local_listener_meta_addr()
-        .addr();
+    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+
     assert_ne!(
         listen_addr.port(),
         0,

@@ -228,6 +228,11 @@ impl AddressBook {
             .expect("unexpected invalid new local listener addr")
     }
 
+    /// Get the local listener [`SocketAddr`].
+    pub fn local_listener_socket_addr(&self) -> SocketAddr {
+        self.local_listener
+    }
+
     /// Get the contents of `self` in random order with sanitized timestamps.
     pub fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
