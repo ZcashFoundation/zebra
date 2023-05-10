@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use crate::PeerSocketAddr;
 
-/// Transform a Zcash-deserialized IPv6 address into a canonical Zebra IP address.
+/// Transform a Zcash-deserialized [`Ipv6Addr`] into a canonical Zebra [`IpAddr`].
 ///
 /// Zcash uses IPv6-mapped IPv4 addresses in its `addr` (v1) network messages.
 /// Zebra converts those addresses to `Ipv4Addr`s, for maximum compatibility
@@ -28,19 +28,29 @@ pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
     }
 }
 
-/// Transform a `SocketAddr` into a canonical Zebra `PeerSocketAddr`, converting
+/// Transform a [`SocketAddr`] into a canonical Zebra [`SocketAddr`], converting
 /// IPv6-mapped IPv4 addresses, and removing IPv6 scope IDs and flow information.
 ///
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
-pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> PeerSocketAddr {
+pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> SocketAddr {
     use SocketAddr::*;
 
     let mut socket_addr = socket_addr.into();
     if let V6(v6_socket_addr) = socket_addr {
         let canonical_ip = canonical_ip_addr(v6_socket_addr.ip());
         // creating a new SocketAddr removes scope IDs and flow information
-        socket_addr = PeerSocketAddr::new(canonical_ip, socket_addr.port());
+        socket_addr = SocketAddr::new(canonical_ip, socket_addr.port());
     }
 
     socket_addr
+}
+
+/// Transform a [`PeerSocketAddr`] into a canonical Zebra [`PeerSocketAddr`], converting
+/// IPv6-mapped IPv4 addresses, and removing IPv6 scope IDs and flow information.
+///
+/// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
+pub fn canonical_peer_addr(peer_socket_addr: impl Into<PeerSocketAddr>) -> PeerSocketAddr {
+    let peer_socket_addr = peer_socket_addr.into();
+
+    canonical_socket_addr(*peer_socket_addr).into()
 }

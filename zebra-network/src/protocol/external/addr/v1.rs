@@ -58,8 +58,6 @@ pub(in super::super) struct AddrV1 {
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
-    //
-    // TODO: create a PeerSocketAddrV6 type?
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
         proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
@@ -162,8 +160,6 @@ pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: &IpAddr) -> Ipv6Addr {
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
 ///
 /// [`canonical_ip_addr`]: super::canonical::canonical_ip_addr
-//
-// TODO: create a PeerSocketAddrV6 type?
 pub(in super::super) fn ipv6_mapped_socket_addr(
     socket_addr: impl Into<PeerSocketAddr>,
 ) -> PeerSocketAddr {

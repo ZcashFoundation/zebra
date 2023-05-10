@@ -17,7 +17,7 @@ use crate::{
         DEFAULT_CRAWL_NEW_PEER_INTERVAL, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
         OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
-    protocol::external::canonical_socket_addr,
+    protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
 };
 
@@ -231,7 +231,7 @@ impl Config {
 
         match fut.await {
             Ok(Ok(ip_addrs)) => {
-                let ip_addrs: Vec<PeerSocketAddr> = ip_addrs.map(canonical_socket_addr).collect();
+                let ip_addrs: Vec<PeerSocketAddr> = ip_addrs.map(canonical_peer_addr).collect();
 
                 // if we're logging at debug level,
                 // the full list of IP addresses will be shown in the log message

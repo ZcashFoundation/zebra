@@ -22,7 +22,7 @@ use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strategy;
 
-use super::{canonical_socket_addr, v1::ipv6_mapped_socket_addr};
+use super::{canonical_peer_addr, v1::ipv6_mapped_socket_addr};
 
 /// The format used for Bitcoin node addresses in `version` messages.
 /// Contains a node address and services, without a last-seen time.
@@ -46,8 +46,6 @@ pub struct AddrInVersion {
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
-    //
-    // TODO: create a PeerSocketAddrV6 type?
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
         proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
@@ -57,7 +55,7 @@ pub struct AddrInVersion {
 
 impl AddrInVersion {
     /// Returns a new `version` message address based on its fields.
-    pub fn new(socket_addr: impl Into<SocketAddr>, untrusted_services: PeerServices) -> Self {
+    pub fn new(socket_addr: impl Into<PeerSocketAddr>, untrusted_services: PeerServices) -> Self {
         Self {
             untrusted_services,
             ipv6_addr: ipv6_mapped_socket_addr(socket_addr),
@@ -66,7 +64,7 @@ impl AddrInVersion {
 
     /// Returns the canonical address for this peer.
     pub fn addr(&self) -> PeerSocketAddr {
-        canonical_socket_addr(self.ipv6_addr)
+        canonical_peer_addr(self.ipv6_addr)
     }
 
     /// Returns the services for this peer.

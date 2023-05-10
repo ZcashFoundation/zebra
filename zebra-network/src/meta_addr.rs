@@ -12,7 +12,7 @@ use zebra_chain::{parameters::Network, serialization::DateTime32};
 use crate::{
     constants,
     peer::PeerPreference,
-    protocol::{external::canonical_socket_addr, types::PeerServices},
+    protocol::{external::canonical_peer_addr, types::PeerServices},
 };
 
 use MetaAddrChange::*;
@@ -26,7 +26,7 @@ pub use peer_addr::PeerSocketAddr;
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
@@ -137,7 +137,7 @@ pub struct MetaAddr {
     /// The peer's canonical socket address.
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
-        proptest(strategy = "canonical_socket_addr_strategy()")
+        proptest(strategy = "canonical_peer_addr_strategy()")
     )]
     //
     // TODO: make addr private, so the constructors can make sure it is a
@@ -199,7 +199,7 @@ pub enum MetaAddrChange {
     NewInitial {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
     },
@@ -208,7 +208,7 @@ pub enum MetaAddrChange {
     NewGossiped {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
         untrusted_services: PeerServices,
@@ -221,7 +221,7 @@ pub enum MetaAddrChange {
     NewAlternate {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
         untrusted_services: PeerServices,
@@ -231,7 +231,7 @@ pub enum MetaAddrChange {
     NewLocal {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
     },
@@ -241,7 +241,7 @@ pub enum MetaAddrChange {
     UpdateAttempt {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
     },
@@ -250,7 +250,7 @@ pub enum MetaAddrChange {
     UpdateResponded {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
         services: PeerServices,
@@ -260,7 +260,7 @@ pub enum MetaAddrChange {
     UpdateFailed {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
         services: Option<PeerServices>,
@@ -272,7 +272,7 @@ impl MetaAddr {
     /// the list of the initial peers.
     pub fn new_initial_peer(addr: PeerSocketAddr) -> MetaAddrChange {
         NewInitial {
-            addr: canonical_socket_addr(addr),
+            addr: canonical_peer_addr(addr),
         }
     }
 
@@ -284,7 +284,7 @@ impl MetaAddr {
         untrusted_last_seen: DateTime32,
     ) -> MetaAddr {
         MetaAddr {
-            addr: canonical_socket_addr(addr),
+            addr: canonical_peer_addr(addr),
             services: Some(untrusted_services),
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
@@ -303,7 +303,7 @@ impl MetaAddr {
         let untrusted_services = self.services?;
 
         Some(NewGossiped {
-            addr: canonical_socket_addr(self.addr),
+            addr: canonical_peer_addr(self.addr),
             untrusted_services,
             untrusted_last_seen: self
                 .untrusted_last_seen
@@ -325,7 +325,7 @@ impl MetaAddr {
     /// - Zebra could advertise unreachable addresses to its own peers.
     pub fn new_responded(addr: &PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
         UpdateResponded {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             services: *services,
         }
     }
@@ -334,7 +334,7 @@ impl MetaAddr {
     /// want to make an outbound connection to.
     pub fn new_reconnect(addr: &PeerSocketAddr) -> MetaAddrChange {
         UpdateAttempt {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
         }
     }
 
@@ -345,7 +345,7 @@ impl MetaAddr {
         untrusted_services: &PeerServices,
     ) -> MetaAddrChange {
         NewAlternate {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             untrusted_services: *untrusted_services,
         }
     }
@@ -353,7 +353,7 @@ impl MetaAddr {
     /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
     pub fn new_local_listener_change(addr: &PeerSocketAddr) -> MetaAddrChange {
         NewLocal {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
         }
     }
 
@@ -364,7 +364,7 @@ impl MetaAddr {
         services: impl Into<Option<PeerServices>>,
     ) -> MetaAddrChange {
         UpdateFailed {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             services: services.into(),
         }
     }
@@ -617,7 +617,7 @@ impl MetaAddr {
             .expect("unexpected underflow: rem_euclid is strictly less than timestamp");
 
         Some(MetaAddr {
-            addr: canonical_socket_addr(self.addr),
+            addr: canonical_peer_addr(self.addr),
             // initial peers are sanitized assuming they are `NODE_NETWORK`
             // TODO: split untrusted and direct services
             //       consider sanitizing untrusted services to NODE_NETWORK (#2324)

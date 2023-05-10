@@ -17,8 +17,11 @@ use tracing::Span;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
-    types::MetaAddr, AddressBookPeers, PeerAddrState, PeerSocketAddr,
+    constants,
+    meta_addr::MetaAddrChange,
+    protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::MetaAddr,
+    AddressBookPeers, PeerAddrState, PeerSocketAddr,
 };
 
 #[cfg(test)]
@@ -183,7 +186,7 @@ impl AddressBook {
         let addrs = addrs
             .into_iter()
             .map(|mut meta_addr| {
-                meta_addr.addr = canonical_socket_addr(meta_addr.addr);
+                meta_addr.addr = canonical_peer_addr(meta_addr.addr);
                 meta_addr
             })
             .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network))
@@ -259,7 +262,7 @@ impl AddressBook {
     ///
     /// Converts `addr` to a canonical address before looking it up.
     pub fn get(&mut self, addr: &PeerSocketAddr) -> Option<MetaAddr> {
-        let addr = canonical_socket_addr(*addr);
+        let addr = canonical_peer_addr(*addr);
 
         // Unfortunately, `OrderedMap` doesn't implement `get`.
         let meta_addr = self.by_addr.remove(&addr);
