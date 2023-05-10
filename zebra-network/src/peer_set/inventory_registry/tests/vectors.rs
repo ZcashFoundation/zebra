@@ -1,6 +1,6 @@
 //! Fixed test vectors for the inventory registry.
 
-use std::{cmp::min, net::SocketAddr};
+use std::cmp::min;
 
 use zebra_chain::{block, serialization::AtLeastOne, transaction};
 

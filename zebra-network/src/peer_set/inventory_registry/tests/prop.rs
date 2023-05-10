@@ -1,6 +1,6 @@
 //! Randomised property tests for the inventory registry.
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::collections::HashSet;
 
 use proptest::prelude::*;
 

@@ -1,7 +1,5 @@
 //! Randomised test data generation for MetaAddr.
 
-use std::net::SocketAddr;
-
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};

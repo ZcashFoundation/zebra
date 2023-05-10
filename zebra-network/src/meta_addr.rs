@@ -2,7 +2,6 @@
 
 use std::{
     cmp::{Ord, Ordering},
-    net::SocketAddr,
     time::Instant,
 };
 

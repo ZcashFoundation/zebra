@@ -1,6 +1,6 @@
 //! Creating isolated connections to specific peers.
 
-use std::{future::Future, net::SocketAddr};
+use std::future::Future;
 
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};

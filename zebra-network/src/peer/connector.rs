@@ -2,7 +2,6 @@
 
 use std::{
     future::Future,
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };

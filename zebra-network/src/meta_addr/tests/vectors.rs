@@ -1,7 +1,5 @@
 //! Fixed test cases for MetaAddr and MetaAddrChange.
 
-use std::net::SocketAddr;
-
 use chrono::Utc;
 
 use zebra_chain::{

@@ -4,7 +4,6 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},

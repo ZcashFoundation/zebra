@@ -1,7 +1,5 @@
 //! Randomised property tests for the peer set.
 
-use std::net::SocketAddr;
-
 use futures::FutureExt;
 use proptest::prelude::*;
 use tower::{discover::Discover, BoxError, ServiceExt};

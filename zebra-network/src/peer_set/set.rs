@@ -98,7 +98,6 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
     time::Instant,

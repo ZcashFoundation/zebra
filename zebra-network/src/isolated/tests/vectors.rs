@@ -1,6 +1,6 @@
 //! Fixed test vectors for isolated Zebra connections.
 
-use std::{net::SocketAddr, task::Poll, time::Duration};
+use std::{task::Poll, time::Duration};
 
 use futures::stream::StreamExt;
 use tokio_util::codec::Framed;

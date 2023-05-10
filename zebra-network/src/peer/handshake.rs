@@ -4,7 +4,7 @@ use std::{
     cmp::min,
     fmt,
     future::Future,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     panic,
     pin::Pin,
     sync::Arc,
@@ -295,6 +295,7 @@ impl ConnectedAddr {
             InboundDirect {
                 maybe_ip,
                 transient_port,
+                addr,
             } => Some(PeerSocketAddr::new(*maybe_ip, *transient_port)),
             OutboundProxy {
                 transient_local_addr,

@@ -1,12 +1,6 @@
 //! Fixed test vectors for CandidateSet.
 
-use std::{
-    convert::TryInto,
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
-    sync::Arc,
-    time::Duration as StdDuration,
-};
+use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration as StdDuration};
 
 use chrono::{DateTime, Duration, Utc};
 use tokio::time::{self, Instant};

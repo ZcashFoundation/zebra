@@ -1,6 +1,6 @@
 //! Randomised test data generation for external protocol types.
 
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 

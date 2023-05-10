@@ -3,7 +3,6 @@
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
 
 use std::{
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
