@@ -1387,7 +1387,7 @@ where
                 // exact transactions we have isn't that important, so it's ok to drop arbitrary
                 // transaction hashes from our response.
                 if hashes.len() > max_tx_inv_in_message {
-                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID reponse");
+                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID response");
                 }
 
                 let hashes = hashes
