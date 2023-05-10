@@ -9,7 +9,7 @@ use zebra_chain::{block, transaction};
 use crate::PeerSocketAddr;
 
 use super::{
-    addr::{canonical_peer_addr, canonical_socket_addr, ipv6_mapped_socket_addr},
+    addr::{canonical_peer_addr, canonical_socket_addr, ipv6_mapped_ip_addr},
     types::{PeerServices, Version},
     InventoryHash, Message,
 };
@@ -141,17 +141,4 @@ pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
 /// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
 pub fn canonical_peer_addr_strategy() -> impl Strategy<Value = PeerSocketAddr> {
     any::<SocketAddr>().prop_map(canonical_peer_addr)
-}
-
-/// Returns a random `SocketAddrV6` for use in `addr` (v1) Zcash network
-/// messages.
-///
-/// See [`canonical_ip_addr`] for details.
-///
-/// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
-//
-// This should be a PeerSocketAddrV6 to prevent logging sensitive info,
-// but this code is only used in tests.
-pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = PeerSocketAddr> {
-    any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
 }

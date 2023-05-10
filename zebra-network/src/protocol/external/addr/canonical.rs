@@ -16,7 +16,7 @@ use crate::PeerSocketAddr;
 /// with systems that don't understand IPv6.
 ///
 /// Zebra also uses this canonical format for addresses from other sources.
-pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
+pub(in super::super) fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
     use IpAddr::*;
 
     // TODO: replace with `to_ipv4_mapped` when that stabilizes
@@ -30,6 +30,9 @@ pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
 
 /// Transform a [`SocketAddr`] into a canonical Zebra [`SocketAddr`], converting
 /// IPv6-mapped IPv4 addresses, and removing IPv6 scope IDs and flow information.
+///
+/// Use [`canonical_peer_addr()`] and [`PeerSocketAddr`] for remote peer addresses,
+/// so that Zebra doesn't log sensitive information about peers.
 ///
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
 pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> SocketAddr {

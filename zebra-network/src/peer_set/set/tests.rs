@@ -1,6 +1,6 @@
 //! Peer set unit tests, and test setup code.
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};
 use proptest::{collection::vec, prelude::*};
@@ -93,7 +93,7 @@ impl PeerVersions {
         let fake_ports = 1_u16..;
 
         let discovered_peers_iterator = fake_ports.zip(clients).map(|(port, client)| {
-            let peer_address = PeerSocketAddr::new([127, 0, 0, 1].into(), port);
+            let peer_address: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), port).into();
 
             Ok(Change::Insert(peer_address, client))
         });

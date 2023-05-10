@@ -22,7 +22,7 @@ pub(super) use v2::AddrV2;
 
 #[allow(unused_imports)]
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(super) use v1::{ipv6_mapped_socket_addr, ADDR_V1_SIZE};
+pub(super) use v1::{ipv6_mapped_ip_addr, ADDR_V1_SIZE};
 
 // TODO: write tests for addrv2 deserialization
 #[allow(unused_imports)]

@@ -20,9 +20,9 @@ use crate::{protocol::external::types::PeerServices, PeerSocketAddr};
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
 
-use super::{canonical_peer_addr, v1::ipv6_mapped_socket_addr};
+use super::{canonical_peer_addr, v1::ipv6_mapped_ip_addr};
 
 /// The format used for Bitcoin node addresses in `version` messages.
 /// Contains a node address and services, without a last-seen time.
@@ -48,7 +48,7 @@ pub struct AddrInVersion {
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
-        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
+        proptest(strategy = "canonical_peer_addr_strategy()")
     )]
     ipv6_addr: PeerSocketAddr,
 }
@@ -58,7 +58,7 @@ impl AddrInVersion {
     pub fn new(socket_addr: impl Into<PeerSocketAddr>, untrusted_services: PeerServices) -> Self {
         Self {
             untrusted_services,
-            ipv6_addr: ipv6_mapped_socket_addr(socket_addr),
+            ipv6_addr: canonical_peer_addr(socket_addr),
         }
     }
 
@@ -77,7 +77,8 @@ impl ZcashSerialize for AddrInVersion {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_u64::<LittleEndian>(self.untrusted_services.bits())?;
 
-        self.ipv6_addr.ip().zcash_serialize(&mut writer)?;
+        let ipv6_addr = ipv6_mapped_ip_addr(self.ipv6_addr.ip());
+        ipv6_addr.zcash_serialize(&mut writer)?;
         writer.write_u16::<BigEndian>(self.ipv6_addr.port())?;
 
         Ok(())
@@ -96,7 +97,7 @@ impl ZcashDeserialize for AddrInVersion {
         let ipv6_addr = SocketAddrV6::new(ipv6_addr, port, 0, 0);
 
         Ok(AddrInVersion {
-            ipv6_addr,
+            ipv6_addr: ipv6_addr.into(),
             untrusted_services,
         })
     }

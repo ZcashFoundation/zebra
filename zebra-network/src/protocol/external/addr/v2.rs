@@ -21,6 +21,7 @@ use zebra_chain::serialization::{
 use crate::{
     meta_addr::MetaAddr,
     protocol::external::{types::PeerServices, MAX_PROTOCOL_MESSAGE_LEN},
+    PeerSocketAddr,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -32,6 +33,8 @@ use byteorder::WriteBytesExt;
 use std::io::Write;
 #[cfg(test)]
 use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
+
+use super::canonical_peer_addr;
 
 /// The maximum permitted size of the `addr` field in `addrv2` messages.
 ///
@@ -100,18 +103,18 @@ pub(in super::super) enum AddrV2 {
         /// records, older peer versions, or buggy or malicious peers.
         untrusted_services: PeerServices,
 
-        /// The peer's IP address.
+        /// The peer's IP address and port.
         ///
         /// Unlike [`AddrV1`], this can be an IPv4 or IPv6 address.
         ///
         /// [`AddrV1`]: super::v1::AddrV1
-        ip: IpAddr,
-
-        /// The peer's TCP port.
-        port: u16,
+        addr: PeerSocketAddr,
     },
 
     /// A node address with an unsupported `networkID`, in `addrv2` format.
+    //
+    // TODO: when we add more address types, make sure their addresses aren't logged,
+    //       in a similar way to `PeerSocketAddr`
     Unsupported,
 }
 
@@ -138,8 +141,7 @@ impl From<MetaAddr> for AddrV2 {
         AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
-            ip: meta_addr.addr.ip(),
-            port: meta_addr.addr.port(),
+            addr: meta_addr.addr(),
         }
     }
 }
@@ -157,12 +159,9 @@ impl TryFrom<AddrV2> for MetaAddr {
         if let AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
-            ip,
-            port,
+            addr,
         } = addr
         {
-            let addr = SocketAddr::new(ip, port);
-
             Ok(MetaAddr::new_gossiped_meta_addr(
                 addr,
                 untrusted_services,
@@ -219,8 +218,7 @@ impl ZcashSerialize for AddrV2 {
         if let AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
-            ip,
-            port,
+            addr,
         } = self
         {
             // > uint32  Time that this node was last seen as connected to the network.
@@ -230,7 +228,7 @@ impl ZcashSerialize for AddrV2 {
             let untrusted_services: CompactSize64 = untrusted_services.bits().into();
             untrusted_services.zcash_serialize(&mut writer)?;
 
-            match ip {
+            match addr.ip() {
                 IpAddr::V4(ip) => {
                     // > Network identifier. An 8-bit value that specifies which network is addressed.
                     writer.write_u8(ADDR_V2_IPV4_NETWORK_ID)?;
@@ -243,7 +241,7 @@ impl ZcashSerialize for AddrV2 {
                     zcash_serialize_bytes(&ip.to_vec(), &mut writer)?;
 
                     // > uint16  Network port. If not relevant for the network this MUST be 0.
-                    writer.write_u16::<BigEndian>(*port)?;
+                    writer.write_u16::<BigEndian>(addr.port())?;
                 }
                 IpAddr::V6(ip) => {
                     writer.write_u8(ADDR_V2_IPV6_NETWORK_ID)?;
@@ -251,7 +249,7 @@ impl ZcashSerialize for AddrV2 {
                     let ip: [u8; ADDR_V2_IPV6_ADDR_SIZE] = ip.octets();
                     zcash_serialize_bytes(&ip.to_vec(), &mut writer)?;
 
-                    writer.write_u16::<BigEndian>(*port)?;
+                    writer.write_u16::<BigEndian>(addr.port())?;
                 }
             }
         } else {
@@ -313,8 +311,7 @@ impl ZcashDeserialize for AddrV2 {
         Ok(AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
-            ip,
-            port,
+            addr: canonical_peer_addr(SocketAddr::new(ip, port)),
         })
     }
 }

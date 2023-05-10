@@ -27,7 +27,9 @@ use crate::{
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
+
+use super::canonical_peer_addr;
 
 /// The first format used for Bitcoin node addresses.
 /// Contains a node address, its advertised services, and last-seen time.
@@ -54,20 +56,20 @@ pub(in super::super) struct AddrV1 {
     /// records, older peer versions, or buggy or malicious peers.
     untrusted_services: PeerServices,
 
-    /// The peer's IPv6 socket address.
+    /// The peer's canonical socket address.
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
-        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
+        proptest(strategy = "canonical_peer_addr_strategy()")
     )]
     ipv6_addr: PeerSocketAddr,
 }
 
 impl From<MetaAddr> for AddrV1 {
     fn from(meta_addr: MetaAddr) -> Self {
-        let ipv6_addr = ipv6_mapped_socket_addr(meta_addr.addr);
+        let ipv6_addr = canonical_peer_addr(meta_addr.addr);
 
         let untrusted_services = meta_addr.services.expect(
             "unexpected MetaAddr with missing peer services: \
@@ -101,7 +103,8 @@ impl ZcashSerialize for AddrV1 {
         self.untrusted_last_seen.zcash_serialize(&mut writer)?;
         writer.write_u64::<LittleEndian>(self.untrusted_services.bits())?;
 
-        self.ipv6_addr.ip().zcash_serialize(&mut writer)?;
+        let ipv6_addr = ipv6_mapped_ip_addr(self.ipv6_addr.ip());
+        ipv6_addr.zcash_serialize(&mut writer)?;
         writer.write_u16::<BigEndian>(self.ipv6_addr.port())?;
 
         Ok(())
@@ -121,7 +124,7 @@ impl ZcashDeserialize for AddrV1 {
         let ipv6_addr = SocketAddrV6::new(ipv6_addr, port, 0, 0);
 
         Ok(AddrV1 {
-            ipv6_addr,
+            ipv6_addr: ipv6_addr.into(),
             untrusted_services,
             untrusted_last_seen,
         })
@@ -143,31 +146,11 @@ impl TrustedPreallocate for AddrV1 {
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
 ///
 /// [`canonical_ip_addr`]: super::canonical::canonical_ip_addr
-pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: &IpAddr) -> Ipv6Addr {
+pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: IpAddr) -> Ipv6Addr {
     use IpAddr::*;
 
     match ip_addr {
         V4(v4_addr) => v4_addr.to_ipv6_mapped(),
-        V6(v6_addr) => *v6_addr,
+        V6(v6_addr) => v6_addr,
     }
-}
-
-/// Transform a `SocketAddr` into an IPv6-mapped IPv4 addresses,
-/// for `addr` (v1) Zcash network messages.
-///
-/// Also remove IPv6 scope IDs and flow information.
-///
-/// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
-///
-/// [`canonical_ip_addr`]: super::canonical::canonical_ip_addr
-pub(in super::super) fn ipv6_mapped_socket_addr(
-    socket_addr: impl Into<PeerSocketAddr>,
-) -> PeerSocketAddr {
-    let socket_addr = socket_addr.into();
-
-    let ipv6_mapped_ip = ipv6_mapped_ip_addr(&socket_addr.ip());
-
-    // Remove scope IDs and flow information.
-    // `0` is the default unspecified value for these fields.
-    SocketAddrV6::new(ipv6_mapped_ip, socket_addr.port(), 0, 0).into()
 }

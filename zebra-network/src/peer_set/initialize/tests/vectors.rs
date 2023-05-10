@@ -1192,7 +1192,7 @@ async fn self_connections_should_fail() {
             .expect("unexpected panic in address book");
 
         let self_connection_status = unlocked_address_book
-            .get(&real_self_listener.addr())
+            .get(real_self_listener.addr())
             .expect("unexpected dropped listener address in address book");
 
         std::mem::drop(unlocked_address_book);
@@ -1485,9 +1485,12 @@ where
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
-        let addr = PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
-        let addr =
-            MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
+        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let addr = MetaAddr::new_gossiped_meta_addr(
+            addr.into(),
+            PeerServices::NODE_NETWORK,
+            DateTime32::now(),
+        );
         fake_peer = Some(addr);
         let addr = addr
             .new_gossiped_change()
@@ -1692,8 +1695,7 @@ where
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
-            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1)
-                .to_string(),
+            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
         );
     }
 
