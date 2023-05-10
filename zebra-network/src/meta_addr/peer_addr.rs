@@ -12,7 +12,10 @@ use std::{
 use proptest_derive::Arbitrary;
 
 /// A thin wrapper for [`SocketAddr`] which hides peer IP addresses in logs and metrics.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct PeerSocketAddr(SocketAddr);
 

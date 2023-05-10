@@ -1,14 +1,12 @@
 //! An array of [`PeerInfo`] is the output of the `getpeerinfo` RPC method.
 
-use std::net::SocketAddr;
-
-use zebra_network::types::MetaAddr;
+use zebra_network::{types::MetaAddr, PeerSocketAddr};
 
 /// Item of the `getpeerinfo` response
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PeerInfo {
     /// The IP address and port of the peer
-    pub addr: SocketAddr,
+    pub addr: PeerSocketAddr,
 }
 
 impl From<MetaAddr> for PeerInfo {
