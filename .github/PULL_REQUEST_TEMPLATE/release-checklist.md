@@ -94,7 +94,7 @@ Sometimes `dependabot` misses some dependency updates, or we accidentally turned
 Here's how we make sure we got everything:
 - [ ] Run `cargo update` on the latest `main` branch, and keep the output
 - [ ] If needed, update [deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
-- [ ] Open a separate PR with the changes, including the output of `cargo update`
+- [ ] Open a separate PR with the changes, and add the output of `cargo update` to that PR as a comment
 
 ## Change Log
 
