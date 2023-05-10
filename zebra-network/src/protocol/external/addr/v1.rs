@@ -23,13 +23,13 @@ use crate::{
     PeerSocketAddr,
 };
 
+use super::canonical_peer_addr;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
-
-use super::canonical_peer_addr;
 
 /// The first format used for Bitcoin node addresses.
 /// Contains a node address, its advertised services, and last-seen time.
@@ -45,9 +45,9 @@ pub(in super::super) struct AddrV1 {
     /// See the [`MetaAddr::last_seen`] method for details.
     untrusted_last_seen: DateTime32,
 
-    /// The unverified services for the peer at `ipv6_addr`.
+    /// The unverified services for the peer at `addr`.
     ///
-    /// These services were advertised by the peer at `ipv6_addr`,
+    /// These services were advertised by the peer at `addr`,
     /// then gossiped via another peer.
     ///
     /// ## Security
@@ -64,12 +64,12 @@ pub(in super::super) struct AddrV1 {
         any(test, feature = "proptest-impl"),
         proptest(strategy = "canonical_peer_addr_strategy()")
     )]
-    ipv6_addr: PeerSocketAddr,
+    addr: PeerSocketAddr,
 }
 
 impl From<MetaAddr> for AddrV1 {
     fn from(meta_addr: MetaAddr) -> Self {
-        let ipv6_addr = canonical_peer_addr(meta_addr.addr);
+        let addr = canonical_peer_addr(meta_addr.addr);
 
         let untrusted_services = meta_addr.services.expect(
             "unexpected MetaAddr with missing peer services: \
@@ -83,7 +83,7 @@ impl From<MetaAddr> for AddrV1 {
         AddrV1 {
             untrusted_last_seen,
             untrusted_services,
-            ipv6_addr,
+            addr,
         }
     }
 }
@@ -91,7 +91,7 @@ impl From<MetaAddr> for AddrV1 {
 impl From<AddrV1> for MetaAddr {
     fn from(addr: AddrV1) -> Self {
         MetaAddr::new_gossiped_meta_addr(
-            addr.ipv6_addr,
+            addr.addr,
             addr.untrusted_services,
             addr.untrusted_last_seen,
         )
@@ -103,9 +103,9 @@ impl ZcashSerialize for AddrV1 {
         self.untrusted_last_seen.zcash_serialize(&mut writer)?;
         writer.write_u64::<LittleEndian>(self.untrusted_services.bits())?;
 
-        let ipv6_addr = ipv6_mapped_ip_addr(self.ipv6_addr.ip());
+        let ipv6_addr = ipv6_mapped_ip_addr(self.addr.ip());
         ipv6_addr.zcash_serialize(&mut writer)?;
-        writer.write_u16::<BigEndian>(self.ipv6_addr.port())?;
+        writer.write_u16::<BigEndian>(self.addr.port())?;
 
         Ok(())
     }
@@ -124,7 +124,7 @@ impl ZcashDeserialize for AddrV1 {
         let ipv6_addr = SocketAddrV6::new(ipv6_addr, port, 0, 0);
 
         Ok(AddrV1 {
-            ipv6_addr: ipv6_addr.into(),
+            addr: canonical_peer_addr(ipv6_addr),
             untrusted_services,
             untrusted_last_seen,
         })

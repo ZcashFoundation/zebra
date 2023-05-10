@@ -24,6 +24,8 @@ use crate::{
     PeerSocketAddr,
 };
 
+use super::canonical_peer_addr;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
@@ -33,8 +35,6 @@ use byteorder::WriteBytesExt;
 use std::io::Write;
 #[cfg(test)]
 use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
-
-use super::canonical_peer_addr;
 
 /// The maximum permitted size of the `addr` field in `addrv2` messages.
 ///
@@ -103,7 +103,7 @@ pub(in super::super) enum AddrV2 {
         /// records, older peer versions, or buggy or malicious peers.
         untrusted_services: PeerServices,
 
-        /// The peer's IP address and port.
+        /// The peer's canonical IP address and port.
         ///
         /// Unlike [`AddrV1`], this can be an IPv4 or IPv6 address.
         ///
@@ -141,7 +141,7 @@ impl From<MetaAddr> for AddrV2 {
         AddrV2::IpAddr {
             untrusted_last_seen,
             untrusted_services,
-            addr: meta_addr.addr(),
+            addr: canonical_peer_addr(meta_addr.addr()),
         }
     }
 }

@@ -31,9 +31,9 @@ use super::{canonical_peer_addr, v1::ipv6_mapped_ip_addr};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AddrInVersion {
-    /// The unverified services for the peer at `ipv6_addr`.
+    /// The unverified services for the peer at `addr`.
     ///
-    /// These services were advertised by the peer at `ipv6_addr`,
+    /// These services were advertised by the peer at `addr`,
     /// then gossiped via another peer.
     ///
     /// ## Security
@@ -42,7 +42,7 @@ pub struct AddrInVersion {
     /// records, older peer versions, or buggy or malicious peers.
     untrusted_services: PeerServices,
 
-    /// The peer's IPv6 socket address.
+    /// The peer's canonical socket address.
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
@@ -50,7 +50,7 @@ pub struct AddrInVersion {
         any(test, feature = "proptest-impl"),
         proptest(strategy = "canonical_peer_addr_strategy()")
     )]
-    ipv6_addr: PeerSocketAddr,
+    addr: PeerSocketAddr,
 }
 
 impl AddrInVersion {
@@ -58,13 +58,13 @@ impl AddrInVersion {
     pub fn new(socket_addr: impl Into<PeerSocketAddr>, untrusted_services: PeerServices) -> Self {
         Self {
             untrusted_services,
-            ipv6_addr: canonical_peer_addr(socket_addr),
+            addr: canonical_peer_addr(socket_addr),
         }
     }
 
     /// Returns the canonical address for this peer.
     pub fn addr(&self) -> PeerSocketAddr {
-        canonical_peer_addr(self.ipv6_addr)
+        self.addr
     }
 
     /// Returns the services for this peer.
@@ -77,9 +77,9 @@ impl ZcashSerialize for AddrInVersion {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_u64::<LittleEndian>(self.untrusted_services.bits())?;
 
-        let ipv6_addr = ipv6_mapped_ip_addr(self.ipv6_addr.ip());
+        let ipv6_addr = ipv6_mapped_ip_addr(self.addr.ip());
         ipv6_addr.zcash_serialize(&mut writer)?;
-        writer.write_u16::<BigEndian>(self.ipv6_addr.port())?;
+        writer.write_u16::<BigEndian>(self.addr.port())?;
 
         Ok(())
     }
@@ -97,7 +97,7 @@ impl ZcashDeserialize for AddrInVersion {
         let ipv6_addr = SocketAddrV6::new(ipv6_addr, port, 0, 0);
 
         Ok(AddrInVersion {
-            ipv6_addr: ipv6_addr.into(),
+            addr: canonical_peer_addr(ipv6_addr),
             untrusted_services,
         })
     }
