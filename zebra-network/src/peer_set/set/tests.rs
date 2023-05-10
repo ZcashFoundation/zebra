@@ -26,7 +26,7 @@ use crate::{
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{set::MorePeers, InventoryChange, PeerSet},
     protocol::external::types::Version,
-    AddressBook, Config,
+    AddressBook, Config, PeerSocketAddr,
 };
 
 #[cfg(test)]

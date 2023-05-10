@@ -9,7 +9,7 @@ use zebra_chain::{
     serialization::{DateTime32, Duration32},
 };
 
-use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices};
+use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices, PeerSocketAddr};
 
 use super::{super::MetaAddr, check};
 

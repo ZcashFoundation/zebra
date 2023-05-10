@@ -43,7 +43,7 @@ use crate::{
         ActiveConnectionCounter, CandidateSet,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, Request, Response,
+    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -1331,7 +1331,8 @@ async fn add_initial_peers_deadlock() {
     let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
         peers.insert(
-            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1)
+                .to_string(),
         );
     }
 
@@ -1462,8 +1463,11 @@ async fn spawn_crawler_with_peer_limit<C>(
     outbound_connector: C,
 ) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
-    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -1674,8 +1678,11 @@ async fn spawn_add_initial_peers<C>(
     JoinHandle<Result<(), BoxError>>,
 )
 where
-    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -1685,7 +1692,8 @@ where
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
-            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1)
+                .to_string(),
         );
     }
 

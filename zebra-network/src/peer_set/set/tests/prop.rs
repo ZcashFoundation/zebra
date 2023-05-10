@@ -10,14 +10,15 @@ use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
 };
 
-use super::{BlockHeightPairAcrossNetworkUpgrades, PeerSetBuilder, PeerVersions};
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion, ReceiveRequestAttempt},
     peer_set::PeerSet,
     protocol::external::types::Version,
-    Request,
+    PeerSocketAddr, Request,
 };
+
+use super::{BlockHeightPairAcrossNetworkUpgrades, PeerSetBuilder, PeerVersions};
 
 proptest! {
     /// Check if discovered outdated peers are immediately dropped by the [`PeerSet`].

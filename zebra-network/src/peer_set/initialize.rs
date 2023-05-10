@@ -39,7 +39,7 @@ use crate::{
         OutboundConnectorRequest, PeerPreference,
     },
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
-    AddressBook, BoxError, Config, Request, Response,
+    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
@@ -254,8 +254,11 @@ async fn add_initial_peers<S>(
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
-    S: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    S: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
@@ -692,8 +695,11 @@ async fn crawl_and_dial<C, S>(
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where
-    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -865,8 +871,11 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
 ) -> CrawlerAction
 where
-    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,

@@ -19,7 +19,7 @@ use crate::{
     },
     peer_set::candidate_set::CandidateSet,
     protocol::{external::canonical_socket_addr, types::PeerServices},
-    AddressBook,
+    AddressBook, PeerSocketAddr,
 };
 
 use super::check;

@@ -18,7 +18,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::{GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
-    AddressBook, Request, Response,
+    AddressBook, PeerSocketAddr, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};

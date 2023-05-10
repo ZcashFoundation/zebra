@@ -18,8 +18,9 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
-    types::MetaAddr, AddressBookPeers, PeerAddrState,
+    types::MetaAddr, AddressBookPeers, PeerAddrState, PeerSocketAddr,
 };
+
 #[cfg(test)]
 mod tests;
 

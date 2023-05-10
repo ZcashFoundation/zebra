@@ -20,6 +20,7 @@ use zebra_chain::serialization::{
 use crate::{
     meta_addr::MetaAddr,
     protocol::external::{types::PeerServices, MAX_PROTOCOL_MESSAGE_LEN},
+    PeerSocketAddr,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

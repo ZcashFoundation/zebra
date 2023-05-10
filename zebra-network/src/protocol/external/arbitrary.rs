@@ -1,8 +1,12 @@
+//! Randomised test data generation for external protocol types.
+
 use std::net::{SocketAddr, SocketAddrV6};
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use zebra_chain::{block, transaction};
+
+use crate::PeerSocketAddr;
 
 use super::{
     addr::{canonical_socket_addr, ipv6_mapped_socket_addr},

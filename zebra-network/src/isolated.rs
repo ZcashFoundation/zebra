@@ -11,7 +11,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
 use crate::{
     peer::{self, Client, ConnectedAddr, HandshakeRequest},
     peer_set::ActiveConnectionCounter,
-    BoxError, Config, Request, Response,
+    BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)

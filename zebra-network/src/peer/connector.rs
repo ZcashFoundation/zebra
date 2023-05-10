@@ -17,7 +17,7 @@ use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 use crate::{
     peer::{Client, ConnectedAddr, Handshake, HandshakeRequest},
     peer_set::ConnectionTracker,
-    BoxError, Request, Response,
+    BoxError, PeerSocketAddr, Request, Response,
 };
 
 /// A wrapper around [`Handshake`] that opens a TCP connection before

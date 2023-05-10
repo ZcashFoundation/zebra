@@ -8,7 +8,7 @@ use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
 
-use super::{MetaAddr, MetaAddrChange, PeerServices};
+use super::{MetaAddr, MetaAddrChange, PeerServices, PeerSocketAddr};
 
 /// The largest number of random changes we want to apply to a [`MetaAddr`].
 ///

@@ -14,7 +14,7 @@ use zebra_chain::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 
-use crate::protocol::external::types::PeerServices;
+use crate::{protocol::external::types::PeerServices, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;

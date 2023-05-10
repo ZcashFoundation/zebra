@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 
 use zebra_chain::parameters::Network;
 
+use crate::PeerSocketAddr;
+
 use AttributePreference::*;
 
 /// A level of preference for a peer attribute.

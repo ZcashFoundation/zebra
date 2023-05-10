@@ -7,6 +7,8 @@
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
+use crate::PeerSocketAddr;
+
 /// Transform a Zcash-deserialized IPv6 address into a canonical Zebra IP address.
 ///
 /// Zcash uses IPv6-mapped IPv4 addresses in its `addr` (v1) network messages.

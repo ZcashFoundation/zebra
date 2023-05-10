@@ -29,7 +29,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxError,
+    BoxError, PeerSocketAddr,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

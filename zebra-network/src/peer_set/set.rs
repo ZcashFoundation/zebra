@@ -133,7 +133,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxError, Config, PeerError, SharedPeerError,
+    BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
 
 #[cfg(test)]

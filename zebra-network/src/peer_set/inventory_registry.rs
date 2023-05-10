@@ -21,7 +21,7 @@ use zebra_chain::serialization::AtLeastOne;
 use crate::{
     constants::INVENTORY_ROTATION_INTERVAL,
     protocol::{external::InventoryHash, internal::InventoryResponse},
-    BoxError,
+    BoxError, PeerSocketAddr,
 };
 
 use self::update::Update;

@@ -11,6 +11,7 @@ use crate::{
         InventoryMarker,
     },
     protocol::external::{InventoryHash, Message},
+    PeerSocketAddr,
 };
 
 use InventoryHash::*;

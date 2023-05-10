@@ -18,7 +18,7 @@ use crate::{
         OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::canonical_socket_addr,
-    BoxError,
+    BoxError, PeerSocketAddr,
 };
 
 #[cfg(test)]

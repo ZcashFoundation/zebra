@@ -45,7 +45,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config, VersionMessage,
+    BoxError, Config, PeerSocketAddr, VersionMessage,
 };
 
 #[cfg(test)]

@@ -175,7 +175,7 @@ pub use crate::{
     address_book_peers::AddressBookPeers,
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
-    meta_addr::PeerAddrState,
+    meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,

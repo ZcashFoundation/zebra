@@ -10,6 +10,7 @@ use crate::{
         MAX_PEERS_PER_INV,
     },
     protocol::external::InventoryHash,
+    PeerSocketAddr,
 };
 
 /// Check an empty inventory registry works as expected.
