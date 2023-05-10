@@ -83,7 +83,6 @@ jobs:
 
       # Setup Rust with stable toolchain and default profile
       - name: Setup Rust
-        if: ${{ !steps.check_permissions.outputs.has-permission }}
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
@@ -91,7 +90,17 @@ jobs:
         with:
           shared-key: "clippy-cargo-lock"
 
-      - name: Run clippy
+      # TODO: keep this action until we find a better solution
+      - name: Run clippy action to produce annotations
+        uses: actions-rs/clippy-check@v1.0.7
+        if: ${{ steps.check_permissions.outputs.has-permission }}
+        with:
+          # GitHub displays the clippy job and its results as separate entries
+          name: Clippy (stable) Results
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings
+
+      - name: Run clippy manually without annotations
         if: ${{ !steps.check_permissions.outputs.has-permission }}
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -116,7 +125,6 @@ jobs:
 
       # Setup Rust with stable toolchain and default profile
       - name: Setup Rust
-        if: ${{ !steps.check_permissions.outputs.has-permission }}
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
@@ -155,7 +163,6 @@ jobs:
 
       # Setup Rust with stable toolchain and default profile
       - name: Setup Rust
-        if: ${{ !steps.check_permissions.outputs.has-permission }}
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
