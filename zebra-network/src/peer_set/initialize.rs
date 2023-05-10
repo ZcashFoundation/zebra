@@ -416,7 +416,7 @@ async fn limit_initial_peers(
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer_addr in all_peers {
-        let preference = PeerPreference::new(&peer_addr, config.network);
+        let preference = PeerPreference::new(peer_addr, config.network);
 
         match preference {
             Ok(preference) => preferred_peers
@@ -473,7 +473,7 @@ async fn limit_initial_peers(
 pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
     if let Err(wrong_addr) =
-        address_is_valid_for_inbound_listeners(&config.listen_addr, config.network)
+        address_is_valid_for_inbound_listeners(config.listen_addr, config.network)
     {
         warn!(
             "We are configured with address {} on {:?}, but it could cause network issues. \
@@ -554,6 +554,8 @@ where
         };
 
         if let Ok((tcp_stream, addr)) = inbound_result {
+            let addr: PeerSocketAddr = addr.into();
+
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()
             {

@@ -223,7 +223,7 @@ impl AddressBook {
     ///
     /// This address contains minimal state, but it is not sanitized.
     pub fn local_listener_meta_addr(&self) -> MetaAddr {
-        MetaAddr::new_local_listener_change(&self.local_listener)
+        MetaAddr::new_local_listener_change(self.local_listener)
             .into_new_meta_addr()
             .expect("unexpected invalid new local listener addr")
     }
@@ -261,7 +261,7 @@ impl AddressBook {
     /// Look up `addr` in the address book, and return its [`MetaAddr`].
     ///
     /// Converts `addr` to a canonical address before looking it up.
-    pub fn get(&mut self, addr: &PeerSocketAddr) -> Option<MetaAddr> {
+    pub fn get(&mut self, addr: PeerSocketAddr) -> Option<MetaAddr> {
         let addr = canonical_peer_addr(*addr);
 
         // Unfortunately, `OrderedMap` doesn't implement `get`.
@@ -295,7 +295,7 @@ impl AddressBook {
     /// peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
-        let previous = self.get(&change.addr());
+        let previous = self.get(change.addr());
 
         let _guard = self.span.enter();
 
@@ -405,7 +405,7 @@ impl AddressBook {
 
     /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
     /// attempt.
-    pub fn pending_reconnection_addr(&mut self, addr: &PeerSocketAddr) -> bool {
+    pub fn pending_reconnection_addr(&mut self, addr: PeerSocketAddr) -> bool {
         let meta_addr = self.get(addr);
 
         let _guard = self.span.enter();

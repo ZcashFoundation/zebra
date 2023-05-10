@@ -388,7 +388,7 @@ where
             //
             // We could send a reconnect change to the AddressBookUpdater when the peer is actually used,
             // but channel order is not guaranteed, so we could accidentally re-use the same peer.
-            let next_peer = MetaAddr::new_reconnect(&next_peer.addr);
+            let next_peer = MetaAddr::new_reconnect(next_peer.addr);
             guard.update(next_peer)
         };
 
@@ -407,7 +407,7 @@ where
 
     /// Mark `addr` as a failed peer.
     pub async fn report_failed(&mut self, addr: &MetaAddr) {
-        let addr = MetaAddr::new_errored(&addr.addr, addr.services);
+        let addr = MetaAddr::new_errored(addr.addr, addr.services);
 
         // # Correctness
         //

@@ -93,7 +93,7 @@ where
         let connector_span = info_span!("connector", peer = ?connected_addr);
 
         async move {
-            let tcp_stream = TcpStream::connect(addr).await?;
+            let tcp_stream = TcpStream::connect(*addr).await?;
             let client = hs
                 .oneshot(HandshakeRequest::<TcpStream> {
                     data_stream: tcp_stream,

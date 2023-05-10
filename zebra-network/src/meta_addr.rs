@@ -11,7 +11,7 @@ use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
     constants,
-    peer::PeerPreference,
+    peer::{address_is_valid_for_outbound_connections, PeerPreference},
     protocol::{external::canonical_peer_addr, types::PeerServices},
 };
 
@@ -323,7 +323,7 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook) state,
     ///   or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(addr: &PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_responded(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
         UpdateResponded {
             addr: canonical_peer_addr(*addr),
             services: *services,
@@ -332,7 +332,7 @@ impl MetaAddr {
 
     /// Returns a [`MetaAddrChange::UpdateAttempt`] for a peer that we
     /// want to make an outbound connection to.
-    pub fn new_reconnect(addr: &PeerSocketAddr) -> MetaAddrChange {
+    pub fn new_reconnect(addr: PeerSocketAddr) -> MetaAddrChange {
         UpdateAttempt {
             addr: canonical_peer_addr(*addr),
         }
@@ -341,7 +341,7 @@ impl MetaAddr {
     /// Returns a [`MetaAddrChange::NewAlternate`] for a peer's alternate address,
     /// received via a `Version` message.
     pub fn new_alternate(
-        addr: &PeerSocketAddr,
+        addr: PeerSocketAddr,
         untrusted_services: &PeerServices,
     ) -> MetaAddrChange {
         NewAlternate {
@@ -351,16 +351,16 @@ impl MetaAddr {
     }
 
     /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
-    pub fn new_local_listener_change(addr: &PeerSocketAddr) -> MetaAddrChange {
+    pub fn new_local_listener_change(addr: impl Into<PeerSocketAddr>) -> MetaAddrChange {
         NewLocal {
-            addr: canonical_peer_addr(*addr),
+            addr: canonical_peer_addr(addr),
         }
     }
 
     /// Returns a [`MetaAddrChange::UpdateFailed`] for a peer that has just had
     /// an error.
     pub fn new_errored(
-        addr: &PeerSocketAddr,
+        addr: PeerSocketAddr,
         services: impl Into<Option<PeerServices>>,
     ) -> MetaAddrChange {
         UpdateFailed {
@@ -371,7 +371,7 @@ impl MetaAddr {
 
     /// Create a new `MetaAddr` for a peer that has just shut down.
     pub fn new_shutdown(
-        addr: &PeerSocketAddr,
+        addr: PeerSocketAddr,
         services: impl Into<Option<PeerServices>>,
     ) -> MetaAddrChange {
         // TODO: if the peer shut down in the Responded state, preserve that
@@ -386,7 +386,7 @@ impl MetaAddr {
 
     /// Return the address preference level for this `MetaAddr`.
     pub fn peer_preference(&self) -> Result<PeerPreference, &'static str> {
-        PeerPreference::new(&self.addr, None)
+        PeerPreference::new(self.addr, None)
     }
 
     /// Returns the time of the last successful interaction with this peer.
@@ -547,7 +547,7 @@ impl MetaAddr {
     /// Since the addresses in the address book are unique, this check can be
     /// used to permanently reject entire [`MetaAddr`]s.
     pub fn address_is_valid_for_outbound(&self, network: Network) -> bool {
-        PeerPreference::new(&self.addr, network).is_ok()
+        address_is_valid_for_outbound_connections(self.addr, network).is_ok()
     }
 
     /// Is the last known information for this peer valid for outbound

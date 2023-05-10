@@ -212,10 +212,7 @@ impl ConnectedAddr {
 
     /// Returns a new inbound directly connected addr.
     pub fn new_inbound_direct(addr: PeerSocketAddr) -> ConnectedAddr {
-        InboundDirect {
-            maybe_ip: addr.ip(),
-            transient_port: addr.port(),
-        }
+        InboundDirect { addr }
     }
 
     /// Returns a new outbound connected addr via `proxy`.
@@ -292,16 +289,12 @@ impl ConnectedAddr {
     pub fn get_transient_addr(&self) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
-            InboundDirect {
-                maybe_ip,
-                transient_port,
-                addr,
-            } => Some(PeerSocketAddr::new(*maybe_ip, *transient_port)),
+            InboundDirect { addr } => Some(*addr),
             OutboundProxy {
                 transient_local_addr,
                 ..
-            } => Some(*transient_local_addr),
-            InboundProxy { transient_addr } => Some(*transient_addr),
+            } => Some(PeerSocketAddr::from(*transient_local_addr)),
+            InboundProxy { transient_addr } => Some(PeerSocketAddr::from(*transient_addr)),
             Isolated => None,
         }
     }
@@ -355,9 +348,9 @@ impl ConnectedAddr {
                 }
             }
 
-            InboundDirect { maybe_ip, .. } => {
+            InboundDirect { addr } => {
                 // Use the IP from the TCP connection, and the port the peer told us
-                let maybe_addr = PeerSocketAddr::new(*maybe_ip, canonical_remote.port());
+                let maybe_addr = SocketAddr::new(addr.ip(), canonical_remote.port()).into();
 
                 // Try both addresses, but remove one duplicate if they match
                 if canonical_remote != maybe_addr {
@@ -654,7 +647,7 @@ where
         // an unspecified address for Isolated connections
         Isolated => {
             let unspec_ipv4 = get_unspecified_ipv4_addr(config.network);
-            (unspec_ipv4, PeerServices::empty(), unspec_ipv4)
+            (unspec_ipv4.into(), PeerServices::empty(), unspec_ipv4)
         }
         _ => {
             let their_addr = connected_addr
@@ -923,7 +916,7 @@ where
             // `Version` messages.
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
-                let alt_addr = MetaAddr::new_alternate(&alt_addr, &remote_services);
+                let alt_addr = MetaAddr::new_alternate(alt_addr, &remote_services);
                 // awaiting a local task won't hang
                 let _ = address_book_updater.send(alt_addr).await;
             }
@@ -933,7 +926,7 @@ where
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
-                    .send(MetaAddr::new_responded(&book_addr, &remote_services))
+                    .send(MetaAddr::new_responded(book_addr, &remote_services))
                     .await;
             }
 
@@ -1023,7 +1016,7 @@ where
                                         // so this await should not hang
                                         let _ = inbound_ts_collector
                                             .send(MetaAddr::new_responded(
-                                                &book_addr,
+                                                book_addr,
                                                 &remote_services,
                                             ))
                                             .await;
@@ -1040,7 +1033,7 @@ where
 
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                     let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_errored(&book_addr, remote_services))
+                                        .send(MetaAddr::new_errored(book_addr, remote_services))
                                         .await;
                                 }
                             }
@@ -1408,7 +1401,7 @@ where
 
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = address_book_updater
-                    .send(MetaAddr::new_errored(&book_addr, *remote_services))
+                    .send(MetaAddr::new_errored(book_addr, *remote_services))
                     .await;
             }
             Err(err)
@@ -1427,7 +1420,7 @@ async fn handle_heartbeat_shutdown(
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(&book_addr, *remote_services))
+            .send(MetaAddr::new_shutdown(book_addr, *remote_services))
             .await;
     }
 

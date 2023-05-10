@@ -51,7 +51,7 @@ impl MetaAddr {
     pub fn alternate_strategy() -> BoxedStrategy<Self> {
         (canonical_peer_addr_strategy(), any::<PeerServices>())
             .prop_map(|(socket_addr, untrusted_services)| {
-                MetaAddr::new_alternate(&socket_addr, &untrusted_services)
+                MetaAddr::new_alternate(socket_addr, &untrusted_services)
                     .into_new_meta_addr()
                     .expect("unexpected invalid alternate change")
             })
@@ -103,7 +103,7 @@ impl MetaAddrChange {
                 // Alternate nodes use the current time, so they're always ready
                 //
                 // TODO: create a "Zebra supported services" constant
-                let change = MetaAddr::new_alternate(&addr, &PeerServices::NODE_NETWORK);
+                let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
                 if change
                     .into_new_meta_addr()
                     .expect("unexpected invalid alternate change")
