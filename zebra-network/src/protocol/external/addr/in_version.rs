@@ -5,7 +5,7 @@
 
 use std::{
     io::{Read, Write},
-    net::{SocketAddr, SocketAddrV6},
+    net::SocketAddrV6,
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};

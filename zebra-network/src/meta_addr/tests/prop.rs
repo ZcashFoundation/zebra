@@ -18,10 +18,7 @@ use crate::{
         PeerAddrState::*,
     },
     peer_set::candidate_set::CandidateSet,
-    protocol::{
-        external::{canonical_peer_addr, canonical_socket_addr},
-        types::PeerServices,
-    },
+    protocol::{external::canonical_peer_addr, types::PeerServices},
     AddressBook, PeerSocketAddr,
 };
 

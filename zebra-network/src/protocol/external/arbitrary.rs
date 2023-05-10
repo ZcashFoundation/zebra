@@ -9,7 +9,7 @@ use zebra_chain::{block, transaction};
 use crate::PeerSocketAddr;
 
 use super::{
-    addr::{canonical_peer_addr, canonical_socket_addr, ipv6_mapped_ip_addr},
+    addr::{canonical_peer_addr, canonical_socket_addr},
     types::{PeerServices, Version},
     InventoryHash, Message,
 };
