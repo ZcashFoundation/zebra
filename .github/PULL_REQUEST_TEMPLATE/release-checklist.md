@@ -92,9 +92,9 @@ You can copy the latest checkpoints from CI by following [the zebra-checkpoints 
 Sometimes `dependabot` misses some dependency updates, or we accidentally turned them off.
 
 Here's how we make sure we got everything:
-1. Run `cargo update` on the latest `main` branch, and keep the output
-2. If needed, update [deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
-3. Open a separate PR with the changes, including the output of `cargo update`
+- [ ] Run `cargo update` on the latest `main` branch, and keep the output
+- [ ] If needed, update [deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+- [ ] Open a separate PR with the changes, including the output of `cargo update`
 
 ## Change Log
 
