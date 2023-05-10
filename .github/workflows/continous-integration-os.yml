@@ -250,6 +250,8 @@ jobs:
           - bans
           - sources
         features: ['', '--all-features', '--no-default-features']
+      # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
+      fail-fast: false
 
     # Prevent sudden announcement of a new advisory from failing ci:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
@@ -259,8 +261,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # this check also runs with optional features off
-      # so we expect some warnings about "skip tree root was not found"
+      # The --all-features job is the only job that gives accurate "skip tree root was not found" warnings.
+      # In other jobs, we expect some of these warnings, due to disabled features.
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
