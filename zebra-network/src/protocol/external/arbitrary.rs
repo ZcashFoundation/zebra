@@ -9,7 +9,7 @@ use zebra_chain::{block, transaction};
 use crate::PeerSocketAddr;
 
 use super::{
-    addr::{canonical_peer_addr, canonical_socket_addr},
+    addr::canonical_peer_addr,
     types::{PeerServices, Version},
     InventoryHash, Message,
 };
@@ -123,15 +123,6 @@ impl Arbitrary for Version {
     }
 
     type Strategy = BoxedStrategy<Self>;
-}
-
-/// Returns a random canonical Zebra [`SocketAddr`].
-///
-/// See [`canonical_ip_addr`] for details.
-///
-/// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
-pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
-    any::<SocketAddr>().prop_map(canonical_socket_addr)
 }
 
 /// Returns a random canonical Zebra [`PeerSocketAddr`].

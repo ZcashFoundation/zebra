@@ -91,7 +91,7 @@ impl From<MetaAddr> for AddrV1 {
 impl From<AddrV1> for MetaAddr {
     fn from(addr: AddrV1) -> Self {
         MetaAddr::new_gossiped_meta_addr(
-            addr.ipv6_addr.into(),
+            addr.ipv6_addr,
             addr.untrusted_services,
             addr.untrusted_last_seen,
         )
