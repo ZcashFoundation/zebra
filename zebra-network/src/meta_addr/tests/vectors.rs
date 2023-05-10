@@ -60,7 +60,7 @@ fn new_local_listener_is_gossipable() {
     let chrono_now = Utc::now();
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer = MetaAddr::new_local_listener_change(&address)
+    let peer = MetaAddr::new_local_listener_change(address)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
 
@@ -78,7 +78,7 @@ fn new_alternate_peer_address_is_not_gossipable() {
     let chrono_now = Utc::now();
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
 
@@ -156,12 +156,12 @@ fn recently_responded_peer_is_gossipable() {
     let chrono_now = Utc::now();
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(&address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
         .apply_to_meta_addr(peer_seed)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -176,12 +176,12 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
     let chrono_now = Utc::now();
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(&address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
         .apply_to_meta_addr(peer_seed)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -206,12 +206,12 @@ fn responded_long_ago_peer_is_not_gossipable() {
     let chrono_now = Utc::now();
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
+    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(&address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
         .apply_to_meta_addr(peer_seed)
         .expect("Failed to create MetaAddr for responded peer");
 

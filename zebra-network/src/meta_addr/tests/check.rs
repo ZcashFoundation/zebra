@@ -75,7 +75,7 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
     assert_eq!(sanitized.services, Some(sanitized_peer_services));
 
     // Remove IPv6 scope ID and flow information
-    let sanitized_socket_addr = SocketAddr::new(original.addr.ip(), original.addr.port());
+    let sanitized_socket_addr = SocketAddr::new(original.addr.ip(), original.addr.port()).into();
     assert_eq!(sanitized.addr.ip(), original.addr.ip());
     assert_eq!(sanitized.addr.port(), original.addr.port());
     assert_eq!(sanitized.addr, sanitized_socket_addr);

@@ -1,5 +1,7 @@
 //! Randomised property tests for the peer set.
 
+use std::net::SocketAddr;
+
 use futures::FutureExt;
 use proptest::prelude::*;
 use tower::{discover::Discover, BoxError, ServiceExt};
@@ -199,7 +201,7 @@ proptest! {
 
             // Remove peers, test broadcast until there is only 1 peer left in the peerset
             for port in 1u16..total_number_of_peers as u16 {
-                peer_set.remove(&PeerSocketAddr::new([127, 0, 0, 1].into(), port));
+                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port).into());
                 handles.remove(0);
 
                 // poll the peers
@@ -269,7 +271,7 @@ proptest! {
 
             // Remove peers
             for port in 1u16..=total_number_of_peers as u16 {
-                peer_set.remove(&PeerSocketAddr::new([127, 0, 0, 1].into(), port));
+                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port).into());
                 handles.remove(0);
             }
 

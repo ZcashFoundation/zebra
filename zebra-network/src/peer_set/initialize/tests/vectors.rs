@@ -1283,7 +1283,7 @@ async fn remnant_nonces_from_outbound_connections_are_limited() {
         let connection_tracker = active_outbound_connections.track_connection();
 
         let req = OutboundConnectorRequest {
-            addr,
+            addr: addr.into(),
             connection_tracker,
         };
 
@@ -1331,8 +1331,7 @@ async fn add_initial_peers_deadlock() {
     let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
         peers.insert(
-            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1)
-                .to_string(),
+            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
         );
     }
 

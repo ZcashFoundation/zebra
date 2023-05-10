@@ -1,6 +1,11 @@
 //! Fixed test vectors for CandidateSet.
 
-use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration as StdDuration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    sync::Arc,
+    time::Duration as StdDuration,
+};
 
 use chrono::{DateTime, Duration, Utc};
 use tokio::time::{self, Instant};
@@ -134,7 +139,7 @@ fn candidate_set_updates_are_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(
-        PeerSocketAddr::from_str("0.0.0.0:0").unwrap(),
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
         Span::none(),
     );
@@ -179,7 +184,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(
-        PeerSocketAddr::from_str("0.0.0.0:0").unwrap(),
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
         Span::none(),
     );
@@ -239,7 +244,7 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
                 .expect("`last_seen` time doesn't fit in a `DateTime32`");
 
             MetaAddr::new_gossiped_meta_addr(
-                PeerSocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000),
+                SocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000).into(),
                 PeerServices::NODE_NETWORK,
                 last_seen,
             )

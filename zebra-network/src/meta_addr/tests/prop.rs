@@ -18,7 +18,10 @@ use crate::{
         PeerAddrState::*,
     },
     peer_set::candidate_set::CandidateSet,
-    protocol::{external::canonical_socket_addr, types::PeerServices},
+    protocol::{
+        external::{canonical_peer_addr, canonical_socket_addr},
+        types::PeerServices,
+    },
     AddressBook, PeerSocketAddr,
 };
 
@@ -117,7 +120,7 @@ proptest! {
                 prop_assert!(attempt_count <= 1);
 
                 // Simulate an attempt
-                addr = MetaAddr::new_reconnect(&addr.addr)
+                addr = MetaAddr::new_reconnect(addr.addr)
                     .apply_to_meta_addr(addr)
                     .expect("unexpected invalid attempt");
             }
@@ -156,7 +159,7 @@ proptest! {
         let sanitized_addrs = address_book.sanitized(chrono_now);
 
         let expected_local_listener = address_book.local_listener_meta_addr();
-        let canonical_local_listener = canonical_socket_addr(local_listener);
+        let canonical_local_listener = canonical_peer_addr(local_listener);
         let book_sanitized_local_listener = sanitized_addrs
             .iter()
             .find(|meta_addr| meta_addr.addr == canonical_local_listener);
@@ -429,7 +432,7 @@ proptest! {
                         );
 
                         // Simulate an attempt
-                        *addr = MetaAddr::new_reconnect(&addr.addr)
+                        *addr = MetaAddr::new_reconnect(addr.addr)
                             .apply_to_meta_addr(*addr)
                             .expect("unexpected invalid attempt");
                     }
