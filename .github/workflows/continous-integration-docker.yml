@@ -479,8 +479,9 @@ jobs:
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: '-e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
       network: 'Testnet'
-      # A full testnet sync took about 2 hours in April 2023
-      is_long_test: false
+      # A full testnet sync could take 2-10 hours in April 2023.
+      # The time varies a lot due to the small number of nodes.
+      is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
       disk_suffix: tip
