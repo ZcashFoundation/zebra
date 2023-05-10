@@ -20,8 +20,8 @@ use zebra_chain::{
 };
 use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
 use zebra_network::{
-    connect_isolated_tcp_direct_with_inbound, types::InventoryHash, Config as NetworkConfig,
-    InventoryResponse, PeerError, Request, Response, SharedPeerError,
+    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash,
+    Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
 use zebra_state::Config as StateConfig;
@@ -67,7 +67,10 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
     let response = request.await;
     match response.as_ref() {
         Ok(Response::Peers(single_peer)) if single_peer.len() == 1 => {
-            assert_eq!(single_peer.first().unwrap().addr(), listen_addr)
+            assert_eq!(
+                single_peer.first().unwrap().addr(),
+                canonical_peer_addr(listen_addr)
+            )
         }
         Ok(Response::Peers(_peer_list)) => unreachable!(
             "`Peers` response should contain a single peer, \
@@ -86,7 +89,10 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
     let response = request.await;
     match response.as_ref() {
         Ok(Response::Peers(single_peer)) if single_peer.len() == 1 => {
-            assert_eq!(single_peer.first().unwrap().addr(), listen_addr)
+            assert_eq!(
+                single_peer.first().unwrap().addr(),
+                canonical_peer_addr(listen_addr)
+            )
         }
         Ok(Response::Peers(_peer_list)) => unreachable!(
             "`Peers` response should contain a single peer, \
