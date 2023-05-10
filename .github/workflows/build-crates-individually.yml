@@ -52,11 +52,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3.5.2
 
-      # Setup Rust with stable toolchain and minimal profile
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
 
+      - uses: actions-rs/cargo@v1.0.3
       # This step is meant to dynamically create a JSON containing the values of each crate
       # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
       #
@@ -115,23 +117,30 @@ jobs:
           version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Setup Rust with stable toolchain and minimal profile
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
 
         # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
         # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
         #
         # Some Zebra crates do not have any features, and most don't have any default features.
       - name: Build ${{ matrix.crate }} crate with no default features
-        run: |
-          cargo build --package ${{ matrix.crate }} --no-default-features
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate }} --no-default-features
 
       - name: Build ${{ matrix.crate }} crate normally
-        run: |
-          cargo build --package ${{ matrix.crate }}
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate }}
 
       - name: Build ${{ matrix.crate }} crate with all features
-        run: |
-          cargo build --package ${{ matrix.crate }} --all-features
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate }} --all-features

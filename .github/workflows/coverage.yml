@@ -61,10 +61,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # Setup Rust with stable toolchain and minimal profile
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal --component=llvm-tools-preview
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov

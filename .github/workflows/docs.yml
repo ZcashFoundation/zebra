@@ -51,12 +51,14 @@ jobs:
           version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Setup Rust with beta toolchain and default profile (to include rust-docs)
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
+      - name: Install latest beta
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: beta
+          components: rust-docs
+          override: true
 
-      - uses: Swatinem/rust-cache@v2.2.1
+      - uses: Swatinem/rust-cache@v1
 
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v1.2.0
