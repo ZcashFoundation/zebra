@@ -71,8 +71,7 @@ jobs:
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
-          --tags zcashd \
-          --zone ${{ vars.GCP_ZONE }}
+          --tags zcashd
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists

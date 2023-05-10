@@ -163,8 +163,7 @@ jobs:
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
-          --tags zebrad \
-          --zone ${{ vars.GCP_ZONE }}
+          --tags zebrad
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists
