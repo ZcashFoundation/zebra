@@ -159,11 +159,11 @@ jobs:
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
-          --tags zebrad \
-          --zone ${{ vars.GCP_ZONE }}
+          --tags zebrad
 
       # Check if our destination instance group exists already
       - name: Check if instance group exists
@@ -247,6 +247,7 @@ jobs:
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad \
