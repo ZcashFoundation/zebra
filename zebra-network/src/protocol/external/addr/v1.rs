@@ -165,7 +165,7 @@ pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: &IpAddr) -> Ipv6Addr {
 //
 // TODO: create a PeerSocketAddrV6 type?
 pub(in super::super) fn ipv6_mapped_socket_addr(
-    socket_addr: impl Into<SocketAddr>,
+    socket_addr: impl Into<PeerSocketAddr>,
 ) -> PeerSocketAddr {
     let socket_addr = socket_addr.into();
 
@@ -173,5 +173,5 @@ pub(in super::super) fn ipv6_mapped_socket_addr(
 
     // Remove scope IDs and flow information.
     // `0` is the default unspecified value for these fields.
-    SocketAddrV6::new(ipv6_mapped_ip, socket_addr.port(), 0, 0)
+    SocketAddrV6::new(ipv6_mapped_ip, socket_addr.port(), 0, 0).into()
 }

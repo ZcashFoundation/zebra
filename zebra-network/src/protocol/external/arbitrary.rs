@@ -143,6 +143,6 @@ pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = PeerSocketAddr>
 //
 // This should be a PeerSocketAddrV6 to prevent logging sensitive info,
 // but this code is only used in tests.
-pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = SocketAddrV6> {
+pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = PeerSocketAddr> {
     any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
 }
