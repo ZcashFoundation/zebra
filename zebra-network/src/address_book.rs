@@ -66,7 +66,7 @@ pub struct AddressBook {
     /// We reverse the comparison order, because the standard library
     /// ([`BTreeMap`](std::collections::BTreeMap)) sorts in ascending order, but
     /// [`OrderedMap`] sorts in descending order.
-    by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
+    by_addr: OrderedMap<PeerSocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -257,7 +257,7 @@ impl AddressBook {
     /// Look up `addr` in the address book, and return its [`MetaAddr`].
     ///
     /// Converts `addr` to a canonical address before looking it up.
-    pub fn get(&mut self, addr: &SocketAddr) -> Option<MetaAddr> {
+    pub fn get(&mut self, addr: &PeerSocketAddr) -> Option<MetaAddr> {
         let addr = canonical_socket_addr(*addr);
 
         // Unfortunately, `OrderedMap` doesn't implement `get`.
@@ -278,7 +278,7 @@ impl AddressBook {
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
     ///
-    /// Change addresses must be canonical `SocketAddr`s. This makes sure that
+    /// Change addresses must be canonical `PeerSocketAddr`s. This makes sure that
     /// each address book entry has a unique IP address.
     ///
     /// # Security
@@ -287,7 +287,7 @@ impl AddressBook {
     /// to the address book. This prevents rapid reconnections to the same peer.
     ///
     /// As an exception, this function can ignore all changes for specific
-    /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
+    /// [`PeerSocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
@@ -378,7 +378,7 @@ impl AddressBook {
     /// All address removals should go through `take`, so that the address
     /// book metrics are accurate.
     #[allow(dead_code)]
-    fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
+    fn take(&mut self, removed_addr: PeerSocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
 
         let instant_now = Instant::now();
@@ -399,9 +399,9 @@ impl AddressBook {
         }
     }
 
-    /// Returns true if the given [`SocketAddr`] is pending a reconnection
+    /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
     /// attempt.
-    pub fn pending_reconnection_addr(&mut self, addr: &SocketAddr) -> bool {
+    pub fn pending_reconnection_addr(&mut self, addr: &PeerSocketAddr) -> bool {
         let meta_addr = self.get(addr);
 
         let _guard = self.span.enter();

@@ -66,7 +66,7 @@ impl PeerPreference {
     /// Return a preference for the peer at `peer_addr` on `network`.
     ///
     /// Use the [`PeerPreference`] [`Ord`] implementation to sort preferred peers first.
-    pub fn new(
+    fn new(
         peer_addr: &SocketAddr,
         network: impl Into<Option<Network>>,
     ) -> Result<PeerPreference, &'static str> {
@@ -81,7 +81,7 @@ impl PeerPreference {
     }
 }
 
-/// Is the [`SocketAddr`] we have for this peer valid for outbound
+/// Is the [`PeerSocketAddr`] we have for this peer valid for outbound
 /// connections?
 ///
 /// Since the addresses in the address book are unique, this check can be
@@ -89,7 +89,7 @@ impl PeerPreference {
 ///
 /// [`MetaAddr`]: crate::meta_addr::MetaAddr
 pub fn address_is_valid_for_outbound_connections(
-    peer_addr: &SocketAddr,
+    peer_addr: &PeerSocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
     // TODO: make private IP addresses an error unless a debug config is set (#3117)

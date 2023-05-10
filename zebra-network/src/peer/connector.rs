@@ -60,7 +60,7 @@ where
 /// Contains the information needed to make an outbound connection to the peer.
 pub struct OutboundConnectorRequest {
     /// The Zcash listener address of the peer.
-    pub addr: SocketAddr,
+    pub addr: PeerSocketAddr,
 
     /// A connection tracker that reduces the open connection count when dropped.
     ///
@@ -74,7 +74,7 @@ where
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
-    type Response = (SocketAddr, Client);
+    type Response = (PeerSocketAddr, Client);
     type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;

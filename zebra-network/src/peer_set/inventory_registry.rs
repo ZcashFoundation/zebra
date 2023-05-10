@@ -79,7 +79,7 @@ pub type InventoryStatus<T> = InventoryResponse<T, T>;
 ///
 /// For security reasons, all `notfound` rejections should be tracked.
 /// This also helps with performance, if the hash is rare on the network.
-pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, SocketAddr)>;
+pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, PeerSocketAddr)>;
 
 /// An internal marker used in inventory status hash maps.
 type InventoryMarker = InventoryStatus<()>;
@@ -94,10 +94,10 @@ pub struct InventoryRegistry {
     /// period.
     //
     // TODO: split maps into available and missing, so we can limit them separately.
-    current: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
+    current: IndexMap<InventoryHash, IndexMap<PeerSocketAddr, InventoryMarker>>,
 
     /// Map tracking inventory statuses from the previous interval period.
-    prev: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
+    prev: IndexMap<InventoryHash, IndexMap<PeerSocketAddr, InventoryMarker>>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -119,20 +119,20 @@ impl std::fmt::Debug for InventoryRegistry {
 
 impl InventoryChange {
     /// Returns a new available inventory change from a single hash.
-    pub fn new_available(hash: InventoryHash, peer: SocketAddr) -> Self {
+    pub fn new_available(hash: InventoryHash, peer: PeerSocketAddr) -> Self {
         InventoryStatus::Available((AtLeastOne::from_one(hash), peer))
     }
 
     /// Returns a new missing inventory change from a single hash.
     #[allow(dead_code)]
-    pub fn new_missing(hash: InventoryHash, peer: SocketAddr) -> Self {
+    pub fn new_missing(hash: InventoryHash, peer: PeerSocketAddr) -> Self {
         InventoryStatus::Missing((AtLeastOne::from_one(hash), peer))
     }
 
     /// Returns a new available multiple inventory change, if `hashes` contains at least one change.
     pub fn new_available_multi<'a>(
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
-        peer: SocketAddr,
+        peer: PeerSocketAddr,
     ) -> Option<Self> {
         let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
 
@@ -153,7 +153,7 @@ impl InventoryChange {
     /// Returns a new missing multiple inventory change, if `hashes` contains at least one change.
     pub fn new_missing_multi<'a>(
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
-        peer: SocketAddr,
+        peer: PeerSocketAddr,
     ) -> Option<Self> {
         let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
 
@@ -220,14 +220,14 @@ impl InventoryRegistry {
     }
 
     /// Returns an iterator over addrs of peers that have recently advertised `hash` in their inventory.
-    pub fn advertising_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &SocketAddr> {
+    pub fn advertising_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.status_peers(hash)
             .filter_map(|addr_status| addr_status.available())
     }
 
     /// Returns an iterator over addrs of peers that have recently missed `hash` in their inventory.
     #[allow(dead_code)]
-    pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &SocketAddr> {
+    pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.status_peers(hash)
             .filter_map(|addr_status| addr_status.missing())
     }
@@ -238,7 +238,7 @@ impl InventoryRegistry {
     pub fn status_peers(
         &self,
         hash: InventoryHash,
-    ) -> impl Iterator<Item = InventoryStatus<&SocketAddr>> {
+    ) -> impl Iterator<Item = InventoryStatus<&PeerSocketAddr>> {
         let prev = self.prev.get(&hash);
         let current = self.current.get(&hash);
 
@@ -258,7 +258,7 @@ impl InventoryRegistry {
     }
 
     /// Returns true if there is a current status entry for `hash` and `addr`.
-    pub fn has_current_status(&self, hash: InventoryHash, addr: SocketAddr) -> bool {
+    pub fn has_current_status(&self, hash: InventoryHash, addr: PeerSocketAddr) -> bool {
         self.current
             .get(&hash)
             .and_then(|current| current.get(&addr))
@@ -272,7 +272,7 @@ impl InventoryRegistry {
     #[allow(dead_code)]
     pub fn status_hashes(
         &self,
-    ) -> impl Iterator<Item = (&InventoryHash, &IndexMap<SocketAddr, InventoryMarker>)> {
+    ) -> impl Iterator<Item = (&InventoryHash, &IndexMap<PeerSocketAddr, InventoryMarker>)> {
         self.current.iter().chain(self.prev.iter())
     }
 

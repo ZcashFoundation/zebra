@@ -200,7 +200,7 @@ proptest! {
 
             // Remove peers, test broadcast until there is only 1 peer left in the peerset
             for port in 1u16..total_number_of_peers as u16 {
-                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
+                peer_set.remove(&PeerSocketAddr::new([127, 0, 0, 1].into(), port));
                 handles.remove(0);
 
                 // poll the peers
@@ -270,7 +270,7 @@ proptest! {
 
             // Remove peers
             for port in 1u16..=total_number_of_peers as u16 {
-                peer_set.remove(&SocketAddr::new([127, 0, 0, 1].into(), port));
+                peer_set.remove(&PeerSocketAddr::new([127, 0, 0, 1].into(), port));
                 handles.remove(0);
             }
 
@@ -294,7 +294,7 @@ fn check_if_only_up_to_date_peers_are_live<D, C>(
     minimum_version: Version,
 ) -> Result<usize, TestCaseError>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {

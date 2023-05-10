@@ -49,7 +49,7 @@ mod tests;
 /// handshake.
 ///
 /// This result comes from the `Handshaker`.
-type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
+type DiscoveredPeer = Result<(PeerSocketAddr, peer::Client), BoxError>;
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -254,7 +254,7 @@ async fn add_initial_peers<S>(
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
-    S: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+    S: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -398,9 +398,9 @@ where
 async fn limit_initial_peers(
     config: &Config,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-) -> HashSet<SocketAddr> {
-    let all_peers: HashSet<SocketAddr> = config.initial_peers().await;
-    let mut preferred_peers: BTreeMap<PeerPreference, Vec<SocketAddr>> = BTreeMap::new();
+) -> HashSet<PeerSocketAddr> {
+    let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
+    let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
 
     let all_peers_count = all_peers.len();
     if all_peers_count > config.peerset_initial_target_size {
@@ -439,7 +439,7 @@ async fn limit_initial_peers(
 
     // Split out the `initial_peers` that will be shuffled and returned,
     // choosing preferred peers first.
-    let mut initial_peers: HashSet<SocketAddr> = HashSet::new();
+    let mut initial_peers: HashSet<PeerSocketAddr> = HashSet::new();
     for better_peers in preferred_peers.values() {
         let mut better_peers = better_peers.clone();
         let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
@@ -644,7 +644,7 @@ enum CrawlerAction {
     TimerCrawl { tick: Instant },
     /// Handle a successfully connected handshake `peer_set_change`.
     HandshakeConnected {
-        address: SocketAddr,
+        address: PeerSocketAddr,
         client: peer::Client,
     },
     /// Handle a handshake failure to `failed_addr`.
@@ -692,7 +692,7 @@ async fn crawl_and_dial<C, S>(
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -865,7 +865,7 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
 ) -> CrawlerAction
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -898,8 +898,8 @@ where
         .await
 }
 
-impl From<Result<(SocketAddr, peer::Client), (MetaAddr, BoxError)>> for CrawlerAction {
-    fn from(dial_result: Result<(SocketAddr, peer::Client), (MetaAddr, BoxError)>) -> Self {
+impl From<Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>> for CrawlerAction {
+    fn from(dial_result: Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>) -> Self {
         use CrawlerAction::*;
         match dial_result {
             Ok((address, client)) => HandshakeConnected { address, client },

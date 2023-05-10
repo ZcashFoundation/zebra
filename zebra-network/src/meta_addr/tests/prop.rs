@@ -1,9 +1,6 @@
 //! Randomised property tests for MetaAddr and MetaAddrChange.
 
-use std::{
-    collections::HashMap, convert::TryFrom, env, net::SocketAddr, str::FromStr, sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, env, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
@@ -415,10 +412,10 @@ proptest! {
             tokio::time::pause();
 
             // The current attempt counts for each peer in this interval
-            let mut attempt_counts: HashMap<SocketAddr, u32> = HashMap::new();
+            let mut attempt_counts: HashMap<PeerSocketAddr, u32> = HashMap::new();
 
             // The most recent address info for each peer
-            let mut addrs: HashMap<SocketAddr, MetaAddr> = HashMap::new();
+            let mut addrs: HashMap<PeerSocketAddr, MetaAddr> = HashMap::new();
 
             for change_index in 0..MAX_ADDR_CHANGE {
                 for (addr, changes) in addr_changes_lists.iter() {

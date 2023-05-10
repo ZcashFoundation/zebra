@@ -140,7 +140,7 @@ fn candidate_set_updates_are_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(
-        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerSocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
         Span::none(),
     );
@@ -185,7 +185,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(
-        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerSocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
         Span::none(),
     );
@@ -245,7 +245,7 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
                 .expect("`last_seen` time doesn't fit in a `DateTime32`");
 
             MetaAddr::new_gossiped_meta_addr(
-                SocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000),
+                PeerSocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000),
                 PeerServices::NODE_NETWORK,
                 last_seen,
             )

@@ -86,14 +86,14 @@ impl PeerVersions {
     pub fn mock_peer_discovery(
         &self,
     ) -> (
-        impl Stream<Item = Result<Change<SocketAddr, LoadTrackedClient>, BoxError>>,
+        impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
         Vec<ClientTestHarness>,
     ) {
         let (clients, harnesses) = self.mock_peers();
         let fake_ports = 1_u16..;
 
         let discovered_peers_iterator = fake_ports.zip(clients).map(|(port, client)| {
-            let peer_address = SocketAddr::new([127, 0, 0, 1].into(), port);
+            let peer_address = PeerSocketAddr::new([127, 0, 0, 1].into(), port);
 
             Ok(Change::Insert(peer_address, client))
         });
@@ -159,7 +159,7 @@ impl<D, C> PeerSetBuilder<D, C> {
 
 impl<D, C> PeerSetBuilder<D, C>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {

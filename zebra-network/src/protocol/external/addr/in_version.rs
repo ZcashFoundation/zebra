@@ -46,11 +46,13 @@ pub struct AddrInVersion {
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
+    //
+    // TODO: create a PeerSocketAddrV6 type?
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
         proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
     )]
-    ipv6_addr: SocketAddrV6,
+    ipv6_addr: PeerSocketAddr,
 }
 
 impl AddrInVersion {
@@ -63,7 +65,7 @@ impl AddrInVersion {
     }
 
     /// Returns the canonical address for this peer.
-    pub fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> PeerSocketAddr {
         canonical_socket_addr(self.ipv6_addr)
     }
 

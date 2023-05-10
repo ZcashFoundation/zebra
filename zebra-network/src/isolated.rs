@@ -126,7 +126,7 @@ where
 /// Prefer `connect_isolated_tor` if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
-    addr: SocketAddr,
+    addr: PeerSocketAddr,
     user_agent: String,
 ) -> impl Future<Output = Result<Client, BoxError>> {
     let nil_inbound_service =
@@ -146,7 +146,7 @@ pub fn connect_isolated_tcp_direct(
 /// which makes it stand out from other isolated connections from other peers.
 pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
     network: Network,
-    addr: SocketAddr,
+    addr: PeerSocketAddr,
     user_agent: String,
     inbound_service: InboundService,
 ) -> impl Future<Output = Result<Client, BoxError>>

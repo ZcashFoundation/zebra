@@ -242,7 +242,7 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
     let (mut inv_registry, inv_stream_tx) = new_inv_registry();
 
     for peer_count in 0..(MAX_PEERS_PER_INV + 10) {
-        let test_peer = SocketAddr::new(
+        let test_peer = PeerSocketAddr::new(
             "2.2.2.2".parse().unwrap(),
             peer_count.try_into().expect("fits in u16"),
         );

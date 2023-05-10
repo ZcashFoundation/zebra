@@ -1,7 +1,4 @@
-use std::{
-    convert::TryInto,
-    net::{SocketAddr, SocketAddrV6},
-};
+use std::net::{SocketAddr, SocketAddrV6};
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
@@ -124,12 +121,12 @@ impl Arbitrary for Version {
     type Strategy = BoxedStrategy<Self>;
 }
 
-/// Returns a random canonical Zebra `SocketAddr`.
+/// Returns a random canonical Zebra `PeerSocketAddr`.
 ///
 /// See [`canonical_ip_addr`] for details.
 ///
 /// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
-pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
+pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = PeerSocketAddr> {
     any::<SocketAddr>().prop_map(canonical_socket_addr)
 }
 
@@ -139,6 +136,9 @@ pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
 /// See [`canonical_ip_addr`] for details.
 ///
 /// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
+//
+// This should be a PeerSocketAddrV6 to prevent logging sensitive info,
+// but this code is only used in tests.
 pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = SocketAddrV6> {
     any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
 }

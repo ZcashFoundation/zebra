@@ -1,6 +1,6 @@
 //! Zebra's canonical node address format.
 //!
-//! Zebra canonicalises all received addresses into Rust [`SocketAddr`]s.
+//! Zebra canonicalises all received addresses into Rust [`PeerSocketAddr`]s.
 //! If the address is an [IPv4-mapped IPv6 address], it becomes a [`SocketAddr::V4`]
 //!
 //! [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
@@ -26,18 +26,18 @@ pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
     }
 }
 
-/// Transform a `SocketAddr` into a canonical Zebra `SocketAddr`, converting
+/// Transform a `SocketAddr` into a canonical Zebra `PeerSocketAddr`, converting
 /// IPv6-mapped IPv4 addresses, and removing IPv6 scope IDs and flow information.
 ///
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
-pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> SocketAddr {
+pub fn canonical_socket_addr(socket_addr: impl Into<SocketAddr>) -> PeerSocketAddr {
     use SocketAddr::*;
 
     let mut socket_addr = socket_addr.into();
     if let V6(v6_socket_addr) = socket_addr {
         let canonical_ip = canonical_ip_addr(v6_socket_addr.ip());
         // creating a new SocketAddr removes scope IDs and flow information
-        socket_addr = SocketAddr::new(canonical_ip, socket_addr.port());
+        socket_addr = PeerSocketAddr::new(canonical_ip, socket_addr.port());
     }
 
     socket_addr

@@ -1331,7 +1331,7 @@ async fn add_initial_peers_deadlock() {
     let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
         peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
         );
     }
 
@@ -1462,7 +1462,7 @@ async fn spawn_crawler_with_peer_limit<C>(
     outbound_connector: C,
 ) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -1481,7 +1481,7 @@ where
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let addr = PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
         let addr =
             MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
         fake_peer = Some(addr);
@@ -1674,7 +1674,7 @@ async fn spawn_add_initial_peers<C>(
     JoinHandle<Result<(), BoxError>>,
 )
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
+    C: Service<OutboundConnectorRequest, Response = (PeerSocketAddr, peer::Client), Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -1685,7 +1685,7 @@ where
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            PeerSocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
         );
     }
 

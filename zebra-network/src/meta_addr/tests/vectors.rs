@@ -61,7 +61,7 @@ fn new_local_listener_is_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer = MetaAddr::new_local_listener_change(&address)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
@@ -79,7 +79,7 @@ fn new_alternate_peer_address_is_not_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
@@ -94,7 +94,7 @@ fn gossiped_peer_reportedly_to_be_seen_recently_is_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
 
     // Report last seen within the reachable interval.
     let offset = MAX_PEER_ACTIVE_FOR_GOSSIP
@@ -116,7 +116,7 @@ fn gossiped_peer_reportedly_seen_in_the_future_is_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
 
     // Report last seen in the future
     let last_seen = DateTime32::now()
@@ -135,7 +135,7 @@ fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
 
     // Report last seen just outside the reachable interval.
     let offset = MAX_PEER_ACTIVE_FOR_GOSSIP
@@ -157,7 +157,7 @@ fn recently_responded_peer_is_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
@@ -177,7 +177,7 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");
@@ -207,7 +207,7 @@ fn responded_long_ago_peer_is_not_gossipable() {
 
     let chrono_now = Utc::now();
 
-    let address = SocketAddr::from(([192, 168, 180, 9], 10_000));
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(&address, &PeerServices::NODE_NETWORK)
         .into_new_meta_addr()
         .expect("MetaAddrChange can't create a new MetaAddr");

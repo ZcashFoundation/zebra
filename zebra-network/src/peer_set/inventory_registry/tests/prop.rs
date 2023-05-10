@@ -59,7 +59,7 @@ async fn inv_registry_inbound_wrapper_with(
     status: InventoryMarker,
     test_hashes: HashSet<InventoryHash>,
 ) {
-    let test_peer: SocketAddr = "1.1.1.1:1"
+    let test_peer: PeerSocketAddr = "1.1.1.1:1"
         .parse()
         .expect("unexpected invalid peer address");
     let test_peer = ConnectedAddr::new_inbound_direct(test_peer);

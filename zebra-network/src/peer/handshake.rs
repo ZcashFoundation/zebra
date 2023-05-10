@@ -152,7 +152,7 @@ pub enum ConnectedAddr {
     /// and port.
     OutboundDirect {
         /// The connected outbound remote address and port.
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
     },
 
     /// The address we received from the OS, when a remote peer directly
@@ -162,11 +162,10 @@ pub enum ConnectedAddr {
     /// if its outbound address is the same as its listener address. But the port
     /// is an ephemeral outbound TCP port, not a listener port.
     InboundDirect {
-        /// The connected inbound remote address.
-        maybe_ip: IpAddr,
-
-        /// The connected inbound transient remote port.
-        transient_port: u16,
+        /// The connected inbound remote address and ephemeral port.
+        ///
+        /// The IP address might be the address of a Zcash peer, but the port is an ephemeral port.
+        addr: PeerSocketAddr,
     },
 
     /// The proxy address we used to make an outbound connection.
@@ -207,12 +206,12 @@ use ConnectedAddr::*;
 
 impl ConnectedAddr {
     /// Returns a new outbound directly connected addr.
-    pub fn new_outbound_direct(addr: SocketAddr) -> ConnectedAddr {
+    pub fn new_outbound_direct(addr: PeerSocketAddr) -> ConnectedAddr {
         OutboundDirect { addr }
     }
 
     /// Returns a new inbound directly connected addr.
-    pub fn new_inbound_direct(addr: SocketAddr) -> ConnectedAddr {
+    pub fn new_inbound_direct(addr: PeerSocketAddr) -> ConnectedAddr {
         InboundDirect {
             maybe_ip: addr.ip(),
             transient_port: addr.port(),
@@ -246,7 +245,7 @@ impl ConnectedAddr {
         Isolated
     }
 
-    /// Returns a `SocketAddr` that can be used to track this connection in the
+    /// Returns a `PeerSocketAddr` that can be used to track this connection in the
     /// `AddressBook`.
     ///
     /// `None` for inbound connections, proxy connections, and isolated
@@ -264,7 +263,7 @@ impl ConnectedAddr {
     /// `AddressBook` state.
     ///
     /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
-    pub fn get_address_book_addr(&self) -> Option<SocketAddr> {
+    pub fn get_address_book_addr(&self) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
             // TODO: consider using the canonical address of the peer to track
@@ -273,7 +272,7 @@ impl ConnectedAddr {
         }
     }
 
-    /// Returns a `SocketAddr` that can be used to temporarily identify a
+    /// Returns a `PeerSocketAddr` that can be used to temporarily identify a
     /// connection.
     ///
     /// Isolated connections must not change Zebra's peer set or address book
@@ -290,13 +289,13 @@ impl ConnectedAddr {
     /// This address must not depend on the canonical address from the `Version`
     /// message. Otherwise, malicious peers could interfere with other peers'
     /// `PeerSet` state.
-    pub fn get_transient_addr(&self) -> Option<SocketAddr> {
+    pub fn get_transient_addr(&self) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
             InboundDirect {
                 maybe_ip,
                 transient_port,
-            } => Some(SocketAddr::new(*maybe_ip, *transient_port)),
+            } => Some(PeerSocketAddr::new(*maybe_ip, *transient_port)),
             OutboundProxy {
                 transient_local_addr,
                 ..
@@ -332,8 +331,8 @@ impl ConnectedAddr {
     /// remote address that we're currently connected to.
     pub fn get_alternate_addrs(
         &self,
-        mut canonical_remote: SocketAddr,
-    ) -> impl Iterator<Item = SocketAddr> {
+        mut canonical_remote: PeerSocketAddr,
+    ) -> impl Iterator<Item = PeerSocketAddr> {
         let addrs = match self {
             OutboundDirect { addr } => {
                 // Fixup unspecified addresses and ports using known good data
@@ -357,7 +356,7 @@ impl ConnectedAddr {
 
             InboundDirect { maybe_ip, .. } => {
                 // Use the IP from the TCP connection, and the port the peer told us
-                let maybe_addr = SocketAddr::new(*maybe_ip, canonical_remote.port());
+                let maybe_addr = PeerSocketAddr::new(*maybe_ip, canonical_remote.port());
 
                 // Try both addresses, but remove one duplicate if they match
                 if canonical_remote != maybe_addr {
