@@ -381,10 +381,9 @@ jobs:
     # it has no impact on this job.)
     #
     # TODO:
-    # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
-    # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
+    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     concurrency:
-      group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync
+      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.run-full-sync) }}-test-full-sync
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -496,10 +495,9 @@ jobs:
     # it has no impact on this job.)
     #
     # TODO:
-    # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
-    # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks-testnet.outputs.zebra_tip_disk is true
+    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     concurrency:
-      group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync-testnet
+      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.run-full-sync) }}-test-full-sync-testnet
       cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
