@@ -38,11 +38,14 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for curve25519-dalek to upgrade
-    { name = "digest", version = "=0.9.0" },
-
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
+
+    # wait for rocksdb to upgrade
+    { name = "bindgen", version = "=0.64.0" },
+
+    # wait for prost-build to upgrade
+    { name = "prettyplease", version = "=0.1.25" },
 
     # ZF crates
 
@@ -54,6 +57,9 @@ skip-tree = [
     # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
     # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
     { name = "ahash", version = "=0.7.6" },
+
+    # wait for ed25519-zebra to upgrade
+    { name = "curve25519-dalek", version = "=3.2.0" },
 
     # ECC crates
 
