@@ -944,13 +944,15 @@ async fn rpc_getpeerinfo() {
     )
     .await;
 
-    let mock_peer_address =
-        zebra_network::types::MetaAddr::new_initial_peer(std::net::SocketAddr::new(
+    let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+        std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
-        ))
-        .into_new_meta_addr()
-        .unwrap();
+        )
+        .into(),
+    )
+    .into_new_meta_addr()
+    .unwrap();
 
     let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
 
