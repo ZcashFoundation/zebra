@@ -323,9 +323,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-stateful-sync:
     name: Zebra checkpoint update
-    needs: regenerate-stateful-disks
+    needs: [ regenerate-stateful-disks, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || jobs.regenerate-stateful-disks.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || needs.regenerate-stateful-disks.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: sync-past-checkpoint
@@ -397,9 +397,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-update-sync:
     name: Zebra tip update
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: update-to-tip
@@ -429,9 +429,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   generate-checkpoints-mainnet:
     name: Generate checkpoints mainnet
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: generate-checkpoints-mainnet
@@ -513,9 +513,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
-    needs: test-full-sync-testnet
+    needs: [ test-full-sync-testnet, get-available-disks-testnet ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || jobs.test-full-sync-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.test-full-sync-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
@@ -548,7 +548,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && ((github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && ((github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
@@ -584,9 +584,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
     name: lightwalletd tip update
-    needs: lightwalletd-full-sync
+    needs: [ lightwalletd-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || jobs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-update-sync
@@ -616,9 +616,9 @@ jobs:
   # TODO: move this job below the rest of the mainnet jobs that just use Zebra cached state
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
@@ -641,9 +641,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-transactions-test:
     name: lightwalletd tip send
-    needs: lightwalletd-full-sync
+    needs: [ lightwalletd-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || jobs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
@@ -668,9 +668,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests
-    needs: lightwalletd-full-sync
+    needs: [ lightwalletd-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || jobs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
@@ -699,9 +699,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   get-block-template-test:
     name: get block template
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: get-block-template
@@ -725,9 +725,9 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   submit-block-test:
     name: submit block
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || jobs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: submit-block
