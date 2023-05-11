@@ -38,9 +38,6 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for curve25519-dalek to upgrade
-    { name = "digest", version = "=0.9.0" },
-
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
