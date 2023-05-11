@@ -67,7 +67,8 @@ jobs:
           --container-image electriccoinco/zcashd \
           --container-env ZCASHD_NETWORK="${{ inputs.network }}" \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --service-account ${{ env.DEPLOY_SA }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zcashd
