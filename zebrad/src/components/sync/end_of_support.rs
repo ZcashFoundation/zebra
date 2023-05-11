@@ -13,7 +13,7 @@ use zebra_chain::{
 use crate::application::release_version;
 
 /// The estimated height that this release started to run.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_026_000;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_081_448;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
