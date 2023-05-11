@@ -44,6 +44,9 @@ skip-tree = [
     # wait for rocksdb to upgrade
     { name = "bindgen", version = "=0.64.0" },
 
+    # wait for prost-build to upgrade
+    { name = "prettyplease", version = "=0.1.25" },
+
     # ZF crates
 
     # wait for zcashd and zcash_script to upgrade
