@@ -5,6 +5,35 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.8) - 2023-05-10
+
+Starting in this release, Zebra has implemented an "end of support" halt. Just like `zcashd`, the `zebrad` binary will stop running 16 weeks after the last release date.
+Also, this release adds the ZIP-317 rules to mempool transactions which should help with the Zcash network spam issue.
+
+### Security
+
+- Avoid inbound service overloads and fix failing tests ([#6537](https://github.com/ZcashFoundation/zebra/pull/6537))
+- Avoid a rare panic when a connection is dropped ([#6566](https://github.com/ZcashFoundation/zebra/pull/6566))
+- Avoid some self-connection nonce removal attacks ([#6410](https://github.com/ZcashFoundation/zebra/pull/6410))
+- Reject nodes using ZClassic ports, and warn if configured with those ports ([#6567](https://github.com/ZcashFoundation/zebra/pull/6567))
+
+### Added
+
+- Add ZIP-317 rules to mempool ([#6556](https://github.com/ZcashFoundation/zebra/pull/6556))
+- Add user agent argument to zebra-network crate ([#6601](https://github.com/ZcashFoundation/zebra/pull/6601))
+- Refuse to run zebrad when release is too old ([#6351](https://github.com/ZcashFoundation/zebra/pull/6351))
+
+### Fixed
+
+- Handle randomness generation and invalid random values as errors in cryptographic code ([#6385](https://github.com/ZcashFoundation/zebra/pull/6385))
+- When configured for testnet, automatically use the correct testnet listener port ([#6575](https://github.com/ZcashFoundation/zebra/pull/6575))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn
+
+
 ## [Zebra 1.0.0-rc.7](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.7) - 2023-04-18
 
 This release features a security fix for unbounded memory use in zebra-network, introduces the "progress-bar" feature, and continues to address audit findings.
