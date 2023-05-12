@@ -794,75 +794,102 @@ impl MetaAddrChange {
     ///
     /// If the change isn't valid for the `previous` address, returns `None`.
     pub fn apply_to_meta_addr(&self, previous: impl Into<Option<MetaAddr>>) -> Option<MetaAddr> {
-        if let Some(previous) = previous.into() {
-            assert_eq!(previous.addr, self.addr(), "unexpected addr mismatch");
-
-            let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
-            let change_to_never_attempted = self
-                .into_new_meta_addr()
-                .map(|meta_addr| meta_addr.last_connection_state.is_never_attempted())
-                .unwrap_or(false);
-
-            if change_to_never_attempted {
-                if previous_has_been_attempted {
-                    // Existing entry has been attempted, change is NeverAttempted
-                    // - ignore the change
-                    //
-                    // # Security
-                    //
-                    // Ignore NeverAttempted changes once we have made an attempt,
-                    // so malicious peers can't keep changing our peer connection order.
-                    None
-                } else {
-                    // Existing entry and change are both NeverAttempted
-                    // - preserve original values of all fields
-                    // - but replace None with Some
-                    //
-                    // # Security
-                    //
-                    // Preserve the original field values for NeverAttempted peers,
-                    // so malicious peers can't keep changing our peer connection order.
-                    Some(MetaAddr {
-                        addr: self.addr(),
-                        services: previous.services.or_else(|| self.untrusted_services()),
-                        untrusted_last_seen: previous
-                            .untrusted_last_seen
-                            .or_else(|| self.untrusted_last_seen()),
-                        // The peer has not been attempted, so these fields must be None
-                        last_response: None,
-                        last_attempt: None,
-                        last_failure: None,
-                        last_connection_state: self.peer_addr_state(),
-                    })
-                }
-            } else {
-                // Existing entry and change are both Attempt, Responded, Failed
-                // - ignore changes to earlier times
-                // - update the services from the change
-                //
-                // # Security
-                //
-                // Ignore changes to earlier times. This enforces the peer
-                // connection timeout, even if changes are applied out of order.
-                Some(MetaAddr {
-                    addr: self.addr(),
-                    // We want up-to-date services, even if they have fewer bits,
-                    // or they are applied out of order.
-                    services: self.untrusted_services().or(previous.services),
-                    // Only NeverAttempted changes can modify the last seen field
-                    untrusted_last_seen: previous.untrusted_last_seen,
-                    // Since Some(time) is always greater than None, `max` prefers:
-                    // - the latest time if both are Some
-                    // - Some(time) if the other is None
-                    last_response: self.last_response().max(previous.last_response),
-                    last_attempt: self.last_attempt().max(previous.last_attempt),
-                    last_failure: self.last_failure().max(previous.last_failure),
-                    last_connection_state: self.peer_addr_state(),
-                })
-            }
-        } else {
+        let Some(previous) = previous.into() else {
             // no previous: create a new entry
-            self.into_new_meta_addr()
+            return self.into_new_meta_addr();
+        };
+
+        assert_eq!(previous.addr, self.addr(), "unexpected addr mismatch");
+
+        // TODO:
+        // - use a monotonic change time instead of these 3 fields
+        //   - use that change time to provide the last failed and last attempted times
+        let change_is_out_of_order = self
+            .last_response()
+            .and_then(|change_last_response| Some(previous.last_response? > change_last_response))
+            .unwrap_or_default()
+            || self
+                .last_attempt()
+                .and_then(|change_last_attempt| Some(previous.last_attempt? > change_last_attempt))
+                .unwrap_or_default()
+            || self
+                .last_failure()
+                .and_then(|change_last_failure| Some(previous.last_failure? > change_last_failure))
+                .unwrap_or_default();
+
+        let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
+        let change_to_never_attempted = self
+            .into_new_meta_addr()
+            .map(|meta_addr| meta_addr.last_connection_state.is_never_attempted())
+            .unwrap_or(false);
+
+        // Invalid changes
+
+        if change_is_out_of_order {
+            // # Security
+            //
+            // Ignore changes that arrive out of order. This enforces the peer
+            // connection timeout, even if changes are applied out of order.
+            return None;
+        }
+
+        if change_to_never_attempted && previous_has_been_attempted {
+            // Existing entry has been attempted, change is NeverAttempted
+            // - ignore the change
+            //
+            // # Security
+            //
+            // Ignore NeverAttempted changes once we have made an attempt,
+            // so malicious peers can't keep changing our peer connection order.
+            return None;
+        }
+
+        // Valid changes
+
+        if change_to_never_attempted && !previous_has_been_attempted {
+            // Existing entry and change are both NeverAttempted
+            // - preserve original values of all fields
+            // - but replace None with Some
+            //
+            // # Security
+            //
+            // Preserve the original field values for NeverAttempted peers,
+            // so malicious peers can't keep changing our peer connection order.
+            Some(MetaAddr {
+                addr: self.addr(),
+                services: previous.services.or_else(|| self.untrusted_services()),
+                untrusted_last_seen: previous
+                    .untrusted_last_seen
+                    .or_else(|| self.untrusted_last_seen()),
+                // The peer has not been attempted, so these fields must be None
+                last_response: None,
+                last_attempt: None,
+                last_failure: None,
+                last_connection_state: self.peer_addr_state(),
+            })
+        } else {
+            // Existing entry and change are both Attempt, Responded, Failed
+            // - update the fields from the change
+            Some(MetaAddr {
+                addr: self.addr(),
+                // Always update optional fields, unless the update is None.
+                //
+                // We want up-to-date services, even if they have fewer bits
+                services: self.untrusted_services().or(previous.services),
+                // Only NeverAttempted changes can modify the last seen field
+                untrusted_last_seen: previous.untrusted_last_seen,
+                // This is a wall clock time, but we already checked that responses are in order.
+                // Even if the wall clock time has jumped, we want to use the latest time.
+                last_response: self.last_response().or(previous.last_response),
+                // These are monotonic times.
+                last_attempt: self.last_attempt().or(previous.last_attempt),
+                last_failure: self.last_failure().or(previous.last_failure),
+                // Always use the latest state.
+                //
+                // TODO:
+                // - if the change times are within a small interval, preserve the worst state
+                last_connection_state: self.peer_addr_state(),
+            })
         }
     }
 }
