@@ -1,7 +1,7 @@
 //! An address-with-metadata type used in Bitcoin networking.
 
 use std::{
-    cmp::{Ord, Ordering},
+    cmp::{max_by, Ord, Ordering},
     time::Instant,
 };
 
@@ -77,6 +77,31 @@ impl PeerAddrState {
         match self {
             NeverAttemptedGossiped | NeverAttemptedAlternate => true,
             AttemptPending | Responded | Failed => false,
+        }
+    }
+
+    /// Returns the typical connection state machine order of `self` and `other`.
+    /// Partially ordered states are sorted in connection attempt order.
+    ///
+    /// See [`MetaAddrChange::apply_to_meta_addr()`] for more details.
+    fn connection_state_order(&self, other: &Self) -> Ordering {
+        use Ordering::*;
+        match (self, other) {
+            (Responded, Responded)
+            | (Failed, Failed)
+            | (NeverAttemptedGossiped, NeverAttemptedGossiped)
+            | (NeverAttemptedAlternate, NeverAttemptedAlternate)
+            | (AttemptPending, AttemptPending) => Equal,
+            // Peers start in a "never attempted" state
+            (NeverAttemptedGossiped, _) => Less,
+            (_, NeverAttemptedGossiped) => Greater,
+            (NeverAttemptedAlternate, _) => Less,
+            (_, NeverAttemptedAlternate) => Greater,
+            (AttemptPending, _) => Less,
+            (_, AttemptPending) => Greater,
+            (Responded, _) => Less,
+            (_, Responded) => Greater,
+            // Failed is covered by the other cases
         }
     }
 }
@@ -804,18 +829,53 @@ impl MetaAddrChange {
         // TODO:
         // - use a monotonic change time instead of these 3 fields
         //   - use that change time to provide the last failed and last attempted times
-        let change_is_out_of_order = self
+        let change_is_concurrent = self
             .last_response()
-            .and_then(|change_last_response| Some(previous.last_response? > change_last_response))
+            .and_then(|change_last_response| {
+                Some(
+                    previous
+                        .last_response?
+                        .saturating_duration_since(change_last_response)
+                        .to_std()
+                        < constants::HANDSHAKE_TIMEOUT,
+                )
+            })
             .unwrap_or_default()
             || self
                 .last_attempt()
-                .and_then(|change_last_attempt| Some(previous.last_attempt? > change_last_attempt))
+                .and_then(|change_last_attempt| {
+                    Some(
+                        previous.last_attempt? - change_last_attempt < constants::HANDSHAKE_TIMEOUT,
+                    )
+                })
                 .unwrap_or_default()
             || self
                 .last_failure()
-                .and_then(|change_last_failure| Some(previous.last_failure? > change_last_failure))
+                .and_then(|change_last_failure| {
+                    Some(
+                        previous.last_failure? - change_last_failure < constants::HANDSHAKE_TIMEOUT,
+                    )
+                })
                 .unwrap_or_default();
+        let change_is_out_of_order = !change_is_concurrent
+            && (self
+                .last_response()
+                .and_then(|change_last_response| {
+                    Some(previous.last_response? > change_last_response)
+                })
+                .unwrap_or_default()
+                || self
+                    .last_attempt()
+                    .and_then(|change_last_attempt| {
+                        Some(previous.last_attempt? > change_last_attempt)
+                    })
+                    .unwrap_or_default()
+                || self
+                    .last_failure()
+                    .and_then(|change_last_failure| {
+                        Some(previous.last_failure? > change_last_failure)
+                    })
+                    .unwrap_or_default());
 
         let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
         let change_to_never_attempted = self
@@ -868,6 +928,12 @@ impl MetaAddrChange {
                 last_connection_state: self.peer_addr_state(),
             })
         } else {
+            let most_connection_progress = max_by(
+                self.peer_addr_state(),
+                previous.last_connection_state,
+                PeerAddrState::connection_state_order,
+            );
+
             // Existing entry and change are both Attempt, Responded, Failed
             // - update the fields from the change
             Some(MetaAddr {
@@ -884,11 +950,28 @@ impl MetaAddrChange {
                 // These are monotonic times.
                 last_attempt: self.last_attempt().or(previous.last_attempt),
                 last_failure: self.last_failure().or(previous.last_failure),
-                // Always use the latest state.
+                // Replace the state with the updated state.
                 //
-                // TODO:
-                // - if the change times are within a small interval, preserve the worst state
-                last_connection_state: self.peer_addr_state(),
+                // # Security
+                //
+                // If the changes might have been concurrent, prefer the connection state with the
+                // most progress. If two changes happen close together, the async scheduler can run
+                // their change sending code in either order. This includes the code that records
+                // the time of the change. So even if a failure happens after a response message,
+                // the failure time can be recorded before the response time code is run.
+                //
+                // The connection state machine order is used so that state transitions which are
+                // typically close together are preserved. These transitions are:
+                // - NeverAttempted*->AttemptPending->(Responded|Failed)
+                // - Responded->Failed
+                //
+                // State transitions like (Responded|Failed)->AttemptPending only happen after the
+                // reconnection timeout, so they will never be considered concurrent.
+                last_connection_state: if change_is_concurrent {
+                    most_connection_progress
+                } else {
+                    self.peer_addr_state()
+                },
             })
         }
     }
