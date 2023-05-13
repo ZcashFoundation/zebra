@@ -551,7 +551,12 @@ impl IntoDisk for OutputIndex {
 
         let disk_bytes = truncate_zero_be_bytes(&mem_bytes, OUTPUT_INDEX_DISK_BYTES);
 
-        disk_bytes.try_into().unwrap()
+        match disk_bytes {
+            Some(b) => b.try_into().unwrap(),
+            // We are hiding a problem with the truncated bytes here, instead of an error we return the biggest valid Height which will not be
+            // in the best chain so RPC methods will return an error.
+            None => [255, 255, 255],
+        }
     }
 }
 

@@ -114,31 +114,30 @@ impl FromDisk for () {
 /// Truncates `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
 /// Used to discard unused zero bytes during serialization.
 ///
+/// Return `None` if any of the truncated bytes are non-zero
+///
 /// # Panics
 ///
-/// - if `mem_bytes` is shorter than `disk_len`
-/// - if any of the truncated bytes are non-zero
-pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> &[u8] {
-    let truncated_bytes = mem_bytes
+/// - if `mem_bytes` is shorter than `disk_len`.
+pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> Option<&[u8]> {
+    let discarded_bytes = mem_bytes
         .len()
         .checked_sub(disk_len)
         .expect("unexpected `mem_bytes` length: must be at least `disk_len`");
 
-    if truncated_bytes == 0 {
-        return mem_bytes;
+    if discarded_bytes == 0 {
+        return Some(mem_bytes);
     }
 
-    let (discarded, truncated) = mem_bytes.split_at(truncated_bytes);
+    let (discarded, truncated) = mem_bytes.split_at(discarded_bytes);
 
-    assert!(
-        discarded.iter().all(|&byte| byte == 0),
-        "unexpected `mem_bytes` content: non-zero discarded bytes: {discarded:?}\n\
-         truncated: {truncated:?}",
-    );
+    if !discarded.iter().all(|&byte| byte == 0) {
+        return None;
+    }
 
     assert_eq!(truncated.len(), disk_len);
 
-    truncated
+    Some(truncated)
 }
 
 /// Expands `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
