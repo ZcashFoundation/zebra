@@ -74,9 +74,6 @@ skip-tree = [
 
     # Test-only dependencies
 
-    # wait for console-api -> console-subscriber to upgrade
-    { name = "tonic", version = "=0.8.3" },
-
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
 
@@ -101,11 +98,6 @@ skip-tree = [
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
-    # Progress bar dependencies
-
-    # wait for indicatif to update
-    { name = "portable-atomic", version = "=0.3.19" },
 
     # Unused dependencies
 
