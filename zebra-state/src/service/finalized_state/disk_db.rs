@@ -17,7 +17,7 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
+    service::finalized_state::disk_format::{FromDisk, TryIntoDisk},
     Config,
 };
 
@@ -105,34 +105,42 @@ pub trait WriteDisk {
     fn zs_insert<C, K, V>(&mut self, cf: &C, key: K, value: V)
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + Debug,
-        V: IntoDisk;
+        K: TryIntoDisk + Debug,
+        V: TryIntoDisk;
 
     /// Remove the given key form rocksdb column family if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + Debug;
+        K: TryIntoDisk + Debug;
 }
 
 impl WriteDisk for DiskWriteBatch {
     fn zs_insert<C, K, V>(&mut self, cf: &C, key: K, value: V)
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + Debug,
-        V: IntoDisk,
+        K: TryIntoDisk + Debug,
+        V: TryIntoDisk,
     {
-        let key_bytes = key.as_bytes();
-        let value_bytes = value.as_bytes();
+        // TODO: propagate these errors to callers if we ever need to serialize heights above
+        // `2^24 - 1` directly into key or value fields (heights inside ZcashSerialize are ok)
+        let key_bytes = key
+            .try_as_bytes()
+            .expect("invalid key: large heights are rejected by block validation");
+        let value_bytes = value
+            .try_as_bytes()
+            .expect("invalid value: large heights are rejected by block validation");
         self.batch.put_cf(cf, key_bytes, value_bytes);
     }
 
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + Debug,
+        K: TryIntoDisk + Debug,
     {
-        let key_bytes = key.as_bytes();
+        let key_bytes = key
+            .try_as_bytes()
+            .expect("invalid key: large heights are rejected by block validation");
         self.batch.delete_cf(cf, key_bytes);
     }
 }
@@ -151,14 +159,14 @@ pub trait ReadDisk {
     fn zs_get<C, K, V>(&self, cf: &C, key: &K) -> Option<V>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk,
+        K: TryIntoDisk,
         V: FromDisk;
 
     /// Check if a rocksdb column family `cf` contains the serialized form of `key`.
     fn zs_contains<C, K>(&self, cf: &C, key: &K) -> bool
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk;
+        K: TryIntoDisk;
 
     /// Returns the lowest key in `cf`, and the corresponding value.
     ///
@@ -185,7 +193,7 @@ pub trait ReadDisk {
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + FromDisk,
+        K: TryIntoDisk + FromDisk,
         V: FromDisk;
 
     /// Returns the first key less than or equal to `upper_bound` in `cf`,
@@ -195,7 +203,7 @@ pub trait ReadDisk {
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + FromDisk,
+        K: TryIntoDisk + FromDisk,
         V: FromDisk;
 }
 
@@ -233,10 +241,10 @@ impl ReadDisk for DiskDb {
     fn zs_get<C, K, V>(&self, cf: &C, key: &K) -> Option<V>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk,
+        K: TryIntoDisk,
         V: FromDisk,
     {
-        let key_bytes = key.as_bytes();
+        let key_bytes = key.try_as_bytes()?;
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
@@ -252,9 +260,12 @@ impl ReadDisk for DiskDb {
     fn zs_contains<C, K>(&self, cf: &C, key: &K) -> bool
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk,
+        K: TryIntoDisk,
     {
-        let key_bytes = key.as_bytes();
+        let Some(key_bytes) = key.try_as_bytes() else {
+            // Invalid conversions are rejected at insertion, so the key can't be in the database
+            return false;
+        };
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
@@ -302,10 +313,10 @@ impl ReadDisk for DiskDb {
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + FromDisk,
+        K: TryIntoDisk + FromDisk,
         V: FromDisk,
     {
-        let lower_bound = lower_bound.as_bytes();
+        let lower_bound = lower_bound.try_as_bytes()?;
         let from = rocksdb::IteratorMode::From(lower_bound.as_ref(), rocksdb::Direction::Forward);
 
         // Reading individual values from iterators does not seem to cause database hangs.
@@ -322,10 +333,10 @@ impl ReadDisk for DiskDb {
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: IntoDisk + FromDisk,
+        K: TryIntoDisk + FromDisk,
         V: FromDisk,
     {
-        let upper_bound = upper_bound.as_bytes();
+        let upper_bound = upper_bound.try_as_bytes()?;
         let from = rocksdb::IteratorMode::From(upper_bound.as_ref(), rocksdb::Direction::Reverse);
 
         // Reading individual values from iterators does not seem to cause database hangs.

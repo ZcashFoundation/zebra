@@ -541,8 +541,6 @@ impl FromDisk for Amount<NonNegative> {
     }
 }
 
-// TODO: serialize the index into a smaller number of bytes (#3953)
-//       serialize the index in big-endian order (#3953)
 impl IntoDisk for OutputIndex {
     type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 

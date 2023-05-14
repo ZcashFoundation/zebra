@@ -18,14 +18,32 @@ mod tests;
 pub use block::{TransactionIndex, TransactionLocation};
 pub use transparent::{OutputIndex, OutputLocation};
 
-/// Helper type for writing types to disk as raw bytes.
+/// Helper type for writing types with falliable conversions to disk as raw bytes.
+/// Also used to convert key types to raw bytes for disk lookups.
+pub trait TryIntoDisk {
+    /// The type used to write bytes to disk,
+    /// and compare a value as a key to on-disk keys.
+    type Bytes: AsRef<[u8]>;
+
+    /// Tries to convert `Self` into serialized raw bytes.
+    /// Returns `None` if the conversion fails.
+    ///
+    /// Used to convert keys to bytes in [`ReadDisk`][1],
+    /// and keys and values to bytes in [`WriteDisk`][2].
+    ///
+    /// [1]: super::disk_db::ReadDisk
+    /// [2]: super::disk_db::WriteDisk
+    fn try_as_bytes(&self) -> Option<Self::Bytes>;
+}
+
+/// Helper type for writing types with infalliable conversions to disk as raw bytes.
 /// Also used to convert key types to raw bytes for disk lookups.
 pub trait IntoDisk {
     /// The type used to write bytes to disk,
     /// and compare a value as a key to on-disk keys.
     type Bytes: AsRef<[u8]>;
 
-    /// Converts the current type into serialized raw bytes.
+    /// Converts `Self` into serialized raw bytes.
     ///
     /// Used to convert keys to bytes in [`ReadDisk`][1],
     /// and keys and values to bytes in [`WriteDisk`][2].
@@ -53,7 +71,24 @@ pub trait FromDisk: Sized {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self;
 }
 
-// Generic serialization impls
+// Generic falliable serialization impls
+
+impl<T> TryIntoDisk for T
+where
+    T: IntoDisk,
+{
+    type Bytes = T::Bytes;
+
+    fn try_as_bytes(&self) -> Option<Self::Bytes> {
+        Some(T::as_bytes(self))
+    }
+}
+
+// We can't impl TryIntoDisk for &T and Arc<T> because it conflicts with the
+// generic IntoDisk -> TryIntoDisk impl. If they are needed, we can replace
+// every IntoDisk impl with `Some(self.as_bytes())`
+
+// Generic infalliable serialization impls
 
 impl<'a, T> IntoDisk for &'a T
 where
