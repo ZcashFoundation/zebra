@@ -75,10 +75,10 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let height = finalized.height;
 
         // Update the tree in state
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&history_tree_cf, h);
         }

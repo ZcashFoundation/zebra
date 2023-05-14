@@ -246,7 +246,7 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let height = finalized.height;
 
         // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
@@ -260,7 +260,7 @@ impl DiskWriteBatch {
         self.zs_insert(&orchard_anchors, orchard_root, ());
 
         // Delete the previously stored Sprout note commitment tree.
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&sprout_note_commitment_tree_cf, h);
         }
@@ -303,7 +303,7 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let height = finalized.height;
 
         // Insert empty note commitment trees. Note that these can't be
         // used too early (e.g. the Orchard tree before Nu5 activates)

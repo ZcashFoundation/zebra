@@ -497,10 +497,10 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
+        let height = finalized.height;
         let FinalizedBlock {
             block,
             hash,
-            height,
             transaction_hashes,
             ..
         } = finalized;
@@ -518,7 +518,7 @@ impl DiskWriteBatch {
             .zip(transaction_hashes.iter())
             .enumerate()
         {
-            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
+            let transaction_location = TransactionLocation::from_usize(height, transaction_index);
 
             // Commit each transaction's data
             self.zs_insert(&tx_by_loc, transaction_location, transaction);

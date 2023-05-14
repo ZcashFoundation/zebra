@@ -432,7 +432,7 @@ impl DiskWriteBatch {
             db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
         // Index all new transparent outputs
-        for (new_output_location, utxo) in new_outputs_by_out_loc {
+        for (&new_output_location, utxo) in new_outputs_by_out_loc {
             let unspent_output = &utxo.output;
             let receiving_address = unspent_output.address(self.network());
 
@@ -447,7 +447,7 @@ impl DiskWriteBatch {
                 //   (the first location of the address in the chain).
                 let address_balance_location = address_balances
                     .entry(receiving_address)
-                    .or_insert_with(|| AddressBalanceLocation::new(*new_output_location));
+                    .or_insert_with(|| AddressBalanceLocation::new(new_output_location));
                 let receiving_address_location = address_balance_location.address_location();
 
                 // Update the balance for the address in memory.
@@ -457,7 +457,7 @@ impl DiskWriteBatch {
 
                 // Create a link from the AddressLocation to the new OutputLocation in the database.
                 let address_unspent_output =
-                    AddressUnspentOutput::new(receiving_address_location, *new_output_location);
+                    AddressUnspentOutput::new(receiving_address_location, new_output_location);
                 self.zs_insert(
                     &utxo_loc_by_transparent_addr_loc,
                     address_unspent_output,
@@ -508,7 +508,7 @@ impl DiskWriteBatch {
         // Mark all transparent inputs as spent.
         //
         // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
-        for (spent_output_location, utxo) in spent_utxos_by_out_loc {
+        for (&spent_output_location, utxo) in spent_utxos_by_out_loc {
             let spent_output = &utxo.output;
             let sending_address = spent_output.address(self.network());
 
@@ -526,7 +526,7 @@ impl DiskWriteBatch {
                 // Delete the link from the AddressLocation to the spent OutputLocation in the database.
                 let address_spent_output = AddressUnspentOutput::new(
                     address_balance_location.address_location(),
-                    *spent_output_location,
+                    spent_output_location,
                 );
                 self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
             }
