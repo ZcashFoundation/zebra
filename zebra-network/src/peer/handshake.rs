@@ -4,7 +4,7 @@ use std::{
     cmp::min,
     fmt,
     future::Future,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     panic,
     pin::Pin,
     sync::Arc,
@@ -45,7 +45,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config, VersionMessage,
+    BoxError, Config, PeerSocketAddr, VersionMessage,
 };
 
 #[cfg(test)]
@@ -152,7 +152,7 @@ pub enum ConnectedAddr {
     /// and port.
     OutboundDirect {
         /// The connected outbound remote address and port.
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
     },
 
     /// The address we received from the OS, when a remote peer directly
@@ -162,11 +162,10 @@ pub enum ConnectedAddr {
     /// if its outbound address is the same as its listener address. But the port
     /// is an ephemeral outbound TCP port, not a listener port.
     InboundDirect {
-        /// The connected inbound remote address.
-        maybe_ip: IpAddr,
-
-        /// The connected inbound transient remote port.
-        transient_port: u16,
+        /// The connected inbound remote address and ephemeral port.
+        ///
+        /// The IP address might be the address of a Zcash peer, but the port is an ephemeral port.
+        addr: PeerSocketAddr,
     },
 
     /// The proxy address we used to make an outbound connection.
@@ -207,16 +206,13 @@ use ConnectedAddr::*;
 
 impl ConnectedAddr {
     /// Returns a new outbound directly connected addr.
-    pub fn new_outbound_direct(addr: SocketAddr) -> ConnectedAddr {
+    pub fn new_outbound_direct(addr: PeerSocketAddr) -> ConnectedAddr {
         OutboundDirect { addr }
     }
 
     /// Returns a new inbound directly connected addr.
-    pub fn new_inbound_direct(addr: SocketAddr) -> ConnectedAddr {
-        InboundDirect {
-            maybe_ip: addr.ip(),
-            transient_port: addr.port(),
-        }
+    pub fn new_inbound_direct(addr: PeerSocketAddr) -> ConnectedAddr {
+        InboundDirect { addr }
     }
 
     /// Returns a new outbound connected addr via `proxy`.
@@ -246,7 +242,7 @@ impl ConnectedAddr {
         Isolated
     }
 
-    /// Returns a `SocketAddr` that can be used to track this connection in the
+    /// Returns a `PeerSocketAddr` that can be used to track this connection in the
     /// `AddressBook`.
     ///
     /// `None` for inbound connections, proxy connections, and isolated
@@ -264,7 +260,7 @@ impl ConnectedAddr {
     /// `AddressBook` state.
     ///
     /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
-    pub fn get_address_book_addr(&self) -> Option<SocketAddr> {
+    pub fn get_address_book_addr(&self) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
             // TODO: consider using the canonical address of the peer to track
@@ -273,7 +269,7 @@ impl ConnectedAddr {
         }
     }
 
-    /// Returns a `SocketAddr` that can be used to temporarily identify a
+    /// Returns a `PeerSocketAddr` that can be used to temporarily identify a
     /// connection.
     ///
     /// Isolated connections must not change Zebra's peer set or address book
@@ -290,18 +286,15 @@ impl ConnectedAddr {
     /// This address must not depend on the canonical address from the `Version`
     /// message. Otherwise, malicious peers could interfere with other peers'
     /// `PeerSet` state.
-    pub fn get_transient_addr(&self) -> Option<SocketAddr> {
+    pub fn get_transient_addr(&self) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
-            InboundDirect {
-                maybe_ip,
-                transient_port,
-            } => Some(SocketAddr::new(*maybe_ip, *transient_port)),
+            InboundDirect { addr } => Some(*addr),
             OutboundProxy {
                 transient_local_addr,
                 ..
-            } => Some(*transient_local_addr),
-            InboundProxy { transient_addr } => Some(*transient_addr),
+            } => Some(PeerSocketAddr::from(*transient_local_addr)),
+            InboundProxy { transient_addr } => Some(PeerSocketAddr::from(*transient_addr)),
             Isolated => None,
         }
     }
@@ -332,8 +325,8 @@ impl ConnectedAddr {
     /// remote address that we're currently connected to.
     pub fn get_alternate_addrs(
         &self,
-        mut canonical_remote: SocketAddr,
-    ) -> impl Iterator<Item = SocketAddr> {
+        mut canonical_remote: PeerSocketAddr,
+    ) -> impl Iterator<Item = PeerSocketAddr> {
         let addrs = match self {
             OutboundDirect { addr } => {
                 // Fixup unspecified addresses and ports using known good data
@@ -355,9 +348,9 @@ impl ConnectedAddr {
                 }
             }
 
-            InboundDirect { maybe_ip, .. } => {
+            InboundDirect { addr } => {
                 // Use the IP from the TCP connection, and the port the peer told us
-                let maybe_addr = SocketAddr::new(*maybe_ip, canonical_remote.port());
+                let maybe_addr = SocketAddr::new(addr.ip(), canonical_remote.port()).into();
 
                 // Try both addresses, but remove one duplicate if they match
                 if canonical_remote != maybe_addr {
@@ -654,7 +647,7 @@ where
         // an unspecified address for Isolated connections
         Isolated => {
             let unspec_ipv4 = get_unspecified_ipv4_addr(config.network);
-            (unspec_ipv4, PeerServices::empty(), unspec_ipv4)
+            (unspec_ipv4.into(), PeerServices::empty(), unspec_ipv4)
         }
         _ => {
             let their_addr = connected_addr
@@ -923,7 +916,7 @@ where
             // `Version` messages.
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
-                let alt_addr = MetaAddr::new_alternate(&alt_addr, &remote_services);
+                let alt_addr = MetaAddr::new_alternate(alt_addr, &remote_services);
                 // awaiting a local task won't hang
                 let _ = address_book_updater.send(alt_addr).await;
             }
@@ -933,7 +926,7 @@ where
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
-                    .send(MetaAddr::new_responded(&book_addr, &remote_services))
+                    .send(MetaAddr::new_responded(book_addr, &remote_services))
                     .await;
             }
 
@@ -1023,7 +1016,7 @@ where
                                         // so this await should not hang
                                         let _ = inbound_ts_collector
                                             .send(MetaAddr::new_responded(
-                                                &book_addr,
+                                                book_addr,
                                                 &remote_services,
                                             ))
                                             .await;
@@ -1040,7 +1033,7 @@ where
 
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                     let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_errored(&book_addr, remote_services))
+                                        .send(MetaAddr::new_errored(book_addr, remote_services))
                                         .await;
                                 }
                             }
@@ -1408,7 +1401,7 @@ where
 
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = address_book_updater
-                    .send(MetaAddr::new_errored(&book_addr, *remote_services))
+                    .send(MetaAddr::new_errored(book_addr, *remote_services))
                     .await;
             }
             Err(err)
@@ -1427,7 +1420,7 @@ async fn handle_heartbeat_shutdown(
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(&book_addr, *remote_services))
+            .send(MetaAddr::new_shutdown(book_addr, *remote_services))
             .await;
     }
 

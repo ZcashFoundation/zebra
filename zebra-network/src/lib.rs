@@ -166,8 +166,9 @@ pub use crate::isolated::tor::connect_isolated_tor;
 pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use crate::isolated::{
-    connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound,
+pub use crate::{
+    isolated::{connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound},
+    protocol::external::canonical_peer_addr,
 };
 
 pub use crate::{
@@ -175,7 +176,7 @@ pub use crate::{
     address_book_peers::AddressBookPeers,
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
-    meta_addr::PeerAddrState,
+    meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,

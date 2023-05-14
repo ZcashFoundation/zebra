@@ -1,7 +1,7 @@
 //! Acceptance tests for zebra-network APIs.
 
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
 };
 
@@ -10,14 +10,14 @@ use chrono::Utc;
 use zebra_chain::block::Height;
 use zebra_network::{
     types::{AddrInVersion, Nonce, PeerServices},
-    ConnectedAddr, ConnectionInfo, Version, VersionMessage,
+    ConnectedAddr, ConnectionInfo, PeerSocketAddr, Version, VersionMessage,
 };
 
 /// Test that the types used in [`ConnectionInfo`] are public,
 /// by compiling code that explicitly uses those types.
 #[test]
 fn connection_info_types_are_public() {
-    let fake_addr: SocketAddr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 3).into();
+    let fake_addr: PeerSocketAddr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 3).into();
     let fake_version = Version(3);
     let fake_services = PeerServices::default();
 

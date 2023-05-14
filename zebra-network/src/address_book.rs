@@ -17,9 +17,13 @@ use tracing::Span;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
-    types::MetaAddr, AddressBookPeers, PeerAddrState,
+    constants,
+    meta_addr::MetaAddrChange,
+    protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::MetaAddr,
+    AddressBookPeers, PeerAddrState, PeerSocketAddr,
 };
+
 #[cfg(test)]
 mod tests;
 
@@ -66,7 +70,7 @@ pub struct AddressBook {
     /// We reverse the comparison order, because the standard library
     /// ([`BTreeMap`](std::collections::BTreeMap)) sorts in ascending order, but
     /// [`OrderedMap`] sorts in descending order.
-    by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
+    by_addr: OrderedMap<PeerSocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -182,7 +186,7 @@ impl AddressBook {
         let addrs = addrs
             .into_iter()
             .map(|mut meta_addr| {
-                meta_addr.addr = canonical_socket_addr(meta_addr.addr);
+                meta_addr.addr = canonical_peer_addr(meta_addr.addr);
                 meta_addr
             })
             .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network))
@@ -219,9 +223,14 @@ impl AddressBook {
     ///
     /// This address contains minimal state, but it is not sanitized.
     pub fn local_listener_meta_addr(&self) -> MetaAddr {
-        MetaAddr::new_local_listener_change(&self.local_listener)
+        MetaAddr::new_local_listener_change(self.local_listener)
             .into_new_meta_addr()
             .expect("unexpected invalid new local listener addr")
+    }
+
+    /// Get the local listener [`SocketAddr`].
+    pub fn local_listener_socket_addr(&self) -> SocketAddr {
+        self.local_listener
     }
 
     /// Get the contents of `self` in random order with sanitized timestamps.
@@ -257,8 +266,8 @@ impl AddressBook {
     /// Look up `addr` in the address book, and return its [`MetaAddr`].
     ///
     /// Converts `addr` to a canonical address before looking it up.
-    pub fn get(&mut self, addr: &SocketAddr) -> Option<MetaAddr> {
-        let addr = canonical_socket_addr(*addr);
+    pub fn get(&mut self, addr: PeerSocketAddr) -> Option<MetaAddr> {
+        let addr = canonical_peer_addr(*addr);
 
         // Unfortunately, `OrderedMap` doesn't implement `get`.
         let meta_addr = self.by_addr.remove(&addr);
@@ -278,7 +287,7 @@ impl AddressBook {
     /// All changes should go through `update`, so that the address book
     /// only contains valid outbound addresses.
     ///
-    /// Change addresses must be canonical `SocketAddr`s. This makes sure that
+    /// Change addresses must be canonical `PeerSocketAddr`s. This makes sure that
     /// each address book entry has a unique IP address.
     ///
     /// # Security
@@ -287,11 +296,11 @@ impl AddressBook {
     /// to the address book. This prevents rapid reconnections to the same peer.
     ///
     /// As an exception, this function can ignore all changes for specific
-    /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
+    /// [`PeerSocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
-        let previous = self.get(&change.addr());
+        let previous = self.get(change.addr());
 
         let _guard = self.span.enter();
 
@@ -378,7 +387,7 @@ impl AddressBook {
     /// All address removals should go through `take`, so that the address
     /// book metrics are accurate.
     #[allow(dead_code)]
-    fn take(&mut self, removed_addr: SocketAddr) -> Option<MetaAddr> {
+    fn take(&mut self, removed_addr: PeerSocketAddr) -> Option<MetaAddr> {
         let _guard = self.span.enter();
 
         let instant_now = Instant::now();
@@ -399,9 +408,9 @@ impl AddressBook {
         }
     }
 
-    /// Returns true if the given [`SocketAddr`] is pending a reconnection
+    /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
     /// attempt.
-    pub fn pending_reconnection_addr(&mut self, addr: &SocketAddr) -> bool {
+    pub fn pending_reconnection_addr(&mut self, addr: PeerSocketAddr) -> bool {
         let meta_addr = self.get(addr);
 
         let _guard = self.span.enter();

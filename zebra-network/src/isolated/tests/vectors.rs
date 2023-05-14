@@ -1,6 +1,6 @@
 //! Fixed test vectors for isolated Zebra connections.
 
-use std::{net::SocketAddr, task::Poll, time::Duration};
+use std::{task::Poll, time::Duration};
 
 use futures::stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -151,7 +151,7 @@ async fn check_version_message<PeerTransport>(
         //
         // SECURITY TODO: check if the timestamp field can be zeroed, to remove another distinguisher (#3300)
 
-        let mut fixed_isolated_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let mut fixed_isolated_addr: PeerSocketAddr = "0.0.0.0:0".parse().unwrap();
         fixed_isolated_addr.set_port(network.default_port());
 
         // Required fields should be accurate and match most other peers.

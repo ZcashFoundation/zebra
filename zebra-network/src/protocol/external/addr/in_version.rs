@@ -5,7 +5,7 @@
 
 use std::{
     io::{Read, Write},
-    net::{SocketAddr, SocketAddrV6},
+    net::SocketAddrV6,
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -14,15 +14,15 @@ use zebra_chain::serialization::{
     SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
 };
 
-use crate::protocol::external::types::PeerServices;
+use crate::{protocol::external::types::PeerServices, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::protocol::external::arbitrary::addr_v1_ipv6_mapped_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
 
-use super::{canonical_socket_addr, v1::ipv6_mapped_socket_addr};
+use super::{canonical_peer_addr, v1::ipv6_mapped_ip_addr};
 
 /// The format used for Bitcoin node addresses in `version` messages.
 /// Contains a node address and services, without a last-seen time.
@@ -31,9 +31,9 @@ use super::{canonical_socket_addr, v1::ipv6_mapped_socket_addr};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AddrInVersion {
-    /// The unverified services for the peer at `ipv6_addr`.
+    /// The unverified services for the peer at `addr`.
     ///
-    /// These services were advertised by the peer at `ipv6_addr`,
+    /// These services were advertised by the peer at `addr`,
     /// then gossiped via another peer.
     ///
     /// ## Security
@@ -42,29 +42,29 @@ pub struct AddrInVersion {
     /// records, older peer versions, or buggy or malicious peers.
     untrusted_services: PeerServices,
 
-    /// The peer's IPv6 socket address.
+    /// The peer's canonical socket address.
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
     /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
-        proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")
+        proptest(strategy = "canonical_peer_addr_strategy()")
     )]
-    ipv6_addr: SocketAddrV6,
+    addr: PeerSocketAddr,
 }
 
 impl AddrInVersion {
     /// Returns a new `version` message address based on its fields.
-    pub fn new(socket_addr: impl Into<SocketAddr>, untrusted_services: PeerServices) -> Self {
+    pub fn new(socket_addr: impl Into<PeerSocketAddr>, untrusted_services: PeerServices) -> Self {
         Self {
             untrusted_services,
-            ipv6_addr: ipv6_mapped_socket_addr(socket_addr),
+            addr: canonical_peer_addr(socket_addr),
         }
     }
 
     /// Returns the canonical address for this peer.
-    pub fn addr(&self) -> SocketAddr {
-        canonical_socket_addr(self.ipv6_addr)
+    pub fn addr(&self) -> PeerSocketAddr {
+        self.addr
     }
 
     /// Returns the services for this peer.
@@ -77,8 +77,9 @@ impl ZcashSerialize for AddrInVersion {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         writer.write_u64::<LittleEndian>(self.untrusted_services.bits())?;
 
-        self.ipv6_addr.ip().zcash_serialize(&mut writer)?;
-        writer.write_u16::<BigEndian>(self.ipv6_addr.port())?;
+        let ipv6_addr = ipv6_mapped_ip_addr(self.addr.ip());
+        ipv6_addr.zcash_serialize(&mut writer)?;
+        writer.write_u16::<BigEndian>(self.addr.port())?;
 
         Ok(())
     }
@@ -96,7 +97,7 @@ impl ZcashDeserialize for AddrInVersion {
         let ipv6_addr = SocketAddrV6::new(ipv6_addr, port, 0, 0);
 
         Ok(AddrInVersion {
-            ipv6_addr,
+            addr: canonical_peer_addr(ipv6_addr),
             untrusted_services,
         })
     }

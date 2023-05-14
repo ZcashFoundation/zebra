@@ -11,7 +11,7 @@ pub mod in_version;
 pub(crate) mod v1;
 pub(crate) mod v2;
 
-pub use canonical::canonical_socket_addr;
+pub use canonical::{canonical_peer_addr, canonical_socket_addr};
 pub use in_version::AddrInVersion;
 
 // These types and functions should only be visible in the `external` module,
@@ -22,7 +22,7 @@ pub(super) use v2::AddrV2;
 
 #[allow(unused_imports)]
 #[cfg(any(test, feature = "proptest-impl"))]
-pub(super) use v1::{ipv6_mapped_socket_addr, ADDR_V1_SIZE};
+pub(super) use v1::{ipv6_mapped_ip_addr, ADDR_V1_SIZE};
 
 // TODO: write tests for addrv2 deserialization
 #[allow(unused_imports)]

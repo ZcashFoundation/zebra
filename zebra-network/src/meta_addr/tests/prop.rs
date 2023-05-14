@@ -1,9 +1,6 @@
 //! Randomised property tests for MetaAddr and MetaAddrChange.
 
-use std::{
-    collections::HashMap, convert::TryFrom, env, net::SocketAddr, str::FromStr, sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, env, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
@@ -21,8 +18,8 @@ use crate::{
         PeerAddrState::*,
     },
     peer_set::candidate_set::CandidateSet,
-    protocol::{external::canonical_socket_addr, types::PeerServices},
-    AddressBook,
+    protocol::{external::canonical_peer_addr, types::PeerServices},
+    AddressBook, PeerSocketAddr,
 };
 
 use super::check;
@@ -120,7 +117,7 @@ proptest! {
                 prop_assert!(attempt_count <= 1);
 
                 // Simulate an attempt
-                addr = MetaAddr::new_reconnect(&addr.addr)
+                addr = MetaAddr::new_reconnect(addr.addr)
                     .apply_to_meta_addr(addr)
                     .expect("unexpected invalid attempt");
             }
@@ -159,7 +156,7 @@ proptest! {
         let sanitized_addrs = address_book.sanitized(chrono_now);
 
         let expected_local_listener = address_book.local_listener_meta_addr();
-        let canonical_local_listener = canonical_socket_addr(local_listener);
+        let canonical_local_listener = canonical_peer_addr(local_listener);
         let book_sanitized_local_listener = sanitized_addrs
             .iter()
             .find(|meta_addr| meta_addr.addr == canonical_local_listener);
@@ -415,10 +412,10 @@ proptest! {
             tokio::time::pause();
 
             // The current attempt counts for each peer in this interval
-            let mut attempt_counts: HashMap<SocketAddr, u32> = HashMap::new();
+            let mut attempt_counts: HashMap<PeerSocketAddr, u32> = HashMap::new();
 
             // The most recent address info for each peer
-            let mut addrs: HashMap<SocketAddr, MetaAddr> = HashMap::new();
+            let mut addrs: HashMap<PeerSocketAddr, MetaAddr> = HashMap::new();
 
             for change_index in 0..MAX_ADDR_CHANGE {
                 for (addr, changes) in addr_changes_lists.iter() {
@@ -432,7 +429,7 @@ proptest! {
                         );
 
                         // Simulate an attempt
-                        *addr = MetaAddr::new_reconnect(&addr.addr)
+                        *addr = MetaAddr::new_reconnect(addr.addr)
                             .apply_to_meta_addr(*addr)
                             .expect("unexpected invalid attempt");
                     }

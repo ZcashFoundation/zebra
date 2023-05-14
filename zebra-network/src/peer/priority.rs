@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 
 use zebra_chain::parameters::Network;
 
+use crate::PeerSocketAddr;
+
 use AttributePreference::*;
 
 /// A level of preference for a peer attribute.
@@ -67,13 +69,15 @@ impl PeerPreference {
     ///
     /// Use the [`PeerPreference`] [`Ord`] implementation to sort preferred peers first.
     pub fn new(
-        peer_addr: &SocketAddr,
+        peer_addr: impl Into<PeerSocketAddr>,
         network: impl Into<Option<Network>>,
     ) -> Result<PeerPreference, &'static str> {
+        let peer_addr = peer_addr.into();
+
         address_is_valid_for_outbound_connections(peer_addr, network)?;
 
-        // This check only prefers the configured network,
-        // because the address book and initial peer connections reject the port used by the other network.
+        // This check only prefers the configured network, because
+        // address_is_valid_for_outbound_connections() rejects the port used by the other network.
         let canonical_port =
             AttributePreference::preferred_from([8232, 18232].contains(&peer_addr.port()));
 
@@ -81,7 +85,7 @@ impl PeerPreference {
     }
 }
 
-/// Is the [`SocketAddr`] we have for this peer valid for outbound
+/// Is the [`PeerSocketAddr`] we have for this peer valid for outbound
 /// connections?
 ///
 /// Since the addresses in the address book are unique, this check can be
@@ -89,7 +93,7 @@ impl PeerPreference {
 ///
 /// [`MetaAddr`]: crate::meta_addr::MetaAddr
 pub fn address_is_valid_for_outbound_connections(
-    peer_addr: &SocketAddr,
+    peer_addr: PeerSocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
     // TODO: make private IP addresses an error unless a debug config is set (#3117)
@@ -105,14 +109,14 @@ pub fn address_is_valid_for_outbound_connections(
         );
     }
 
-    address_is_valid_for_inbound_listeners(peer_addr, network)
+    address_is_valid_for_inbound_listeners(*peer_addr, network)
 }
 
 /// Is the supplied [`SocketAddr`] valid for inbound listeners on `network`?
 ///
 /// This is used to check Zebra's configured Zcash listener port.
 pub fn address_is_valid_for_inbound_listeners(
-    listener_addr: &SocketAddr,
+    listener_addr: SocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
     // TODO: make private IP addresses an error unless a debug config is set (#3117)

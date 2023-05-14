@@ -4,7 +4,6 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -29,7 +28,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxError,
+    BoxError, PeerSocketAddr,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -87,7 +86,7 @@ pub(crate) struct ClientRequest {
     /// The peer address for registering missing inventory.
     ///
     /// TODO: replace this with `ConnectedAddr`?
-    pub transient_addr: Option<SocketAddr>,
+    pub transient_addr: Option<PeerSocketAddr>,
 
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
@@ -166,7 +165,7 @@ pub(super) struct MissingInventoryCollector {
     collector: broadcast::Sender<InventoryChange>,
 
     /// The peer address for registering missing inventory.
-    transient_addr: SocketAddr,
+    transient_addr: PeerSocketAddr,
 }
 
 impl std::fmt::Debug for Client {
@@ -263,7 +262,7 @@ impl MustUseClientResponseSender {
         tx: oneshot::Sender<Result<Response, SharedPeerError>>,
         request: &Request,
         inv_collector: Option<broadcast::Sender<InventoryChange>>,
-        transient_addr: Option<SocketAddr>,
+        transient_addr: Option<PeerSocketAddr>,
     ) -> Self {
         Self {
             tx: Some(tx),
@@ -341,7 +340,7 @@ impl MissingInventoryCollector {
     pub fn new(
         request: &Request,
         inv_collector: Option<broadcast::Sender<InventoryChange>>,
-        transient_addr: Option<SocketAddr>,
+        transient_addr: Option<PeerSocketAddr>,
     ) -> Option<Box<MissingInventoryCollector>> {
         if !request.is_inventory_download() {
             return None;
