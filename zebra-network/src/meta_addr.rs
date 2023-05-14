@@ -2,7 +2,6 @@
 
 use std::{
     cmp::{Ord, Ordering},
-    net::SocketAddr,
     time::Instant,
 };
 
@@ -12,18 +11,22 @@ use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
     constants,
-    peer::PeerPreference,
-    protocol::{external::canonical_socket_addr, types::PeerServices},
+    peer::{address_is_valid_for_outbound_connections, PeerPreference},
+    protocol::{external::canonical_peer_addr, types::PeerServices},
 };
 
 use MetaAddrChange::*;
 use PeerAddrState::*;
 
+pub mod peer_addr;
+
+pub use peer_addr::PeerSocketAddr;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
+use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
@@ -134,12 +137,12 @@ pub struct MetaAddr {
     /// The peer's canonical socket address.
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
-        proptest(strategy = "canonical_socket_addr_strategy()")
+        proptest(strategy = "canonical_peer_addr_strategy()")
     )]
     //
     // TODO: make addr private, so the constructors can make sure it is a
     // canonical SocketAddr (#2357)
-    pub(crate) addr: SocketAddr,
+    pub(crate) addr: PeerSocketAddr,
 
     /// The services advertised by the peer.
     ///
@@ -196,18 +199,18 @@ pub enum MetaAddrChange {
     NewInitial {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
     },
 
     /// Creates a new gossiped `MetaAddr`.
     NewGossiped {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
         untrusted_services: PeerServices,
         untrusted_last_seen: DateTime32,
     },
@@ -218,9 +221,9 @@ pub enum MetaAddrChange {
     NewAlternate {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
         untrusted_services: PeerServices,
     },
 
@@ -228,9 +231,9 @@ pub enum MetaAddrChange {
     NewLocal {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
     },
 
     /// Updates an existing `MetaAddr` when an outbound connection attempt
@@ -238,18 +241,18 @@ pub enum MetaAddrChange {
     UpdateAttempt {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
     },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
     UpdateResponded {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
         services: PeerServices,
     },
 
@@ -257,9 +260,9 @@ pub enum MetaAddrChange {
     UpdateFailed {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_socket_addr_strategy()")
+            proptest(strategy = "canonical_peer_addr_strategy()")
         )]
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
         services: Option<PeerServices>,
     },
 }
@@ -267,21 +270,21 @@ pub enum MetaAddrChange {
 impl MetaAddr {
     /// Returns a [`MetaAddrChange::NewInitial`] for a peer that was excluded from
     /// the list of the initial peers.
-    pub fn new_initial_peer(addr: SocketAddr) -> MetaAddrChange {
+    pub fn new_initial_peer(addr: PeerSocketAddr) -> MetaAddrChange {
         NewInitial {
-            addr: canonical_socket_addr(addr),
+            addr: canonical_peer_addr(addr),
         }
     }
 
     /// Returns a new `MetaAddr`, based on the deserialized fields from a
     /// gossiped peer [`Addr`][crate::protocol::external::Message::Addr] message.
     pub fn new_gossiped_meta_addr(
-        addr: SocketAddr,
+        addr: PeerSocketAddr,
         untrusted_services: PeerServices,
         untrusted_last_seen: DateTime32,
     ) -> MetaAddr {
         MetaAddr {
-            addr: canonical_socket_addr(addr),
+            addr: canonical_peer_addr(addr),
             services: Some(untrusted_services),
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
@@ -300,7 +303,7 @@ impl MetaAddr {
         let untrusted_services = self.services?;
 
         Some(NewGossiped {
-            addr: canonical_socket_addr(self.addr),
+            addr: canonical_peer_addr(self.addr),
             untrusted_services,
             untrusted_last_seen: self
                 .untrusted_last_seen
@@ -320,52 +323,55 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook) state,
     ///   or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(addr: &SocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_responded(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
         UpdateResponded {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             services: *services,
         }
     }
 
     /// Returns a [`MetaAddrChange::UpdateAttempt`] for a peer that we
     /// want to make an outbound connection to.
-    pub fn new_reconnect(addr: &SocketAddr) -> MetaAddrChange {
+    pub fn new_reconnect(addr: PeerSocketAddr) -> MetaAddrChange {
         UpdateAttempt {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
         }
     }
 
     /// Returns a [`MetaAddrChange::NewAlternate`] for a peer's alternate address,
     /// received via a `Version` message.
-    pub fn new_alternate(addr: &SocketAddr, untrusted_services: &PeerServices) -> MetaAddrChange {
+    pub fn new_alternate(
+        addr: PeerSocketAddr,
+        untrusted_services: &PeerServices,
+    ) -> MetaAddrChange {
         NewAlternate {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             untrusted_services: *untrusted_services,
         }
     }
 
     /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
-    pub fn new_local_listener_change(addr: &SocketAddr) -> MetaAddrChange {
+    pub fn new_local_listener_change(addr: impl Into<PeerSocketAddr>) -> MetaAddrChange {
         NewLocal {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(addr),
         }
     }
 
     /// Returns a [`MetaAddrChange::UpdateFailed`] for a peer that has just had
     /// an error.
     pub fn new_errored(
-        addr: &SocketAddr,
+        addr: PeerSocketAddr,
         services: impl Into<Option<PeerServices>>,
     ) -> MetaAddrChange {
         UpdateFailed {
-            addr: canonical_socket_addr(*addr),
+            addr: canonical_peer_addr(*addr),
             services: services.into(),
         }
     }
 
     /// Create a new `MetaAddr` for a peer that has just shut down.
     pub fn new_shutdown(
-        addr: &SocketAddr,
+        addr: PeerSocketAddr,
         services: impl Into<Option<PeerServices>>,
     ) -> MetaAddrChange {
         // TODO: if the peer shut down in the Responded state, preserve that
@@ -374,13 +380,13 @@ impl MetaAddr {
     }
 
     /// Return the address for this `MetaAddr`.
-    pub fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> PeerSocketAddr {
         self.addr
     }
 
     /// Return the address preference level for this `MetaAddr`.
     pub fn peer_preference(&self) -> Result<PeerPreference, &'static str> {
-        PeerPreference::new(&self.addr, None)
+        PeerPreference::new(self.addr, None)
     }
 
     /// Returns the time of the last successful interaction with this peer.
@@ -535,13 +541,13 @@ impl MetaAddr {
             && self.is_probably_reachable(chrono_now)
     }
 
-    /// Is the [`SocketAddr`] we have for this peer valid for outbound
+    /// Is the [`PeerSocketAddr`] we have for this peer valid for outbound
     /// connections?
     ///
     /// Since the addresses in the address book are unique, this check can be
     /// used to permanently reject entire [`MetaAddr`]s.
     pub fn address_is_valid_for_outbound(&self, network: Network) -> bool {
-        PeerPreference::new(&self.addr, network).is_ok()
+        address_is_valid_for_outbound_connections(self.addr, network).is_ok()
     }
 
     /// Is the last known information for this peer valid for outbound
@@ -611,7 +617,7 @@ impl MetaAddr {
             .expect("unexpected underflow: rem_euclid is strictly less than timestamp");
 
         Some(MetaAddr {
-            addr: canonical_socket_addr(self.addr),
+            addr: canonical_peer_addr(self.addr),
             // initial peers are sanitized assuming they are `NODE_NETWORK`
             // TODO: split untrusted and direct services
             //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
@@ -640,7 +646,7 @@ impl MetaAddr {
 
 impl MetaAddrChange {
     /// Return the address for this change.
-    pub fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> PeerSocketAddr {
         match self {
             NewInitial { addr }
             | NewGossiped { addr, .. }
@@ -656,7 +662,7 @@ impl MetaAddrChange {
     /// Set the address for this change to `new_addr`.
     ///
     /// This method should only be used in tests.
-    pub fn set_addr(&mut self, new_addr: SocketAddr) {
+    pub fn set_addr(&mut self, new_addr: PeerSocketAddr) {
         match self {
             NewInitial { addr }
             | NewGossiped { addr, .. }

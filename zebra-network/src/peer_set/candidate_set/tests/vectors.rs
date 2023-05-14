@@ -1,7 +1,6 @@
 //! Fixed test vectors for CandidateSet.
 
 use std::{
-    convert::TryInto,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::Arc,
@@ -245,7 +244,7 @@ fn mock_gossiped_peers(last_seen_times: impl IntoIterator<Item = DateTime<Utc>>)
                 .expect("`last_seen` time doesn't fit in a `DateTime32`");
 
             MetaAddr::new_gossiped_meta_addr(
-                SocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000),
+                SocketAddr::new(IpAddr::from([192, 168, 1, index as u8]), 20_000).into(),
                 PeerServices::NODE_NETWORK,
                 last_seen,
             )

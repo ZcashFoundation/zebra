@@ -43,7 +43,7 @@ use crate::{
         ActiveConnectionCounter, CandidateSet,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, Request, Response,
+    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -1192,7 +1192,7 @@ async fn self_connections_should_fail() {
             .expect("unexpected panic in address book");
 
         let self_connection_status = unlocked_address_book
-            .get(&real_self_listener.addr())
+            .get(real_self_listener.addr())
             .expect("unexpected dropped listener address in address book");
 
         std::mem::drop(unlocked_address_book);
@@ -1283,7 +1283,7 @@ async fn remnant_nonces_from_outbound_connections_are_limited() {
         let connection_tracker = active_outbound_connections.track_connection();
 
         let req = OutboundConnectorRequest {
-            addr,
+            addr: addr.into(),
             connection_tracker,
         };
 
@@ -1462,8 +1462,11 @@ async fn spawn_crawler_with_peer_limit<C>(
     outbound_connector: C,
 ) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,
@@ -1482,8 +1485,11 @@ where
     let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
         let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
-        let addr =
-            MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now());
+        let addr = MetaAddr::new_gossiped_meta_addr(
+            addr.into(),
+            PeerServices::NODE_NETWORK,
+            DateTime32::now(),
+        );
         fake_peer = Some(addr);
         let addr = addr
             .new_gossiped_change()
@@ -1674,8 +1680,11 @@ async fn spawn_add_initial_peers<C>(
     JoinHandle<Result<(), BoxError>>,
 )
 where
-    C: Service<OutboundConnectorRequest, Response = (SocketAddr, peer::Client), Error = BoxError>
-        + Clone
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     C::Future: Send + 'static,

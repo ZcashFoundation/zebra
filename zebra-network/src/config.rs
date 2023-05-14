@@ -17,8 +17,8 @@ use crate::{
         DEFAULT_CRAWL_NEW_PEER_INTERVAL, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
         OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
-    protocol::external::canonical_socket_addr,
-    BoxError,
+    protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    BoxError, PeerSocketAddr,
 };
 
 #[cfg(test)]
@@ -145,7 +145,7 @@ impl Config {
     }
 
     /// Resolve initial seed peer IP addresses, based on the configured network.
-    pub async fn initial_peers(&self) -> HashSet<SocketAddr> {
+    pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
         Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await
     }
 
@@ -154,7 +154,7 @@ impl Config {
     ///
     /// If DNS resolution fails or times out for all peers, continues retrying
     /// until at least one peer is found.
-    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<SocketAddr> {
+    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<PeerSocketAddr> {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
@@ -196,7 +196,7 @@ impl Config {
     /// `max_retries` times.
     ///
     /// If DNS continues to fail, returns an empty list of addresses.
-    async fn resolve_host(host: &str, max_retries: usize) -> HashSet<SocketAddr> {
+    async fn resolve_host(host: &str, max_retries: usize) -> HashSet<PeerSocketAddr> {
         for retries in 0..=max_retries {
             if let Ok(addresses) = Config::resolve_host_once(host).await {
                 return addresses;
@@ -225,13 +225,13 @@ impl Config {
     ///
     /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
     /// If DNS resolution fails or times out, returns an error.
-    async fn resolve_host_once(host: &str) -> Result<HashSet<SocketAddr>, BoxError> {
+    async fn resolve_host_once(host: &str) -> Result<HashSet<PeerSocketAddr>, BoxError> {
         let fut = tokio::net::lookup_host(host);
         let fut = tokio::time::timeout(DNS_LOOKUP_TIMEOUT, fut);
 
         match fut.await {
             Ok(Ok(ip_addrs)) => {
-                let ip_addrs: Vec<SocketAddr> = ip_addrs.map(canonical_socket_addr).collect();
+                let ip_addrs: Vec<PeerSocketAddr> = ip_addrs.map(canonical_peer_addr).collect();
 
                 // if we're logging at debug level,
                 // the full list of IP addresses will be shown in the log message

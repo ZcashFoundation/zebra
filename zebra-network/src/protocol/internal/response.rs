@@ -32,7 +32,7 @@ pub enum Response {
     ///
     /// The list contains `0..=MAX_META_ADDR` peers.
     //
-    // TODO: make this into a HashMap<SocketAddr, MetaAddr> - a unique list of peer addresses (#2244)
+    // TODO: make this into a HashMap<PeerSocketAddr, MetaAddr> - a unique list of peer addresses (#2244)
     Peers(Vec<MetaAddr>),
 
     /// An ordered list of block hashes.

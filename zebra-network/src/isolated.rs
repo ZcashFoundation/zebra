@@ -1,6 +1,6 @@
 //! Creating isolated connections to specific peers.
 
-use std::{future::Future, net::SocketAddr};
+use std::future::Future;
 
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -11,7 +11,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
 use crate::{
     peer::{self, Client, ConnectedAddr, HandshakeRequest},
     peer_set::ActiveConnectionCounter,
-    BoxError, Config, Request, Response,
+    BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
@@ -126,7 +126,7 @@ where
 /// Prefer `connect_isolated_tor` if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
-    addr: SocketAddr,
+    addr: impl Into<PeerSocketAddr>,
     user_agent: String,
 ) -> impl Future<Output = Result<Client, BoxError>> {
     let nil_inbound_service =
@@ -146,7 +146,7 @@ pub fn connect_isolated_tcp_direct(
 /// which makes it stand out from other isolated connections from other peers.
 pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
     network: Network,
-    addr: SocketAddr,
+    addr: impl Into<PeerSocketAddr>,
     user_agent: String,
     inbound_service: InboundService,
 ) -> impl Future<Output = Result<Client, BoxError>>
@@ -155,7 +155,9 @@ where
         Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     InboundService::Future: Send,
 {
-    tokio::net::TcpStream::connect(addr)
+    let addr = addr.into();
+
+    tokio::net::TcpStream::connect(*addr)
         .err_into()
         .and_then(move |tcp_stream| {
             connect_isolated_with_inbound(network, tcp_stream, user_agent, inbound_service)

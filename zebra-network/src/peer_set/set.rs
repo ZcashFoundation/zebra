@@ -98,7 +98,6 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
     time::Instant,
@@ -133,7 +132,7 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
     },
-    BoxError, Config, PeerError, SharedPeerError,
+    BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
 
 #[cfg(test)]
@@ -166,7 +165,7 @@ pub struct CancelClientWork;
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
 pub struct PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -252,7 +251,7 @@ where
 
 impl<D, C> Drop for PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -263,7 +262,7 @@ where
 
 impl<D, C> PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -711,7 +710,7 @@ where
             return fut.map_err(Into::into).boxed();
         }
 
-        let missing_peer_list: HashSet<SocketAddr> = self
+        let missing_peer_list: HashSet<PeerSocketAddr> = self
             .inventory_registry
             .missing_peers(hash)
             .copied()
@@ -883,7 +882,7 @@ where
 
 impl<D, C> Service<Request> for PeerSet<D, C>
 where
-    D: Discover<Key = SocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {

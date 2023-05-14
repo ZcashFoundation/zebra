@@ -1,14 +1,15 @@
-use std::{
-    convert::TryInto,
-    net::{SocketAddr, SocketAddrV6},
-};
+//! Randomised test data generation for external protocol types.
+
+use std::net::SocketAddr;
 
 use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use zebra_chain::{block, transaction};
 
+use crate::PeerSocketAddr;
+
 use super::{
-    addr::{canonical_socket_addr, ipv6_mapped_socket_addr},
+    addr::canonical_peer_addr,
     types::{PeerServices, Version},
     InventoryHash, Message,
 };
@@ -124,21 +125,11 @@ impl Arbitrary for Version {
     type Strategy = BoxedStrategy<Self>;
 }
 
-/// Returns a random canonical Zebra `SocketAddr`.
+/// Returns a random canonical Zebra [`PeerSocketAddr`].
 ///
 /// See [`canonical_ip_addr`] for details.
 ///
 /// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
-pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
-    any::<SocketAddr>().prop_map(canonical_socket_addr)
-}
-
-/// Returns a random `SocketAddrV6` for use in `addr` (v1) Zcash network
-/// messages.
-///
-/// See [`canonical_ip_addr`] for details.
-///
-/// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
-pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = SocketAddrV6> {
-    any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
+pub fn canonical_peer_addr_strategy() -> impl Strategy<Value = PeerSocketAddr> {
+    any::<SocketAddr>().prop_map(canonical_peer_addr)
 }
