@@ -1033,7 +1033,7 @@ fn transaction_v4_with_joinsplit_data(
         joinsplit_data.first.vpub_old = zero_amount;
         joinsplit_data.first.vpub_new = zero_amount;
 
-        for mut joinsplit in &mut joinsplit_data.rest {
+        for joinsplit in &mut joinsplit_data.rest {
             joinsplit.vpub_old = zero_amount;
             joinsplit.vpub_new = zero_amount;
         }

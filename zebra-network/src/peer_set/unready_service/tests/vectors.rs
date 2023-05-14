@@ -31,7 +31,7 @@ async fn unready_service_result_ok() {
         key: Some(MockKey),
         cancel,
         service: Some(mock_client),
-        _req: PhantomData::default(),
+        _req: PhantomData,
     };
 
     let result = unready_service.await;
@@ -50,7 +50,7 @@ async fn unready_service_result_canceled() {
         key: Some(MockKey),
         cancel,
         service: Some(mock_client),
-        _req: PhantomData::default(),
+        _req: PhantomData,
     };
 
     cancel_sender
@@ -73,7 +73,7 @@ async fn unready_service_result_cancel_handle_dropped() {
         key: Some(MockKey),
         cancel,
         service: Some(mock_client),
-        _req: PhantomData::default(),
+        _req: PhantomData,
     };
 
     std::mem::drop(cancel_sender);
