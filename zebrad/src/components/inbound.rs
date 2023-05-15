@@ -46,6 +46,15 @@ mod tests;
 
 use downloads::Downloads as BlockDownloads;
 
+/// The number of bytes the [`Inbound`] service will queue in response to a single block or
+/// transaction request, before ignoring any additional block or transaction IDs in that request.
+///
+/// This is the same as `zcashd`'s default send buffer limit:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/net.h#L84>
+/// as used in `ProcessGetData()`:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.cpp#L6410-L6412>
+pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
+
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
@@ -409,13 +418,15 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::TransactionsById(req_tx_ids) => {
                 // We return an available or missing response to each inventory request,
-                // unless the request is empty.
+                // unless the request is empty, or it reaches a response limit.
                 if req_tx_ids.is_empty() {
                     return async { Ok(zn::Response::Nil) }.boxed();
                 }
 
                 let request = mempool::Request::TransactionsById(req_tx_ids.clone());
                 mempool.clone().oneshot(request).map_ok(move |resp| {
+                    let mut total_size = 0;
+
                     let transactions = match resp {
                         mempool::Response::Transactions(transactions) => transactions,
                         _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
@@ -423,12 +434,31 @@ impl Service<zn::Request> for Inbound {
 
                     // Work out which transaction IDs were missing.
                     let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
-                    let available = transactions.into_iter().map(Available);
+                    // We don't need to limit the size of the missing transaction IDs list,
+                    // because it is already limited to the size of the getdata request
+                    // sent by the peer. (Their content and encodings are the same.)
                     let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
 
+                    // If we skip sending some transactions because the limit has been reached,
+                    // they aren't reported as missing. This matches `zcashd`'s behaviour:
+                    // <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.cpp#L6410-L6412>
+                    let available = transactions.into_iter().take_while(|tx| {
+                        // We check the limit after including the transaction,
+                        // so that we can send transactions greater than 1 MB
+                        // (but only one at a time)
+                        let within_limit = total_size < GETDATA_SENT_BYTES_LIMIT;
+
+                        total_size += tx.size;
+
+                        within_limit
+                    }).map(Available);
+
+                    // The network layer handles splitting this response into multiple `tx`
+                    // messages, and a `notfound` message if needed.
                     zn::Response::Transactions(available.chain(missing).collect())
                 }).boxed()
             }
+            // Find* responses are already size-limited by the state.
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
                 state.clone().oneshot(request).map_ok(|resp| match resp {
