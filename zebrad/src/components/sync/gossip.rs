@@ -85,5 +85,11 @@ where
             .map_err(PeerSetReadiness)?
             .call(request)
             .await;
+
+        // wait for at least the network timeout between gossips
+        //
+        // in practice, we expect blocks to arrive approximately every 75 seconds,
+        // so waiting 6 seconds won't make much difference
+        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
     }
 }

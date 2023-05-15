@@ -27,7 +27,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::watch;
+use tokio::sync::broadcast;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -233,7 +233,7 @@ pub struct Mempool {
 
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
-    transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+    transaction_sender: broadcast::Sender<HashSet<UnminedTxId>>,
 
     // Diagnostics
     //
@@ -267,9 +267,9 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-    ) -> (Self, watch::Receiver<HashSet<UnminedTxId>>) {
+    ) -> (Self, broadcast::Receiver<HashSet<UnminedTxId>>) {
         let (transaction_sender, transaction_receiver) =
-            tokio::sync::watch::channel(HashSet::new());
+            tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
 
         let mut service = Mempool {
             config: config.clone(),
@@ -659,9 +659,6 @@ impl Service<Request> for Mempool {
             if !send_to_peers_ids.is_empty() {
                 tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
 
-                // TODO:
-                // - if the transaction gossip task is slow, we can overwrite unsent IDs here
-                // - does this happen often enough to be worth a fix?
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
