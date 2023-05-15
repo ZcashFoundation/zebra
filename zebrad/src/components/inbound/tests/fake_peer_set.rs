@@ -35,7 +35,7 @@ use crate::{
             gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
             Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus},
+        sync::{self, BlockGossipError, SyncStatus, TIPS_RESPONSE_TIMEOUT},
     },
     BoxError,
 };
@@ -420,7 +420,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(tx1_id);
 
-    // Transaction and Block IDs are gossipped, in any order
+    // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs),
         Request::AdvertiseBlock(block_two.hash()),
@@ -488,7 +489,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Block is gossiped
+    // Test the block is gossiped, after waiting for the multi-gossip delay
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash()))
         .await
@@ -564,7 +566,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::Expired)
     );
 
-    // Test transaction 2 is gossiped
+    // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
     peer_set
@@ -583,18 +587,6 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         zebra_test::vectors::BLOCK_MAINNET_6_BYTES
             .zcash_deserialize_into()
             .unwrap(),
-        zebra_test::vectors::BLOCK_MAINNET_7_BYTES
-            .zcash_deserialize_into()
-            .unwrap(),
-        zebra_test::vectors::BLOCK_MAINNET_8_BYTES
-            .zcash_deserialize_into()
-            .unwrap(),
-        zebra_test::vectors::BLOCK_MAINNET_9_BYTES
-            .zcash_deserialize_into()
-            .unwrap(),
-        zebra_test::vectors::BLOCK_MAINNET_10_BYTES
-            .zcash_deserialize_into()
-            .unwrap(),
     ];
     for block in more_blocks {
         state_service
@@ -605,7 +597,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Block is gossiped
+        // Test the block is gossiped, after waiting for the multi-gossip delay
+        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await

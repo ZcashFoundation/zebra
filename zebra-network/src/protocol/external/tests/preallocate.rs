@@ -16,7 +16,7 @@ use crate::{
     meta_addr::MetaAddr,
     protocol::external::{
         addr::{AddrV1, AddrV2, ADDR_V1_SIZE, ADDR_V2_MIN_SIZE},
-        inv::{InventoryHash, MAX_TX_INV_IN_MESSAGE},
+        inv::{InventoryHash, MAX_INV_IN_RECEIVED_MESSAGE},
     },
 };
 
@@ -66,7 +66,7 @@ proptest! {
         //
         // Special case: Zcash has a slightly smaller limit for transaction invs,
         // so we use it for all invs.
-        prop_assert!(smallest_disallowed_serialized.len() > min(MAX_PROTOCOL_MESSAGE_LEN, usize::try_from(MAX_TX_INV_IN_MESSAGE).expect("fits in usize")));
+        prop_assert!(smallest_disallowed_serialized.len() > min(MAX_PROTOCOL_MESSAGE_LEN, usize::try_from(MAX_INV_IN_RECEIVED_MESSAGE).expect("fits in usize")));
 
         // Create largest_allowed_vec by removing one element from smallest_disallowed_vec without copying (for efficiency)
         smallest_disallowed_vec.pop();

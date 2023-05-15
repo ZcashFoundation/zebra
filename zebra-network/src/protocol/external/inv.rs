@@ -179,12 +179,26 @@ impl ZcashDeserialize for InventoryHash {
 /// The minimum serialized size of an [`InventoryHash`].
 pub(crate) const MIN_INV_HASH_SIZE: usize = 36;
 
-/// The maximum number of transaction inventory items in a network message.
-/// We also use this limit for block inventory, because it is typically much smaller.
+/// The maximum number of inventory items in a network message received from a peer.
+///
+/// After [ZIP-239](https://zips.z.cash/zip-0239#deployment), this would allow a message filled
+/// with `MSG_WTX` entries to be around 3.4 MB, so we also need a separate constant to limit the
+/// number of `inv` entries that we send.
 ///
 /// Same as `MAX_INV_SZ` in `zcashd`:
 /// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/net.h#L50>
-pub const MAX_TX_INV_IN_MESSAGE: u64 = 50_000;
+pub const MAX_INV_IN_RECEIVED_MESSAGE: u64 = 50_000;
+
+/// The maximum number of transaction inventory items in a network message received from a peer.
+///
+/// After [ZIP-239](https://zips.z.cash/zip-0239#deployment), this would allow a message filled
+/// with `MSG_WTX` entries to be around 3.4 MB, so we also need a separate constant to limit the
+/// number of `inv` entries that we send.
+///
+/// This constant is not critical to compatibility: it just needs to be less than or equal to
+/// `zcashd`'s `MAX_INV_SZ`:
+/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/net.h#L50>
+pub const MAX_TX_INV_IN_SENT_MESSAGE: u64 = 25_000;
 
 impl TrustedPreallocate for InventoryHash {
     fn max_allocation() -> u64 {
@@ -193,6 +207,6 @@ impl TrustedPreallocate for InventoryHash {
         // a single message
         let message_size_limit = ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_INV_HASH_SIZE) as u64;
 
-        min(message_size_limit, MAX_TX_INV_IN_MESSAGE)
+        min(message_size_limit, MAX_INV_IN_RECEIVED_MESSAGE)
     }
 }

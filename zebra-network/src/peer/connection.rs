@@ -37,7 +37,7 @@ use crate::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
     },
-    BoxError,
+    BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 use InventoryResponse::*;
@@ -992,9 +992,31 @@ where
                     )
             }
             (AwaitingRequest, AdvertiseTransactionIds(hashes)) => {
+                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
+                    .try_into()
+                    .expect("constant fits in usize");
+
+                // # Security
+                //
+                // In most cases, we try to split over-sized requests into multiple network-layer
+                // messages. But we are unlikely to reach this limit with the default mempool
+                // config, so a gossip like this could indicate a network amplification attack.
+                //
+                // This limit is particularly important here, because advertisements send the same
+                // message to half our available peers.
+                //
+                // If there are thousands of transactions in the mempool, letting peers know the
+                // exact transactions we have isn't that important, so it's ok to drop arbitrary
+                // transaction hashes from our response.
+                if hashes.len() > max_tx_inv_in_message {
+                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID gossip");
+                }
+
+                let hashes = hashes.into_iter().take(max_tx_inv_in_message).map(Into::into).collect();
+
                 self
                     .peer_tx
-                    .send(Message::Inv(hashes.iter().map(|h| (*h).into()).collect()))
+                    .send(Message::Inv(hashes))
                     .await
                     .map(|()|
                          Handler::Finished(Ok(Response::Nil))
@@ -1351,11 +1373,30 @@ where
                 }
             }
             Response::TransactionIds(hashes) => {
-                if let Err(e) = self
-                    .peer_tx
-                    .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))
-                    .await
-                {
+                let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
+                    .try_into()
+                    .expect("constant fits in usize");
+
+                // # Security
+                //
+                // In most cases, we try to split over-sized responses into multiple network-layer
+                // messages. But we are unlikely to reach this limit with the default mempool
+                // config, so a response like this could indicate a network amplification attack.
+                //
+                // If there are thousands of transactions in the mempool, letting peers know the
+                // exact transactions we have isn't that important, so it's ok to drop arbitrary
+                // transaction hashes from our response.
+                if hashes.len() > max_tx_inv_in_message {
+                    debug!(inv_count = ?hashes.len(), ?MAX_TX_INV_IN_SENT_MESSAGE, "unusually large transaction ID response");
+                }
+
+                let hashes = hashes
+                    .into_iter()
+                    .take(max_tx_inv_in_message)
+                    .map(Into::into)
+                    .collect();
+
+                if let Err(e) = self.peer_tx.send(Message::Inv(hashes)).await {
                     self.fail_with(e)
                 }
             }

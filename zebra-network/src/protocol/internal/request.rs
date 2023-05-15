@@ -148,14 +148,11 @@ pub enum Request {
 
     /// Advertise a set of unmined transactions to all peers.
     ///
-    /// This is intended to be used in Zebra with a single transaction at a time
-    /// (set of size 1), but multiple transactions are permitted because this is
-    /// how we interpret advertisements from zcashd, which sometimes advertises
-    /// multiple transactions at once.
+    /// Both Zebra and zcashd sometimes advertise multiple transactions at once.
     ///
     /// This is implemented by sending an `inv` message containing the unmined
-    /// transaction ID, allowing the remote peer to choose whether to download
-    /// it. Remote peers who choose to download the transaction will generate a
+    /// transaction IDs, allowing the remote peer to choose whether to download
+    /// them. Remote peers who choose to download the transaction will generate a
     /// [`Request::TransactionsById`] against the "inbound" service passed to
     /// [`init`](crate::init).
     ///
