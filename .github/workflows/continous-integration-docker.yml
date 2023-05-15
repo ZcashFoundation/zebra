@@ -314,7 +314,7 @@ jobs:
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.regenerate-disks) }}-regenerate-stateful-disks
+      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.regenerate-disks == 'true') }}-regenerate-stateful-disks
       cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
@@ -383,7 +383,7 @@ jobs:
     # TODO:
     # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.run-full-sync) }}-test-full-sync
+      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-test-full-sync
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -497,7 +497,7 @@ jobs:
     # TODO:
     # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.run-full-sync) }}-test-full-sync-testnet
+      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-test-full-sync-testnet
       cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
@@ -572,7 +572,7 @@ jobs:
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ fromJSON(github.event.inputs.run-lwd-sync) }}-lightwalletd-full-sync
+      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-lwd-sync == 'true') }}-lightwalletd-full-sync
       cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
