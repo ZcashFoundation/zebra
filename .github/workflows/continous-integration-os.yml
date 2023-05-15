@@ -100,7 +100,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
 
 
-      - uses: Swatinem/rust-cache@v2.2.1
+      - uses: Swatinem/rust-cache@v2.3.0
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -233,7 +233,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-      - uses: Swatinem/rust-cache@v2.2.1
+      - uses: Swatinem/rust-cache@v2.3.0
         with:
           shared-key: "clippy-cargo-lock"
 
