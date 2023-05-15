@@ -2,7 +2,7 @@
 
 Support for different platforms are organized into three tiers, each with a
 different set of guarantees. For more information on the policies for platforms
-at each tier, see the [Platform Tier Policy](platform-tier-policy.md).
+at each tier, see the [Platform Tier Policy](target-tier-policies.md).
 
 Platforms are identified by their Rust "target triple" which is a string composed by
 `<machine>-<vendor>-<operating system>`.
