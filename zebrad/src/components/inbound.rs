@@ -426,8 +426,6 @@ impl Service<zn::Request> for Inbound {
                     let available = transactions.into_iter().map(Available);
                     let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
 
-                    // The network layer handles splitting this response into multiple `tx`
-                    // messages, and a `notfound` message if needed.
                     zn::Response::Transactions(available.chain(missing).collect())
                 }).boxed()
             }
@@ -470,6 +468,7 @@ impl Service<zn::Request> for Inbound {
                 block_downloads.download_and_verify(hash);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
+            // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
