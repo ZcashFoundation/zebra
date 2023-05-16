@@ -22,6 +22,10 @@ use super::super::*;
 #[cfg(feature = "getblocktemplate-rpcs")]
 mod get_block_template_rpcs;
 
+/// The first block height in the state that can never be stored in the database,
+/// due to optimisations in the disk format.
+pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
+
 /// Snapshot test for RPC methods responses.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rpc_response_data() {
@@ -107,8 +111,6 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getblock` variants
     // A valid block height in the populated state
     const BLOCK_HEIGHT: u32 = 1;
-    // The first never-stored block height in the state
-    const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 
     let block_hash = blocks[BLOCK_HEIGHT as usize].hash();
 

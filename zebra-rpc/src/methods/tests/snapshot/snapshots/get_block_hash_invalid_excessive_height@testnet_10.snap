@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: block_hash
+---
+{
+  "Err": {
+    "code": -32602,
+    "message": "Provided index is greater than the current tip"
+  }
+}
