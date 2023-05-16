@@ -259,7 +259,7 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
 
     // create a new rpc instance with new state and mock
-    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+    let get_block_template_rpc_mock_state = GetBlockTemplateRpcImpl::new(
         network,
         mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
@@ -276,7 +276,7 @@ pub async fn test_responses<State, ReadState>(
     let mock_read_state_request_handler = make_mock_read_state_request_handler();
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
-    let get_block_template_fut = get_block_template_rpc.get_block_template(None);
+    let get_block_template_fut = get_block_template_rpc_mock_state.get_block_template(None);
 
     let (get_block_template, ..) = tokio::join!(
         get_block_template_fut,
@@ -314,7 +314,7 @@ pub async fn test_responses<State, ReadState>(
     let mock_read_state_request_handler = make_mock_read_state_request_handler();
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
-    let get_block_template_fut = get_block_template_rpc.get_block_template(
+    let get_block_template_fut = get_block_template_rpc_mock_state.get_block_template(
         get_block_template::JsonParameters {
             long_poll_id: long_poll_id.into(),
             ..Default::default()
@@ -349,12 +349,13 @@ pub async fn test_responses<State, ReadState>(
 
     // `getblocktemplate` proposal mode variant
 
-    let get_block_template =
-        get_block_template_rpc.get_block_template(Some(get_block_template::JsonParameters {
+    let get_block_template = get_block_template_rpc_mock_state.get_block_template(Some(
+        get_block_template::JsonParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData("".into())),
             ..Default::default()
-        }));
+        },
+    ));
 
     let get_block_template = get_block_template
         .await
@@ -365,7 +366,7 @@ pub async fn test_responses<State, ReadState>(
     // the following snapshots use a mock read_state and chain_verifier
 
     let mut mock_chain_verifier = MockService::build().for_unit_tests();
-    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+    let get_block_template_rpc_mock_state_verifier = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
@@ -376,12 +377,13 @@ pub async fn test_responses<State, ReadState>(
         MockAddressBookPeers::default(),
     );
 
-    let get_block_template_fut =
-        get_block_template_rpc.get_block_template(Some(get_block_template::JsonParameters {
+    let get_block_template_fut = get_block_template_rpc_mock_state_verifier.get_block_template(
+        Some(get_block_template::JsonParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
             ..Default::default()
-        }));
+        }),
+    );
 
     let mock_chain_verifier_request_handler = async move {
         mock_chain_verifier
@@ -397,6 +399,8 @@ pub async fn test_responses<State, ReadState>(
         get_block_template.expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
+
+    // These RPC snapshots use the populated state
 
     // `submitblock`
 
@@ -443,18 +447,26 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a z_validate_address::Response");
     snapshot_rpc_z_validateaddress("invalid", z_validate_address, &settings);
 
-    // getdifficulty
+    // `getdifficulty`
+    // This RPC snapshot uses both the mock and populated states
 
-    // Fake the ChainInfo response
+    // Fake the ChainInfo response using the mock state
     let mock_read_state_request_handler = make_mock_read_state_request_handler();
 
-    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
+    let get_difficulty_fut = get_block_template_rpc_mock_state.get_difficulty();
 
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    let get_difficulty = get_difficulty.expect("unexpected error in getdifficulty RPC call");
+    let mock_get_difficulty = get_difficulty.expect("unexpected error in getdifficulty RPC call");
 
-    snapshot_rpc_getdifficulty(get_difficulty, &settings);
+    snapshot_rpc_getdifficulty_valid("mock", mock_get_difficulty, &settings);
+
+    // Now use the populated state
+
+    let populated_get_difficulty = get_block_template_rpc.get_difficulty().await;
+    snapshot_rpc_getdifficulty_invalid("populated", populated_get_difficulty, &settings);
+
+    // `z_listunifiedreceivers`
 
     let ua1 = String::from("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf");
     let z_list_unified_receivers =
@@ -578,9 +590,26 @@ fn snapshot_rpc_z_validateaddress(
     });
 }
 
-/// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getdifficulty(difficulty: f64, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_difficulty", difficulty));
+/// Snapshot valid `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty_valid(
+    variant: &'static str,
+    difficulty: f64,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_difficulty_valid_{variant}"), difficulty)
+    });
+}
+
+/// Snapshot invalid `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty_invalid(
+    variant: &'static str,
+    difficulty: Result<f64>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_difficulty_invalid_{variant}"), difficulty)
+    });
 }
 
 /// Snapshot `snapshot_rpc_z_listunifiedreceivers` response, using `cargo insta` and JSON serialization.
