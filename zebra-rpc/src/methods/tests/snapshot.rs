@@ -14,6 +14,7 @@ use zebra_chain::{
     parameters::Network::{Mainnet, Testnet},
     serialization::ZcashDeserializeInto,
 };
+use zebra_state::MAX_ON_DISK_HEIGHT;
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -104,7 +105,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
     snapshot_rpc_getaddressbalance(get_address_balance, &settings);
 
     // `getblock` variants
+    // A valid block height in the populated state
     const BLOCK_HEIGHT: u32 = 1;
+    // The first never-stored block height in the state
+    const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
+
     let block_hash = blocks[BLOCK_HEIGHT as usize].hash();
 
     // `getblock`, verbosity=0, height
@@ -118,6 +123,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
         block_data.get(&BLOCK_HEIGHT).unwrap(),
         &settings,
     );
+
+    let get_block = rpc
+        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(0u8))
+        .await;
+    snapshot_rpc_getblock_invalid("excessive_height_verbosity_0", get_block, &settings);
 
     // `getblock`, verbosity=0, hash
     let get_block = rpc
@@ -138,6 +148,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("height_verbosity_1", get_block, &settings);
 
+    let get_block = rpc
+        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(1u8))
+        .await;
+    snapshot_rpc_getblock_invalid("excessive_height_verbosity_1", get_block, &settings);
+
     // `getblock`, verbosity=1, hash
     let get_block = rpc
         .get_block(block_hash.to_string(), Some(1u8))
@@ -151,6 +166,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("height_verbosity_default", get_block, &settings);
+
+    let get_block = rpc
+        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), None)
+        .await;
+    snapshot_rpc_getblock_invalid("excessive_height_verbosity_default", get_block, &settings);
 
     // `getblock`, no verbosity - defaults to 1, hash
     let get_block = rpc
@@ -202,7 +222,12 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .z_get_treestate(BLOCK_HEIGHT.to_string())
         .await
         .expect("We should have a GetTreestate struct");
-    snapshot_rpc_z_gettreestate(tree_state, &settings);
+    snapshot_rpc_z_gettreestate_valid(tree_state, &settings);
+
+    let tree_state = rpc
+        .z_get_treestate(EXCESSIVE_BLOCK_HEIGHT.to_string())
+        .await;
+    snapshot_rpc_z_gettreestate_invalid("excessive_height", tree_state, &settings);
 
     // `getrawtransaction` verbosity=0
     //
@@ -250,7 +275,35 @@ async fn test_rpc_response_data_for_network(network: Network) {
         })
         .await
         .expect("We should have a vector of strings");
-    snapshot_rpc_getaddresstxids(get_address_tx_ids, &settings);
+    snapshot_rpc_getaddresstxids_valid("multi_block", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: 2,
+            end: 2,
+        })
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("single_block", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: 3,
+            end: EXCESSIVE_BLOCK_HEIGHT,
+        })
+        .await;
+    snapshot_rpc_getaddresstxids_invalid("excessive_end", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: EXCESSIVE_BLOCK_HEIGHT,
+            end: EXCESSIVE_BLOCK_HEIGHT + 1,
+        })
+        .await;
+    snapshot_rpc_getaddresstxids_invalid("excessive_start", get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
@@ -293,22 +346,23 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
-/// Check `getblock` response, using `cargo insta`, JSON serialization, and block test vectors.
+/// Check valid `getblock` data response with verbosity=0, using `cargo insta`, JSON serialization,
+/// and block test vectors.
 ///
 /// The snapshot file does not contain any data, but it does enforce the response format.
 fn snapshot_rpc_getblock_data(
     variant: &'static str,
     block: GetBlock,
-    block_data: &[u8],
+    expected_block_data: &[u8],
     settings: &insta::Settings,
 ) {
-    let block_data = hex::encode(block_data);
+    let expected_block_data = hex::encode(expected_block_data);
 
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("get_block_data_{variant}"), block, {
             "." => dynamic_redaction(move |value, _path| {
                 // assert that the block data matches, without creating a 1.5 kB snapshot file
-                assert_eq!(value.as_str().unwrap(), block_data);
+                assert_eq!(value.as_str().unwrap(), expected_block_data);
                 // replace with:
                 "[BlockData]"
             }),
@@ -316,13 +370,23 @@ fn snapshot_rpc_getblock_data(
     });
 }
 
-/// Check `getblock` response with verbosity=1, using `cargo insta` and JSON serialization.
+/// Check valid `getblock` response with verbosity=1, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblock_verbose(
     variant: &'static str,
     block: GetBlock,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
+}
+
+/// Check invalid height `getblock` response using `cargo insta`.
+fn snapshot_rpc_getblock_invalid(
+    variant: &'static str,
+    response: Result<GetBlock>,
+    settings: &insta::Settings,
+) {
+    settings
+        .bind(|| insta::assert_json_snapshot!(format!("get_block_invalid_{variant}"), response));
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
@@ -335,9 +399,20 @@ fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settin
     settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
-/// Snapshot `z_gettreestate` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_z_gettreestate(tree_state: GetTreestate, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate", tree_state));
+/// Snapshot a valid `z_gettreestate` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_gettreestate_valid(tree_state: GetTreestate, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!(format!("z_get_treestate_valid"), tree_state));
+}
+
+/// Snapshot an invalid `z_gettreestate` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_gettreestate_invalid(
+    variant: &'static str,
+    tree_state: Result<GetTreestate>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_get_treestate_invalid_{variant}"), tree_state)
+    });
 }
 
 /// Snapshot `getrawtransaction` response, using `cargo insta` and JSON serialization.
@@ -351,9 +426,29 @@ fn snapshot_rpc_getrawtransaction(
     });
 }
 
-/// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_address_tx_ids", transactions));
+/// Snapshot valid `getaddressbalance` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getaddresstxids_valid(
+    variant: &'static str,
+    transactions: Vec<String>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_address_tx_ids_valid_{variant}"), transactions)
+    });
+}
+
+/// Snapshot invalid `getaddressbalance` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getaddresstxids_invalid(
+    variant: &'static str,
+    transactions: Result<Vec<String>>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(
+            format!("get_address_tx_ids_invalid_{variant}"),
+            transactions
+        )
+    });
 }
 
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
