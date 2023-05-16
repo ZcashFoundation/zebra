@@ -41,9 +41,6 @@ skip-tree = [
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
-    # wait for rocksdb to upgrade
-    { name = "bindgen", version = "=0.64.0" },
-
     # wait for prost-build to upgrade
     { name = "prettyplease", version = "=0.1.25" },
 
