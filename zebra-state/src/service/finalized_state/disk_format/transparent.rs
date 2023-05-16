@@ -36,6 +36,20 @@ pub const BALANCE_DISK_BYTES: usize = 8;
 /// This reduces database size and increases lookup performance.
 pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 
+/// The maximum value of an on-disk serialized [`OutputIndex`].
+///
+/// This allows us to store [`OutputLocation`](crate::OutputLocation)s in
+/// 8 bytes, which makes database searches more efficient.
+///
+/// # Consensus
+///
+/// This output index is impossible with the current 2 MB block size limit.
+///
+/// Since Zebra only stores fully verified blocks on disk, blocks with larger indexes
+/// are rejected before reaching the database.
+pub const MAX_ON_DISK_OUTPUT_INDEX: OutputIndex =
+    OutputIndex((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
+
 /// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
 /// and 3 byte output index on disk.
 ///
@@ -541,8 +555,6 @@ impl FromDisk for Amount<NonNegative> {
     }
 }
 
-// TODO: serialize the index into a smaller number of bytes (#3953)
-//       serialize the index in big-endian order (#3953)
 impl IntoDisk for OutputIndex {
     type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 
@@ -553,9 +565,22 @@ impl IntoDisk for OutputIndex {
 
         match disk_bytes {
             Some(b) => b.try_into().unwrap(),
-            // We are hiding a problem with the truncated bytes here, instead of an error we return the biggest valid Height which will not be
-            // in the best chain so RPC methods will return an error.
-            None => [255, 255, 255],
+            // # Security
+            //
+            // The RPC method or state query was given a transparent output index that is
+            // impossible with the current block size limit of 2 MB. To save space in database
+            // indexes, we don't support output indexes 2^24 and above.
+            //
+            // Instead,  we return an invalid database output index to the lookup code,
+            // which can never be inserted into the database as part of a valid block.
+            // So RPC methods will return an error or None.
+            None => truncate_zero_be_bytes(
+                &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
+                OUTPUT_INDEX_DISK_BYTES,
+            )
+            .expect("max on disk output index is valid")
+            .try_into()
+            .unwrap(),
         }
     }
 }
