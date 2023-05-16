@@ -574,13 +574,25 @@ impl IntoDisk for OutputIndex {
             // Instead,  we return an invalid database output index to the lookup code,
             // which can never be inserted into the database as part of a valid block.
             // So RPC methods will return an error or None.
-            None => truncate_zero_be_bytes(
-                &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
-                OUTPUT_INDEX_DISK_BYTES,
-            )
-            .expect("max on disk output index is valid")
-            .try_into()
-            .unwrap(),
+            None => {
+                #[cfg(test)]
+                {
+                    use zebra_chain::serialization::TrustedPreallocate;
+                    assert!(
+                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.0)
+                            > zebra_chain::transparent::Output::max_allocation(),
+                        "increased block size requires database output index format change",
+                    );
+                }
+
+                truncate_zero_be_bytes(
+                    &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
+                    OUTPUT_INDEX_DISK_BYTES,
+                )
+                .expect("max on disk output index is valid")
+                .try_into()
+                .unwrap()
+            }
         }
     }
 }
