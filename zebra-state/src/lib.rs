@@ -31,7 +31,9 @@ mod tests;
 
 pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
-pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
+pub use error::{
+    BoxError, CloneError, CommitBlockError, DuplicateNullifierError, ValidateContextError,
+};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
