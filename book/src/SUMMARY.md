@@ -1,8 +1,9 @@
 # Summary
 
 [Zebra](README.md)
+
 - [User Documentation](user.md)
-  - [Zebra System Requirements](user/requirements.md)
+  - [System Requirements](user/requirements.md)
   - [Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
   - [Zebra with Docker](user/docker.md)
