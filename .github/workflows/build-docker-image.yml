@@ -43,14 +43,14 @@ on:
         required: false
         default: "sentry"
         type: string
-      test_features: 
+      test_features:
         required: false
         default: "lightwalletd-grpc-tests zebra-checkpoints"
         type: string
-      rpc_port: 
+      rpc_port:
         required: false
         type: string
-      tag_suffix: 
+      tag_suffix:
         required: false
         type: string
 
@@ -74,6 +74,7 @@ jobs:
       - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4

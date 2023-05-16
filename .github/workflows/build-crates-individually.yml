@@ -51,6 +51,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v3.5.2
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
@@ -107,6 +108,7 @@ jobs:
       - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v1.1.2
