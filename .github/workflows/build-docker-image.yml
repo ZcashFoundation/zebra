@@ -88,7 +88,7 @@ jobs:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
           # appends inputs.tag_suffix to image tags/names
           flavor: |
             suffix=${{ inputs.tag_suffix }}

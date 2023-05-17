@@ -18,14 +18,14 @@ jobs:
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from git
 
-  # The image will be named `zebrad:<semver>`
+  # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
-      image_name: zebrad
+      image_name: zebra
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: '1'
