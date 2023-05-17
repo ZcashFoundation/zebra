@@ -186,7 +186,24 @@ impl IntoDisk for Height {
 
         let disk_bytes = truncate_zero_be_bytes(&mem_bytes, HEIGHT_DISK_BYTES);
 
-        disk_bytes.try_into().unwrap()
+        match disk_bytes {
+            Some(b) => b.try_into().unwrap(),
+
+            // # Security
+            //
+            // The RPC method or state query was given a block height that is ridiculously high.
+            // But to save space in database indexes, we don't support heights 2^24 and above.
+            //
+            // Instead we return the biggest valid database Height to the lookup code.
+            // So RPC methods and queued block checks will return an error or None.
+            //
+            // At the current block production rate, these heights can't be inserted into the
+            // database until at least 2050. (Blocks are verified in strict height order.)
+            None => truncate_zero_be_bytes(&MAX_ON_DISK_HEIGHT.0.to_be_bytes(), HEIGHT_DISK_BYTES)
+                .expect("max on disk height is valid")
+                .try_into()
+                .unwrap(),
+        }
     }
 }
 
