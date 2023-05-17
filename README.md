@@ -69,7 +69,7 @@ Zebra validates blocks and transactions, but needs extra software to generate th
 ## Getting Started
 
 You can run Zebra using our Docker image or you can build it manually. Please
-see [the Book](https://zebra.zfnd.org/user/requirements.html) for system
+see the [requirements section of the  Zebra Book](https://zebra.zfnd.org/user/requirements.html) for system
 requirements.
 
 ### Docker
@@ -185,7 +185,7 @@ Zebra uses the following inbound and outbound TCP ports:
 
 Please see the [Network
 Requirements](https://zebra.zfnd.org/user/requirements.html#network-requirements-and-ports)
-section for more details.
+section of the Zebra book for more details.
 
 ## Known Issues
 
