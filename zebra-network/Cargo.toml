@@ -23,7 +23,7 @@ progress-bar = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.2.1"
+bitflags = "2.3.1"
 byteorder = "1.4.3"
 bytes = "1.4.0"
 chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
