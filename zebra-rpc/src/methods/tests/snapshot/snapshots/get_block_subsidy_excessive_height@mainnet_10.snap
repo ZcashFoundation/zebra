@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: get_block_subsidy
+---
+{
+  "fundingstreams": [],
+  "miner": 0.00610351,
+  "founders": 0.0
+}

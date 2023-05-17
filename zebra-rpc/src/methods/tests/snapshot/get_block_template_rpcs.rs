@@ -9,6 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use hex::FromHex;
 use insta::Settings;
+use jsonrpc_core::Result;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -45,7 +46,7 @@ use crate::methods::{
             unified_address, validate_address, z_validate_address,
         },
     },
-    tests::utils::fake_history_tree,
+    tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
@@ -155,11 +156,21 @@ pub async fn test_responses<State, ReadState>(
 
     // `getblockhash`
     const BLOCK_HEIGHT10: i32 = 10;
+
     let get_block_hash = get_block_template_rpc
         .get_block_hash(BLOCK_HEIGHT10)
         .await
         .expect("We should have a GetBlockHash struct");
-    snapshot_rpc_getblockhash(get_block_hash, &settings);
+    snapshot_rpc_getblockhash_valid(get_block_hash, &settings);
+
+    let get_block_hash = get_block_template_rpc
+        .get_block_hash(
+            EXCESSIVE_BLOCK_HEIGHT
+                .try_into()
+                .expect("constant fits in i32"),
+        )
+        .await;
+    snapshot_rpc_getblockhash_invalid("excessive_height", get_block_hash, &settings);
 
     // `getmininginfo`
     let get_mining_info = get_block_template_rpc
@@ -174,7 +185,19 @@ pub async fn test_responses<State, ReadState>(
         .get_block_subsidy(Some(fake_future_block_height))
         .await
         .expect("We should have a success response");
-    snapshot_rpc_getblocksubsidy(get_block_subsidy, &settings);
+    snapshot_rpc_getblocksubsidy("future_height", get_block_subsidy, &settings);
+
+    let get_block_subsidy = get_block_template_rpc
+        .get_block_subsidy(None)
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
+
+    let get_block_subsidy = get_block_template_rpc
+        .get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT))
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
 
     // `getpeerinfo`
     let get_peer_info = get_block_template_rpc
@@ -184,6 +207,9 @@ pub async fn test_responses<State, ReadState>(
     snapshot_rpc_getpeerinfo(get_peer_info, &settings);
 
     // `getnetworksolps` (and `getnetworkhashps`)
+    //
+    // TODO: add tests for excessive num_blocks and height (#6688)
+    //       add the same tests for get_network_hash_ps
     let get_network_sol_ps = get_block_template_rpc
         .get_network_sol_ps(None, None)
         .await
@@ -454,9 +480,20 @@ fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_count", block_count));
 }
 
-/// Snapshot `getblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_hash", block_hash));
+/// Snapshot valid `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHash, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_hash_valid", block_hash));
+}
+
+/// Snapshot invalid `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash_invalid(
+    variant: &'static str,
+    block_hash: Result<GetBlockHash>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_hash_invalid_{variant}"), block_hash)
+    });
 }
 
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
@@ -499,8 +536,14 @@ fn snapshot_rpc_getmininginfo(
 }
 
 /// Snapshot `getblocksubsidy` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblocksubsidy(get_block_subsidy: BlockSubsidy, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_subsidy", get_block_subsidy));
+fn snapshot_rpc_getblocksubsidy(
+    variant: &'static str,
+    get_block_subsidy: BlockSubsidy,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_subsidy_{variant}"), get_block_subsidy)
+    });
 }
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.

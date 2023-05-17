@@ -977,7 +977,7 @@ where
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
                     return Err(Error {
-                        code: ErrorCode::ServerError(0),
+                        code: MISSING_BLOCK_ERROR_CODE,
                         message: "the requested block was not found".to_string(),
                         data: None,
                     })
