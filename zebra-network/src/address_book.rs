@@ -14,7 +14,7 @@ use ordered_map::OrderedMap;
 use tokio::sync::watch;
 use tracing::Span;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
     constants,
@@ -222,10 +222,11 @@ impl AddressBook {
     /// Get the local listener address.
     ///
     /// This address contains minimal state, but it is not sanitized.
-    pub fn local_listener_meta_addr(&self) -> MetaAddr {
+    pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
+        let now: DateTime32 = now.try_into().expect("will succeed until 2038");
+
         MetaAddr::new_local_listener_change(self.local_listener)
-            .into_new_meta_addr()
-            .expect("unexpected invalid new local listener addr")
+            .local_listener_into_new_meta_addr(now)
     }
 
     /// Get the local listener [`SocketAddr`].
@@ -243,7 +244,7 @@ impl AddressBook {
         // Unconditionally add our local listener address to the advertised peers,
         // to replace any self-connection failures. The address book and change
         // constructors make sure that the SocketAddr is canonical.
-        let local_listener = self.local_listener_meta_addr();
+        let local_listener = self.local_listener_meta_addr(now);
         peers.insert(local_listener.addr, local_listener);
 
         // Then sanitize and shuffle
@@ -307,7 +308,7 @@ impl AddressBook {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
-        let updated = change.apply_to_meta_addr(previous);
+        let updated = change.apply_to_meta_addr(previous, instant_now, chrono_now);
 
         trace!(
             ?change,
