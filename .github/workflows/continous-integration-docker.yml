@@ -137,6 +137,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -159,6 +161,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -184,6 +188,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -205,6 +211,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -224,6 +232,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -244,6 +254,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -267,6 +279,8 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -684,7 +698,7 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
     secrets: inherit
-    
+
   ## getblocktemplate-rpcs using cached Zebra state on mainnet
   #
   # TODO: move these below the rest of the mainnet jobs that just use Zebra cached state
