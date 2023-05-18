@@ -1145,7 +1145,7 @@ async fn self_connections_should_fail() {
             .lock()
             .expect("unexpected panic in address book");
 
-        let real_self_listener = unlocked_address_book.local_listener_meta_addr();
+        let real_self_listener = unlocked_address_book.local_listener_meta_addr(Utc::now());
 
         // Set a fake listener to get past the check for adding our own address
         unlocked_address_book.set_local_listener("192.168.0.0:1".parse().unwrap());
@@ -1384,7 +1384,10 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         "Test user agent".to_string(),
     )
     .await;
-    let local_listener = address_book.lock().unwrap().local_listener_meta_addr();
+    let local_listener = address_book
+        .lock()
+        .unwrap()
+        .local_listener_meta_addr(Utc::now());
 
     if listen_addr.port() == 0 {
         assert_ne!(

@@ -1,5 +1,7 @@
 //! Fixed test cases for MetaAddr and MetaAddrChange.
 
+use std::time::Instant;
+
 use chrono::Utc;
 
 use zebra_chain::{
@@ -57,12 +59,13 @@ fn sanitize_extremes() {
 fn new_local_listener_is_gossipable() {
     let _init_guard = zebra_test::init();
 
+    let instant_now = Instant::now();
     let chrono_now = Utc::now();
+    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer = MetaAddr::new_local_listener_change(address)
-        .into_new_meta_addr()
-        .expect("MetaAddrChange can't create a new MetaAddr");
+    let peer =
+        MetaAddr::new_local_listener_change(address).into_new_meta_addr(instant_now, wall_now);
 
     assert!(peer.is_active_for_gossip(chrono_now));
 }
@@ -75,12 +78,13 @@ fn new_local_listener_is_gossipable() {
 fn new_alternate_peer_address_is_not_gossipable() {
     let _init_guard = zebra_test::init();
 
+    let instant_now = Instant::now();
     let chrono_now = Utc::now();
+    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr()
-        .expect("MetaAddrChange can't create a new MetaAddr");
+        .into_new_meta_addr(instant_now, wall_now);
 
     assert!(!peer.is_active_for_gossip(chrono_now));
 }
@@ -153,16 +157,17 @@ fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
 fn recently_responded_peer_is_gossipable() {
     let _init_guard = zebra_test::init();
 
+    let instant_now = Instant::now();
     let chrono_now = Utc::now();
+    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr()
-        .expect("MetaAddrChange can't create a new MetaAddr");
+        .into_new_meta_addr(instant_now, wall_now);
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
-        .apply_to_meta_addr(peer_seed)
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     assert!(peer.is_active_for_gossip(chrono_now));
@@ -173,16 +178,17 @@ fn recently_responded_peer_is_gossipable() {
 fn not_so_recently_responded_peer_is_still_gossipable() {
     let _init_guard = zebra_test::init();
 
+    let instant_now = Instant::now();
     let chrono_now = Utc::now();
+    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr()
-        .expect("MetaAddrChange can't create a new MetaAddr");
+        .into_new_meta_addr(instant_now, wall_now);
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
-        .apply_to_meta_addr(peer_seed)
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Tweak the peer's last response time to be within the limits of the reachable duration
@@ -203,16 +209,17 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 fn responded_long_ago_peer_is_not_gossipable() {
     let _init_guard = zebra_test::init();
 
+    let instant_now = Instant::now();
     let chrono_now = Utc::now();
+    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr()
-        .expect("MetaAddrChange can't create a new MetaAddr");
+        .into_new_meta_addr(instant_now, wall_now);
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
-        .apply_to_meta_addr(peer_seed)
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Tweak the peer's last response time to be outside the limits of the reachable duration
