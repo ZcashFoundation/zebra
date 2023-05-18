@@ -6,7 +6,7 @@ We've embraced Docker in Zebra for most of the solution lifecycle, from developm
 
 ## Quick usage
 
-You can deploy Zebra for a daily use with the images available in [Docker Hub](https://hub.docker.com/repository/docker/zfnd/zebra) or build it locally for testing
+You can deploy Zebra for a daily use with the images available in [Docker Hub](https://hub.docker.com/r/zfnd/zebra) or build it locally for testing
 
 ### Ready to use image
 
@@ -41,4 +41,4 @@ As a result the Zebra team builds four images:
 
 The images built by the Zebra team are all publicly hosted. Old image versions meant to be used by our [CI pipeline](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-docker.yml) (`zebrad-test`, `lighwalletd`) might be deleted on a scheduled basis.
 
-We use [Docker Hub](https://hub.docker.com/repository/docker/zfnd/zebra) for end-user images and [Google Artifact Registry](https://console.cloud.google.com/artifacts/docker/zealous-zebra/us/zebra) to build external tools and test images
+We use [Docker Hub](https://hub.docker.com/r/zfnd/zebra) for end-user images and [Google Artifact Registry](https://console.cloud.google.com/artifacts/docker/zealous-zebra/us/zebra) to build external tools and test images
