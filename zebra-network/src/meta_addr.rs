@@ -87,11 +87,7 @@ impl PeerAddrState {
     fn connection_state_order(&self, other: &Self) -> Ordering {
         use Ordering::*;
         match (self, other) {
-            (NeverAttemptedAlternate, NeverAttemptedAlternate)
-            | (NeverAttemptedGossiped, NeverAttemptedGossiped)
-            | (AttemptPending, AttemptPending)
-            | (Responded, Responded)
-            | (Failed, Failed) => Equal,
+            _ if self == other => Equal,
             // Peers start in one of the "never attempted" states,
             // then typically progress towards a "responded" or "failed" state.
             //
@@ -109,7 +105,10 @@ impl PeerAddrState {
             (_, AttemptPending) => Greater,
             (Responded, _) => Less,
             (_, Responded) => Greater,
-            // Failed is covered by the other cases
+            // These patterns are redundant, but Rust doesn't assume that `==` is reflexive,
+            // so the first is still required (but unreachable).
+            (Failed, _) => Less,
+            //(_, Failed) => Greater,
         }
     }
 }
@@ -133,11 +132,7 @@ impl Ord for PeerAddrState {
     fn cmp(&self, other: &Self) -> Ordering {
         use Ordering::*;
         match (self, other) {
-            (Responded, Responded)
-            | (NeverAttemptedGossiped, NeverAttemptedGossiped)
-            | (NeverAttemptedAlternate, NeverAttemptedAlternate)
-            | (Failed, Failed)
-            | (AttemptPending, AttemptPending) => Equal,
+            _ if self == other => Equal,
             // We reconnect to `Responded` peers that have stopped sending messages,
             // then `NeverAttempted` peers, then `Failed` peers
             (Responded, _) => Less,
@@ -148,7 +143,10 @@ impl Ord for PeerAddrState {
             (_, NeverAttemptedAlternate) => Greater,
             (Failed, _) => Less,
             (_, Failed) => Greater,
-            // AttemptPending is covered by the other cases
+            // These patterns are redundant, but Rust doesn't assume that `==` is reflexive,
+            // so the first is still required (but unreachable).
+            (AttemptPending, _) => Less,
+            //(_, AttemptPending) => Greater,
         }
     }
 }
