@@ -22,6 +22,10 @@ docker build --file docker/Dockerfile --target runtime --tag zebra:local .
 docker run --detach zebra:local
 ```
 
+### Alternatives
+
+See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) for more information.
+
 ## Registries
 
 The images built by the Zebra team are all publicly hosted. Old image versions meant to be used by our [CI pipeline](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-docker.yml) (`zebrad-test`, `lighwalletd`) might be deleted on a scheduled basis.
