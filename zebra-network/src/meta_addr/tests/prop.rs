@@ -115,14 +115,18 @@ proptest! {
 
         for change in changes {
             while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
-                attempt_count += 1;
-                // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
-                prop_assert!(attempt_count <= 1);
-
                 // Simulate an attempt
-                addr = MetaAddr::new_reconnect(addr.addr)
-                    .apply_to_meta_addr(addr, instant_now, chrono_now)
-                    .expect("unexpected invalid attempt");
+                addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
+                    .apply_to_meta_addr(addr, instant_now, chrono_now) {
+                        attempt_count += 1;
+                        // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
+                        prop_assert!(attempt_count <= 1);
+                        addr
+                    } else {
+                        // Stop updating when an attempt comes too soon after a failure.
+                        // In production these are prevented by the dialer code.
+                        break;
+                    }
             }
 
             // If `change` is invalid for the current MetaAddr state, skip it.
@@ -429,15 +433,19 @@ proptest! {
                     let change = changes.get(change_index);
 
                     while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
-                        *attempt_counts.entry(addr.addr).or_default() += 1;
-                        prop_assert!(
-                            *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
-                        );
-
                         // Simulate an attempt
-                        *addr = MetaAddr::new_reconnect(addr.addr)
-                            .apply_to_meta_addr(*addr, instant_now, chrono_now)
-                            .expect("unexpected invalid attempt");
+                        *addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
+                            .apply_to_meta_addr(*addr, instant_now, chrono_now) {
+                                *attempt_counts.entry(addr.addr).or_default() += 1;
+                                prop_assert!(
+                                    *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
+                                );
+                                addr
+                            } else {
+                                // Stop updating when an attempt comes too soon after a failure.
+                                // In production these are prevented by the dialer code.
+                                break;
+                            }
                     }
 
                     // If `change` is invalid for the current MetaAddr state, skip it.
