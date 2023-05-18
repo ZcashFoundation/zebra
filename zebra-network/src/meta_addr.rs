@@ -957,12 +957,27 @@ impl MetaAddrChange {
             // If the changes might have been concurrent, ignore connection states with less
             // progress.
             //
+            // ## Sources of Concurrency
+            //
             // If two changes happen close together, the async scheduler can run their change
             // send and apply code in any order. This includes the code that records the time of
             // the change. So even if a failure happens after a response message, the failure time
             // can be recorded before the response time code is run.
             //
-            // In that case, we want to apply the failure, then ignore any nearby changes that
+            // Some machines and OSes have limited time resolution, so we can't guarantee that
+            // two messages on the same connection will always have different times. There are
+            // also known bugs impacting monotonic times which make them go backwards or stay
+            // equal. For wall clock times, clock skew is an expected event, particularly with
+            // network time server updates.
+            //
+            // Also, the application can fail a connection independently and simultaneously
+            // (or slightly before) a positive update from that peer connection. We want the
+            // application change to take priority in the address book, because the connection
+            // state machine also prioritises failures over any other peer messages.
+            //
+            // ## Resolution
+            //
+            // In these cases, we want to apply the failure, then ignore any nearby changes that
             // reset the address book entry to a more appealing state. This prevents peers from
             // sending updates right before failing a connection, in order to make themselves more
             // likely to get a reconnection.
