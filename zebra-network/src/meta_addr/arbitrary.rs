@@ -57,12 +57,14 @@ impl MetaAddr {
             any::<Instant>(),
             any::<DateTime32>(),
         )
-            .prop_map(|(socket_addr, untrusted_services, instant_now, local_now)| {
-                // instant_now is not actually used for this variant,
-                // so we could just provide a default value
-                MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                    .into_new_meta_addr(instant_now, local_now)
-            })
+            .prop_map(
+                |(socket_addr, untrusted_services, instant_now, local_now)| {
+                    // instant_now is not actually used for this variant,
+                    // so we could just provide a default value
+                    MetaAddr::new_alternate(socket_addr, &untrusted_services)
+                        .into_new_meta_addr(instant_now, local_now)
+                },
+            )
             .boxed()
     }
 }
