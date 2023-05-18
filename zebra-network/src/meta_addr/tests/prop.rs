@@ -65,7 +65,7 @@ proptest! {
 
         let instant_now = std::time::Instant::now();
         let chrono_now = Utc::now();
-        let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+        let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
         for change in changes {
             if let Some(changed_addr) = change.apply_to_meta_addr(addr, instant_now, chrono_now) {
@@ -76,7 +76,7 @@ proptest! {
                 } else {
                     prop_assert_eq!(
                         changed_addr.untrusted_last_seen,
-                        change.untrusted_last_seen(wall_now)
+                        change.untrusted_last_seen(local_now)
                     );
                 }
 

@@ -9,7 +9,11 @@ use zebra_chain::{
     serialization::{DateTime32, Duration32},
 };
 
-use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices, PeerSocketAddr};
+use crate::{
+    constants::{CONCURRENT_ADDRESS_CHANGE_PERIOD, MAX_PEER_ACTIVE_FOR_GOSSIP},
+    protocol::types::PeerServices,
+    PeerSocketAddr,
+};
 
 use super::{super::MetaAddr, check};
 
@@ -61,11 +65,11 @@ fn new_local_listener_is_gossipable() {
 
     let instant_now = Instant::now();
     let chrono_now = Utc::now();
-    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer =
-        MetaAddr::new_local_listener_change(address).into_new_meta_addr(instant_now, wall_now);
+        MetaAddr::new_local_listener_change(address).into_new_meta_addr(instant_now, local_now);
 
     assert!(peer.is_active_for_gossip(chrono_now));
 }
@@ -80,11 +84,11 @@ fn new_alternate_peer_address_is_not_gossipable() {
 
     let instant_now = Instant::now();
     let chrono_now = Utc::now();
-    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, wall_now);
+        .into_new_meta_addr(instant_now, local_now);
 
     assert!(!peer.is_active_for_gossip(chrono_now));
 }
@@ -159,11 +163,11 @@ fn recently_responded_peer_is_gossipable() {
 
     let instant_now = Instant::now();
     let chrono_now = Utc::now();
-    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, wall_now);
+        .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
@@ -180,11 +184,11 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 
     let instant_now = Instant::now();
     let chrono_now = Utc::now();
-    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, wall_now);
+        .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
@@ -211,11 +215,11 @@ fn responded_long_ago_peer_is_not_gossipable() {
 
     let instant_now = Instant::now();
     let chrono_now = Utc::now();
-    let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, wall_now);
+        .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)

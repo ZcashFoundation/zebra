@@ -832,12 +832,12 @@ impl MetaAddrChange {
     }
 
     /// Returns the corresponding `MetaAddr` for this change.
-    pub fn into_new_meta_addr(self, instant_now: Instant, wall_now: DateTime32) -> MetaAddr {
+    pub fn into_new_meta_addr(self, instant_now: Instant, local_now: DateTime32) -> MetaAddr {
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
-            untrusted_last_seen: self.untrusted_last_seen(wall_now),
-            last_response: self.last_response(wall_now),
+            untrusted_last_seen: self.untrusted_last_seen(local_now),
+            last_response: self.last_response(local_now),
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
@@ -852,14 +852,14 @@ impl MetaAddrChange {
     /// # Panics
     ///
     /// If this change is not a [`MetaAddrChange::NewLocal`].
-    pub fn local_listener_into_new_meta_addr(self, wall_now: DateTime32) -> MetaAddr {
+    pub fn local_listener_into_new_meta_addr(self, local_now: DateTime32) -> MetaAddr {
         assert!(matches!(self, MetaAddrChange::NewLocal { .. }));
 
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
-            untrusted_last_seen: self.untrusted_last_seen(wall_now),
-            last_response: self.last_response(wall_now),
+            untrusted_last_seen: self.untrusted_last_seen(local_now),
+            last_response: self.last_response(local_now),
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
@@ -877,17 +877,17 @@ impl MetaAddrChange {
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> Option<MetaAddr> {
-        let wall_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+        let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
         let Some(previous) = previous.into() else {
             // no previous: create a new entry
-            return Some(self.into_new_meta_addr(instant_now, wall_now));
+            return Some(self.into_new_meta_addr(instant_now, local_now));
         };
 
         assert_eq!(previous.addr, self.addr(), "unexpected addr mismatch");
 
         let instant_previous = max(previous.last_attempt, previous.last_failure);
-        let clock_previous = previous.last_response;
+        let local_previous = previous.last_response;
 
         // Is this change potentially concurrent with the previous change?
         let change_is_concurrent = instant_previous
@@ -896,19 +896,19 @@ impl MetaAddrChange {
                     || instant_now - instant_previous < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
             })
             .unwrap_or_default()
-            || clock_previous
-                .map(|clock_previous| {
-                    clock_previous.saturating_duration_since(wall_now).to_std()
+            || local_previous
+                .map(|local_previous| {
+                    local_previous.saturating_duration_since(local_now).to_std()
                         < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
-                        || wall_now.saturating_duration_since(clock_previous).to_std()
+                        || local_now.saturating_duration_since(local_previous).to_std()
                             < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
                 })
                 .unwrap_or_default();
         let change_is_out_of_order = instant_previous
             .map(|instant_previous| instant_previous > instant_now)
             .unwrap_or_default()
-            || clock_previous
-                .map(|clock_previous| clock_previous > wall_now)
+            || local_previous
+                .map(|local_previous| local_previous > local_now)
                 .unwrap_or_default();
 
         // Is this change typically from a connection state that has more progress?
@@ -988,7 +988,7 @@ impl MetaAddrChange {
                 services: previous.services.or_else(|| self.untrusted_services()),
                 untrusted_last_seen: previous
                     .untrusted_last_seen
-                    .or_else(|| self.untrusted_last_seen(wall_now)),
+                    .or_else(|| self.untrusted_last_seen(local_now)),
                 // The peer has not been attempted, so these fields must be None
                 last_response: None,
                 last_attempt: None,
@@ -1010,7 +1010,7 @@ impl MetaAddrChange {
                 untrusted_last_seen: previous.untrusted_last_seen,
                 // This is a wall clock time, but we already checked that responses are in order.
                 // Even if the wall clock time has jumped, we want to use the latest time.
-                last_response: self.last_response(wall_now).or(previous.last_response),
+                last_response: self.last_response(local_now).or(previous.last_response),
                 // These are monotonic times, we already checked the responses are in order.
                 last_attempt: self.last_attempt(instant_now).or(previous.last_attempt),
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),

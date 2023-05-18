@@ -57,11 +57,11 @@ impl MetaAddr {
             any::<Instant>(),
             any::<DateTime32>(),
         )
-            .prop_map(|(socket_addr, untrusted_services, instant_now, wall_now)| {
+            .prop_map(|(socket_addr, untrusted_services, instant_now, local_now)| {
                 // instant_now is not actually used for this variant,
                 // so we could just provide a default value
                 MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                    .into_new_meta_addr(instant_now, wall_now)
+                    .into_new_meta_addr(instant_now, local_now)
             })
             .boxed()
     }
@@ -113,14 +113,14 @@ impl MetaAddrChange {
         )
             .prop_filter_map(
                 "failed MetaAddr::is_valid_for_outbound",
-                |(addr, instant_now, wall_now)| {
+                |(addr, instant_now, local_now)| {
                     // Alternate nodes use the current time, so they're always ready
                     //
                     // TODO: create a "Zebra supported services" constant
 
                     let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
                     if change
-                        .into_new_meta_addr(instant_now, wall_now)
+                        .into_new_meta_addr(instant_now, local_now)
                         .last_known_info_is_valid_for_outbound(Mainnet)
                     {
                         Some(change)
