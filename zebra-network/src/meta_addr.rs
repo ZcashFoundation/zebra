@@ -890,17 +890,22 @@ impl MetaAddrChange {
         let local_previous = previous.last_response;
 
         // Is this change potentially concurrent with the previous change?
+        //
+        // Since we're using saturating arithmetic, one of each pair of less than comparisons
+        // will always be true, because subtraction saturates to zero.
         let change_is_concurrent = instant_previous
             .map(|instant_previous| {
-                instant_previous - instant_now < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
-                    || instant_now - instant_previous < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
+                instant_previous.saturating_duration_since(instant_now)
+                    < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
+                    && instant_now.saturating_duration_since(instant_previous)
+                        < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
             })
             .unwrap_or_default()
             || local_previous
                 .map(|local_previous| {
                     local_previous.saturating_duration_since(local_now).to_std()
                         < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
-                        || local_now.saturating_duration_since(local_previous).to_std()
+                        && local_now.saturating_duration_since(local_previous).to_std()
                             < constants::CONCURRENT_ADDRESS_CHANGE_PERIOD
                 })
                 .unwrap_or_default();
