@@ -267,7 +267,7 @@ pub enum ValidateContextError {
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
-pub(crate) trait DuplicateNullifierError {
+pub trait DuplicateNullifierError {
     /// Returns the corresponding duplicate nullifier error for `self`.
     fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError;
 }

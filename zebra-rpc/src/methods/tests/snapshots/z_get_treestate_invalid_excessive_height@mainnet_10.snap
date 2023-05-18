@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: tree_state
+---
+{
+  "Err": {
+    "code": -8,
+    "message": "the requested block was not found"
+  }
+}

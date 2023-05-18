@@ -1253,6 +1253,10 @@ where
         );
         self.update_state_metrics(format!("In::Req::{}", req.command()));
 
+        // Give the inbound service time to clear its queue,
+        // before sending the next inbound request.
+        tokio::task::yield_now().await;
+
         if self.svc.ready().await.is_err() {
             // Treat all service readiness errors as Overloaded
             // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
@@ -1403,6 +1407,10 @@ where
         }
 
         debug!(state = %self.state, %req, %rsp, "sent Zebra response to peer");
+
+        // Give the inbound service time to clear its queue,
+        // before checking the connection for the next inbound or outbound request.
+        tokio::task::yield_now().await;
     }
 }
 

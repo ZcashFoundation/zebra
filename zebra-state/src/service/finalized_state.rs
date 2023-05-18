@@ -38,7 +38,7 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_DISK_HEIGHT};
 
 pub(super) use zebra_db::ZebraDb;
 

@@ -28,6 +28,7 @@ use zebra_chain::{
     transparent::{self, CoinbaseData},
 };
 
+use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
 use crate::error::TransactionError;
@@ -592,7 +593,7 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 /// Tests that calls to the transaction verifier with a mempool request that spends
 /// immature coinbase outputs will return an error.
 #[tokio::test]
-async fn mempool_request_with_immature_spent_is_rejected() {
+async fn mempool_request_with_immature_spend_is_rejected() {
     let _init_guard = zebra_test::init();
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -689,6 +690,106 @@ async fn mempool_request_with_immature_spent_is_rejected() {
     assert_eq!(
         verifier_response, expected_error,
         "expected to fail verification, got: {verifier_response:?}"
+    );
+}
+
+/// Tests that errors from the read state service are correctly converted into
+/// transaction verifier errors.
+#[tokio::test]
+async fn state_error_converted_correctly() {
+    use zebra_state::DuplicateNullifierError;
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    let make_validate_context_error =
+        || sprout::Nullifier([0; 32].into()).duplicate_nullifier_error(true);
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(Err::<zebra_state::Response, zebra_state::BoxError>(
+                make_validate_context_error().into(),
+            ));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    let transaction_error =
+        verifier_response.expect_err("expected failed verification, got: {verifier_response:?}");
+
+    assert_eq!(
+        TransactionError::from(make_validate_context_error()),
+        transaction_error,
+        "expected matching state and transaction errors"
+    );
+
+    let state_error = zebra_state::BoxError::from(make_validate_context_error())
+        .downcast::<ValidateContextError>()
+        .map(|boxed| TransactionError::from(*boxed))
+        .expect("downcast should succeed");
+
+    assert_eq!(
+        state_error, transaction_error,
+        "expected matching state and transaction errors"
+    );
+
+    let TransactionError::ValidateContextError(propagated_validate_context_error) = transaction_error else {
+        panic!("should be a ValidateContextError variant");
+    };
+
+    assert_eq!(
+        *propagated_validate_context_error,
+        make_validate_context_error(),
+        "expected matching state and transaction errors"
     );
 }
 

@@ -4,6 +4,8 @@
 
 - [User Documentation](user.md)
   - [System Requirements](user/requirements.md)
+  - [Supported Platforms](user/supported-platforms.md)
+    - [Platform Tier Policy](user/target-tier-policies.md)
   - [Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
   - [Zebra with Docker](user/docker.md)
@@ -17,6 +19,7 @@
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
   - [Design Overview](dev/overview.md)
+  - [Zebra versioning and releases](dev/release-process.md)
   - [Zebra RFCs](dev/rfcs.md)
     - [Pipelinable Block Lookup](dev/rfcs/0001-pipelinable-block-lookup.md)
     - [Parallel Verification](dev/rfcs/0002-parallel-verification.md)

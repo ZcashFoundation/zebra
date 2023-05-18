@@ -31,7 +31,9 @@ mod tests;
 
 pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
-pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
+pub use error::{
+    BoxError, CloneError, CommitBlockError, DuplicateNullifierError, ValidateContextError,
+};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
@@ -48,7 +50,7 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::{DiskWriteBatch, WriteDisk},
+    finalized_state::{DiskWriteBatch, WriteDisk, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services, ReadStateService,
 };
 
