@@ -457,7 +457,7 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
             .signed_duration_since(previous_block.header.time);
 
         // zcashd requires a gap that's strictly greater than 6 times the target
-        // threshold, but ZIP-205 and ZIP-208 are ambiguous. See bug #1276.
+        // threshold.
         match NetworkUpgrade::minimum_difficulty_spacing_for_height(Network::Testnet, height) {
             None => Err(eyre!("the minimum difficulty rule is not active"))?,
             Some(spacing) if (time_gap <= spacing) => Err(eyre!(
