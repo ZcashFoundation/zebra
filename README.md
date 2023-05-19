@@ -56,14 +56,11 @@ Zebra validates blocks and transactions, but needs extra software to generate th
   miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
   experimental, and off by default.
 
-Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
-than other Zcash implementations.
-
-## Release Candidates
-
-Zebra's network stack is interoperable with `zcashd`,
-and Zebra implements all the features required to reach Zcash network consensus.
-Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
+the features required to reach Zcash network consensus, including the validation
+of all the consensus rules for the NU5 network upgrade.
+[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+benefits of Zebra.
 
 ## Getting Started
 
