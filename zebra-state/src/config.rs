@@ -29,10 +29,7 @@ pub struct Config {
     /// When Zebra's state format changes, it creates a new state subdirectory for that version,
     /// and re-syncs from genesis.
     ///
-    /// Old state versions are [not automatically deleted](https://github.com/ZcashFoundation/zebra/issues/1213).
-    /// It is ok to manually delete old state versions.
-    ///
-    /// It is also ok to delete the entire cached state directory.
+    /// It is ok to delete the entire cached state directory.
     /// If you do, Zebra will re-sync from genesis next time it is launched.
     ///
     /// The default directory is platform dependent, based on
