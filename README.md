@@ -49,11 +49,12 @@ in terms of speed and resistance to denial of service attacks, for example.
 
 Zebra validates blocks and transactions, but needs extra software to generate them:
 
-- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
-  and use a light wallet with `lightwalletd` and Zebra.
-- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
-  and use a mining pool or miner with Zebra's mining JSON-RPCs.
-  Mining support is currently incomplete, experimental, and off by default.
+- To generate transactions, [run Zebra with
+  `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
+- To generate blocks, [enable mining
+  support](https://zebra.zfnd.org/user/mining.html), and use a mining pool or
+  miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
+  experimental, and off by default.
 
 Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
