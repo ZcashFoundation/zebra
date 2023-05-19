@@ -5,18 +5,11 @@ Testnet. The sync speed depends on your network connection and the overall Zcash
 network load. The major constraint we've found on `zebrad` performance is the
 network weather, especially the ability to make good connections to other Zcash
 network peers. If you're having trouble syncing, try the following config
-changes:
+changes.
 
 ### Release Build
 
 Make sure you're using a release build on your native architecture.
-
-If you're using an ARM machine,
-[install the Rust compiler for ARM](https://rust-lang.github.io/rustup/installation/other.html).
-If you build using the x86_64 tools, Zebra might run really slowly.
-
-Run a release build using the
-[`cargo install` command from the README.](https://github.com/ZcashFoundation/zebra#build-and-run-instructions)
 
 ### Syncer Lookahead Limit
 

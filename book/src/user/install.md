@@ -2,6 +2,12 @@
 
 Follow the [Docker or compilation instructions in the README](https://github.com/ZcashFoundation/zebra#getting-started).
 
+#### ARM
+
+If you're using an ARM machine, [install the Rust compiler for
+ARM](https://rust-lang.github.io/rustup/installation/other.html). If you build
+using the x86_64 tools, Zebra might run really slowly.
+
 #### Build Troubleshooting
 
 If you're having trouble with:
