@@ -30,13 +30,20 @@ Zebra uses the following inbound and outbound TCP ports:
 - 8233 on Mainnet
 - 18233 on Testnet
 
-Outbound connections are required to sync, inbound connections are optional.
-Zebra also needs access to the Zcash DNS seeders, via the OS DNS resolver
-(usually port 53).
+If you configure Zebra with a specific
+[`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
+it will advertise this address to other nodes for inbound connections. Outbound
+connections are required to sync, inbound connections are optional. Zebra also
+needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port
+53).
 
-The typical Mainnet network usage is:
+Zebra makes outbound connections to peers on any port. But `zcashd` prefers
+peers on the default ports, so that it can't be used for DDoS attacks on other
+networks.
 
-- Initial sync: 300 GB download, as already noted, we expect the initial
+### Typical Mainnet Network Usage
+
+- Initial sync: 300 GB download. As already noted, we expect the initial
   download to grow.
 - Ongoing updates: 10 MB - 10 GB upload and download per day, depending on
   user-created transaction size and peer requests.

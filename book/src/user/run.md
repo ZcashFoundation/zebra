@@ -22,21 +22,6 @@ Always run a supported version of Zebra, and upgrade it regularly, so it doesn't
 - `2`: Application crashed
 - `zebrad` may also return platform-dependent codes.
 
-## Network Ports and Data Usage
-
-`zebrad`'s default ports and network usage are
-[documented in the README.](https://github.com/ZcashFoundation/zebra#network-ports-and-data-usage)
-
-If Zebra is configured with a specific [`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
-it will advertise this address to other nodes for inbound connections.
-
-Zebra makes outbound connections to peers on any port.
-But `zcashd` prefers peers on the default ports,
-so that it can't be used for DDoS attacks on other networks.
-
-Zebra needs some peers which have a round-trip latency of 2 seconds or less.
-If this is a problem for you, please let us know!
-
 ## Improving Performance
 
 Zebra usually syncs in around three days on Mainnet and one afternoon on
