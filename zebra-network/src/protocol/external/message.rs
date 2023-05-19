@@ -401,8 +401,6 @@ impl TryFrom<Message> for VersionMessage {
     }
 }
 
-// TODO: add tests for Error conversion and Reject message serialization (#4633)
-// (Zebra does not currently send reject messages, and it ignores received reject messages.)
 impl<E> From<E> for Message
 where
     E: Error,
