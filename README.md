@@ -52,8 +52,6 @@ than other Zcash implementations.
 
 ## Release Candidates
 
-Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
-
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
@@ -91,6 +89,9 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
 supported or tested. Note that Zebra's code currently uses features introduced
 in Rust 1.68, or any later stable release.
+
+Every few weeks, we release a [new Zebra
+version](https://github.com/ZcashFoundation/zebra/releases).
 
 Below are quick summaries for installing the dependencies on your machine.
 
