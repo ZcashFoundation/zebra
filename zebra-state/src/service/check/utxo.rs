@@ -229,7 +229,6 @@ pub fn remaining_transaction_value(
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        // TODO: check coinbase transaction remaining value (#338, #1162)
         if transaction.is_coinbase() {
             continue;
         }
