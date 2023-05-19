@@ -47,6 +47,14 @@ You would want to run Zebra if you want to contribute to the
 Zcash network: the more nodes are run, the more reliable the network will be
 in terms of speed and resistance to denial of service attacks, for example.
 
+Zebra validates blocks and transactions, but needs extra software to generate them:
+
+- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
+  and use a light wallet with `lightwalletd` and Zebra.
+- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
+  and use a mining pool or miner with Zebra's mining JSON-RPCs.
+  Mining support is currently incomplete, experimental, and off by default.
+
 Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
 
@@ -55,14 +63,6 @@ than other Zcash implementations.
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-
-Zebra validates blocks and transactions, but needs extra software to generate them:
-
-- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
-  and use a light wallet with `lightwalletd` and Zebra.
-- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
-  and use a mining pool or miner with Zebra's mining JSON-RPCs.
-  Mining support is currently incomplete, experimental, and off by default.
 
 ## Getting Started
 
