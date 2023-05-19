@@ -65,8 +65,8 @@ benefits of Zebra.
 ## Getting Started
 
 You can run Zebra using our Docker image or you can build it manually. Please
-see the [requirements section of the  Zebra Book](https://zebra.zfnd.org/user/requirements.html) for system
-requirements.
+see the [System Requirements](https://zebra.zfnd.org/user/requirements.html)
+section in the Zebra book for system requirements.
 
 ### Docker
 
