@@ -9,7 +9,12 @@ The configuration format is the TOML encoding of the internal config
 structure, and documentation for all of the config options can be found
 [here](https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html).
 
-* `zebrad start` starts a full node.
+- `zebrad start` starts a full node.
+
+You can run Zebra as a:
+
+- [`lightwalletd` backend](https://zebra.zfnd.org/user/lightwalletd.html), and
+- experimental [mining backend](https://zebra.zfnd.org/user/mining.html).
 
 ## Supported versions
 
