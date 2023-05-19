@@ -42,9 +42,10 @@ If this is a problem for you, please let us know!
 
 ## Improving Performance
 
-Zebra usually syncs in around a day, depending on your network connection, and the overall Zcash network load.
-
-If you're having trouble syncing, try the following config changes:
+Zebra usually syncs in around three days on Mainnet and one afternoon on
+Testnet. The sync speed depends on your network connection and the overall Zcash
+network load. If you're having trouble syncing, try the following config
+changes:
 
 ### Release Build
 
