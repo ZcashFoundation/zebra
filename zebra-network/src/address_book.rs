@@ -180,6 +180,9 @@ impl AddressBook {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
+        // The maximum number of addresses should be always greater than 0
+        assert!(addr_limit > 0);
+
         let mut new_book = AddressBook::new(local_listener, network, span);
         new_book.addr_limit = addr_limit;
 
@@ -190,12 +193,15 @@ impl AddressBook {
                 meta_addr
             })
             .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network))
-            .take(addr_limit)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
         for (socket_addr, meta_addr) in addrs {
             // overwrite any duplicate addresses
             new_book.by_addr.insert(socket_addr, meta_addr);
+            // exit as soon as we get enough addresses
+            if new_book.by_addr.len() >= addr_limit {
+                break;
+            }
         }
 
         new_book.update_metrics(instant_now, chrono_now);
