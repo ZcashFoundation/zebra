@@ -34,9 +34,6 @@ impl<Req: Clone + std::fmt::Debug, Res, E: std::fmt::Debug> Policy<Req, Res, E> 
                 Some(
                     // Let other tasks run, so we're more likely to choose a different peer,
                     // and so that any notfound inv entries win the race to the PeerSet.
-                    //
-                    // TODO: move syncer retries into the PeerSet,
-                    //       so we always choose different peers (#3235)
                     Box::pin(tokio::task::yield_now().map(move |()| retry_outcome)),
                 )
             } else {
