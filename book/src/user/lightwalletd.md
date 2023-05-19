@@ -4,7 +4,6 @@ Zebra's RPC methods can support a lightwalletd service backed by zebrad.
 
 Contents:
 
-- [Download and build Zebra](#download-and-build-zebra)
 - [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
   - [RPC section](#rpc-section)
 - [Sync Zebra](#sync-zebra)
@@ -15,16 +14,8 @@ Contents:
   - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
   - [Run the wallet](#run-the-wallet)
 
-## Download and build Zebra
-[#download-and-build-zebra]: #download-and-build-zebra
-
-```console
-cargo install --locked --git https://github.com/ZcashFoundation/zebra zebrad
-```
-
-Zebra binary will be at ` ~/.cargo/bin/zebrad`.
-
 ## Configure zebra for lightwalletd
+
 [#configure-zebra-for-lightwalletd]: #configure-zebra-for-lightwalletd
 
 We need a zebra configuration file. First, we create a file with the default settings:
