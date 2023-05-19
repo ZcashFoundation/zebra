@@ -34,9 +34,6 @@ Zebra makes outbound connections to peers on any port.
 But `zcashd` prefers peers on the default ports,
 so that it can't be used for DDoS attacks on other networks.
 
-The major constraint we've found on `zebrad` performance is the network weather,
-especially the ability to make good connections to other Zcash network peers.
-
 Zebra needs some peers which have a round-trip latency of 2 seconds or less.
 If this is a problem for you, please let us know!
 
@@ -44,7 +41,9 @@ If this is a problem for you, please let us know!
 
 Zebra usually syncs in around three days on Mainnet and one afternoon on
 Testnet. The sync speed depends on your network connection and the overall Zcash
-network load. If you're having trouble syncing, try the following config
+network load. The major constraint we've found on `zebrad` performance is the
+network weather, especially the ability to make good connections to other Zcash
+network peers. If you're having trouble syncing, try the following config
 changes:
 
 ### Release Build
