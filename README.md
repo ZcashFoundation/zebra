@@ -16,7 +16,6 @@
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
     - [Optional Features](#optional-features)
-  - [Configuring JSON-RPC for lightwalletd](#configuring-json-rpc-for-lightwalletd)
   - [Network Ports](#network-ports)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
@@ -153,27 +152,6 @@ The features are also described in [the API
 documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags).
 The debugging and monitoring features are disabled in release builds to increase
 performance.
-
-### Configuring JSON-RPC for lightwalletd
-
-To use `zebrad` as a `lightwalletd` backend, give it this `~/.config/zebrad.toml`:
-
-```toml
-[rpc]
-# listen for RPC queries on localhost
-listen_addr = '127.0.0.1:8232'
-
-# automatically use multiple CPU threads
-parallel_cpu_threads = 0
-```
-
-**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
-
-`lightwalletd` also requires a `zcash.conf` file.
-
-It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because that is used in testing.
-Other `lightwalletd` forks have limited support, see the [detailed `lightwalletd` instructions](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/lightwalletd.md#sync-lightwalletd).
 
 ### Network Ports
 
