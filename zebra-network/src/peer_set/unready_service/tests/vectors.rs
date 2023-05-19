@@ -1,6 +1,4 @@
 //! Fixed test vectors for unready services.
-//!
-//! TODO: test that inner service errors are handled correctly (#3204)
 
 use std::marker::PhantomData;
 
