@@ -418,8 +418,6 @@ where
         for guard in self.guards.iter() {
             guard.abort();
         }
-
-        // TODO: implement graceful shutdown for InventoryRegistry (#1678)
     }
 
     /// Check busy peer services for request completion or errors.
