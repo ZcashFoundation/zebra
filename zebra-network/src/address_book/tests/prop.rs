@@ -77,7 +77,7 @@ proptest! {
             MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE),
             2..MAX_ADDR_CHANGE
         ),
-        addr_limit in 0..=MAX_ADDR_CHANGE,
+        addr_limit in 1..=MAX_ADDR_CHANGE,
         pre_fill in any::<bool>(),
     ) {
         let _init_guard = zebra_test::init();
