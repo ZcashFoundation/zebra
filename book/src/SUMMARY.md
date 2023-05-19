@@ -16,6 +16,7 @@
   - [Mining](user/mining.md)
     - [Testnet Mining with s-nomp](user/mining-testnet-s-nomp.md)
   - [Kibana blockchain explorer](user/elasticsearch.md)
+  - [Improving Perfomance](user/performance.md)
   - [Troubleshooting](user/troubleshooting.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
