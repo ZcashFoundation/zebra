@@ -1,8 +1,9 @@
 # Summary
 
 [Zebra](README.md)
+
 - [User Documentation](user.md)
-  - [Zebra System Requirements](user/requirements.md)
+  - [System Requirements](user/requirements.md)
   - [Supported Platforms](user/supported-platforms.md)
     - [Platform Tier Policy](user/target-tier-policies.md)
   - [Installing Zebra](user/install.md)

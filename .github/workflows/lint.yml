@@ -67,7 +67,7 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.1.2
+        uses: arduino/setup-protoc@v1.2.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '3.20.1'
@@ -115,9 +115,10 @@ jobs:
       - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.1.2
+        uses: arduino/setup-protoc@v1.2.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '3.20.1'
@@ -153,9 +154,10 @@ jobs:
       - uses: actions/checkout@v3.5.2
         with:
           persist-credentials: false
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.1.2
+        uses: arduino/setup-protoc@v1.2.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '3.20.1'
