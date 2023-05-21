@@ -2,8 +2,7 @@
 
 ---
 
-[![CI Docker](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml) [![Coverage](https://github.com/ZcashFoundation/zebra/actions/workflows/coverage.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/coverage.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml) [![Build lightwalletd](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-lightwalletd.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-lightwalletd.yml) [![Build Zcash Params](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml)
-
+[![CI Docker](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 ## Contents
@@ -135,24 +134,22 @@ book for more details.
 
 #### Optional Features
 
-You can also build Zebra with the following [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring)
+- `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging)
+- `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics)
+- `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html)
 
-- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring);
-- `filter-reload` for [dynamic tracing](https://zebra.zfnd.org/user/tracing.html#dynamic-tracing)
-- `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging).
-- `flamegraph` for [generating flamegraphs](https://zebra.zfnd.org/user/tracing.html#flamegraphs).
-- `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics).
-- `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html).
-
-You can arbitrarily combine the features by listing them as parameters of the `--features` flag:
+You can combine multiple features by listing them as parameters of the `--features` flag:
 
 ```sh
 cargo install --features="<feature1> <feature2> ..." ...
 ```
 
-The features are also described in [the API
+Our full list of experimental and developer features is in [the API
 documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags).
-The debugging and monitoring features are disabled in release builds to increase
+
+Some debugging and monitoring features are disabled in release builds to increase
 performance.
 
 ### Configuring JSON-RPC for lightwalletd
@@ -203,16 +200,9 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 ## Future Work
 
-Performance and Reliability:
+The Zebra team is currently working towards an audited stable release.
 
-- Reliable syncing under poor network conditions
-- Additional batch verification
-- Performance tuning
-
-Currently, the following features are out of scope:
-
-- Optional Zcash network protocol messages
-- Consensus rules removed before Canopy activation (Zebra checkpoints on Canopy activation)
+We will continue to add new features as part of future network upgrades, and in response to community feedback.
 
 ## Documentation
 
