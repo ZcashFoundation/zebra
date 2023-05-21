@@ -914,6 +914,10 @@ where
             // addresses. Otherwise, malicious peers could interfere with the
             // address book state of other peers by providing their addresses in
             // `Version` messages.
+            //
+            // New alternate peer address and peer responded updates are rate-limited because:
+            // - opening connections is rate-limited
+            // - we only send these messages once per handshake
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
                 let alt_addr = MetaAddr::new_alternate(alt_addr, &remote_services);
@@ -1411,6 +1415,12 @@ where
         Err(err) => {
             tracing::debug!(?err, "heartbeat error, shutting down");
 
+            // # Security
+            //
+            // Peer errors and shutdowns are rate-limited because:
+            // - opening connections is rate-limited
+            // - the number of connections is limited
+            // - after the first error or shutdown, the peer is disconnected
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = address_book_updater
                     .send(MetaAddr::new_errored(book_addr, *remote_services))
