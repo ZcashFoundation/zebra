@@ -35,9 +35,9 @@ pub use request::Request;
 #[cfg(test)]
 mod tests;
 
-/// Asynchronous block verification.
+/// Asynchronous semantic block verification.
 #[derive(Debug)]
-pub struct BlockVerifier<S, V> {
+pub struct SemanticBlockVerifier<S, V> {
     /// The network to be verified.
     network: Network,
     state_service: S,
@@ -100,14 +100,14 @@ impl VerifyBlockError {
 /// <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
 pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
 
-impl<S, V> BlockVerifier<S, V>
+impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
-    /// Creates a new BlockVerifier
+    /// Creates a new SemanticBlockVerifier
     pub fn new(network: Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network,
@@ -117,7 +117,7 @@ where
     }
 }
 
-impl<S, V> Service<Request> for BlockVerifier<S, V>
+impl<S, V> Service<Request> for SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,

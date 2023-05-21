@@ -84,7 +84,7 @@ impl RpcServer {
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        chain_verifier: ChainVerifier,
+        router_verifier: ChainVerifier,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         sync_status: SyncStatus,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
@@ -149,7 +149,7 @@ impl RpcServer {
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),
-                    chain_verifier,
+                    router_verifier,
                     sync_status,
                     address_book,
                 );

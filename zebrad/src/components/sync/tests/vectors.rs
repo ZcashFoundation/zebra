@@ -45,7 +45,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
-        mut chain_verifier,
+        mut router_verifier,
         mut peer_set,
         mut state_service,
         _mock_chain_tip_sender,
@@ -88,7 +88,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
-    chain_verifier
+    router_verifier
         .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
@@ -96,7 +96,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for genesis again
     state_service
@@ -144,7 +144,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // Check that nothing unexpected happened.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
@@ -174,7 +174,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             .collect();
 
     for _ in 1..=2 {
-        chain_verifier
+        router_verifier
             .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
             .respond_with(|req| req.block().hash());
@@ -186,7 +186,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // ChainSync::extend_tips
@@ -217,7 +217,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     }
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // Blocks 3 & 4 are fetched in order, then verified concurrently
@@ -238,7 +238,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             .collect();
 
     for _ in 3..=4 {
-        chain_verifier
+        router_verifier
             .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
             .respond_with(|req| req.block().hash());
@@ -250,7 +250,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
@@ -272,7 +272,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
-        mut chain_verifier,
+        mut router_verifier,
         mut peer_set,
         mut state_service,
         _mock_chain_tip_sender,
@@ -315,7 +315,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
-    chain_verifier
+    router_verifier
         .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
@@ -323,7 +323,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for genesis again
     state_service
@@ -373,7 +373,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // Check that nothing unexpected happened.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
@@ -403,7 +403,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             .collect();
 
     for _ in 1..=2 {
-        chain_verifier
+        router_verifier
             .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
             .respond_with(|req| req.block().hash());
@@ -415,7 +415,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // ChainSync::extend_tips
@@ -448,7 +448,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     }
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // Blocks 3 & 4 are fetched in order, then verified concurrently
@@ -469,7 +469,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             .collect();
 
     for _ in 3..=4 {
-        chain_verifier
+        router_verifier
             .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
             .respond_with(|req| req.block().hash());
@@ -481,7 +481,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
@@ -500,7 +500,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
-        mut chain_verifier,
+        mut router_verifier,
         mut peer_set,
         mut state_service,
         _mock_chain_tip_sender,
@@ -535,7 +535,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Block is dropped because it is too far ahead of the tip.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
@@ -555,7 +555,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
-        mut chain_verifier,
+        mut router_verifier,
         mut peer_set,
         mut state_service,
         _mock_chain_tip_sender,
@@ -597,7 +597,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         .await
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
-    chain_verifier
+    router_verifier
         .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
@@ -605,7 +605,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for genesis again
     state_service
@@ -654,7 +654,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // Check that nothing unexpected happened.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for all non-tip blocks (blocks 982k, 1, 2) in response order
     state_service
@@ -710,7 +710,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
-        mut chain_verifier,
+        mut router_verifier,
         mut peer_set,
         mut state_service,
         _mock_chain_tip_sender,
@@ -758,7 +758,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .await
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
-    chain_verifier
+    router_verifier
         .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
@@ -766,7 +766,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for genesis again
     state_service
@@ -814,7 +814,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // Check that nothing unexpected happened.
     peer_set.expect_no_requests().await;
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
 
     // State is checked for all non-tip blocks (blocks 1 & 2) in response order
     state_service
@@ -844,7 +844,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             .collect();
 
     for _ in 1..=2 {
-        chain_verifier
+        router_verifier
             .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
             .respond_with(|req| req.block().hash());
@@ -856,7 +856,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // ChainSync::extend_tips
@@ -888,7 +888,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     }
 
     // Check that nothing unexpected happened.
-    chain_verifier.expect_no_requests().await;
+    router_verifier.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
     // Blocks 3, 4, 982k are fetched in order, then verified concurrently,
@@ -951,7 +951,7 @@ fn setup() -> (
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
 
-    let chain_verifier = MockService::build()
+    let router_verifier = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
 
@@ -965,7 +965,7 @@ fn setup() -> (
         &config,
         Height(0),
         peer_set.clone(),
-        chain_verifier.clone(),
+        router_verifier.clone(),
         state_service.clone(),
         mock_chain_tip,
     );
@@ -975,7 +975,7 @@ fn setup() -> (
     (
         chain_sync_future,
         sync_status,
-        chain_verifier,
+        router_verifier,
         peer_set,
         state_service,
         mock_chain_tip_sender,

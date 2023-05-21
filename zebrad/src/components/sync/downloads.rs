@@ -122,7 +122,7 @@ pub enum BlockDownloadVerifyError {
     #[error("block failed consensus validation: {error:?} {height:?} {hash:?}")]
     Invalid {
         #[source]
-        error: zebra_consensus::chain::VerifyChainError,
+        error: zebra_consensus::router::RouterError,
         height: block::Height,
         hash: block::Hash,
     },
@@ -543,7 +543,7 @@ where
                 verification
                     .map(|hash| (block_height, hash))
                     .map_err(|err| {
-                        match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
+                        match err.downcast::<zebra_consensus::router::RouterError>() {
                             Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
                             Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
                         }

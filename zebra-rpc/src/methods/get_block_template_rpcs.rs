@@ -24,7 +24,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
-    VerifyChainError,
+    RouterError,
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
@@ -268,7 +268,7 @@ where
     latest_chain_tip: Tip,
 
     /// The chain verifier, used for submitting blocks.
-    chain_verifier: ChainVerifier,
+    router_verifier: ChainVerifier,
 
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
@@ -314,7 +314,7 @@ where
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        chain_verifier: ChainVerifier,
+        router_verifier: ChainVerifier,
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
@@ -353,7 +353,7 @@ where
             mempool,
             state,
             latest_chain_tip,
-            chain_verifier,
+            router_verifier,
             sync_status,
             address_book,
         }
@@ -449,7 +449,7 @@ where
             .and_then(get_block_template::JsonParameters::block_proposal_data)
         {
             return validate_block_proposal(
-                self.chain_verifier.clone(),
+                self.router_verifier.clone(),
                 block_proposal_bytes,
                 network,
                 latest_chain_tip,
@@ -732,7 +732,7 @@ where
         HexData(block_bytes): HexData,
         _parameters: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
-        let mut chain_verifier = self.chain_verifier.clone();
+        let mut router_verifier = self.router_verifier.clone();
 
         async move {
             let block: Block = match block_bytes.zcash_deserialize_into() {
@@ -749,7 +749,7 @@ where
                 .map(|height| height.0.to_string())
                 .unwrap_or_else(|| "invalid coinbase height".to_string());
 
-            let chain_verifier_response = chain_verifier
+            let router_verifier_response = router_verifier
                 .ready()
                 .await
                 .map_err(|error| Error {
@@ -760,7 +760,7 @@ where
                 .call(zebra_consensus::Request::Commit(Arc::new(block)))
                 .await;
 
-            let chain_error = match chain_verifier_response {
+            let chain_error = match router_verifier_response {
                 // Currently, this match arm returns `null` (Accepted) for blocks committed
                 // to any chain, but Accepted is only for blocks in the best chain.
                 //
@@ -776,7 +776,7 @@ where
                 // by downcasting from Any to VerifyChainError.
                 Err(box_error) => {
                     let error = box_error
-                        .downcast::<VerifyChainError>()
+                        .downcast::<RouterError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
                     // TODO: add block hash to error?

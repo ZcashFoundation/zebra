@@ -82,11 +82,11 @@ pub async fn test_responses<State, ReadState>(
     <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         network,
         state.clone(),
@@ -143,7 +143,7 @@ pub async fn test_responses<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         read_state,
         mock_chain_tip.clone(),
-        chain_verifier.clone(),
+        router_verifier.clone(),
         mock_sync_status.clone(),
         mock_address_book,
     );
@@ -265,7 +265,7 @@ pub async fn test_responses<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip.clone(),
-        chain_verifier,
+        router_verifier,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );
@@ -363,16 +363,16 @@ pub async fn test_responses<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // the following snapshots use a mock read_state and chain_verifier
+    // the following snapshots use a mock read_state and router_verifier
 
-    let mut mock_chain_verifier = MockService::build().for_unit_tests();
+    let mut mock_router_verifier = MockService::build().for_unit_tests();
     let get_block_template_rpc_mock_state_verifier = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        mock_chain_verifier.clone(),
+        mock_router_verifier.clone(),
         mock_sync_status,
         MockAddressBookPeers::default(),
     );
@@ -385,15 +385,15 @@ pub async fn test_responses<State, ReadState>(
         }),
     );
 
-    let mock_chain_verifier_request_handler = async move {
-        mock_chain_verifier
+    let mock_router_verifier_request_handler = async move {
+        mock_router_verifier
             .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
             .await
             .respond(Hash::from([0; 32]));
     };
 
     let (get_block_template, ..) =
-        tokio::join!(get_block_template_fut, mock_chain_verifier_request_handler,);
+        tokio::join!(get_block_template_fut, mock_router_verifier_request_handler,);
 
     let get_block_template =
         get_block_template.expect("unexpected error in getblocktemplate RPC call");

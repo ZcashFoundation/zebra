@@ -1,6 +1,6 @@
 //! Top-level semantic block verification for Zebra.
 //!
-//! Verifies blocks using the [`CheckpointVerifier`] or full [`BlockVerifier`],
+//! Verifies blocks using the [`CheckpointVerifier`] or full [`SemanticBlockVerifier`],
 //! depending on the config and block height.
 //!
 //! # Correctness
@@ -33,7 +33,7 @@ use zebra_chain::{
 use zebra_state as zs;
 
 use crate::{
-    block::{BlockVerifier, Request, VerifyBlockError},
+    block::{Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
@@ -56,15 +56,15 @@ mod tests;
 /// memory, but missing slots can significantly slow down Zebra.
 const VERIFIER_BUFFER_BOUND: usize = 5;
 
-/// The chain verifier routes requests to either the checkpoint verifier or the
-/// block verifier, depending on the maximum checkpoint height.
+/// The block verifier router routes requests to either the checkpoint verifier or the
+/// semantic block verifier, depending on the maximum checkpoint height.
 ///
 /// # Correctness
 ///
 /// Block verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
 /// module documentation for details.
-struct ChainVerifier<S, V>
+struct BlockVerifierRouter<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -84,8 +84,8 @@ where
     /// This height must be in the `checkpoint` verifier's checkpoint list.
     max_checkpoint_height: block::Height,
 
-    /// The full block verifier, used for blocks after `max_checkpoint_height`.
-    block: BlockVerifier<S, V>,
+    /// The full semantic block verifier, used for blocks after `max_checkpoint_height`.
+    block: SemanticBlockVerifier<S, V>,
 }
 
 /// An error while semantically verifying a block.
@@ -93,41 +93,41 @@ where
 // One or both of these error variants are at least 140 bytes
 #[derive(Debug, Display, Error)]
 #[allow(missing_docs)]
-pub enum VerifyChainError {
+pub enum RouterError {
     /// Block could not be checkpointed
     Checkpoint { source: Box<VerifyCheckpointError> },
     /// Block could not be full-verified
     Block { source: Box<VerifyBlockError> },
 }
 
-impl From<VerifyCheckpointError> for VerifyChainError {
+impl From<VerifyCheckpointError> for RouterError {
     fn from(err: VerifyCheckpointError) -> Self {
-        VerifyChainError::Checkpoint {
+        RouterError::Checkpoint {
             source: Box::new(err),
         }
     }
 }
 
-impl From<VerifyBlockError> for VerifyChainError {
+impl From<VerifyBlockError> for RouterError {
     fn from(err: VerifyBlockError) -> Self {
-        VerifyChainError::Block {
+        RouterError::Block {
             source: Box::new(err),
         }
     }
 }
 
-impl VerifyChainError {
+impl RouterError {
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
         match self {
-            VerifyChainError::Checkpoint { source, .. } => source.is_duplicate_request(),
-            VerifyChainError::Block { source, .. } => source.is_duplicate_request(),
+            RouterError::Checkpoint { source, .. } => source.is_duplicate_request(),
+            RouterError::Block { source, .. } => source.is_duplicate_request(),
         }
     }
 }
 
-impl<S, V> Service<Request> for ChainVerifier<S, V>
+impl<S, V> Service<Request> for BlockVerifierRouter<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -138,7 +138,7 @@ where
     V::Future: Send + 'static,
 {
     type Response = block::Hash;
-    type Error = VerifyChainError;
+    type Error = RouterError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -232,7 +232,7 @@ pub async fn init<S>(
     mut state_service: S,
     debug_skip_parameter_preload: bool,
 ) -> (
-    Buffer<BoxService<Request, block::Hash, VerifyChainError>, Request>,
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
@@ -364,24 +364,28 @@ where
         zs::Response::Tip(tip) => tip,
         _ => unreachable!("wrong response to Request::Tip"),
     };
-    tracing::info!(?tip, ?max_checkpoint_height, "initializing chain verifier");
+    tracing::info!(
+        ?tip,
+        ?max_checkpoint_height,
+        "initializing block verifier router"
+    );
 
-    let block = BlockVerifier::new(network, state_service.clone(), transaction.clone());
+    let block = SemanticBlockVerifier::new(network, state_service.clone(), transaction.clone());
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
-    let chain = ChainVerifier {
+    let router = BlockVerifierRouter {
         checkpoint,
         max_checkpoint_height,
         block,
     };
 
-    let chain = Buffer::new(BoxService::new(chain), VERIFIER_BUFFER_BOUND);
+    let router = Buffer::new(BoxService::new(router), VERIFIER_BUFFER_BOUND);
 
     let task_handles = BackgroundTaskHandles {
         groth16_download_handle,
         state_checkpoint_verify_handle,
     };
 
-    (chain, transaction, task_handles, max_checkpoint_height)
+    (router, transaction, task_handles, max_checkpoint_height)
 }
 
 /// Parses the checkpoint list for `network` and `config`.

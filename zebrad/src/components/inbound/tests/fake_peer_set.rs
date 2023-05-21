@@ -784,7 +784,7 @@ async fn setup(
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::chain::init(
+        zebra_consensus::router::init(
             consensus_config.clone(),
             network,
             state_service.clone(),
