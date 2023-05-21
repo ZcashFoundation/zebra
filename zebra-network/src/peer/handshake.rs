@@ -1010,18 +1010,10 @@ where
                                     "addr" => connected_addr.get_transient_addr_label(),
                                 );
 
-                                if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                                    if matches!(msg, Message::Ping(_) | Message::Pong(_)) {
-                                        // the collector doesn't depend on network activity,
-                                        // so this await should not hang
-                                        let _ = inbound_ts_collector
-                                            .send(MetaAddr::new_responded(
-                                                book_addr,
-                                                &remote_services,
-                                            ))
-                                            .await;
-                                    }
-                                }
+                                // # Security
+                                //
+                                // Peer messages are not rate-limited, so we can't send anything
+                                // to a shared channel or do anything expensive here.
                             }
                             Err(err) => {
                                 metrics::counter!(
@@ -1031,6 +1023,12 @@ where
                                     "addr" => connected_addr.get_transient_addr_label(),
                                 );
 
+                                // # Security
+                                //
+                                // Peer errors are rate-limited because:
+                                // - opening connections is rate-limited
+                                // - the number of connections is limited
+                                // - after the first error, the peer is disconnected
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
                                     let _ = inbound_ts_collector
                                         .send(MetaAddr::new_errored(book_addr, remote_services))
@@ -1295,6 +1293,20 @@ async fn send_periodic_heartbeats_run_loop(
             &remote_services,
         )
         .await?;
+
+        // # Security
+        //
+        // Peer heartbeats are rate-limited because:
+        // - opening connections is rate-limited
+        // - the number of connections is limited
+        // - Zebra initiates each heartbeat using a timer
+        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            // the collector doesn't depend on network activity,
+            // so this await should not hang
+            let _ = heartbeat_ts_collector
+                .send(MetaAddr::new_responded(book_addr, &remote_services))
+                .await;
+        }
     }
 
     unreachable!("unexpected IntervalStream termination")
