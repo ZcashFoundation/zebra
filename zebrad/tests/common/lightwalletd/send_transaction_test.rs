@@ -45,7 +45,7 @@ use crate::common::{
 /// TODO: replace with a const when `min()` stabilises as a const function:
 ///       https://github.com/rust-lang/rust/issues/92391
 fn max_sent_transactions() -> usize {
-    min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1
+    min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY)/2
 }
 
 /// Number of blocks past the finalized to load transactions from.
