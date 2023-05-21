@@ -549,7 +549,7 @@ impl NonFinalizedState {
 
     /// Return the non-finalized portion of the current best chain.
     pub fn best_chain(&self) -> Option<&Arc<Chain>> {
-        self.chain_set.iter().rev().next()
+        self.chain_iter().next()
     }
 
     /// Return the number of chains.

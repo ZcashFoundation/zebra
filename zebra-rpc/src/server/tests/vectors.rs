@@ -1,5 +1,8 @@
 //! Fixed test vectors for the RPC server.
 
+// These tests call functions which can take unit arguments if some features aren't enabled.
+#![allow(clippy::unit_arg)]
+
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     time::Duration,
