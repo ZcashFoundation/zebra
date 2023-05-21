@@ -3,12 +3,9 @@
 use std::time::Duration;
 
 use color_eyre::eyre::Result;
-use tokio::time::timeout;
 
 use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
-
 use zebra_consensus::CheckpointList;
-
 use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
 // Estimated blocks per day with the current 75 seconds block spacing.
@@ -80,7 +77,11 @@ async fn end_of_support_task() -> Result<()> {
 
     let eos_future = end_of_support::start(Network::Mainnet, latest_chain_tip);
 
-    let _ = timeout(Duration::from_secs(15), eos_future).await.ok();
+    tokio::time::timeout(Duration::from_secs(15), eos_future)
+        .await
+        .expect_err(
+            "end of support task unexpectedly exited: it should keep running until Zebra exits",
+        );
 
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."

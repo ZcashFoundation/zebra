@@ -139,10 +139,6 @@ into several components:
   node, which connects these components together and implements logic to handle
   inbound requests from peers and the chain sync process.
 
-- `zebra-rpc` and `zebra-client` will eventually contain the RPC and wallet
-  functionality, but as mentioned above, our goal is to implement replication
-  of chain state first before asking users to entrust Zebra with their funds.
-
 All of these components can be reused as independent libraries, and all
 communication between stateful components is handled internally by
 [internal asynchronous RPC abstraction](https://docs.rs/tower/)
