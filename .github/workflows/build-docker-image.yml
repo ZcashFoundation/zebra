@@ -1,6 +1,20 @@
 name: Build docker image
 
 on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: 'The docker image name to use for the registry'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'The path to the Dockerfile in the repository'
+        required: true
+        type: string
+      dockerfile_target:
+        description: 'The target stage to build in the Dockerfile'
+        required: true
+        type: string
   workflow_call:
     inputs:
       network:
