@@ -110,7 +110,7 @@ pub trait GetBlockTemplateRpc {
     /// - the parent block is a valid block that Zebra already has, or will receive soon.
     ///
     /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
-    /// so moving between chains is very cheap.
+    /// so moving between chains and forking chains is very cheap.
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
