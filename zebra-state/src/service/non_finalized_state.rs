@@ -18,7 +18,7 @@ use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     request::{ContextuallyValidBlock, FinalizedWithTrees},
     service::{check, finalized_state::ZebraDb},
-    PreparedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -235,7 +235,7 @@ impl NonFinalizedState {
     #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_block(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
@@ -266,7 +266,7 @@ impl NonFinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_new_chain(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let finalized_tip_height = finalized_state.finalized_tip_height();
@@ -308,7 +308,7 @@ impl NonFinalizedState {
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         // Reads from disk

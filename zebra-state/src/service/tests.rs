@@ -23,7 +23,7 @@ use crate::{
     init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
+    BoxError, Config, FinalizedBlock, Request, Response, SemanticallyVerifiedBlock,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -556,7 +556,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
     Value = (
         Network,
         SummaryDebug<Vec<FinalizedBlock>>,
-        SummaryDebug<Vec<PreparedBlock>>,
+        SummaryDebug<Vec<SemanticallyVerifiedBlock>>,
     ),
 > {
     any::<Network>()
@@ -567,7 +567,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
                 Network::Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
             };
 
-            // Transform the test vector's block bytes into a vector of `PreparedBlock`s.
+            // Transform the test vector's block bytes into a vector of `SemanticallyVerifiedBlock`s.
             let blocks: Vec<_> = raw_blocks
                 .iter()
                 .map(|(_height, &block_bytes)| {

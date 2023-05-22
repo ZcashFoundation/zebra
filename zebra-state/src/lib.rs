@@ -34,7 +34,7 @@ pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{
     BoxError, CloneError, CommitBlockError, DuplicateNullifierError, ValidateContextError,
 };
-pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
+pub use request::{FinalizedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock};
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},

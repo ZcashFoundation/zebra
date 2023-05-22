@@ -61,8 +61,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, Config, FinalizedBlock, PreparedBlock, ReadRequest, ReadResponse,
-    Request, Response,
+    BoxError, CloneError, Config, FinalizedBlock, ReadRequest, ReadResponse, Request, Response,
+    SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -639,7 +639,7 @@ impl StateService {
     #[instrument(level = "debug", skip(self, prepared))]
     fn queue_and_commit_non_finalized(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
@@ -763,7 +763,7 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let (PreparedBlock { hash, .. }, _) = queued_child;
+                    let (SemanticallyVerifiedBlock { hash, .. }, _) = queued_child;
 
                     self.sent_non_finalized_block_hashes.add(&queued_child.0);
                     let send_result = non_finalized_block_write_sender.send(queued_child);
@@ -799,7 +799,7 @@ impl StateService {
     }
 
     /// Assert some assumptions about the prepared `block` before it is queued.
-    fn assert_block_can_be_validated(&self, block: &PreparedBlock) {
+    fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
         // required by CommitBlock call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),

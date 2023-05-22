@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
-    PreparedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 /// Checks the final Sapling and Orchard anchors specified by `transaction`
@@ -312,9 +312,9 @@ fn sprout_anchors_refer_to_treestates(
     Ok(())
 }
 
-/// Accepts a [`ZebraDb`], [`Chain`], and [`PreparedBlock`].
+/// Accepts a [`ZebraDb`], [`Chain`], and [`SemanticallyVerifiedBlock`].
 ///
-/// Iterates over the transactions in the [`PreparedBlock`] checking the final Sapling and Orchard anchors.
+/// Iterates over the transactions in the [`SemanticallyVerifiedBlock`] checking the final Sapling and Orchard anchors.
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
@@ -322,7 +322,7 @@ fn sprout_anchors_refer_to_treestates(
 pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Arc<Chain>,
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     prepared.block.transactions.iter().enumerate().try_for_each(
         |(tx_index_in_block, transaction)| {
@@ -338,9 +338,9 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     )
 }
 
-/// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`PreparedBlock`].
+/// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`SemanticallyVerifiedBlock`].
 ///
-/// Iterates over the transactions in the [`PreparedBlock`], and fetches the Sprout final treestates
+/// Iterates over the transactions in the [`SemanticallyVerifiedBlock`], and fetches the Sprout final treestates
 /// from the state.
 ///
 /// Returns a `HashMap` of the Sprout final treestates from the state for [`sprout_anchors_refer_to_treestates()`]
@@ -353,7 +353,7 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
 pub(crate) fn block_fetch_sprout_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Arc<Chain>,
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
 ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
     let mut sprout_final_treestates = HashMap::new();
 

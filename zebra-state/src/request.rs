@@ -137,7 +137,7 @@ impl std::str::FromStr for HashOrHeight {
 /// the *service caller*'s task, not inside the service call itself. This allows
 /// moving work out of the single-threaded state service.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedBlock {
+pub struct SemanticallyVerifiedBlock {
     /// The block to commit to the state.
     pub block: Arc<Block>,
     /// The hash of the block.
@@ -299,8 +299,8 @@ impl From<FinalizedBlock> for FinalizedWithTrees {
     }
 }
 
-impl From<&PreparedBlock> for PreparedBlock {
-    fn from(prepared: &PreparedBlock) -> Self {
+impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
+    fn from(prepared: &SemanticallyVerifiedBlock) -> Self {
         prepared.clone()
     }
 }
@@ -311,7 +311,7 @@ impl From<&PreparedBlock> for PreparedBlock {
 
 impl ContextuallyValidBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
-    /// using a [`PreparedBlock`] and the UTXOs it spends.
+    /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
     /// When combined, `prepared.new_outputs` and `spent_utxos` must contain
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
@@ -320,10 +320,10 @@ impl ContextuallyValidBlock {
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
     /// `Chain::update_chain_state_with` returns success.
     pub fn with_block_and_spent_utxos(
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
-        let PreparedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -428,7 +428,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitBlock(PreparedBlock),
+    CommitBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most block validation.
     ///
@@ -619,7 +619,7 @@ pub enum Request {
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
-    CheckBlockProposalValidity(PreparedBlock),
+    CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 }
 
 impl Request {
@@ -870,7 +870,7 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
-    CheckBlockProposalValidity(PreparedBlock),
+    CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 }
 
 impl ReadRequest {

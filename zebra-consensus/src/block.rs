@@ -283,7 +283,7 @@ where
             let new_outputs = Arc::try_unwrap(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let prepared_block = zs::PreparedBlock {
+            let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
                 height,
