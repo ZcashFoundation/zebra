@@ -2,6 +2,8 @@
 
 use std::{
     collections::HashSet,
+    ffi::OsString,
+    io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     string::String,
@@ -10,6 +12,8 @@ use std::{
 
 use indexmap::IndexSet;
 use serde::{de, Deserialize, Deserializer};
+use tempfile::NamedTempFile;
+use tokio::{fs, io::AsyncWriteExt};
 
 use zebra_chain::parameters::Network;
 
@@ -108,8 +112,8 @@ pub struct Config {
     /// # Implementation Details
     ///
     /// Each network has a separate peer list, which is updated regularly from the current
-    /// address book. These lists are stored in `network/mainnet_peers` and
-    /// `network/testnet_peers` files, underneath the `cache_dir` path.
+    /// address book. These lists are stored in `network/mainnet.peers` and
+    /// `network/testnet.peers` files, underneath the `cache_dir` path.
     ///
     /// Previous peer lists are automatically loaded at startup, and used to populate the
     /// initial peer set and address book.
@@ -318,17 +322,141 @@ impl Config {
 
     /// Returns the path for the peer list cache file, if set.
     pub fn peer_cache_file_path(&self, network: Network) -> Option<PathBuf> {
-        let net_file = match network {
-            Network::Mainnet => "mainnet",
-            Network::Testnet => "testnet",
-        };
-
         Some(
             self.cache_dir
                 .as_ref()?
                 .join("network")
-                .join(format!("{net_file}_peers")),
+                .join(format!("{}.peers", network.lowercase_name())),
         )
+    }
+
+    /// Returns the addresses in the peer list cache file, if available.
+    pub async fn load_peer_cache(&self) -> io::Result<HashSet<PeerSocketAddr>> {
+        let Some(peer_cache_file) = self.peer_cache_file_path(self.network) else {
+            return Ok(HashSet::new());
+        };
+
+        let peer_list = match fs::read_to_string(peer_cache_file).await {
+            Ok(peer_list) => peer_list,
+            Err(peer_list_error) => {
+                // We expect that the cache will be missing for new Zebra installs
+                if peer_list_error.kind() == ErrorKind::NotFound {
+                    return Ok(HashSet::new());
+                } else {
+                    info!(
+                        ?peer_list_error,
+                        "could not load cached peer list, using default seed peers"
+                    );
+                    return Err(peer_list_error);
+                }
+            }
+        };
+
+        // Skip and log addresses that don't parse, and automatically deduplicate using the HashSet.
+        // (These issues shouldn't happen unless users modify the file.)
+        let peer_list = peer_list
+            .lines()
+            .filter_map(|peer| {
+                peer.parse()
+                    .map_err(|peer_parse_error| {
+                        info!(
+                            ?peer_parse_error,
+                            "invalid peer address in cached peer list, skipping"
+                        );
+                        peer_parse_error
+                    })
+                    .ok()
+            })
+            .collect();
+
+        Ok(peer_list)
+    }
+
+    /// Atomically writes a new `peer_list` to the peer list cache file, if configured.
+    ///
+    /// Also creates the peer cache directory, if it doesn't already exist.
+    ///
+    /// Atomic writes avoid corrupting the cache if Zebra panics or crashes, or if multiple Zebra
+    /// instances try to read and write the same cache file.
+    pub async fn update_peer_cache(&self, peer_list: HashSet<PeerSocketAddr>) -> io::Result<()> {
+        let Some(peer_cache_file) = self.peer_cache_file_path(self.network) else {
+            return Ok(());
+        };
+
+        // Turn IP addresses into strings
+        let mut peer_list: Vec<String> = peer_list
+            .iter()
+            .map(|redacted_peer| redacted_peer.remove_socket_addr_privacy().to_string())
+            .collect();
+        // # Privacy
+        //
+        // Sort to destroy any peer order, which could leak peer connection times.
+        // (Currently the HashSet argument does this as well.)
+        peer_list.sort();
+        // Make a newline-separated list
+        let peer_list = peer_list.join("\n");
+
+        // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
+        // at the same time.
+        //
+        // # Concurrency
+        //
+        // We want to use async code to avoid blocking the tokio executor on filesystem operations,
+        // but `tempfile` is implemented using non-asyc methods. So we wrap its filesystem
+        // operations in `tokio::spawn_blocking()`.
+        //
+        // TODO: split this out into an atomic_write_to_tmp_file() method if we need to re-use it
+
+        // Create the peer cache directory if needed
+        let peer_cache_dir = peer_cache_file
+            .parent()
+            .expect("cache path always has a network directory")
+            .to_owned();
+        tokio::fs::create_dir_all(&peer_cache_dir).await?;
+
+        // Give the temporary file a similar name to the permanent cache file,
+        // but hide it in directory listings.
+        let mut tmp_peer_cache_prefix: OsString = ".tmp.".into();
+        tmp_peer_cache_prefix.push(
+            peer_cache_file
+                .file_name()
+                .expect("cache file always has a file name"),
+        );
+
+        // Create the temporary file.
+        // Do blocking filesystem operations on a dedicated thread.
+        let tmp_peer_cache_file = tokio::task::spawn_blocking(move || {
+            // Put the temporary file in the same directory as the permanent file,
+            // so atomic filesystem operations are possible.
+            tempfile::Builder::new()
+                .prefix(&tmp_peer_cache_prefix)
+                .tempfile_in(peer_cache_dir)
+        })
+        .await
+        .expect("unexpected panic creating temporary peer cache file")?;
+
+        // Write the list to the file asynchronously, by extracting the inner file, using it,
+        // then combining it back into a type that will correctly drop the file on error.
+        let (tmp_peer_cache_file, tmp_peer_cache_path) = tmp_peer_cache_file.into_parts();
+        let mut tmp_peer_cache_file = tokio::fs::File::from_std(tmp_peer_cache_file);
+        tmp_peer_cache_file.write_all(peer_list.as_bytes()).await?;
+
+        let tmp_peer_cache_file =
+            NamedTempFile::from_parts(tmp_peer_cache_file, tmp_peer_cache_path);
+
+        // Atomically replace the current cache with the temporary cache.
+        // Do blocking filesystem operations on a dedicated thread.
+        tokio::task::spawn_blocking(|| {
+            let result = tmp_peer_cache_file.persist(peer_cache_file);
+
+            // Drops the temp file if needed
+            match result {
+                Ok(_temp_file) => Ok(()),
+                Err(error) => Err(error.error),
+            }
+        })
+        .await
+        .expect("unexpected panic making temporary peer cache file permanent")
     }
 }
 

@@ -5864,6 +5864,7 @@ dependencies = [
  "regex",
  "serde",
  "static_assertions",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
