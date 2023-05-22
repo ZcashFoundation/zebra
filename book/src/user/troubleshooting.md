@@ -17,12 +17,9 @@ for:
 
 ## Network Issues
 
-- Some of Zebra's tests download Zcash blocks, so they might be unreliable
-  depending on your network connection. You can set `ZEBRA_SKIP_NETWORK_TESTS=1`
-  to skip the network tests.
-- Zebra may be unreliable on Testnet, and under less-than-perfect network
-  conditions. See our [future
-  work](https://github.com/ZcashFoundation/zebra#future-work) for details.
+Some of Zebra's tests download Zcash blocks, so they might be unreliable
+depending on your network connection. You can set `ZEBRA_SKIP_NETWORK_TESTS=1`
+to skip the network tests.
 
 ## Issues with Tests on macOS
 
