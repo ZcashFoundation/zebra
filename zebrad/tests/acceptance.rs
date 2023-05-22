@@ -736,7 +736,7 @@ fn last_config_is_stored() -> Result<()> {
          Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
          zebrad/tests/common/configs/{}<next-release-tag>.toml",
         if cfg!(feature = "getblocktemplate-rpcs") {
             GET_BLOCK_TEMPLATE_CONFIG_PREFIX
