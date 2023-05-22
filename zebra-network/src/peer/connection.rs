@@ -1265,9 +1265,7 @@ where
         tokio::task::yield_now().await;
 
         if self.svc.ready().await.is_err() {
-            // Treat all service readiness errors as Overloaded
-            // TODO: treat `TryRecvError::Closed` in `Inbound::poll_ready` as a fatal error (#1655)
-            self.fail_with(PeerError::Overloaded);
+            self.fail_with(PeerError::Fatal);
             return;
         }
 
@@ -1301,8 +1299,8 @@ where
                             (now - previous_overload_time).as_millis()
                                 / constants::SHORT_OVERLOAD_INTERVAL;
 
-                        // u128 between 1 and 10 should convert to f32
-                        0.95 - ((num_intervals_since_last_overload.pow(2)).clamp(0, 100) as f32)
+                        // u128 between 1 and 100 should convert to f32
+                        ((95 - num_intervals_since_last_overload.pow(2)).clamp(0, 90) as f32)
                             / 100.0
                     } else {
                         0.05
