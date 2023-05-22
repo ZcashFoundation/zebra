@@ -15,6 +15,10 @@ on:
         description: 'The target stage to build in the Dockerfile'
         required: true
         type: string
+      docker_context:
+        description: 'The context to use for the docker build'
+        required: false
+        type: string
   workflow_call:
     inputs:
       network:
@@ -161,7 +165,7 @@ jobs:
         uses: docker/build-push-action@v4.0.0
         with:
           target: ${{ inputs.dockerfile_target }}
-          context: .
+          context: ${{ inputs.docker_context || . }}
           file: ${{ inputs.dockerfile_path }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -18,4 +18,4 @@ jobs:
     with:
       dockerfile_path: ./docker/gh-runner/Dockerfile
       dockerfile_target: runner
-      image_name: runner
+      image_name: gh-runner
