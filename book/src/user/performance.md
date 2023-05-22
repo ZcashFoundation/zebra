@@ -1,6 +1,6 @@
 ## Improving Performance
 
-Zebra usually syncs in around three days on Mainnet and one afternoon on
+Zebra usually syncs in around three days on Mainnet and half a day on
 Testnet. The sync speed depends on your network connection and the overall Zcash
 network load. The major constraint we've found on `zebrad` performance is the
 network weather, especially the ability to make good connections to other Zcash
