@@ -16,7 +16,10 @@ use zebra_network::MAX_TX_INV_IN_SENT_MESSAGE;
 
 use zebra_network as zn;
 
-use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
+use crate::{
+    components::sync::{PEER_GOSSIP_DELAY, TIPS_RESPONSE_TIMEOUT},
+    BoxError,
+};
 
 /// The maximum number of channel messages we will combine into a single peer broadcast.
 pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
@@ -96,6 +99,6 @@ where
         //
         // in practice, transactions arrive every 1-20 seconds,
         // so waiting 6 seconds can delay transaction propagation, in order to reduce peer load
-        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     }
 }
