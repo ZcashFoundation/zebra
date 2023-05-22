@@ -34,6 +34,11 @@ impl<Req: Clone + std::fmt::Debug, Res, E: std::fmt::Debug> Policy<Req, Res, E> 
                 Some(
                     // Let other tasks run, so we're more likely to choose a different peer,
                     // and so that any notfound inv entries win the race to the PeerSet.
+                    // # Security
+                    //
+                    // We want to choose different peers for retries, so we have a better chance of getting each block.
+                    // This is implemented by the connection state machine sending synthetic `notfound`s to the 
+                    // `InventoryRegistry`, as well as forwarding actual `notfound`s from peers.
                     Box::pin(tokio::task::yield_now().map(move |()| retry_outcome)),
                 )
             } else {
