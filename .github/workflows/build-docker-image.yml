@@ -36,6 +36,10 @@ on:
       dockerfile_target:
         required: true
         type: string
+      docker_context:
+        description: 'The context to use for the docker build'
+        required: false
+        type: string
       short_sha:
         required: false
         type: string
