@@ -1,0 +1,21 @@
+name: Build runner image
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+# TODO: add condition to only run when needed
+on:
+  push:
+
+jobs:
+  build:
+    name: Build CI Docker
+    uses: ./.github/workflows/build-docker-image.yml
+    with:
+      dockerfile_path: ./docker/gh-runner/Dockerfile
+      dockerfile_target: runner
+      image_name: runner
