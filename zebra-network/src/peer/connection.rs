@@ -7,7 +7,14 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    fmt,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use futures::{
     future::{self, Either},
@@ -508,6 +515,12 @@ pub struct Connection<S, Tx> {
 
     /// The state for this peer, when the metrics were last updated.
     pub(super) last_metrics_state: Option<Cow<'static, str>>,
+
+    /// The time of the last overload error response from the inbound service
+    /// to a request from this connection in milliseconds since the unix epoch,
+    ///
+    /// or None if this connection hasn't yet received an overload error.
+    last_overload_time: Mutex<Option<Instant>>,
 }
 
 impl<S, Tx> fmt::Debug for Connection<S, Tx> {
@@ -549,6 +562,7 @@ impl<S, Tx> Connection<S, Tx> {
             connection_tracker,
             metrics_label,
             last_metrics_state: None,
+            last_overload_time: None.into(),
         }
     }
 }
@@ -1280,7 +1294,27 @@ where
                     );
 
                     metrics::counter!("pool.closed.loadshed", 1);
-                    self.fail_with(PeerError::Overloaded);
+
+                    let now = Instant::now();
+                    if let Some(previous_overload_time) = self
+                        .last_overload_time
+                        .get_mut()
+                        .expect("mutex should not be poisoned")
+                        .replace(now)
+                    {
+                        use rand::{thread_rng, Rng};
+
+                        let drop_connection_threshold =
+                            if previous_overload_time - now > constants::SHORT_OVERLOAD_INTERVAL {
+                                0.5
+                            } else {
+                                0.95
+                            };
+
+                        if thread_rng().gen::<f32>() > drop_connection_threshold {
+                            self.fail_with(PeerError::Overloaded);
+                        }
+                    };
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.

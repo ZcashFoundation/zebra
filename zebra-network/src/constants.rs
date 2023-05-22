@@ -316,6 +316,11 @@ pub const EWMA_DECAY_TIME_NANOS: f64 = 200.0 * NANOS_PER_SECOND;
 /// The number of nanoseconds in one second.
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 
+/// The amount of time after a connection receives an overload error from the inbound
+/// service during which another overload error will have a higher likelihood of dropping
+/// the peer connection.
+pub const SHORT_OVERLOAD_INTERVAL: Duration = Duration::from_millis(500);
+
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
     /// represented as a network upgrade.
