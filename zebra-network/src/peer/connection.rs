@@ -7,14 +7,7 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    fmt,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
 
 use futures::{
     future::{self, Either},
@@ -520,7 +513,7 @@ pub struct Connection<S, Tx> {
     /// to a request from this connection in milliseconds since the unix epoch,
     ///
     /// or None if this connection hasn't yet received an overload error.
-    last_overload_time: Mutex<Option<Instant>>,
+    last_overload_time: Option<Instant>,
 }
 
 impl<S, Tx> fmt::Debug for Connection<S, Tx> {
@@ -562,7 +555,7 @@ impl<S, Tx> Connection<S, Tx> {
             connection_tracker,
             metrics_label,
             last_metrics_state: None,
-            last_overload_time: None.into(),
+            last_overload_time: None,
         }
     }
 }
@@ -1281,6 +1274,8 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
+                    use rand::{thread_rng, Rng};
+
                     tracing::info!(
                         remote_user_agent = ?self.connection_info.remote.user_agent,
                         negotiated_version = ?self.connection_info.negotiated_version,
@@ -1290,31 +1285,35 @@ where
                         remote_height = ?self.connection_info.remote.start_height,
                         cached_addrs = ?self.cached_addrs.len(),
                         connection_state = ?self.state,
-                        "inbound service is overloaded, closing connection",
+                        "inbound service is overloaded",
                     );
 
-                    metrics::counter!("pool.closed.loadshed", 1);
-
                     let now = Instant::now();
-                    if let Some(previous_overload_time) = self
-                        .last_overload_time
-                        .get_mut()
-                        .expect("mutex should not be poisoned")
-                        .replace(now)
+
+                    // Connections that haven't seen an overload error in the past
+                    // 10 SHORT_OVERLOAD_INTERVALs have a 5% chance of being closed.
+                    // Connections that have seen a previous overload error in that time
+                    // have a higher chance of being dropped, i.e. (95 - num_intervals^2)%
+                    let drop_connection_probability: f32 = if let Some(previous_overload_time) =
+                        self.last_overload_time.replace(now)
                     {
-                        use rand::{thread_rng, Rng};
+                        let num_intervals_since_last_overload: u128 =
+                            (now - previous_overload_time).as_millis()
+                                / constants::SHORT_OVERLOAD_INTERVAL;
 
-                        let drop_connection_threshold =
-                            if previous_overload_time - now > constants::SHORT_OVERLOAD_INTERVAL {
-                                0.5
-                            } else {
-                                0.95
-                            };
-
-                        if thread_rng().gen::<f32>() > drop_connection_threshold {
-                            self.fail_with(PeerError::Overloaded);
-                        }
+                        // u128 between 1 and 10 should convert to f32
+                        0.95 - ((num_intervals_since_last_overload.pow(2)).clamp(0, 100) as f32)
+                            / 100.0
+                    } else {
+                        0.05
                     };
+
+                    if thread_rng().gen::<f32>() < drop_connection_probability {
+                        metrics::counter!("pool.closed.loadshed", 1);
+                        tracing::info!(drop_connection_probability, "closing connection",);
+
+                        self.fail_with(PeerError::Overloaded);
+                    }
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.
