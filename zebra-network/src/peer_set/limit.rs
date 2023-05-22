@@ -178,6 +178,9 @@ impl Drop for ConnectionTracker {
 
         // We ignore disconnected errors, because the receiver can be dropped
         // before some connections are dropped.
+        // # Security
+        //
+        // This channel is actually bounded by the inbound and outbound connection limit.
         let _ = self.close_notification_tx.send(ConnectionClosed);
     }
 }
