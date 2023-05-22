@@ -865,7 +865,8 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(network, state_service);
 
-        let transaction = fake_v5_transactions_for_network(network, blocks).next_back()
+        let transaction = fake_v5_transactions_for_network(network, blocks)
+            .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
 
         let result = verifier
@@ -915,7 +916,8 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(network, state_service);
 
-        let mut transaction = fake_v5_transactions_for_network(network, blocks).next_back()
+        let mut transaction = fake_v5_transactions_for_network(network, blocks)
+            .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
         if transaction
             .expiry_height()
