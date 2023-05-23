@@ -193,9 +193,20 @@ impl Config {
         }
     }
 
-    /// Resolve initial seed peer IP addresses, based on the configured network.
+    /// Resolve initial seed peer IP addresses, based on the configured network,
+    /// and load cached peers from disk, if available.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await
+        // TODO: do DNS and disk in parallel if startup speed becomes important
+        let dns_peers =
+            Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
+
+        // Ignore disk errors because the cache is optional and the method already logs them.
+        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+
+        dns_peers
+            .into_iter()
+            .chain(disk_peers.into_iter())
+            .collect()
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
@@ -210,6 +221,7 @@ impl Config {
             warn!(
                 "no initial peers in the network config. \
                  Hint: you must configure at least one peer IP or DNS seeder to run Zebra, \
+                 give it some previously cached peer IP addresses on disk, \
                  or make sure Zebra's listener port gets inbound connections."
             );
             return HashSet::new();

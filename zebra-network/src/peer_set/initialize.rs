@@ -186,7 +186,7 @@ where
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
-    // 2. Initial peers, specified in the config.
+    // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
         config.clone(),
         outbound_connector.clone(),
@@ -242,8 +242,8 @@ where
     (peer_set, address_book)
 }
 
-/// Use the provided `outbound_connector` to connect to the configured initial peers,
-/// then send the resulting peer connections over `peerset_tx`.
+/// Use the provided `outbound_connector` to connect to the configured DNS seeder and
+/// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
 /// Also sends every initial peer address to the `address_book_updater`.
 #[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
@@ -385,7 +385,7 @@ where
         ?handshake_success_total,
         ?handshake_error_total,
         ?outbound_connections,
-        "finished connecting to initial seed peers"
+        "finished connecting to initial seed and disk cache peers"
     );
 
     Ok(active_outbound_connections)
@@ -423,10 +423,10 @@ async fn limit_initial_peers(
                 .entry(preference)
                 .or_default()
                 .push(peer_addr),
-            Err(error) => warn!(
+            Err(error) => info!(
                 ?peer_addr,
                 ?error,
-                "invalid initial peer from DNS seeder or configured IP address",
+                "invalid initial peer from DNS seeder, configured IP address, or disk cache",
             ),
         }
     }
