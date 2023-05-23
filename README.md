@@ -15,7 +15,6 @@
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
     - [Optional Features](#optional-features)
-  - [Configuring JSON-RPC for lightwalletd](#configuring-json-rpc-for-lightwalletd)
   - [Network Ports](#network-ports)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
@@ -46,30 +45,26 @@ You would want to run Zebra if you want to contribute to the
 Zcash network: the more nodes are run, the more reliable the network will be
 in terms of speed and resistance to denial of service attacks, for example.
 
-Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
-than other Zcash implementations.
-
-## Release Candidates
-
-Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
-
-Zebra's network stack is interoperable with `zcashd`,
-and Zebra implements all the features required to reach Zcash network consensus.
-Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-
 Zebra validates blocks and transactions, but needs extra software to generate them:
 
-- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
-  and use a light wallet with `lightwalletd` and Zebra.
-- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
-  and use a mining pool or miner with Zebra's mining JSON-RPCs.
-  Mining support is currently incomplete, experimental, and off by default.
+- To generate transactions, [run Zebra with
+  `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
+- To generate blocks, [enable mining
+  support](https://zebra.zfnd.org/user/mining.html), and use a mining pool or
+  miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
+  experimental, and off by default.
+
+Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
+the features required to reach Zcash network consensus, including the validation
+of all the consensus rules for the NU5 network upgrade.
+[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+benefits of Zebra.
 
 ## Getting Started
 
 You can run Zebra using our Docker image or you can build it manually. Please
-see the [requirements section of the  Zebra Book](https://zebra.zfnd.org/user/requirements.html) for system
-requirements.
+see the [System Requirements](https://zebra.zfnd.org/user/requirements.html)
+section in the Zebra book for system requirements.
 
 ### Docker
 
@@ -90,6 +85,9 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
 supported or tested. Note that Zebra's code currently uses features introduced
 in Rust 1.68, or any later stable release.
+
+Every few weeks, we release a [new Zebra
+version](https://github.com/ZcashFoundation/zebra/releases).
 
 Below are quick summaries for installing the dependencies on your machine.
 
@@ -151,27 +149,6 @@ documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags)
 
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
-
-### Configuring JSON-RPC for lightwalletd
-
-To use `zebrad` as a `lightwalletd` backend, give it this `~/.config/zebrad.toml`:
-
-```toml
-[rpc]
-# listen for RPC queries on localhost
-listen_addr = '127.0.0.1:8232'
-
-# automatically use multiple CPU threads
-parallel_cpu_threads = 0
-```
-
-**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
-
-`lightwalletd` also requires a `zcash.conf` file.
-
-It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because that is used in testing.
-Other `lightwalletd` forks have limited support, see the [detailed `lightwalletd` instructions](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/lightwalletd.md#sync-lightwalletd).
 
 ### Network Ports
 
