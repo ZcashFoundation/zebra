@@ -140,6 +140,15 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// don't synchronise with other crawls.
 pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
+/// The peer address disk cache update interval.
+///
+/// This should be longer than [`DEFAULT_CRAWL_NEW_PEER_INTERVAL`],
+/// but shorter than [`MAX_PEER_ACTIVE_FOR_GOSSIP`].
+///
+/// We use a short interval so Zebra instances which are restarted frequently
+/// still have useful caches.
+pub const PEER_DISK_CACHE_UPDATE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
 /// The maximum number of addresses in the peer disk cache.
 ///
 /// This is chosen to be less than the number of active peers,

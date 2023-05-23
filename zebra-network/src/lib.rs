@@ -103,6 +103,7 @@
 //!
 //! Peer Inventory Service:
 //!  * tracks gossiped `inv` advertisements for each peer
+//!  * updated before each `PeerSet` request is processed
 //!  * tracks missing inventory for each peer
 //!  * used by the `PeerSet` to route block and transaction requests
 //!    to peers that have the requested data
@@ -112,10 +113,15 @@
 //! [`AddressBook`] Service:
 //!  * maintains a list of peer addresses and associated connection attempt metadata
 //!  * address book metadata is used to prioritise peer connection attempts
+//!  * updated by an independent thread based on peer connection status changes
+//!  * caches peer addresses to disk regularly using an independent task
 //!
 //! Initial Seed Peer Task:
-//!  * initiates new outbound peer connections to seed peers, resolving them via DNS if required
-//!  * adds seed peer addresses to the [`AddressBook`]
+//! On startup:
+//!  * loads seed peers from the config, resolving them via DNS if required
+//!  * loads cached peer addresses from disk
+//!  * initiates new outbound peer connections to seed and cached peers
+//!  * adds seed and cached peer addresses to the [`AddressBook`]
 //!
 //! Peer Crawler Task:
 //!  * discovers new peer addresses by sending `Addr` requests to connected peers
@@ -151,6 +157,7 @@ pub mod constants;
 mod isolated;
 mod meta_addr;
 mod peer;
+mod peer_cache_updater;
 mod peer_set;
 mod policies;
 mod protocol;

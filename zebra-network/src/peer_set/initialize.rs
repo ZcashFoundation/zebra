@@ -38,6 +38,7 @@ use crate::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
+    peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
@@ -224,8 +225,9 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
+    // Start the peer crawler
     let crawl_fut = crawl_and_dial(
-        config,
+        config.clone(),
         demand_tx,
         demand_rx,
         candidates,
@@ -235,8 +237,17 @@ where
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
+    // Start the peer disk cache updater
+    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
+
     handle_tx
-        .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
+        .send(vec![
+            listen_guard,
+            crawl_guard,
+            address_book_updater_guard,
+            peer_cache_updater_guard,
+        ])
         .unwrap();
 
     (peer_set, address_book)
