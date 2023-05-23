@@ -273,9 +273,12 @@ where
         "Outbound Connections",
     );
 
+    // TODO: update when we add Tor peers or other kinds of addresses.
+    let ipv4_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv4()).count();
+    let ipv6_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv6()).count();
     info!(
-        initial_peer_count = ?initial_peers.len(),
-        ?initial_peers,
+        ?ipv4_peer_count,
+        ?ipv6_peer_count,
         "connecting to initial peer set"
     );
 
