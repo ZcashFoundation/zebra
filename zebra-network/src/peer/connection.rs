@@ -25,7 +25,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants,
+    constants::{
+        self, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS, OVERLOAD_DROP_PROBABILITY_INTERVAL,
+    },
     meta_addr::MetaAddr,
     peer::{
         connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
@@ -510,7 +513,7 @@ pub struct Connection<S, Tx> {
     pub(super) last_metrics_state: Option<Cow<'static, str>>,
 
     /// The time of the last overload error response from the inbound service
-    /// to a request from this connection in milliseconds since the unix epoch,
+    /// to a request from this connection,
     ///
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
@@ -1265,7 +1268,7 @@ where
         tokio::task::yield_now().await;
 
         if self.svc.ready().await.is_err() {
-            self.fail_with(PeerError::Fatal);
+            self.fail_with(PeerError::ServiceShutdown);
             return;
         }
 
@@ -1274,43 +1277,53 @@ where
                 if e.is::<Overloaded>() {
                     use rand::{thread_rng, Rng};
 
-                    tracing::info!(
-                        remote_user_agent = ?self.connection_info.remote.user_agent,
-                        negotiated_version = ?self.connection_info.negotiated_version,
-                        peer = ?self.metrics_label,
-                        last_peer_state = ?self.last_metrics_state,
-                        // TODO: remove this detailed debug info once #6506 is fixed
-                        remote_height = ?self.connection_info.remote.start_height,
-                        cached_addrs = ?self.cached_addrs.len(),
-                        connection_state = ?self.state,
-                        "inbound service is overloaded",
-                    );
+                    tracing::debug!("inbound service is overloaded, may close connection",);
 
                     let now = Instant::now();
 
                     // Connections that haven't seen an overload error in the past
                     // 10 SHORT_OVERLOAD_INTERVALs have a 5% chance of being closed.
                     // Connections that have seen a previous overload error in that time
-                    // have a higher chance of being dropped, i.e. (95 - num_intervals^2)%
-                    let drop_connection_probability: f32 = if let Some(previous_overload_time) =
-                        self.last_overload_time.replace(now)
-                    {
-                        let num_intervals_since_last_overload: u128 =
-                            (now - previous_overload_time).as_millis()
-                                / constants::SHORT_OVERLOAD_INTERVAL;
+                    // have a higher chance of being dropped: `(95 - num_intervals_since^2)%`
+                    //
+                    // # Security
+                    //
+                    // Dropping every connection that receives an `Overloaded`
+                    // error from the inbound service could cause Zebra to drop peer connections
+                    // when the inbound service is overloaded by requests from other peers.
+                    let drop_connection_probability = self
+                        .last_overload_time
+                        .replace(now)
+                        .map(|prev| {
+                            let elapsed_intervals = (now - prev).as_secs_f32()
+                                / OVERLOAD_DROP_PROBABILITY_INTERVAL.as_secs_f32();
 
-                        // u128 between 1 and 100 should convert to f32
-                        ((95 - num_intervals_since_last_overload.pow(2)).clamp(0, 90) as f32)
-                            / 100.0
-                    } else {
-                        0.05
-                    };
+                            MAX_OVERLOAD_DROP_PROBABILITY
+                                - elapsed_intervals.powi(2)
+                                    / NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2)
+                        })
+                        .unwrap_or_default()
+                        .clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY);
 
                     if thread_rng().gen::<f32>() < drop_connection_probability {
                         metrics::counter!("pool.closed.loadshed", 1);
-                        tracing::info!(drop_connection_probability, "closing connection",);
+
+                        tracing::info!(
+                            drop_connection_probability,
+                            remote_user_agent = ?self.connection_info.remote.user_agent,
+                            negotiated_version = ?self.connection_info.negotiated_version,
+                            peer = ?self.metrics_label,
+                            last_peer_state = ?self.last_metrics_state,
+                            // TODO: remove this detailed debug info once #6506 is fixed
+                            remote_height = ?self.connection_info.remote.start_height,
+                            cached_addrs = ?self.cached_addrs.len(),
+                            connection_state = ?self.state,
+                            "inbound service is overloaded, closing connection",
+                        );
 
                         self.fail_with(PeerError::Overloaded);
+                    } else {
+                        metrics::counter!("pool.ignored.loadshed", 1);
                     }
                 } else {
                     // We could send a reject to the remote peer, but that might cause

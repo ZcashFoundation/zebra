@@ -84,7 +84,7 @@ pub enum PeerError {
 
     /// This node's internal services are no longer able to service requests.
     #[error("Internal services have failed or shutdown")]
-    Fatal,
+    ServiceShutdown,
 
     /// We requested data, but the peer replied with a `notfound` message.
     /// (Or it didn't respond before the request finished.)
@@ -142,7 +142,7 @@ impl PeerError {
             PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
-            PeerError::Fatal => "Fatal".into(),
+            PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
             PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
         }
