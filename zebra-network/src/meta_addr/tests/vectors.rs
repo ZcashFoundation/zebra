@@ -282,7 +282,7 @@ fn long_delayed_change_is_not_applied() {
     );
 }
 
-/// Test that a change that happens long time after the previous change
+/// Test that a change that happens a long time after the previous change
 /// is applied to the address state, even if it is a revert.
 #[test]
 fn later_revert_change_is_applied() {

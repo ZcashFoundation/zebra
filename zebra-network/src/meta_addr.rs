@@ -753,7 +753,7 @@ impl MetaAddrChange {
     //
     // Since the connection tasks run concurrently in an unspecified order, and the address book
     // updater runs in a separate thread, these times are almost always very similar. If Zebra's
-    // address book is under load, we should increase the rate-limits for new inbound or outbound
+    // address book is under load, we should use lower rate-limits for new inbound or outbound
     // connections, disconnections, peer gossip crawls, or peer `UpdateResponded` updates.
     //
     // TODO:
