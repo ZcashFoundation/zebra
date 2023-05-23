@@ -1,12 +1,15 @@
 # Running lightwalletd with zebra
 
-Zebra's RPC methods can support a lightwalletd service backed by zebrad.
+Zebra's RPC methods can support a lightwalletd service backed by zebrad. We
+recommend using
+[adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because we
+use it in testing. Other `lightwalletd` forks have limited support, see the
+[Sync lightwalletd](#sync-lightwalletd) section for more info.
 
 Contents:
 
-- [Download and build Zebra](#download-and-build-zebra)
 - [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
-  - [RPC section](#rpc-section)
+  - [JSON-RPC](#json-rpc)
 - [Sync Zebra](#sync-zebra)
 - [Download and build lightwalletd](#download-and-build-lightwalletd)
 - [Sync lightwalletd](#sync-lightwalletd)
@@ -15,16 +18,8 @@ Contents:
   - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
   - [Run the wallet](#run-the-wallet)
 
-## Download and build Zebra
-[#download-and-build-zebra]: #download-and-build-zebra
-
-```console
-cargo install --locked --git https://github.com/ZcashFoundation/zebra zebrad
-```
-
-Zebra binary will be at ` ~/.cargo/bin/zebrad`.
-
 ## Configure zebra for lightwalletd
+
 [#configure-zebra-for-lightwalletd]: #configure-zebra-for-lightwalletd
 
 We need a zebra configuration file. First, we create a file with the default settings:
@@ -37,17 +32,33 @@ The above command places the generated `zebrad.toml` config file in the default 
 
 Tweak the following option in order to prepare for lightwalletd setup.
 
-### RPC section
-[#rpc-section]: #rpc-section
+### JSON-RPC
 
-This change is required for zebra to behave as an RPC endpoint. The standard port for RPC endpoint is `8232`.
+[#rpc-section]: #json-rpc
 
-```
+We need to configure Zebra to behave as an RPC endpoint. The standard RPC port
+for Zebra is:
+
+- `8232` for Mainnet, and
+- `18323` for Testnet.
+
+For example, to use Zebra as a `lightwalletd` backend on Mainnet, give it this
+`~/.config/zebrad.toml`:
+
+```toml
 [rpc]
-listen_addr = "127.0.0.1:8232"
+# listen for RPC queries on localhost
+listen_addr = '127.0.0.1:8232'
+
+# automatically use multiple CPU threads
+parallel_cpu_threads = 0
 ```
+
+**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
+See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
 
 ## Sync Zebra
+
 [#sync-zebra]: #sync-zebra
 
 With the configuration in place you can start synchronizing Zebra with the Zcash blockchain. This may take a while depending on your hardware.
