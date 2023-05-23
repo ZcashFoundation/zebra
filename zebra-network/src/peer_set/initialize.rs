@@ -433,6 +433,12 @@ async fn limit_initial_peers(
 
     // Send every initial peer to the address book, in preferred order.
     // (This treats initial peers the same way we treat gossiped peers.)
+    //
+    // # Security
+    //
+    // Initial peers are limited because:
+    // - the number of initial peers is limited
+    // - this code only runs once at startup
     for peer in preferred_peers.values().flatten() {
         let peer_addr = MetaAddr::new_initial_peer(*peer);
         // `send` only waits when the channel is full.

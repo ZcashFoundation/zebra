@@ -316,6 +316,12 @@ where
 
     /// Add new `addrs` to the address book.
     async fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
+        // # Security
+        //
+        // New gossiped peers are rate-limited because:
+        // - Zebra initiates requests for new gossiped peers
+        // - the fanout is limited
+        // - the number of addresses per peer is limited
         let addrs: Vec<MetaAddrChange> = addrs
             .into_iter()
             .map(MetaAddr::new_gossiped_change)
