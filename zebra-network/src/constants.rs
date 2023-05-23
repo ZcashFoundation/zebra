@@ -140,6 +140,13 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// don't synchronise with other crawls.
 pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
+/// The maximum number of addresses in the peer disk cache.
+///
+/// This is chosen to be less than the number of active peers,
+/// and approximately the same as the number of seed peers returned by DNS.
+/// It is a tradeoff between fingerprinting attacks, DNS pollution risk, and cache pollution risk.
+pub const MAX_PEER_DISK_CACHE_SIZE: usize = 75;
+
 /// The maximum duration since a peer was last seen to consider it reachable.
 ///
 /// This is used to prevent Zebra from gossiping addresses that are likely unreachable. Peers that

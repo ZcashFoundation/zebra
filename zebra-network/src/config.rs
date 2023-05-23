@@ -20,7 +20,7 @@ use zebra_chain::parameters::Network;
 use crate::{
     constants::{
         DEFAULT_CRAWL_NEW_PEER_INTERVAL, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
-        OUTBOUND_PEER_LIMIT_MULTIPLIER,
+        MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
@@ -413,6 +413,7 @@ impl Config {
     }
 
     /// Atomically writes a new `peer_list` to the peer list cache file, if configured.
+    /// If the list is empty, keeps the previous cache file.
     ///
     /// Also creates the peer cache directory, if it doesn't already exist.
     ///
@@ -423,9 +424,18 @@ impl Config {
             return Ok(());
         };
 
+        if peer_list.is_empty() {
+            info!(
+                ?peer_cache_file,
+                "cacheable peer list was empty, keeping previous cache"
+            );
+            return Ok(());
+        }
+
         // Turn IP addresses into strings
         let mut peer_list: Vec<String> = peer_list
             .iter()
+            .take(MAX_PEER_DISK_CACHE_SIZE)
             .map(|redacted_peer| redacted_peer.remove_socket_addr_privacy().to_string())
             .collect();
         // # Privacy
