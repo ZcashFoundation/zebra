@@ -348,7 +348,7 @@ impl Config {
             return Ok(HashSet::new());
         };
 
-        let peer_list = match fs::read_to_string(peer_cache_file).await {
+        let peer_list = match fs::read_to_string(&peer_cache_file).await {
             Ok(peer_list) => peer_list,
             Err(peer_list_error) => {
                 // We expect that the cache will be missing for new Zebra installs
@@ -366,7 +366,7 @@ impl Config {
 
         // Skip and log addresses that don't parse, and automatically deduplicate using the HashSet.
         // (These issues shouldn't happen unless users modify the file.)
-        let peer_list = peer_list
+        let peer_list: HashSet<PeerSocketAddr> = peer_list
             .lines()
             .filter_map(|peer| {
                 peer.parse()
@@ -380,6 +380,34 @@ impl Config {
                     .ok()
             })
             .collect();
+
+        // This log is needed for user debugging, but it's annoying during tests.
+        #[cfg(not(test))]
+        info!(
+            cached_ip_count = ?peer_list.len(),
+            ?peer_cache_file,
+            "loaded cached peer IP addresses"
+        );
+        #[cfg(test)]
+        debug!(
+            cached_ip_count = ?peer_list.len(),
+            ?peer_cache_file,
+            "loaded cached peer IP addresses"
+        );
+
+        for ip in &peer_list {
+            // Count each initial peer, recording the cache file and loaded IP address.
+            //
+            // If an IP is returned by DNS seeders and the cache,
+            // each duplicate adds 1 to the initial peer count.
+            // (But we only make one initial connection attempt to each IP.)
+            metrics::counter!(
+                "zcash.net.peers.initial",
+                1,
+                "cache" => peer_cache_file.display().to_string(),
+                "remote_ip" => ip.to_string()
+            );
+        }
 
         Ok(peer_list)
     }
@@ -406,7 +434,7 @@ impl Config {
         // (Currently the HashSet argument does this as well.)
         peer_list.sort();
         // Make a newline-separated list
-        let peer_list = peer_list.join("\n");
+        let peer_data = peer_list.join("\n");
 
         // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
         // at the same time.
@@ -451,19 +479,36 @@ impl Config {
         // then combining it back into a type that will correctly drop the file on error.
         let (tmp_peer_cache_file, tmp_peer_cache_path) = tmp_peer_cache_file.into_parts();
         let mut tmp_peer_cache_file = tokio::fs::File::from_std(tmp_peer_cache_file);
-        tmp_peer_cache_file.write_all(peer_list.as_bytes()).await?;
+        tmp_peer_cache_file.write_all(peer_data.as_bytes()).await?;
 
         let tmp_peer_cache_file =
             NamedTempFile::from_parts(tmp_peer_cache_file, tmp_peer_cache_path);
 
         // Atomically replace the current cache with the temporary cache.
         // Do blocking filesystem operations on a dedicated thread.
-        tokio::task::spawn_blocking(|| {
-            let result = tmp_peer_cache_file.persist(peer_cache_file);
+        tokio::task::spawn_blocking(move || {
+            let result = tmp_peer_cache_file.persist(&peer_cache_file);
 
             // Drops the temp file if needed
             match result {
-                Ok(_temp_file) => Ok(()),
+                Ok(_temp_file) => {
+                    info!(
+                        cached_ip_count = ?peer_list.len(),
+                        ?peer_cache_file,
+                        "updated cached peer IP addresses"
+                    );
+
+                    for ip in &peer_list {
+                        metrics::counter!(
+                            "zcash.net.peers.cache",
+                            1,
+                            "cache" => peer_cache_file.display().to_string(),
+                            "remote_ip" => ip.to_string()
+                        );
+                    }
+
+                    Ok(())
+                }
                 Err(error) => Err(error.error),
             }
         })
