@@ -502,14 +502,12 @@ where
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            let preselected_p2c_peer = &mut self.preselected_p2c_peer;
-
             self.ready_services.retain(|address, peer| {
                 if peer.remote_version() >= minimum_version {
                     true
                 } else {
-                    if *preselected_p2c_peer == Some(*address) {
-                        *preselected_p2c_peer = None;
+                    if self.preselected_p2c_peer == Some(*address) {
+                        self.preselected_p2c_peer = None;
                     }
 
                     false

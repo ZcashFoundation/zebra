@@ -35,7 +35,7 @@ use crate::{
             gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
             Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus, TIPS_RESPONSE_TIMEOUT},
+        sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
     },
     BoxError,
 };
@@ -421,7 +421,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     hs.insert(tx1_id);
 
     // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs),
         Request::AdvertiseBlock(block_two.hash()),
@@ -490,7 +490,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .unwrap();
 
     // Test the block is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash()))
         .await
@@ -567,7 +567,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     );
 
     // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
 
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
@@ -598,7 +598,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .unwrap();
 
         // Test the block is gossiped, after waiting for the multi-gossip delay
-        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await
