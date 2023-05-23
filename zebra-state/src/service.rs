@@ -664,7 +664,7 @@ impl StateService {
             return rsp_rx;
         }
 
-        // Request::CommitBlock contract: a request to commit a block which has
+        // Request::SemanticallyVerifiedBlock contract: a request to commit a block which has
         // been queued but not yet committed to the state fails the older
         // request and replaces it with the newer request.
         let rsp_rx = if let Some((_, old_rsp_tx)) =
@@ -800,7 +800,7 @@ impl StateService {
 
     /// Assert some assumptions about the prepared `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
-        // required by CommitBlock call
+        // required by SemanticallyVerifiedBlock call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
             "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
@@ -901,7 +901,7 @@ impl Service<Request> for StateService {
         match req {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
-            Request::CommitBlock(prepared) => {
+            Request::CommitSemanticallyVerifiedBlock(prepared) => {
                 self.assert_block_can_be_validated(&prepared);
 
                 self.pending_utxos
@@ -927,14 +927,16 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitBlock");
+                timer.finish(module_path!(), line!(), "SemanticallyVerifiedBlock");
 
                 let span = Span::current();
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from("block was dropped from the state CommitBlock queue")
+                            BoxError::from(
+                                "block was dropped from the state SemanticallyVerifiedBlock queue",
+                            )
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
@@ -1778,7 +1780,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         //
-                        // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
+                        // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                         latest_non_finalized_state.disable_metrics();
 
                         write::validate_and_commit_non_finalized(

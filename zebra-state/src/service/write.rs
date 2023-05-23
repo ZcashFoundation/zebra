@@ -20,7 +20,7 @@ use crate::{
         queued_blocks::{QueuedFinalized, QueuedNonFinalized},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
     },
-    CommitBlockError, SemanticallyVerifiedBlock,
+    CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
 
 // These types are used in doc links
@@ -50,7 +50,7 @@ pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
-) -> Result<(), CommitBlockError> {
+) -> Result<(), CommitSemanticallyVerifiedError> {
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 

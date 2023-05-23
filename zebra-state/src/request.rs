@@ -428,7 +428,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitBlock(SemanticallyVerifiedBlock),
+    CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most block validation.
     ///
@@ -625,7 +625,7 @@ pub enum Request {
 impl Request {
     fn variant_name(&self) -> &'static str {
         match self {
-            Request::CommitBlock(_) => "commit_block",
+            Request::CommitSemanticallyVerifiedBlock(_) => "commit_block",
             Request::CommitFinalizedBlock(_) => "commit_finalized_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -947,7 +947,7 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::CheckBestChainTipNullifiersAndAnchors(tx))
             }
 
-            Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
+            Request::CommitSemanticallyVerifiedBlock(_) | Request::CommitFinalizedBlock(_) => {
                 Err("ReadService does not write blocks")
             }
 

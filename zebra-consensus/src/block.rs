@@ -311,7 +311,7 @@ where
                 .ready()
                 .await
                 .map_err(VerifyBlockError::Commit)?
-                .call(zs::Request::CommitBlock(prepared_block))
+                .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared_block))
                 .await
                 .map_err(VerifyBlockError::Commit)?
             {
@@ -319,7 +319,7 @@ where
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                _ => unreachable!("wrong response for CommitBlock"),
+                _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
             }
         }
         .instrument(span)
