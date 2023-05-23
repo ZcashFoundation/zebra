@@ -1281,10 +1281,12 @@ where
 
                     let now = Instant::now();
 
-                    // Connections that haven't seen an overload error in the past
-                    // 10 SHORT_OVERLOAD_INTERVALs have a 5% chance of being closed.
+                    // Connections that haven't seen an overload error in the past NUM_OVERLOAD_DROP_PROBABILITY_INTERVAL (10)
+                    // OVERLOAD_DROP_PROBABILITY_INTERVALs (50ms) have a MIN_OVERLOAD_DROP_PROBABILITY (5%) chance of being closed.
+                    //
                     // Connections that have seen a previous overload error in that time
-                    // have a higher chance of being dropped: `(95 - num_intervals_since^2)%`
+                    // have a higher chance of being dropped up to MAX_OVERLOAD_DROP_PROBABILITY (95%):
+                    // `95 - ((10 + elapsed_intervals)^2 - 100) / (95 * 3)`%
                     //
                     // # Security
                     //
@@ -1299,8 +1301,12 @@ where
                                 / OVERLOAD_DROP_PROBABILITY_INTERVAL.as_secs_f32();
 
                             MAX_OVERLOAD_DROP_PROBABILITY
-                                - elapsed_intervals.powi(2)
-                                    / NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2)
+                                - ((NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS + elapsed_intervals)
+                                    .powi(2)
+                                    - NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2))
+                                    / (3.0 // 3x^2 = (2x)^2 - x^2
+                                        * MAX_OVERLOAD_DROP_PROBABILITY
+                                        * NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2))
                         })
                         .unwrap_or_default()
                         .clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY);
