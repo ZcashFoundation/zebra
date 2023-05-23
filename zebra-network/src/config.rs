@@ -80,10 +80,11 @@ pub struct Config {
     /// If this is `None`, then peer addresses are not read or written to disk.
     ///
     /// If you change this directory, you might also want to change `state.cache_dir`.
+    /// By default, all Zebra instances run by the same user will share a single peer cache.
     ///
     /// The peer cache is a list of the addresses of some recently useful peers.
     ///
-    /// For privacy reasons, it does *not* include any other information about peers,
+    /// For privacy reasons, the cache does *not* include any other information about peers,
     /// such as when they were connected to the node.
     ///
     /// Deleting or modifying the peer cache can impact your node's:
