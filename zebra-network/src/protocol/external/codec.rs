@@ -184,10 +184,10 @@ impl Codec {
     /// Obtain the size of the body of a given message. This will match the
     /// number of bytes written to the writer provided to `write_body` for the
     /// same message.
-    ///
-    /// TODO: Replace with a size estimate, to avoid multiple serializations
-    /// for large data structures like lists, blocks, and transactions.
-    /// See #1774.
+    // # Performance TODO
+    //
+    // If this code shows up in profiles, replace with a size estimate or cached size,
+    // to avoid multiple serializations for large data structures like lists, blocks, and transactions.
     fn body_length(&self, msg: &Message) -> usize {
         let mut writer = FakeWriter(0);
 
