@@ -14,6 +14,7 @@ use futures::{
     prelude::*,
     stream::Stream,
 };
+use rand::{thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
 use tower::Service;
 use tracing_futures::Instrument;
@@ -27,7 +28,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         self, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS, OVERLOAD_DROP_PROBABILITY_INTERVAL,
+        OVERLOAD_PROTECTION_INTERVAL,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -512,9 +513,8 @@ pub struct Connection<S, Tx> {
     /// The state for this peer, when the metrics were last updated.
     pub(super) last_metrics_state: Option<Cow<'static, str>>,
 
-    /// The time of the last overload error response from the inbound service
-    /// to a request from this connection,
-    ///
+    /// The time of the last overload error response from the inbound
+    /// service to a request from this connection,
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
 }
@@ -1275,38 +1275,54 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
-                    use rand::{thread_rng, Rng};
-
                     tracing::debug!("inbound service is overloaded, may close connection",);
 
                     let now = Instant::now();
 
-                    // Connections that haven't seen an overload error in the past NUM_OVERLOAD_DROP_PROBABILITY_INTERVAL (10)
-                    // OVERLOAD_DROP_PROBABILITY_INTERVALs (50ms) have a MIN_OVERLOAD_DROP_PROBABILITY (5%) chance of being closed.
-                    //
-                    // Connections that have seen a previous overload error in that time
-                    // have a higher chance of being dropped up to MAX_OVERLOAD_DROP_PROBABILITY (95%):
-                    // `95 - ((10 + elapsed_intervals)^2 - 100) / (95 * 3)`%
-                    //
                     // # Security
                     //
-                    // Dropping every connection that receives an `Overloaded`
-                    // error from the inbound service could cause Zebra to drop peer connections
-                    // when the inbound service is overloaded by requests from other peers.
+                    // When the inbound service is overloaded with requests, Zebra needs to drop some connections,
+                    // to reduce the load on the application. But dropping every connection that receives an `Overloaded`
+                    // error from the inbound service could cause Zebra to drop too many peer connections,
+                    // and stop itself downloading blocks or transactions.
+                    //
+                    // Malicious or misbehaving peers can also overload the inbound service, and make Zebra drop
+                    // its connections to other peers.
+                    //
+                    // So instead, Zebra drops some overloaded connections at random. If a connection has recently
+                    // overloaded the inbound service, it is more likely to be dropped. This makes it harder for a single
+                    // peer or multiple peers to perform a denial of service attack.
+                    //
+                    // The inbound connection rate-limit also makes it hard for multiple peers to perform this attack,
+                    // because each inbound connection can only send one inbound request before its probability of
+                    // being disconnected increases.
+                    //
+                    // ## Implementation Details
+                    //
+                    // Connections that haven't seen an overload error in the past OVERLOAD_PROTECTION_INTERVAL
+                    // have a 5% chance of being closed.
+                    //
+                    // If a connection sends multiple overloads close together, it is very likely to be disconnected
+                    // If a connection has two overloads multiple seconds apart, it is unlikely to be disconnected
+                    //
+                    // Connections that have seen a previous overload error in that time
+                    // have a higher chance of being dropped up to MAX_OVERLOAD_DROP_PROBABILITY.
+                    // This probability increases quadratically, so peers that send lots of inbound
+                    // requests are more likely to be dropped.
                     let drop_connection_probability = self
                         .last_overload_time
                         .replace(now)
                         .map(|prev| {
-                            let elapsed_intervals = (now - prev).as_secs_f32()
-                                / OVERLOAD_DROP_PROBABILITY_INTERVAL.as_secs_f32();
-
-                            MAX_OVERLOAD_DROP_PROBABILITY
-                                - ((NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS + elapsed_intervals)
-                                    .powi(2)
-                                    - NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2))
-                                    / (3.0 // 3x^2 = (2x)^2 - x^2
-                                        * MAX_OVERLOAD_DROP_PROBABILITY
-                                        * NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS.powi(2))
+                            let protection_fraction_since_last_overload = (now - prev)
+                                .as_secs_f32()
+                                / OVERLOAD_PROTECTION_INTERVAL.as_secs_f32();
+                            // Quadratically increase the disconnection probability for very recent overloads.
+                            // Negative values are ignored by clamping to MIN_OVERLOAD_DROP_PROBABILITY.
+                            let overload_fraction =
+                                1.0 - protection_fraction_since_last_overload.powi(2);
+                            let probability_range =
+                                MAX_OVERLOAD_DROP_PROBABILITY - MIN_OVERLOAD_DROP_PROBABILITY;
+                            MAX_OVERLOAD_DROP_PROBABILITY - (overload_fraction * probability_range)
                         })
                         .unwrap_or_default()
                         .clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY);

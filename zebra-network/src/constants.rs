@@ -316,20 +316,16 @@ pub const EWMA_DECAY_TIME_NANOS: f64 = 200.0 * NANOS_PER_SECOND;
 /// The number of nanoseconds in one second.
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 
-/// The minimum interval that must elapse for the drop probability of an overloaded connection to decrease.
+/// The duration it takes for the drop probability of an overloaded connection to
+/// reach [`MIN_OVERLOAD_DROP_PROBABILITY`].
 ///
 /// Peer connections that receive multiple overloads have a higher probability of being dropped.
-/// Each time this interval elapses after the last overload, the probability of a connection being
-/// dropped gradually decreases, until it reaches the default drop probability.
+///
+/// The probability of a connection being dropped gradually decreases during this interval
+/// until it reaches the default drop probability ([`MIN_OVERLOAD_DROP_PROBABILITY`]).
 ///
 /// Increasing this number increases the rate at which connections are dropped.
-pub const OVERLOAD_DROP_PROBABILITY_INTERVAL: Duration = Duration::from_millis(50);
-
-/// The number of [`OVERLOAD_DROP_PROBABILITY_INTERVAL`]s that must elapse to reach the minimum
-/// drop probability for an overloaded connection.
-///
-/// Increasing this number increases the rate at which connections are dropped.
-pub const NUM_OVERLOAD_DROP_PROBABILITY_INTERVALS: f32 = 10.0;
+pub const OVERLOAD_PROTECTION_INTERVAL: Duration = MIN_INBOUND_PEER_CONNECTION_INTERVAL;
 
 /// The minimum probability of dropping a peer connection when it receives an
 /// [`Overloaded`](crate::PeerError::Overloaded) error.
