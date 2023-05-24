@@ -171,9 +171,16 @@ where
     }
 
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
+        let dir = self.as_ref();
+        let cache_dir = PathBuf::from(dir);
+
+        // If the peer cache has already been disabled, don't re-enable it
+        if config.network.cache_dir.is_some() {
+            config.network.cache_dir = Some(cache_dir.clone());
+        }
+
+        // Only replace the state cache directory if it's going to be used
         if !config.state.ephemeral {
-            let dir = self.as_ref();
-            let cache_dir = PathBuf::from(dir);
             config.state.cache_dir = cache_dir;
         }
 
