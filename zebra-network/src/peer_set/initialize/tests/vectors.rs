@@ -1126,6 +1126,7 @@ async fn self_connections_should_fail() {
 
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: None,
 
         ..Config::default()
     };
@@ -1371,6 +1372,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: None,
 
         ..Config::default()
     };
@@ -1706,6 +1708,8 @@ where
 
     let config = Config {
         initial_mainnet_peers: peers,
+        // We want exactly the above list of peers, without any cached peers.
+        cache_dir: None,
 
         network: Network::Mainnet,
         listen_addr: unused_v4,

@@ -647,6 +647,7 @@ async fn setup(
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: None,
 
         ..NetworkConfig::default()
     };
