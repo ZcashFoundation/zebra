@@ -23,7 +23,7 @@ use std::{
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
-    request::FinalizedWithTrees,
+    request::ContextuallyVerifiedBlockWithTrees,
     service::{check, QueuedFinalized},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
@@ -221,7 +221,7 @@ impl FinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
-        finalized_with_trees: FinalizedWithTrees,
+        finalized_with_trees: ContextuallyVerifiedBlockWithTrees,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
         let finalized = finalized_with_trees.finalized;

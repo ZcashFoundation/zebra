@@ -266,14 +266,14 @@ impl Treestate {
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
 /// database and recompute the new one.
-pub struct FinalizedWithTrees {
+pub struct ContextuallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
     pub finalized: CheckpointVerifiedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
-impl FinalizedWithTrees {
+impl ContextuallyVerifiedBlockWithTrees {
     pub fn new(block: ContextuallyValidBlock, treestate: Treestate) -> Self {
         let finalized = CheckpointVerifiedBlock::from(block);
 
@@ -284,13 +284,13 @@ impl FinalizedWithTrees {
     }
 }
 
-impl From<Arc<Block>> for FinalizedWithTrees {
+impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
     fn from(block: Arc<Block>) -> Self {
         Self::from(CheckpointVerifiedBlock::from(block))
     }
 }
 
-impl From<CheckpointVerifiedBlock> for FinalizedWithTrees {
+impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
     fn from(block: CheckpointVerifiedBlock) -> Self {
         Self {
             finalized: block,
