@@ -737,7 +737,7 @@ where
             let block: Block = match block_bytes.zcash_deserialize_into() {
                 Ok(block_bytes) => block_bytes,
                 Err(error) => {
-                    tracing::info!(?error, "submit block failed");
+                    tracing::info!(?error, "submit block failed: block bytes could not be deserialized into a structurally valid block");
 
                     return Ok(submit_block::ErrorResponse::Rejected.into());
                 }
@@ -778,8 +778,7 @@ where
                         .downcast::<VerifyChainError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
-                    // TODO: add block hash to error?
-                    tracing::info!(?error, ?block_height, "submit block failed");
+                    tracing::info!(?error, ?block_hash, ?block_height, "submit block failed verification");
 
                     error
                 }
