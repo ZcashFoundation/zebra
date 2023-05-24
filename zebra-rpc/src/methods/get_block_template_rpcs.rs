@@ -747,6 +747,7 @@ where
                 .coinbase_height()
                 .map(|height| height.0.to_string())
                 .unwrap_or_else(|| "invalid coinbase height".to_string());
+            let block_hash = block.hash();
 
             let chain_verifier_response = chain_verifier
                 .ready()
