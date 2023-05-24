@@ -1095,7 +1095,7 @@ where
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .oneshot(zs::Request::CommitFinalizedBlock(req_block.block))
+                .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .await?
             {
@@ -1103,7 +1103,7 @@ where
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                _ => unreachable!("wrong response for CommitFinalizedBlock"),
+                _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
             }
         });
 

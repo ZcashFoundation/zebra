@@ -199,7 +199,7 @@ pub async fn populated_state(
 ) {
     let requests = blocks
         .into_iter()
-        .map(|block| Request::CommitFinalizedBlock(block.into()));
+        .map(|block| Request::CommitCheckpointVerifiedBlock(block.into()));
 
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.

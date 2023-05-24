@@ -355,7 +355,7 @@ impl CheckpointVerifiedBlock {
     /// using a precalculated [`block::Hash`].
     ///
     /// Note: a [`FinalizedBlock`] isn't actually finalized
-    /// until [`Request::CommitFinalizedBlock`] returns success.
+    /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         let height = block
             .coinbase_height()
@@ -474,7 +474,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitFinalizedBlock(CheckpointVerifiedBlock),
+    CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -626,7 +626,7 @@ impl Request {
     fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_block",
-            Request::CommitFinalizedBlock(_) => "commit_finalized_block",
+            Request::CommitCheckpointVerifiedBlock(_) => "commit_finalized_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
@@ -947,9 +947,8 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::CheckBestChainTipNullifiersAndAnchors(tx))
             }
 
-            Request::CommitSemanticallyVerifiedBlock(_) | Request::CommitFinalizedBlock(_) => {
-                Err("ReadService does not write blocks")
-            }
+            Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitCheckpointVerifiedBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \

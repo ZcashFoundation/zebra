@@ -950,7 +950,7 @@ impl Service<Request> for StateService {
 
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
-            Request::CommitFinalizedBlock(finalized) => {
+            Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
                 // A non-finalized block verification could have called AwaitUtxo
@@ -972,14 +972,14 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
+                timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
 
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
                             BoxError::from(
-                                "block was dropped from the state CommitFinalizedBlock queue",
+                                "block was dropped from the state CommitCheckpointVerifiedBlock queue",
                             )
                         })
                         // TODO: replace with Result::flatten once it stabilises

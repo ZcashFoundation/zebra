@@ -216,7 +216,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
 
     let iter = vec![
-        // No checks for SemanticallyVerifiedBlock or CommitFinalizedBlock because empty state
+        // No checks for SemanticallyVerifiedBlock or CommitCheckpointVerifiedBlock because empty state
         // precondition doesn't matter to them
         (Request::Depth(block.hash()), Ok(Response::Depth(None))),
         (Request::Tip, Ok(Response::Tip(None))),
