@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::watch_receiver::WatchReceiver,
+    request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver,
     CheckpointVerifiedBlock,
 };
 
@@ -86,9 +86,9 @@ impl fmt::Display for ChainTipBlock {
     }
 }
 
-impl From<ContextuallyValidBlock> for ChainTipBlock {
-    fn from(contextually_valid: ContextuallyValidBlock) -> Self {
-        let ContextuallyValidBlock {
+impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
+    fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
+        let ContextuallyVerifiedBlock {
             block,
             hash,
             height,

@@ -165,12 +165,12 @@ pub struct SemanticallyVerifiedBlock {
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
 
-/// A contextually validated block, ready to be committed directly to the finalized state with
+/// A contextually verified block, ready to be committed directly to the finalized state with
 /// no checks, if it becomes the root of the best non-finalized chain.
 ///
 /// Used by the state service and non-finalized `Chain`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextuallyValidBlock {
+pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
     pub(crate) block: Arc<Block>,
 
@@ -274,7 +274,7 @@ pub struct ContextuallyVerifiedBlockWithTrees {
 }
 
 impl ContextuallyVerifiedBlockWithTrees {
-    pub fn new(block: ContextuallyValidBlock, treestate: Treestate) -> Self {
+    pub fn new(block: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
         let finalized = CheckpointVerifiedBlock::from(block);
 
         Self {
@@ -309,7 +309,7 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // the *service caller*'s task, not inside the service call itself.
 // This allows moving work out of the single-threaded state service.
 
-impl ContextuallyValidBlock {
+impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -317,7 +317,7 @@ impl ContextuallyValidBlock {
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
-    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
     /// `Chain::update_chain_state_with` returns success.
     pub fn with_block_and_spent_utxos(
         prepared: SemanticallyVerifiedBlock,
@@ -381,9 +381,9 @@ impl From<Arc<Block>> for CheckpointVerifiedBlock {
     }
 }
 
-impl From<ContextuallyValidBlock> for CheckpointVerifiedBlock {
-    fn from(contextually_valid: ContextuallyValidBlock) -> Self {
-        let ContextuallyValidBlock {
+impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
+    fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
+        let ContextuallyVerifiedBlock {
             block,
             hash,
             height,

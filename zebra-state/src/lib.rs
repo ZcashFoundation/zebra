@@ -57,4 +57,4 @@ pub use service::{
     init_test, init_test_services, ReadStateService,
 };
 
-pub(crate) use request::ContextuallyValidBlock;
+pub(crate) use request::ContextuallyVerifiedBlock;

@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, CheckpointVerifiedBlock,
+    request::ContextuallyVerifiedBlock, service::chain_tip::ChainTipBlock, CheckpointVerifiedBlock,
     SemanticallyVerifiedBlock,
 };
 
@@ -72,16 +72,16 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
 }
 
 impl SemanticallyVerifiedBlock {
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_spent_utxos(&self) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_zero_spent_utxos(self)
+    pub fn test_with_zero_spent_utxos(&self) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_zero_spent_utxos(self)
     }
 
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
@@ -89,21 +89,21 @@ impl SemanticallyVerifiedBlock {
     pub fn test_with_chain_pool_change(
         &self,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
-    ) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_chain_pool_change(self, fake_chain_value_pool_change)
+    ) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_chain_pool_change(self, fake_chain_value_pool_change)
     }
 
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_zero_chain_pool_change(self)
+    pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_zero_chain_pool_change(self)
     }
 }
 
-impl ContextuallyValidBlock {
+impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual
     /// validation, using a [`SemanticallyVerifiedBlock`] and fake zero-valued spent UTXOs.
     ///
@@ -128,11 +128,11 @@ impl ContextuallyValidBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyValidBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
             .expect("all UTXOs are provided with zero values")
     }
 
-    /// Create a [`ContextuallyValidBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
+    /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
@@ -162,7 +162,7 @@ impl ContextuallyValidBlock {
         }
     }
 
-    /// Create a [`ContextuallyValidBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
+    /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
     /// with no chain value pool change.
     ///
     /// Only for use in tests.

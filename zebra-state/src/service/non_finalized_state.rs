@@ -16,7 +16,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyValidBlock, ContextuallyVerifiedBlockWithTrees},
+    request::{ContextuallyVerifiedBlock, ContextuallyVerifiedBlockWithTrees},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -336,7 +336,7 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
+        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
         )
@@ -358,7 +358,7 @@ impl NonFinalizedState {
     #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
-        contextual: ContextuallyValidBlock,
+        contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
@@ -489,7 +489,7 @@ impl NonFinalizedState {
 
     /// Returns the block at the tip of the best chain.
     #[allow(dead_code)]
-    pub fn best_tip_block(&self) -> Option<&ContextuallyValidBlock> {
+    pub fn best_tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
         let best_chain = self.best_chain()?;
 
         best_chain.tip_block()
