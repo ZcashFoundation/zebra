@@ -1318,8 +1318,7 @@ where
                                 / OVERLOAD_PROTECTION_INTERVAL.as_secs_f32();
                             // Quadratically increase the disconnection probability for very recent overloads.
                             // Negative values are ignored by clamping to MIN_OVERLOAD_DROP_PROBABILITY.
-                            let overload_fraction =
-                                1.0 - protection_fraction_since_last_overload.powi(2);
+                            let overload_fraction = protection_fraction_since_last_overload.powi(2);
                             let probability_range =
                                 MAX_OVERLOAD_DROP_PROBABILITY - MIN_OVERLOAD_DROP_PROBABILITY;
                             MAX_OVERLOAD_DROP_PROBABILITY - (overload_fraction * probability_range)
