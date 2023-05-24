@@ -90,6 +90,24 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// nodes, and on testnet.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// The maximum time difference for two address book changes to be considered concurrent.
+///
+/// This prevents simultaneous or nearby important changes or connection progress
+/// being overridden by less important changes.
+///
+/// This timeout should be less than:
+/// - the [peer reconnection delay](MIN_PEER_RECONNECTION_DELAY), and
+/// - the [peer keepalive/heartbeat interval](HEARTBEAT_INTERVAL).
+///
+/// But more than:
+/// - the amount of time between connection events and address book updates,
+///   even under heavy load (in tests, we have observed delays up to 500ms),
+/// - the delay between an outbound connection failing,
+///   and the [CandidateSet](crate::peer_set::CandidateSet) registering the failure, and
+/// - the delay between the application closing a connection,
+///   and any remaining positive changes from the peer.
+pub const CONCURRENT_ADDRESS_CHANGE_PERIOD: Duration = Duration::from_secs(5);
+
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
 /// This is the sum of:
