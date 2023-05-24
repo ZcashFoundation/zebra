@@ -277,7 +277,7 @@ proptest! {
             block.transactions.push(Arc::new(transaction.clone()));
 
             // commit the created block
-            let request = zebra_state::Request::CommitFinalizedBlock(zebra_state::FinalizedBlock::from(Arc::new(block.clone())));
+            let request = zebra_state::Request::CommitFinalizedBlock(zebra_state::CheckpointVerifiedBlock::from(Arc::new(block.clone())));
             let send_task = tokio::spawn(write_state.clone().oneshot(request.clone()));
             let response = zebra_state::Response::Committed(block.hash());
 

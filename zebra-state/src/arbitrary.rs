@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, FinalizedBlock,
+    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, CheckpointVerifiedBlock,
     SemanticallyVerifiedBlock,
 };
 
@@ -171,7 +171,7 @@ impl ContextuallyValidBlock {
     }
 }
 
-impl FinalizedBlock {
+impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`] and [`block::Height`].
     ///

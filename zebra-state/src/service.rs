@@ -61,8 +61,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, Config, FinalizedBlock, ReadRequest, ReadResponse, Request, Response,
-    SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CloneError, Config, ReadRequest, ReadResponse, Request,
+    Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -345,7 +345,7 @@ impl StateService {
         let initial_tip = finalized_state
             .db
             .tip_block()
-            .map(FinalizedBlock::from)
+            .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
         timer.finish(module_path!(), line!(), "fetching database tip");
 
@@ -459,7 +459,7 @@ impl StateService {
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_finalized(
         &mut self,
-        finalized: FinalizedBlock,
+        finalized: CheckpointVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         // # Correctness & Performance
         //

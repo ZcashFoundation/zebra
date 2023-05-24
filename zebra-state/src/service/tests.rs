@@ -23,7 +23,7 @@ use crate::{
     init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, Config, FinalizedBlock, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -555,7 +555,7 @@ proptest! {
 fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
     Value = (
         Network,
-        SummaryDebug<Vec<FinalizedBlock>>,
+        SummaryDebug<Vec<CheckpointVerifiedBlock>>,
         SummaryDebug<Vec<SemanticallyVerifiedBlock>>,
     ),
 > {
@@ -591,7 +591,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
             let finalized_blocks: Vec<_> = blocks
                 .into_iter()
-                .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
+                .map(|prepared_block| CheckpointVerifiedBlock::from(prepared_block.block))
                 .collect();
 
             (

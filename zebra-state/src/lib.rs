@@ -35,7 +35,9 @@ pub use error::{
     BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
     ValidateContextError,
 };
-pub use request::{FinalizedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock};
+pub use request::{
+    CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
+};
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},

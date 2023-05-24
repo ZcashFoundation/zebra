@@ -20,7 +20,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::watch_receiver::WatchReceiver, FinalizedBlock,
+    request::ContextuallyValidBlock, service::watch_receiver::WatchReceiver,
+    CheckpointVerifiedBlock,
 };
 
 use TipAction::*;
@@ -106,9 +107,9 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
     }
 }
 
-impl From<FinalizedBlock> for ChainTipBlock {
-    fn from(finalized: FinalizedBlock) -> Self {
-        let FinalizedBlock {
+impl From<CheckpointVerifiedBlock> for ChainTipBlock {
+    fn from(finalized: CheckpointVerifiedBlock) -> Self {
+        let CheckpointVerifiedBlock {
             block,
             hash,
             height,

@@ -207,12 +207,12 @@ pub struct ContextuallyValidBlock {
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
 
-/// A finalized block, ready to be committed directly to the finalized state with
+/// A block ready to be committed directly to the finalized state with
 /// no checks.
 ///
 /// This is exposed for use in checkpointing.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FinalizedBlock {
+pub struct CheckpointVerifiedBlock {
     /// The block to commit to the state.
     pub block: Arc<Block>,
     /// The hash of the block.
@@ -268,14 +268,14 @@ impl Treestate {
 /// database and recompute the new one.
 pub struct FinalizedWithTrees {
     /// A block ready to be committed.
-    pub finalized: FinalizedBlock,
+    pub finalized: CheckpointVerifiedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
 impl FinalizedWithTrees {
     pub fn new(block: ContextuallyValidBlock, treestate: Treestate) -> Self {
-        let finalized = FinalizedBlock::from(block);
+        let finalized = CheckpointVerifiedBlock::from(block);
 
         Self {
             finalized,
@@ -286,12 +286,12 @@ impl FinalizedWithTrees {
 
 impl From<Arc<Block>> for FinalizedWithTrees {
     fn from(block: Arc<Block>) -> Self {
-        Self::from(FinalizedBlock::from(block))
+        Self::from(CheckpointVerifiedBlock::from(block))
     }
 }
 
-impl From<FinalizedBlock> for FinalizedWithTrees {
-    fn from(block: FinalizedBlock) -> Self {
+impl From<CheckpointVerifiedBlock> for FinalizedWithTrees {
+    fn from(block: CheckpointVerifiedBlock) -> Self {
         Self {
             finalized: block,
             treestate: None,
@@ -350,7 +350,7 @@ impl ContextuallyValidBlock {
     }
 }
 
-impl FinalizedBlock {
+impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
     ///
@@ -373,15 +373,15 @@ impl FinalizedBlock {
     }
 }
 
-impl From<Arc<Block>> for FinalizedBlock {
+impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
         let hash = block.hash();
 
-        FinalizedBlock::with_hash(block, hash)
+        CheckpointVerifiedBlock::with_hash(block, hash)
     }
 }
 
-impl From<ContextuallyValidBlock> for FinalizedBlock {
+impl From<ContextuallyValidBlock> for CheckpointVerifiedBlock {
     fn from(contextually_valid: ContextuallyValidBlock) -> Self {
         let ContextuallyValidBlock {
             block,
@@ -474,7 +474,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitFinalizedBlock(FinalizedBlock),
+    CommitFinalizedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///

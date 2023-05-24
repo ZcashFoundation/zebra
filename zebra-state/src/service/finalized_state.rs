@@ -25,7 +25,7 @@ use zebra_chain::{block, parameters::Network};
 use crate::{
     request::FinalizedWithTrees,
     service::{check, QueuedFinalized},
-    BoxError, CloneError, Config, FinalizedBlock,
+    BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
 
 mod disk_db;
@@ -168,7 +168,7 @@ impl FinalizedState {
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedFinalized,
-    ) -> Result<FinalizedBlock, BoxError> {
+    ) -> Result<CheckpointVerifiedBlock, BoxError> {
         let (finalized, rsp_tx) = ordered_block;
         let result =
             self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
