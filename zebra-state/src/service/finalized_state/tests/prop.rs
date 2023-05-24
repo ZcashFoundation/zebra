@@ -28,9 +28,9 @@ fn blocks_with_v5_transactions() -> Result<()> {
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
-                let finalized = CheckpointVerifiedBlock::from(block.block.clone());
+                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
                 let hash = state.commit_finalized_direct(
-                    finalized.into(),
+                    checkpoint_verified.into(),
                     "blocks_with_v5_transactions test"
                 );
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
@@ -84,18 +84,18 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         h == nu5_height ||
                         h == nu5_height_plus1 => {
                             let block = block.block.clone().set_block_commitment([0x42; 32]);
-                            let finalized = CheckpointVerifiedBlock::from(block);
+                            let checkpoint_verified = CheckpointVerifiedBlock::from(block);
                             state.commit_finalized_direct(
-                                finalized.into(),
+                                checkpoint_verified.into(),
                                 "all_upgrades test"
                             ).expect_err("Must fail commitment check");
                             failure_count += 1;
                         },
                     _ => {},
                 }
-                let finalized = CheckpointVerifiedBlock::from(block.block.clone());
+                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
                 let hash = state.commit_finalized_direct(
-                    finalized.into(),
+                    checkpoint_verified.into(),
                     "all_upgrades test"
                 ).unwrap();
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
