@@ -9,7 +9,7 @@ use chrono::Utc;
 use tokio::time::sleep;
 
 use crate::{
-    constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, PEER_DISK_CACHE_UPDATE_INTERVAL},
+    constants::{DNS_LOOKUP_TIMEOUT, PEER_DISK_CACHE_UPDATE_INTERVAL},
     meta_addr::MetaAddr,
     AddressBook, BoxError, Config,
 };
@@ -19,8 +19,12 @@ pub async fn peer_cache_updater(
     config: Config,
     address_book: Arc<Mutex<AddressBook>>,
 ) -> Result<(), BoxError> {
-    // Wait for at least one peer crawl
-    sleep(DEFAULT_CRAWL_NEW_PEER_INTERVAL * 3 / 2).await;
+    // Wait until we've queried DNS and (hopefully) sent peers to the address book.
+    // Ideally we'd wait for at least one peer crawl, but that makes tests very slow.
+    //
+    // TODO: turn the initial sleep time into a parameter of this function,
+    //       and allow it to be set in tests
+    sleep(DNS_LOOKUP_TIMEOUT * 2).await;
 
     loop {
         // Ignore errors because updating the cache is optional.
