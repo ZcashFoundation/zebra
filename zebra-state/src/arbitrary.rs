@@ -175,7 +175,7 @@ impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`] and [`block::Height`].
     ///
-    /// This is a test-only method, prefer [`FinalizedBlock::with_hash`].
+    /// This is a test-only method, prefer [`CheckpointVerifiedBlock::with_hash`].
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn with_hash_and_height(
         block: Arc<Block>,
