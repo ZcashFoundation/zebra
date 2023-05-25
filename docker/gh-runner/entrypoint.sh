@@ -15,14 +15,12 @@
 
 #remove runner on stop signal
 remove_runner() {
-    /runner/config.sh remove --unattended --token "$(curl -sS --request POST --url "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token" --header "authorization: Bearer ${GITHUB_TOKEN}"  --header "content-type: application/json" | jq -r .token)"
+    ./config.sh remove --unattended --token "$(curl -sS --request POST --url "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token" --header "authorization: Bearer ${GITHUB_TOKEN}"  --header "content-type: application/json" | jq -r .token)"
     exit 0
 }
 
-#Trap SIGTERM
-trap 'remove_runner' SIGTERM
-#Trap SIGINT
-trap 'remove_runner' SIGINT
+#Trap termination signals
+trap 'remove_runner' SIGINT SIGQUIT SIGTERM
 
 
 # shellcheck disable=SC2034
