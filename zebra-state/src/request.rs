@@ -169,6 +169,10 @@ pub struct SemanticallyVerifiedBlock {
 /// no checks, if it becomes the root of the best non-finalized chain.
 ///
 /// Used by the state service and non-finalized `Chain`.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is that the `CheckpointVerifier`
+/// doesn't bind the transaction authorizing data to the `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState`
+/// and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
@@ -211,6 +215,10 @@ pub struct ContextuallyVerifiedBlock {
 /// no checks.
 ///
 /// This is exposed for use in checkpointing.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is that the `CheckpointVerifier`
+/// doesn't bind the transaction authorizing data to the `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState`
+/// and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointVerifiedBlock {
     /// The block to commit to the state.
