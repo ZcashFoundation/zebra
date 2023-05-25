@@ -580,7 +580,7 @@ where
 
     /// Check that the block height, proof of work, and Merkle root are valid.
     ///
-    /// Returns a [`FinalizedBlock`] with precalculated block data.
+    /// Returns a [`CheckpointVerifiedBlock`] with precalculated block data.
     ///
     /// ## Security
     ///

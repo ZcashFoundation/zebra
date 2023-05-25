@@ -62,7 +62,7 @@ const VERIFIER_BUFFER_BOUND: usize = 5;
 /// # Correctness
 ///
 /// Block verification requests should be wrapped in a timeout, so that
-/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
 struct BlockVerifierRouter<S, V>
 where
@@ -224,7 +224,7 @@ where
 ///
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
-/// See the [`chain`](`crate::chain`) module documentation for details.
+/// See the [`router`](`crate::router`) module documentation for details.
 #[instrument(skip(state_service))]
 pub async fn init<S>(
     config: Config,
