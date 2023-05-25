@@ -1,13 +1,18 @@
 //! `generate` subcommand - generates a skeleton config.
 
 use crate::config::ZebradConfig;
-use abscissa_core::{Command, Options, Runnable};
+use abscissa_core::{Command, Runnable};
+use clap::Parser;
 
-/// `generate` subcommand
-#[derive(Command, Debug, Options)]
+// `generate` subcommand
+/// generate a skeleton configuration
+#[derive(Command, Debug, Default, Parser)]
 pub struct GenerateCmd {
     /// The file to write the generated config to.
-    #[options(help = "The file to write the generated config to (stdout if unspecified)")]
+    #[clap(
+        long,
+        help = "The file to write the generated config to (stdout if unspecified)"
+    )]
     output_file: Option<String>,
 }
 

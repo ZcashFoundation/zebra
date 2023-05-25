@@ -1,26 +1,23 @@
 //! Zebrad Abscissa Application
 
-use std::{fmt::Write as _, io::Write as _, process};
+use std::{fmt::Write as _, io::Write as _, process, sync::Arc};
 
 use abscissa_core::{
     application::{self, AppCell},
-    config::{self, Configurable},
+    config::CfgCell,
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{
-    commands::ZebradCmd,
+    commands::EntryPoint,
     components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
     config::ZebradConfig,
 };
-
-mod entry_point;
-use entry_point::EntryPoint;
 
 /// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit
@@ -31,25 +28,6 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
-
-/// Obtain a read-only (multi-reader) lock on the application state.
-///
-/// Panics if the application state has not been initialized.
-pub fn app_reader() -> application::lock::Reader<ZebradApp> {
-    APPLICATION.read()
-}
-
-/// Obtain an exclusive mutable lock on the application state.
-pub fn app_writer() -> application::lock::Writer<ZebradApp> {
-    APPLICATION.write()
-}
-
-/// Obtain a read-only (multi-reader) lock on the application configuration.
-///
-/// Panics if the application configuration has not been loaded.
-pub fn app_config() -> config::Reader<ZebradApp> {
-    config::Reader::new(&APPLICATION)
-}
 
 /// Returns the zebrad version for this build, in SemVer 2.0 format.
 ///
@@ -117,10 +95,10 @@ pub fn user_agent() -> String {
 }
 
 /// Zebrad Application
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ZebradApp {
     /// Application configuration.
-    config: Option<ZebradConfig>,
+    config: CfgCell<ZebradConfig>,
 
     /// Application state.
     state: application::State<Self>,
@@ -147,21 +125,6 @@ impl ZebradApp {
     }
 }
 
-/// Initialize a new application instance.
-///
-/// By default no configuration is loaded, and the framework state is
-/// initialized to a default, empty state (no components, threads, etc).
-#[allow(unknown_lints)]
-#[allow(clippy::derivable_impls)]
-impl Default for ZebradApp {
-    fn default() -> Self {
-        Self {
-            config: None,
-            state: application::State::default(),
-        }
-    }
-}
-
 impl Application for ZebradApp {
     /// Entrypoint command for this application.
     type Cmd = EntryPoint;
@@ -173,18 +136,13 @@ impl Application for ZebradApp {
     type Paths = StandardPaths;
 
     /// Accessor for application configuration.
-    fn config(&self) -> &ZebradConfig {
-        self.config.as_ref().expect("config not loaded")
+    fn config(&self) -> Arc<ZebradConfig> {
+        self.config.read()
     }
 
     /// Borrow the application state immutably.
     fn state(&self) -> &application::State<Self> {
         &self.state
-    }
-
-    /// Borrow the application state mutably.
-    fn state_mut(&mut self) -> &mut application::State<Self> {
-        &mut self.state
     }
 
     /// Returns the framework components used by this application.
@@ -394,23 +352,9 @@ impl Application for ZebradApp {
             .build_global()
             .expect("unable to initialize rayon thread pool");
 
-        self.config = Some(config);
-
-        let cfg_ref = self
-            .config
-            .as_ref()
-            .expect("config is loaded before register_components");
-
-        let default_filter = command
-            .command
-            .as_ref()
-            .map(|zcmd| zcmd.default_tracing_filter(command.verbose, command.help))
-            .unwrap_or("warn");
-        let is_server = command
-            .command
-            .as_ref()
-            .map(ZebradCmd::is_server)
-            .unwrap_or(false);
+        let cfg_ref = &config;
+        let default_filter = command.cmd.default_tracing_filter(command.verbose);
+        let is_server = command.cmd.is_server();
 
         // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
@@ -436,7 +380,7 @@ impl Application for ZebradApp {
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
         // short commit hash, and the unique part of the network name.
-        let net = &self.config.clone().unwrap().network.network.to_string()[..4];
+        let net = &config.network.network.to_string()[..4];
         let global_span = if let Some(git_commit) = ZebradApp::git_commit() {
             error_span!("", zebrad = git_commit, net)
         } else {
@@ -459,7 +403,10 @@ impl Application for ZebradApp {
             components.push(Box::new(MetricsEndpoint::new(&metrics_config)?));
         }
 
-        self.state.components.register(components)
+        self.state.components_mut().register(components)?;
+
+        // Fire callback to signal state in the application lifecycle
+        self.after_config(config)
     }
 
     /// Load this application's configuration and initialize its components.
@@ -468,16 +415,7 @@ impl Application for ZebradApp {
         // Create and register components with the application.
         // We do this first to calculate a proper dependency ordering before
         // application configuration is processed
-        self.register_components(command)?;
-
-        // Fire callback to signal state in the application lifecycle
-        let config = self
-            .config
-            .take()
-            .expect("register_components always populates the config");
-        self.after_config(config)?;
-
-        Ok(())
+        self.register_components(command)
     }
 
     /// Post-configuration lifecycle callback.
@@ -487,13 +425,13 @@ impl Application for ZebradApp {
     /// possible.
     fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
         // Configure components
-        self.state.components.after_config(&config)?;
-        self.config = Some(config);
+        self.state.components_mut().after_config(&config)?;
+        self.config.set_once(config);
 
         Ok(())
     }
 
-    fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+    fn shutdown(&self, shutdown: Shutdown) -> ! {
         // Some OSes require a flush to send all output to the terminal.
         // zebrad's logging uses Abscissa, so we flush its streams.
         //
@@ -503,25 +441,23 @@ impl Application for ZebradApp {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
-        if let Err(e) = self.state().components.shutdown(self, shutdown) {
+        if let Err(e) = self.state().components().shutdown(self, shutdown) {
             let app_name = self.name().to_string();
 
+            // TODO: find a way to trigger component destructors, maybe get_downcast_mut?
             // Swap out a fake app so we can trigger the destructor on the original
-            let _ = std::mem::take(self);
+            // let _ = std::mem::take(&mut APPLICATION.state);
             fatal_error(app_name, &e);
         }
 
+        // TODO: find a way to trigger component destructors, maybe get_downcast_mut?
         // Swap out a fake app so we can trigger the destructor on the original
-        let _ = std::mem::take(self);
+        // let _ = std::mem::take(APPLICATION.state_mut());
 
         match shutdown {
             Shutdown::Graceful => process::exit(0),
             Shutdown::Forced => process::exit(1),
             Shutdown::Crash => process::exit(2),
         }
-    }
-
-    fn version(&self) -> Version {
-        app_version()
     }
 }

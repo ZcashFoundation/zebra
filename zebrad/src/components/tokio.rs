@@ -83,7 +83,7 @@ impl RuntimeRun for Runtime {
             }
             Err(error) => {
                 warn!(?error, "shutting down Zebra due to an error");
-                app_writer().shutdown(Shutdown::Forced);
+                APPLICATION.shutdown(Shutdown::Forced);
             }
         }
     }
