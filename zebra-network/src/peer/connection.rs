@@ -1342,8 +1342,16 @@ where
                             "inbound service is overloaded, closing connection",
                         );
 
+                        self.update_state_metrics(format!(
+                            "In::Req::{}/Rsp::Overload::Error",
+                            req.command()
+                        ));
                         self.fail_with(PeerError::Overloaded);
                     } else {
+                        self.update_state_metrics(format!(
+                            "In::Req::{}/Rsp::Overload::Ignored",
+                            req.command()
+                        ));
                         metrics::counter!("pool.ignored.loadshed", 1);
                     }
                 } else {
@@ -1357,6 +1365,7 @@ where
                         client_receiver = ?self.client_rx,
                         "error processing peer request",
                     );
+                    self.update_state_metrics(format!("In::Req::{}/Rsp::Error", req.command()));
                 }
                 return;
             }
