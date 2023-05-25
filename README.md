@@ -8,7 +8,6 @@
 ## Contents
 
 - [About](#about)
-  - [Using Zebra](#using-zebra)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
@@ -23,27 +22,16 @@
 ## About
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of a Zcash node, currently under
-development. It can be used to join the Zcash peer-to-peer network, which helps
-keeping Zcash working by validating and broadcasting transactions, and maintaining
-the Zcash blockchain state in a distributed manner.
+consensus-compatible implementation of a Zcash node.
 
-[Zcash](https://doc.zebra.zfnd.org/zebrad/index.html#about-zcash)
-is a cryptocurrency designed to preserve the user's privacy.
-If you just want to send and receive Zcash then you don't need to use Zebra
-directly. You can download a Zcash wallet application which will handle that
-for you.
+Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
+the features required to reach Zcash network consensus, including the validation
+of all the consensus rules for the NU5 network upgrade.
+[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+benefits of Zebra.
 
-Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
-like to find out more or get involved!
-
-### Using Zebra
-
-You would want to run Zebra if you want to contribute to the
-Zcash network: the more nodes are run, the more reliable the network will be
-in terms of speed and resistance to denial of service attacks, for example.
-
-Zebra validates blocks and transactions, but needs extra software to generate them:
+Zebra validates blocks and transactions, but needs extra software to generate
+them:
 
 - To generate transactions, [run Zebra with
   `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
@@ -52,11 +40,8 @@ Zebra validates blocks and transactions, but needs extra software to generate th
   miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
   experimental, and off by default.
 
-Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
-the features required to reach Zcash network consensus, including the validation
-of all the consensus rules for the NU5 network upgrade.
-[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
-benefits of Zebra.
+Please [join us on Discord](https://discord.gg/na6QZNd) if you'd like to find
+out more or get involved!
 
 ## Getting Started
 
