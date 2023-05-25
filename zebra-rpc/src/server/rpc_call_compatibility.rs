@@ -12,7 +12,7 @@ use jsonrpc_core::{
     BoxFuture, ErrorCode, Metadata, MethodCall, Notification,
 };
 
-use crate::constants::INVALID_PARAMETERS_ERROR_CODE;
+use crate::constants::{INVALID_PARAMETERS_ERROR_CODE, MAX_PARAMS_LOG_LENGTH};
 
 /// JSON-RPC [`Middleware`] with compatibility workarounds.
 ///
@@ -75,10 +75,22 @@ impl FixRpcResponseMiddleware {
     fn call_description(call: &Call) -> String {
         match call {
             Call::MethodCall(MethodCall { method, params, .. }) => {
-                format!(r#"method = {method:?}, params = {params:?}"#)
+                let mut params = format!("{params:?}");
+                if params.len() >= MAX_PARAMS_LOG_LENGTH {
+                    params.truncate(MAX_PARAMS_LOG_LENGTH);
+                    params.push_str("...");
+                }
+
+                format!(r#"method = {method:?}, params = {params}"#)
             }
             Call::Notification(Notification { method, params, .. }) => {
-                format!(r#"notification = {method:?}, params = {params:?}"#)
+                let mut params = format!("{params:?}");
+                if params.len() >= MAX_PARAMS_LOG_LENGTH {
+                    params.truncate(MAX_PARAMS_LOG_LENGTH);
+                    params.push_str("...");
+                }
+
+                format!(r#"notification = {method:?}, params = {params}"#)
             }
             Call::Invalid { .. } => "invalid request".to_owned(),
         }

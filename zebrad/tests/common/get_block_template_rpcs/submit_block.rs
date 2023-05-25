@@ -75,7 +75,10 @@ pub(crate) async fn run() -> Result<()> {
         let res_text = res.text().await?;
 
         // Test rpc endpoint response
-        assert!(res_text.contains(r#""result":null"#));
+        assert!(
+            res_text.contains(r#""result":null"#),
+            "unexpected response from submitblock RPC, should be null, was: {res_text}"
+        );
     }
 
     zebrad.kill(false)?;
