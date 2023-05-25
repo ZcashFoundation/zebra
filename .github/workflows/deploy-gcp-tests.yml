@@ -199,7 +199,7 @@ jobs:
     needs: [ setup-without-cached-state ]
     # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
     if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -443,7 +443,7 @@ jobs:
     needs: [ setup-with-cached-state ]
     # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
     if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: 'read'
       id-token: 'write'
