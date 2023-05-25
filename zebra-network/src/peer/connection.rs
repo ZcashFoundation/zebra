@@ -16,7 +16,7 @@ use futures::{
 };
 use rand::{thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
-use tower::Service;
+use tower::{load_shed::error::Overloaded, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -1252,7 +1252,6 @@ where
     /// of connected peers.
     async fn drive_peer_request(&mut self, req: Request) {
         trace!(?req);
-        use tower::{load_shed::error::Overloaded, ServiceExt};
 
         // Add a metric for inbound requests
         metrics::counter!(
@@ -1275,85 +1274,11 @@ where
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<Overloaded>() {
-                    tracing::debug!("inbound service is overloaded, may close connection",);
+                    tracing::debug!("inbound service is overloaded, may close connection");
 
                     let now = Instant::now();
 
-                    // # Security
-                    //
-                    // When the inbound service is overloaded with requests, Zebra needs to drop some connections,
-                    // to reduce the load on the application. But dropping every connection that receives an `Overloaded`
-                    // error from the inbound service could cause Zebra to drop too many peer connections,
-                    // and stop itself downloading blocks or transactions.
-                    //
-                    // Malicious or misbehaving peers can also overload the inbound service, and make Zebra drop
-                    // its connections to other peers.
-                    //
-                    // So instead, Zebra drops some overloaded connections at random. If a connection has recently
-                    // overloaded the inbound service, it is more likely to be dropped. This makes it harder for a single
-                    // peer or multiple peers to perform a denial of service attack.
-                    //
-                    // The inbound connection rate-limit also makes it hard for multiple peers to perform this attack,
-                    // because each inbound connection can only send one inbound request before its probability of
-                    // being disconnected increases.
-                    //
-                    // ## Implementation Details
-                    //
-                    // Connections that haven't seen an overload error in the past OVERLOAD_PROTECTION_INTERVAL
-                    // have a 5% chance of being closed.
-                    //
-                    // If a connection sends multiple overloads close together, it is very likely to be disconnected
-                    // If a connection has two overloads multiple seconds apart, it is unlikely to be disconnected
-                    //
-                    // Connections that have seen a previous overload error in that time
-                    // have a higher chance of being dropped up to MAX_OVERLOAD_DROP_PROBABILITY.
-                    // This probability increases quadratically, so peers that send lots of inbound
-                    // requests are more likely to be dropped.
-                    let drop_connection_probability = self
-                        .last_overload_time
-                        .replace(now)
-                        .map(|prev| {
-                            let protection_fraction_since_last_overload = (now - prev)
-                                .as_secs_f32()
-                                / OVERLOAD_PROTECTION_INTERVAL.as_secs_f32();
-                            // Quadratically increase the disconnection probability for very recent overloads.
-                            // Negative values are ignored by clamping to MIN_OVERLOAD_DROP_PROBABILITY.
-                            let overload_fraction = protection_fraction_since_last_overload.powi(2);
-                            let probability_range =
-                                MAX_OVERLOAD_DROP_PROBABILITY - MIN_OVERLOAD_DROP_PROBABILITY;
-                            MAX_OVERLOAD_DROP_PROBABILITY - (overload_fraction * probability_range)
-                        })
-                        .unwrap_or_default()
-                        .clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY);
-
-                    if thread_rng().gen::<f32>() < drop_connection_probability {
-                        metrics::counter!("pool.closed.loadshed", 1);
-
-                        tracing::info!(
-                            drop_connection_probability,
-                            remote_user_agent = ?self.connection_info.remote.user_agent,
-                            negotiated_version = ?self.connection_info.negotiated_version,
-                            peer = ?self.metrics_label,
-                            last_peer_state = ?self.last_metrics_state,
-                            // TODO: remove this detailed debug info once #6506 is fixed
-                            remote_height = ?self.connection_info.remote.start_height,
-                            cached_addrs = ?self.cached_addrs.len(),
-                            connection_state = ?self.state,
-                            "inbound service is overloaded, closing connection",
-                        );
-
-                        self.update_state_metrics(format!(
-                            "In::Req::{}/Rsp::Overload::Error",
-                            req.command()
-                        ));
-                        self.fail_with(PeerError::Overloaded);
-                    } else {
-                        self.update_state_metrics(format!(
-                            "In::Req::{}/Rsp::Overload::Ignored",
-                            req.command()
-                        ));
-                        metrics::counter!("pool.ignored.loadshed", 1);
-                    }
+                    self.handle_inbound_overload(req, now).await;
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.
@@ -1367,6 +1292,7 @@ where
                     );
                     self.update_state_metrics(format!("In::Req::{}/Rsp::Error", req.command()));
                 }
+
                 return;
             }
             Ok(rsp) => rsp,
@@ -1381,6 +1307,7 @@ where
         );
         self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
 
+        // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
             Response::Peers(addrs) => {
@@ -1486,6 +1413,90 @@ where
         // before checking the connection for the next inbound or outbound request.
         tokio::task::yield_now().await;
     }
+
+    /// Handle inbound service overload error responses by randomly terminating some connections.
+    ///
+    /// # Security
+    ///
+    /// When the inbound service is overloaded with requests, Zebra needs to drop some connections,
+    /// to reduce the load on the application. But dropping every connection that receives an
+    /// `Overloaded` error from the inbound service could cause Zebra to drop too many peer
+    /// connections, and stop itself downloading blocks or transactions.
+    ///
+    /// Malicious or misbehaving peers can also overload the inbound service, and make Zebra drop
+    /// its connections to other peers.
+    ///
+    /// So instead, Zebra drops some overloaded connections at random. If a connection has recently
+    /// overloaded the inbound service, it is more likely to be dropped. This makes it harder for a
+    /// single peer (or multiple peers) to perform a denial of service attack.
+    ///
+    /// The inbound connection rate-limit also makes it hard for multiple peers to perform this
+    /// attack, because each inbound connection can only send one inbound request before its
+    /// probability of being disconnected increases.
+    async fn handle_inbound_overload(&mut self, req: Request, now: Instant) {
+        let prev = self.last_overload_time.replace(now);
+        let drop_connection_probability = overload_drop_connection_probability(now, prev);
+
+        if thread_rng().gen::<f32>() < drop_connection_probability {
+            metrics::counter!("pool.closed.loadshed", 1);
+
+            tracing::info!(
+                drop_connection_probability,
+                remote_user_agent = ?self.connection_info.remote.user_agent,
+                negotiated_version = ?self.connection_info.negotiated_version,
+                peer = ?self.metrics_label,
+                last_peer_state = ?self.last_metrics_state,
+                // TODO: remove this detailed debug info once #6506 is fixed
+                remote_height = ?self.connection_info.remote.start_height,
+                cached_addrs = ?self.cached_addrs.len(),
+                connection_state = ?self.state,
+                "inbound service is overloaded, closing connection",
+            );
+
+            self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Error", req.command()));
+            self.fail_with(PeerError::Overloaded);
+        } else {
+            self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Ignored", req.command()));
+            metrics::counter!("pool.ignored.loadshed", 1);
+        }
+    }
+}
+
+/// Returns the probability of dropping a connection where the last overload was at `prev`,
+/// and the current overload is `now`.
+///
+/// # Security
+///
+/// Connections that haven't seen an overload error in the past OVERLOAD_PROTECTION_INTERVAL
+/// have a small chance of being closed (MIN_OVERLOAD_DROP_PROBABILITY).
+///
+/// Connections that have seen a previous overload error in that time
+/// have a higher chance of being dropped up to MAX_OVERLOAD_DROP_PROBABILITY.
+/// This probability increases quadratically, so peers that send lots of inbound
+/// requests are more likely to be dropped.
+///
+/// ## Examples
+///
+/// If a connection sends multiple overloads close together, it is very likely to be
+/// disconnected. If a connection has two overloads multiple seconds apart, it is unlikely
+/// to be disconnected.
+fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> f32 {
+    let Some(prev) = prev else {
+            return MIN_OVERLOAD_DROP_PROBABILITY;
+        };
+
+    let protection_fraction_since_last_overload =
+        (now - prev).as_secs_f32() / OVERLOAD_PROTECTION_INTERVAL.as_secs_f32();
+
+    // Quadratically increase the disconnection probability for very recent overloads.
+    // Negative values are ignored by clamping to MIN_OVERLOAD_DROP_PROBABILITY.
+    let overload_fraction = protection_fraction_since_last_overload.powi(2);
+
+    let probability_range = MAX_OVERLOAD_DROP_PROBABILITY - MIN_OVERLOAD_DROP_PROBABILITY;
+    let raw_drop_probability =
+        MAX_OVERLOAD_DROP_PROBABILITY - (overload_fraction * probability_range);
+
+    raw_drop_probability.clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY)
 }
 
 impl<S, Tx> Connection<S, Tx> {
