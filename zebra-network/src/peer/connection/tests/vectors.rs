@@ -4,7 +4,11 @@
 //!   - inbound message as request
 //!   - inbound message, but not a request (or a response)
 
-use std::{collections::HashSet, task::Poll, time::Duration};
+use std::{
+    collections::HashSet,
+    task::Poll,
+    time::{Duration, Instant},
+};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -17,9 +21,9 @@ use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    constants::REQUEST_TIMEOUT,
+    constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
     peer::{
-        connection::{Connection, State},
+        connection::{overload_drop_connection_probability, Connection, State},
         ClientRequest, ErrorSlot,
     },
     protocol::external::Message,
@@ -654,6 +658,121 @@ async fn connection_run_loop_receive_timeout() {
     connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
+}
+
+/// Check basic properties of overload probabilities
+#[test]
+fn overload_probability_reduces_over_time() {
+    let now = Instant::now();
+
+    // Edge case: previous is in the future due to OS monotonic clock bugs
+    let prev = now + Duration::from_secs(1);
+    assert_eq!(
+        overload_drop_connection_probability(now, Some(prev)),
+        MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overload time is in the future (OS bugs?), it should have maximum drop probability",
+    );
+
+    // Overload/DoS case/edge case: rapidly repeated overloads
+    let prev = now;
+    assert_eq!(
+        overload_drop_connection_probability(now, Some(prev)),
+        MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overload times are the same, overloads should have maximum drop probability",
+    );
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_micros(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability <= MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overloads are very close together, drops can optionally decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly",
+    );
+    let last_probability = drop_probability;
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_millis(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly",
+    );
+    let last_probability = drop_probability;
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_millis(10);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: frequent overloads
+    let prev = now - Duration::from_millis(100);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.01,
+        "if the overloads are very close together, drops can only decrease slightly",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: occasional but repeated overloads
+    let prev = now - Duration::from_secs(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.5,
+        "if the overloads are distant, drops should decrease a lot",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: occasional overloads
+    let prev = now - Duration::from_secs(5);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.7,
+        "if the overloads are distant, drops should decrease a lot",
+    );
+    let _last_probability = drop_probability;
+
+    // Base case: infrequent overloads
+    let prev = now - Duration::from_secs(10);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if overloads are far apart, drops should have minimum drop probability",
+    );
+
+    // Base case: no previous overload
+    let drop_probability = overload_drop_connection_probability(now, None);
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if there is no previous overload time, overloads should have minimum drop probability",
+    );
 }
 
 /// Creates a new [`Connection`] instance for unit tests.
