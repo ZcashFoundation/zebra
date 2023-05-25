@@ -7,10 +7,8 @@
 
 ## Contents
 
-- [Contents](#contents)
 - [About](#about)
   - [Using Zebra](#using-zebra)
-- [Release Candidates](#release-candidates)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
@@ -133,6 +131,7 @@ book for more details.
 #### Optional Features
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring)
 - `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging)
 - `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics)
