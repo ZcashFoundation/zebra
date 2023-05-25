@@ -4,6 +4,7 @@ USER root
 
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
+    openssh-client \
     curl \
     jq \
     && rm -rf /var/lib/apt/lists/*
