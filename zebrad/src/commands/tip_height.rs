@@ -5,7 +5,8 @@
 
 use std::path::PathBuf;
 
-use abscissa_core::{Command, Options, Runnable};
+use abscissa_core::{Application, Command, Runnable};
+use clap::Parser;
 use color_eyre::eyre::{eyre, Result};
 
 use zebra_chain::{
@@ -15,17 +16,18 @@ use zebra_chain::{
 };
 use zebra_state::LatestChainTip;
 
-use crate::prelude::app_config;
+use crate::prelude::APPLICATION;
 
-/// `zebra-tip-height` subcommand
-#[derive(Command, Debug, Options)]
+// `zebra-tip-height` subcommand
+/// get the block height of Zebra's persisted chain state
+#[derive(Command, Debug, Default, Parser)]
 pub struct TipHeightCmd {
     /// Path to Zebra's cached state.
-    #[options(help = "path to directory with the Zebra chain state")]
+    #[clap(long, help = "path to directory with the Zebra chain state")]
     cache_dir: Option<PathBuf>,
 
     /// The network to obtain the chain tip.
-    #[options(default = "mainnet", help = "the network of the chain to load")]
+    #[clap(long, help = "the network of the chain to load")]
     network: Network,
 }
 
@@ -54,7 +56,7 @@ impl TipHeightCmd {
 
     /// Starts a state service using the `cache_dir` and `network` from the provided arguments.
     fn load_latest_chain_tip(&self) -> LatestChainTip {
-        let mut config = app_config().state.clone();
+        let mut config = APPLICATION.config().state.clone();
 
         if let Some(cache_dir) = self.cache_dir.clone() {
             config.cache_dir = cache_dir;

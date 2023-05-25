@@ -5,59 +5,47 @@ mod download;
 mod generate;
 mod start;
 mod tip_height;
-mod version;
 
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
-    tip_height::TipHeightCmd, version::VersionCmd,
+    tip_height::TipHeightCmd,
 };
 
 pub use self::start::StartCmd;
 
 use crate::config::ZebradConfig;
 
-use abscissa_core::{
-    config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
-};
+use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
 use std::path::PathBuf;
 
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
 
 /// Zebrad Subcommands
-#[derive(Command, Debug, Options)]
+#[derive(Command, Debug, clap::Subcommand)]
 pub enum ZebradCmd {
     /// The `copy-state` subcommand, used to debug cached chain state
     // TODO: hide this command from users in release builds (#3279)
-    #[options(help = "copy cached chain state (debug only)")]
     CopyState(CopyStateCmd),
 
     /// The `download` subcommand
-    #[options(help = "pre-download required parameter files")]
     Download(DownloadCmd),
 
     /// The `generate` subcommand
-    #[options(help = "generate a skeleton configuration")]
     Generate(GenerateCmd),
 
-    /// The `help` subcommand
-    #[options(help = "get usage information, \
-        use help <subcommand> for subcommand usage information, \
-        or --help flag to see top-level options")]
-    Help(Help<Self>),
-
     /// The `start` subcommand
-    #[options(help = "start the application")]
     Start(StartCmd),
 
     /// The `tip-height` subcommand
-    #[options(help = "get the block height of Zebra's persisted chain state")]
     TipHeight(TipHeightCmd),
+}
 
-    /// The `version` subcommand
-    #[options(help = "display version information")]
-    Version(VersionCmd),
+impl Default for ZebradCmd {
+    fn default() -> Self {
+        Self::Start(StartCmd::default())
+    }
 }
 
 impl ZebradCmd {
@@ -73,27 +61,26 @@ impl ZebradCmd {
             CopyState(_) | Start(_) => true,
 
             // Utility commands that don't use server components
-            Download(_) | Generate(_) | Help(_) | TipHeight(_) | Version(_) => false,
+            Download(_) | Generate(_) | TipHeight(_) => false,
         }
     }
 
     /// Returns the default log level for this command, based on the `verbose` command line flag.
     ///
     /// Some commands need to be quiet by default.
-    pub(crate) fn default_tracing_filter(&self, verbose: bool, help: bool) -> &'static str {
+    pub(crate) fn default_tracing_filter(&self, verbose: bool) -> &'static str {
         let only_show_warnings = match self {
             // Commands that generate quiet output by default.
             // This output:
             // - is used by automated tools, or
             // - needs to be read easily.
-            Generate(_) | TipHeight(_) | Help(_) | Version(_) => true,
+            Generate(_) | TipHeight(_) => true,
 
             // Commands that generate informative logging output by default.
             CopyState(_) | Download(_) | Start(_) => false,
         };
 
-        // set to warn so that usage info is printed without info-level logs from component registration
-        if help || (only_show_warnings && !verbose) {
+        if only_show_warnings && !verbose {
             "warn"
         } else if only_show_warnings || !verbose {
             "info"
@@ -109,10 +96,8 @@ impl Runnable for ZebradCmd {
             CopyState(cmd) => cmd.run(),
             Download(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
-            ZebradCmd::Help(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),
-            Version(cmd) => cmd.run(),
         }
     }
 }
@@ -141,5 +126,68 @@ impl Configurable<ZebradConfig> for ZebradCmd {
             ZebradCmd::Start(cmd) => cmd.override_config(config),
             _ => Ok(config),
         }
+    }
+}
+
+/// Toplevel entrypoint command.
+///
+/// Handles obtaining toplevel help as well as verbosity settings.
+#[derive(Debug, clap::Parser)]
+pub struct EntryPoint {
+    /// Subcommand to execute.
+    ///
+    /// The `command` option will delegate option parsing to the command type,
+    /// starting at the first free argument. Defaults to start.
+    #[clap(subcommand)]
+    pub cmd: ZebradCmd,
+
+    /// Path to the configuration file
+    #[clap(long, short, help = "path to configuration file")]
+    pub config: Option<PathBuf>,
+
+    /// Increase verbosity setting
+    #[clap(long, short, help = "be verbose")]
+    pub verbose: bool,
+}
+
+impl Runnable for EntryPoint {
+    fn run(&self) {
+        self.cmd.run()
+    }
+}
+
+impl Command for EntryPoint {
+    /// Name of this program as a string
+    fn name() -> &'static str {
+        ZebradCmd::name()
+    }
+
+    /// Description of this program
+    fn description() -> &'static str {
+        ZebradCmd::description()
+    }
+
+    /// Authors of this program
+    fn authors() -> &'static str {
+        ZebradCmd::authors()
+    }
+}
+
+impl Configurable<ZebradConfig> for EntryPoint {
+    /// Path to the command's configuration file
+    fn config_path(&self) -> Option<PathBuf> {
+        match &self.config {
+            // Use explicit `-c`/`--config` argument if passed
+            Some(cfg) => Some(cfg.clone()),
+
+            // Otherwise defer to the toplevel command's config path logic
+            None => self.cmd.config_path(),
+        }
+    }
+
+    /// Process the configuration after it has been loaded, potentially
+    /// modifying it or returning an error if options are incompatible
+    fn process_config(&self, config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
+        self.cmd.process_config(config)
     }
 }
