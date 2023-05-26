@@ -161,7 +161,7 @@ impl FinalizedState {
         self.network
     }
 
-    /// Commit a checkpoint verified block to the state.
+    /// Commit a checkpoint-verified block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
@@ -172,7 +172,7 @@ impl FinalizedState {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
-            "CommitFinalized request",
+            "commit checkpoint-verified request",
         );
 
         if result.is_ok() {

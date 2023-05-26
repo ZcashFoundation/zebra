@@ -290,7 +290,7 @@ pub fn write_blocks_from_channels(
             tracing::trace!("finalizing block past the reorg limit");
             let contextually_verified_with_trees = non_finalized_state.finalize();
             finalized_state
-                        .commit_finalized_direct(contextually_verified_with_trees, "best non-finalized chain root")
+                        .commit_finalized_direct(contextually_verified_with_trees, "commit contextually-verified request")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
