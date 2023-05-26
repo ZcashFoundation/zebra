@@ -978,9 +978,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from(
-                                "block was dropped from the queue of finalized blocks",
-                            )
+                            BoxError::from("block was dropped from the queue of finalized blocks")
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
