@@ -276,17 +276,17 @@ impl Treestate {
 /// database and recompute the new one.
 pub struct ContextuallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub finalized: CheckpointVerifiedBlock,
+    pub checkpoint_verified: CheckpointVerifiedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
 impl ContextuallyVerifiedBlockWithTrees {
     pub fn new(block: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
-        let finalized = CheckpointVerifiedBlock::from(block);
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block);
 
         Self {
-            finalized,
+            checkpoint_verified,
             treestate: Some(treestate),
         }
     }
@@ -301,7 +301,7 @@ impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
 impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
     fn from(block: CheckpointVerifiedBlock) -> Self {
         Self {
-            finalized: block,
+            checkpoint_verified: block,
             treestate: None,
         }
     }

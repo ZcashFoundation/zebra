@@ -459,25 +459,25 @@ impl StateService {
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_finalized(
         &mut self,
-        finalized: CheckpointVerifiedBlock,
+        checkpoint_verified: CheckpointVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         // # Correctness & Performance
         //
         // This method must not block, access the database, or perform CPU-intensive tasks,
         // because it is called directly from the tokio executor's Future threads.
 
-        let queued_prev_hash = finalized.block.header.previous_block_hash;
-        let queued_height = finalized.height;
+        let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
+        let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
         // full verification of non-finalized blocks, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.sent_non_finalized_block_hashes
-                .add_finalized(&finalized)
+                .add_finalized(&checkpoint_verified)
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (finalized, rsp_tx);
+        let queued = (checkpoint_verified, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
             // We're still committing finalized blocks
@@ -636,17 +636,17 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(level = "debug", skip(self, prepared))]
+    #[instrument(level = "debug", skip(self, semantically_verrified))]
     fn queue_and_commit_non_finalized(
         &mut self,
-        prepared: SemanticallyVerifiedBlock,
+        semantically_verrified: SemanticallyVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
-        tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
-        let parent_hash = prepared.block.header.previous_block_hash;
+        tracing::debug!(block = %semantically_verrified.block, "queueing block for contextual verification");
+        let parent_hash = semantically_verrified.block.header.previous_block_hash;
 
         if self
             .sent_non_finalized_block_hashes
-            .contains(&prepared.hash)
+            .contains(&semantically_verrified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err(
@@ -655,7 +655,11 @@ impl StateService {
             return rsp_rx;
         }
 
-        if self.read_service.db.contains_height(prepared.height) {
+        if self
+            .read_service
+            .db
+            .contains_height(semantically_verrified.height)
+        {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err(
                 "block height is in the finalized state: block is already committed to the state"
@@ -667,8 +671,9 @@ impl StateService {
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
         // it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx)) =
-            self.queued_non_finalized_blocks.get_mut(&prepared.hash)
+        let rsp_rx = if let Some((_, old_rsp_tx)) = self
+            .queued_non_finalized_blocks
+            .get_mut(&semantically_verrified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
@@ -677,7 +682,8 @@ impl StateService {
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.queued_non_finalized_blocks.queue((prepared, rsp_tx));
+            self.queued_non_finalized_blocks
+                .queue((semantically_verrified, rsp_tx));
             rsp_rx
         };
 
