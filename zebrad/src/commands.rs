@@ -42,12 +42,6 @@ pub enum ZebradCmd {
     TipHeight(TipHeightCmd),
 }
 
-impl Default for ZebradCmd {
-    fn default() -> Self {
-        Self::Start(StartCmd::default())
-    }
-}
-
 impl ZebradCmd {
     /// Returns true if this command is a server command.
     ///
@@ -139,7 +133,7 @@ pub struct EntryPoint {
     /// The `command` option will delegate option parsing to the command type,
     /// starting at the first free argument. Defaults to start.
     #[clap(subcommand)]
-    pub cmd: ZebradCmd,
+    pub cmd: Option<ZebradCmd>,
 
     /// Path to the configuration file
     #[clap(long, short, help = "path to configuration file")]
@@ -150,9 +144,27 @@ pub struct EntryPoint {
     pub verbose: bool,
 }
 
+impl EntryPoint {
+    /// Borrow the command in the option
+    ///
+    /// # Panics
+    ///
+    /// If `cmd` is None
+    pub fn cmd(&self) -> &ZebradCmd {
+        self.cmd
+            .as_ref()
+            .expect("should default to start if not provided")
+    }
+
+    /// Returns a string that parses to the default subcommand
+    pub fn default_cmd_as_str() -> &'static str {
+        "start"
+    }
+}
+
 impl Runnable for EntryPoint {
     fn run(&self) {
-        self.cmd.run()
+        self.cmd().run()
     }
 }
 
@@ -181,13 +193,13 @@ impl Configurable<ZebradConfig> for EntryPoint {
             Some(cfg) => Some(cfg.clone()),
 
             // Otherwise defer to the toplevel command's config path logic
-            None => self.cmd.config_path(),
+            None => self.cmd().config_path(),
         }
     }
 
     /// Process the configuration after it has been loaded, potentially
     /// modifying it or returning an error if options are incompatible
     fn process_config(&self, config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
-        self.cmd.process_config(config)
+        self.cmd().process_config(config)
     }
 }

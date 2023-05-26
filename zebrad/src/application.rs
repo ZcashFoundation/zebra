@@ -1,6 +1,6 @@
 //! Zebrad Abscissa Application
 
-use std::{fmt::Write as _, io::Write as _, process, sync::Arc};
+use std::{env, fmt::Write as _, io::Write as _, process, sync::Arc};
 
 use abscissa_core::{
     application::{self, AppCell},
@@ -10,6 +10,7 @@ use abscissa_core::{
     Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
+use clap::Parser;
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
@@ -357,8 +358,8 @@ impl Application for ZebradApp {
             .expect("unable to initialize rayon thread pool");
 
         let cfg_ref = &config;
-        let default_filter = command.cmd.default_tracing_filter(command.verbose);
-        let is_server = command.cmd.is_server();
+        let default_filter = command.cmd().default_tracing_filter(command.verbose);
+        let is_server = command.cmd().is_server();
 
         // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
@@ -464,4 +465,24 @@ impl Application for ZebradApp {
             Shutdown::Crash => process::exit(2),
         }
     }
+}
+
+/// Boot the given application, parsing subcommand and options from
+/// command-line arguments, and terminating when complete.
+pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
+    let mut args: Vec<_> = env::args_os().collect();
+
+    // Check if the provided arguments include a subcommand
+    let should_add_default_subcommand = EntryPoint::try_parse_from(&args)
+        .unwrap_or_else(|err| err.exit())
+        .cmd
+        .is_none();
+
+    // Append the default subcommand to args if cmd is None
+    if should_add_default_subcommand {
+        args.push(EntryPoint::default_cmd_as_str().into());
+    };
+
+    ZebradApp::run(app_cell, args);
+    process::exit(0);
 }
