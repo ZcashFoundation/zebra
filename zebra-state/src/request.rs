@@ -165,14 +165,14 @@ pub struct SemanticallyVerifiedBlock {
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
 
-/// A contextually verified block, ready to be committed directly to the finalized state with
-/// no checks, if it becomes the root of the best non-finalized chain.
+/// A contextually verified block, ready to be committed directly to the finalized state with no
+/// checks, if it becomes the root of the best non-finalized chain.
 ///
 /// Used by the state service and non-finalized `Chain`.
 ///
-/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is that the `CheckpointVerifier`
-/// doesn't bind the transaction authorizing data to the `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState`
-/// and `FinalizedState` do.
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
@@ -216,9 +216,9 @@ pub struct ContextuallyVerifiedBlock {
 ///
 /// This is exposed for use in checkpointing.
 ///
-/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is that the `CheckpointVerifier`
-/// doesn't bind the transaction authorizing data to the `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState`
-/// and `FinalizedState` do.
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointVerifiedBlock {
     /// The block to commit to the state.
@@ -633,8 +633,9 @@ pub enum Request {
 impl Request {
     fn variant_name(&self) -> &'static str {
         match self {
-            Request::CommitSemanticallyVerifiedBlock(_) => "commit_block",
-            Request::CommitCheckpointVerifiedBlock(_) => "commit_finalized_block",
+            Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
+
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
