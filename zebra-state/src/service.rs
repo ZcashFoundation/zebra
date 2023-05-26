@@ -664,9 +664,9 @@ impl StateService {
             return rsp_rx;
         }
 
-        // Request::SemanticallyVerifiedBlock contract: a request to commit a block which has
-        // been queued but not yet committed to the state fails the older
-        // request and replaces it with the newer request.
+        // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
+        // has been queued but not yet committed to the state fails the older request and replaces
+        // it with the newer request.
         let rsp_rx = if let Some((_, old_rsp_tx)) =
             self.queued_non_finalized_blocks.get_mut(&prepared.hash)
         {
@@ -800,7 +800,7 @@ impl StateService {
 
     /// Assert some assumptions about the prepared `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
-        // required by SemanticallyVerifiedBlock call
+        // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
             "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
@@ -927,7 +927,7 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "SemanticallyVerifiedBlock");
+                timer.finish(module_path!(), line!(), "CommitSemanticallyVerifiedBlock");
 
                 let span = Span::current();
                 async move {
@@ -935,7 +935,7 @@ impl Service<Request> for StateService {
                         .await
                         .map_err(|_recv_error| {
                             BoxError::from(
-                                "block was dropped from the state SemanticallyVerifiedBlock queue",
+                                "block was dropped from the queue of non-finalized blocks",
                             )
                         })
                         // TODO: replace with Result::flatten once it stabilises
@@ -979,7 +979,7 @@ impl Service<Request> for StateService {
                         .await
                         .map_err(|_recv_error| {
                             BoxError::from(
-                                "block was dropped from the state CommitCheckpointVerifiedBlock queue",
+                                "block was dropped from the queue of finalized blocks",
                             )
                         })
                         // TODO: replace with Result::flatten once it stabilises
