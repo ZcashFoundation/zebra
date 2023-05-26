@@ -148,26 +148,30 @@ impl Application for ZebradApp {
     /// Returns the framework components used by this application.
     fn framework_components(
         &mut self,
-        command: &Self::Cmd,
+        _command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
+        // TODO: Open a PR in abscissa to add a TerminalBuilder for opting out
+        //       of the `color_eyre::install` part of `Terminal::new` without
+        //       ColorChoice::Never.
+        //
         // Automatically use color if we're outputting to a terminal
         //
         // The `abcissa` docs claim that abscissa implements `Auto`, but it
         // does not - except in `color_backtrace` backtraces.
-        let mut term_colors = self.term_colors(command);
-        if term_colors == ColorChoice::Auto {
-            // We want to disable colors on a per-stream basis, but that feature
-            // can only be implemented inside the terminal component streams.
-            // Instead, if either output stream is not a terminal, disable
-            // colors.
-            //
-            // We'd also like to check `config.tracing.use_color` here, but the
-            // config has not been loaded yet.
-            if !Self::outputs_are_ttys() {
-                term_colors = ColorChoice::Never;
-            }
-        }
-        let terminal = Terminal::new(term_colors);
+        // let mut term_colors = self.term_colors(command);
+        // if term_colors == ColorChoice::Auto {
+        //     // We want to disable colors on a per-stream basis, but that feature
+        //     // can only be implemented inside the terminal component streams.
+        //     // Instead, if either output stream is not a terminal, disable
+        //     // colors.
+        //     //
+        //     // We'd also like to check `config.tracing.use_color` here, but the
+        //     // config has not been loaded yet.
+        //     if !Self::outputs_are_ttys() {
+        //         term_colors = ColorChoice::Never;
+        //     }
+        // }
+        let terminal = Terminal::new(ColorChoice::Never);
 
         Ok(vec![Box::new(terminal)])
     }
