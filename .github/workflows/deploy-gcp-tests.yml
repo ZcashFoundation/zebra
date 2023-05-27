@@ -773,6 +773,7 @@ jobs:
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
+    timeout-minutes: 7200 # 5 days
     runs-on: self-hosted
     permissions:
       contents: 'read'
