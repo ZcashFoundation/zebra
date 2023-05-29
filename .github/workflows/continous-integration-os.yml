@@ -81,6 +81,11 @@ jobs:
             rust: beta
           - os: macos-latest
             features: " --features getblocktemplate-rpcs"
+        # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
+        # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
+          - os: ubuntu-latest
+            rust: beta
+            features: " --features getblocktemplate-rpcs"
 
     steps:
       - uses: actions/checkout@v3.5.2
@@ -252,7 +257,10 @@ jobs:
         checks:
           - bans
           - sources
-        features: ['', '--all-features', '--no-default-features']
+        # We don't need to check `--no-default-features` here, because (except in very rare cases):
+        # - disabling features isn't going to add duplicate dependencies
+        # - disabling features isn't going to add more crate sources
+        features: ['', '--all-features']
       # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
       fail-fast: false
 
