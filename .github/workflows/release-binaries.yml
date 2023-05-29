@@ -34,7 +34,7 @@ jobs:
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
-  # The image will be named `zebrad-mining-rpcs-testnet:<semver>.experimental`
+  # The image will be named `zebra:<semver>.experimental`
   build-mining-testnet:
     name: Build Release Testnet Mining Docker
     uses: ./.github/workflows/build-docker-image.yml
