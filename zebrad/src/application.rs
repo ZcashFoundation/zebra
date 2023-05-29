@@ -153,7 +153,7 @@ impl Application for ZebradApp {
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
         // TODO: Open a PR in abscissa to add a TerminalBuilder for opting out
         //       of the `color_eyre::install` part of `Terminal::new` without
-        //       ColorChoice::Never.
+        //       ColorChoice::Never?
         //
         // Automatically use color if we're outputting to a terminal
         //
@@ -172,6 +172,9 @@ impl Application for ZebradApp {
         //         term_colors = ColorChoice::Never;
         //     }
         // }
+
+        // The Tracing component uses stdout directly and will apply colors
+        // `if Self::outputs_are_ttys() && config.tracing.use_colors`
         let terminal = Terminal::new(ColorChoice::Never);
 
         Ok(vec![Box::new(terminal)])
@@ -470,7 +473,7 @@ impl Application for ZebradApp {
 /// Boot the given application, parsing subcommand and options from
 /// command-line arguments, and terminating when complete.
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
-    let mut args: Vec<_> = env::args_os().collect();
+    let args: Vec<_> = env::args_os().collect();
 
     // Check if the provided arguments include a subcommand
     let should_add_default_subcommand = EntryPoint::try_parse_from(&args)
@@ -478,9 +481,27 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
         .cmd
         .is_none();
 
-    // Append the default subcommand to args if cmd is None
-    if should_add_default_subcommand {
-        args.push(EntryPoint::default_cmd_as_str().into());
+    // Add the default subcommand to args after the top-level args if cmd is None
+    let args = if should_add_default_subcommand {
+        // try_parse_from currently produces an error if the first argument is not the binary name,
+        let mut num_top_level_args = 1;
+
+        // update last_top_level_arg_idx to the number of top-level args
+        for (idx, arg) in args.iter().enumerate() {
+            num_top_level_args = match arg.to_str() {
+                Some("--verbose" | "-v") => idx + 1,
+                Some("--config" | "-c") => idx + 2,
+                _ => num_top_level_args,
+            }
+        }
+
+        let mut updated_args: Vec<_> = args.iter().take(num_top_level_args).cloned().collect();
+        updated_args.push(EntryPoint::default_cmd_as_str().into());
+        updated_args.extend(args.into_iter().skip(num_top_level_args));
+
+        updated_args
+    } else {
+        args
     };
 
     ZebradApp::run(app_cell, args);

@@ -142,6 +142,11 @@ pub struct EntryPoint {
     /// Increase verbosity setting
     #[clap(long, short, help = "be verbose")]
     pub verbose: bool,
+
+    /// Filter strings which override the config file and defaults
+    // This can be applied to the default start command if no subcommand is provided.
+    #[clap(help = "tracing filters which override the zebrad.toml config")]
+    filters: Vec<String>,
 }
 
 impl EntryPoint {

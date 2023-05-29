@@ -96,7 +96,7 @@ use crate::{
 #[derive(Command, Debug, Default, clap::Parser)]
 pub struct StartCmd {
     /// Filter strings which override the config file and defaults
-    #[clap(long, help = "tracing filters which override the zebrad.toml config")]
+    #[clap(help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
