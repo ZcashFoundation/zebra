@@ -41,7 +41,7 @@ jobs:
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
-      image_name: zebrad-mining-rpcs-testnet
+      image_name: zebra
       # TODO: change this to `-experimental` when we release Zebra `1.0.0`
       tag_suffix: .experimental
       network: Testnet
