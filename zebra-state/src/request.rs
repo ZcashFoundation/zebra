@@ -318,7 +318,7 @@ impl ContextuallyValidBlock {
     /// including UTXOs created by earlier transactions in this block.
     ///
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
-    /// `Chain::update_chain_tip_with` returns success.
+    /// [`Chain::update_chain_tip_with()`] returns success.
     pub fn with_block_and_spent_utxos(
         prepared: PreparedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
