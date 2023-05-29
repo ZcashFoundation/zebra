@@ -113,7 +113,7 @@ zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 # Benchmarks
-criterion = { version = "0.5.0", features = ["html_reports"] }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = "0.6.2"
