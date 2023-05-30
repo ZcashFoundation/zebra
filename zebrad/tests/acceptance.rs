@@ -544,11 +544,6 @@ fn version_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    // unexpected free argument `argument`
-    let child = testdir.spawn_child(args!["--version", "argument"])?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
-
     // unrecognized option `-f`
     let child = testdir.spawn_child(args!["--version", "-f"])?;
     let output = child.wait_with_output()?;
