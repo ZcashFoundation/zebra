@@ -784,18 +784,20 @@ async fn connection_is_randomly_disconnected_on_overload() {
     let _init_guard = zebra_test::init();
 
     // The number of times we repeat the test
-    const TEST_RUNS: usize = 21_000;
+    const TEST_RUNS: usize = 220;
+    // The expected number of tests before a test failure due to random chance.
+    // Based on 10 tests per PR, 100 PR pushes per week, 50 weeks per year.
+    const TESTS_BEFORE_FAILURE: f32 = 50_000.0;
 
-    // The expected number of tests before failing due to random all-successes or all-failures
-    const TESTS_BEFORE_FAILURE: f32 = 1000.0;
-
-    let test_runs = TEST_RUNS as f32;
+    let test_runs = TEST_RUNS.try_into().expect("constant fits in i32");
+    // The probability of random test failure is:
+    // MIN_OVERLOAD_DROP_PROBABILITY^TEST_RUNS + MAX_OVERLOAD_DROP_PROBABILITY^TEST_RUNS
     assert!(
-        test_runs / TESTS_BEFORE_FAILURE > 1.0 / MIN_OVERLOAD_DROP_PROBABILITY,
+        1.0 / MIN_OVERLOAD_DROP_PROBABILITY.powi(test_runs) > TESTS_BEFORE_FAILURE,
         "not enough test runs: failures must be frequent enough to happen in almost all tests"
     );
     assert!(
-        test_runs / TESTS_BEFORE_FAILURE > 1.0 / (1.0 - MAX_OVERLOAD_DROP_PROBABILITY),
+        1.0 / MAX_OVERLOAD_DROP_PROBABILITY.powi(test_runs) > TESTS_BEFORE_FAILURE,
         "not enough test runs: successes must be frequent enough to happen in almost all tests"
     );
 
@@ -824,6 +826,7 @@ async fn connection_is_randomly_disconnected_on_overload() {
 
         // Start the connection run loop future in a spawned task
         let connection_handle = tokio::spawn(connection.run(peer_rx));
+        tokio::time::sleep(Duration::from_millis(1)).await;
 
         // The connection hasn't received any messages, so it must not have errors
         let error = shared_error_slot.try_get_error();
@@ -838,6 +841,7 @@ async fn connection_is_randomly_disconnected_on_overload() {
             .send(Ok(inbound_req))
             .await
             .expect("send to channel always succeeds");
+        tokio::time::sleep(Duration::from_millis(1)).await;
 
         // The connection hasn't got a response, so it must not have errors
         let error = shared_error_slot.try_get_error();
@@ -850,6 +854,7 @@ async fn connection_is_randomly_disconnected_on_overload() {
             .expect_request(Request::Peers)
             .await
             .respond_error(Overloaded::new().into());
+        tokio::time::sleep(Duration::from_millis(1)).await;
 
         let outbound_result = peer_outbound_messages.try_next();
         assert!(
