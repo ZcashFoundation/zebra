@@ -60,7 +60,7 @@ const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 #[derive(Command, Debug, clap::Parser)]
 pub struct CopyStateCmd {
     /// Source height that the copy finishes at.
-    #[clap(long, help = "stop copying at this source height")]
+    #[clap(long, short, help = "stop copying at this source height")]
     max_source_height: Option<u32>,
 
     /// Path to a Zebra config.toml for the target state.
@@ -70,13 +70,14 @@ pub struct CopyStateCmd {
     /// All other options are ignored.
     #[clap(
         long,
+        short,
         help = "config file path for the target state (default: ephemeral), \
                       the source state uses the main zebrad config"
     )]
     target_config_path: Option<PathBuf>,
 
     /// Filter strings which override the config file and defaults
-    #[clap(long, help = "tracing filters which override the zebrad.toml config")]
+    #[clap(help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
