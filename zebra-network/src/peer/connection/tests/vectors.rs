@@ -13,10 +13,11 @@ use std::{
 use futures::{
     channel::{mpsc, oneshot},
     sink::SinkMapErr,
-    FutureExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
 };
-
+use tower::load_shed::error::Overloaded;
 use tracing::Span;
+
 use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -772,6 +773,110 @@ fn overload_probability_reduces_over_time() {
     assert_eq!(
         drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
         "if there is no previous overload time, overloads should have minimum drop probability",
+    );
+}
+
+/// Test that connections are randomly terminated in response to `Overloaded` errors.
+///
+/// TODO: do a similar test on the real service stack created in the `start` command.
+#[tokio::test(flavor = "multi_thread")]
+async fn connection_is_randomly_disconnected_on_overload() {
+    let _init_guard = zebra_test::init();
+
+    // The number of times we repeat the test
+    const TEST_RUNS: usize = 21_000;
+
+    // The expected number of tests before failing due to random all-successes or all-failures
+    const TESTS_BEFORE_FAILURE: f32 = 1000.0;
+
+    let test_runs = TEST_RUNS as f32;
+    assert!(
+        test_runs / TESTS_BEFORE_FAILURE > 1.0 / MIN_OVERLOAD_DROP_PROBABILITY,
+        "not enough test runs: failures must be frequent enough to happen in almost all tests"
+    );
+    assert!(
+        test_runs / TESTS_BEFORE_FAILURE > 1.0 / (1.0 - MAX_OVERLOAD_DROP_PROBABILITY),
+        "not enough test runs: successes must be frequent enough to happen in almost all tests"
+    );
+
+    let mut connection_continues = 0;
+    let mut connection_closes = 0;
+
+    for _ in 0..TEST_RUNS {
+        // The real stream and sink are from a split TCP connection,
+        // but that doesn't change how the state machine behaves.
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+
+        let (
+            connection,
+            _client_tx,
+            mut inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+
+        // The connection hasn't run so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before starting the connection event loop: {error:?}",
+        );
+
+        // Start the connection run loop future in a spawned task
+        let connection_handle = tokio::spawn(connection.run(peer_rx));
+
+        // The connection hasn't received any messages, so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before sending messages to the connection event loop: {error:?}",
+        );
+
+        // Simulate an overloaded connection error in response to an inbound request.
+        let inbound_req = Message::GetAddr;
+        peer_tx
+            .send(Ok(inbound_req))
+            .await
+            .expect("send to channel always succeeds");
+
+        // The connection hasn't got a response, so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before sending responses to the connection event loop: {error:?}",
+        );
+
+        inbound_service
+            .expect_request(Request::Peers)
+            .await
+            .respond_error(Overloaded::new().into());
+
+        let outbound_result = peer_outbound_messages.try_next();
+        assert!(
+            !matches!(outbound_result, Ok(Some(_))),
+            "unexpected outbound message after Overloaded error:\n\
+             {outbound_result:?}\n\
+             note: TryRecvErr means there are no messages, Ok(None) means the channel is closed"
+        );
+
+        let error = shared_error_slot.try_get_error();
+        if error.is_some() {
+            connection_closes += 1;
+        } else {
+            connection_continues += 1;
+        }
+
+        // We need to terminate the spawned task
+        connection_handle.abort();
+    }
+
+    assert!(
+        connection_closes > 0,
+        "some overloaded connections must be closed at random"
+    );
+    assert!(
+        connection_continues > 0,
+        "some overloaded errors must be ignored at random"
     );
 }
 
