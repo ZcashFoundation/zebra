@@ -30,6 +30,9 @@ jobs:
             rust: beta
           - os: macos-latest
             features: " --features getblocktemplate-rpcs"
+          - os: ubuntu-latest
+            rust: beta
+            features: " --features getblocktemplate-rpcs"
 
     steps:
       - run: 'echo "No build required"'
@@ -56,7 +59,7 @@ jobs:
         checks:
           - bans
           - sources
-        features: ['', '--all-features', '--no-default-features']
+        features: ['', '--all-features']
 
     steps:
       - run: 'echo "No build required"'
