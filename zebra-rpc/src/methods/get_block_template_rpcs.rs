@@ -218,8 +218,14 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
-where
+pub struct GetBlockTemplateRpcImpl<
+    Mempool,
+    State,
+    Tip,
+    BlockVerifierRouter,
+    SyncStatus,
+    AddressBook,
+> where
     Mempool: Service<
         mempool::Request,
         Response = mempool::Response,
@@ -230,7 +236,7 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -268,7 +274,7 @@ where
     latest_chain_tip: Tip,
 
     /// The chain verifier, used for submitting blocks.
-    router_verifier: ChainVerifier,
+    router_verifier: BlockVerifierRouter,
 
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
@@ -277,8 +283,8 @@ where
     address_book: AddressBook,
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
-    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -294,7 +300,7 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -314,7 +320,7 @@ where
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        router_verifier: ChainVerifier,
+        router_verifier: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
@@ -360,8 +366,8 @@ where
     }
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -379,12 +385,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -803,7 +809,7 @@ where
                 //   and return a duplicate error for the newer request immediately.
                 //   This improves the speed of the RPC response.
                 //
-                // Checking the download queues and ChainVerifier buffer for duplicates
+                // Checking the download queues and BlockVerifierRouter buffer for duplicates
                 // might require architectural changes to Zebra, so we should only do it
                 // if mining pools really need it.
                 Ok(_verify_chain_error) => submit_block::ErrorResponse::Rejected,

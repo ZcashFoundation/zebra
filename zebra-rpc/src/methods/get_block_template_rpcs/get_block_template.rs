@@ -97,15 +97,15 @@ pub fn check_miner_address(
 /// usual acceptance rules (except proof-of-work).
 ///
 /// Returns a `getblocktemplate` [`Response`].
-pub async fn validate_block_proposal<ChainVerifier, Tip, SyncStatus>(
-    mut router_verifier: ChainVerifier,
+pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
+    mut router_verifier: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
     network: Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
 ) -> Result<Response>
 where
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync

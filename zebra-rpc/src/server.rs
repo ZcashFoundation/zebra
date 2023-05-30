@@ -73,7 +73,7 @@ impl RpcServer {
     //
     // TODO: put some of the configs or services in their own struct?
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>(
+    pub fn spawn<Version, Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
         config: Config,
         #[cfg(feature = "getblocktemplate-rpcs")]
         mining_config: get_block_template_rpcs::config::Config,
@@ -84,7 +84,7 @@ impl RpcServer {
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        router_verifier: ChainVerifier,
+        router_verifier: BlockVerifierRouter,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         sync_status: SyncStatus,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
@@ -110,7 +110,7 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
-        ChainVerifier: Service<
+        BlockVerifierRouter: Service<
                 zebra_consensus::Request,
                 Response = block::Hash,
                 Error = zebra_consensus::BoxError,
@@ -118,7 +118,7 @@ impl RpcServer {
             + Send
             + Sync
             + 'static,
-        <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
+        <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {

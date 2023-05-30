@@ -926,7 +926,7 @@ fn setup() -> (
     // ChainSync
     impl Future<Output = Result<(), Report>> + Send,
     SyncStatus,
-    // ChainVerifier
+    // BlockVerifierRouter
     MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
     // PeerSet
     MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
