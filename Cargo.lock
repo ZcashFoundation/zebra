@@ -510,6 +510,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bs58"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5353f36341f7451062466f0b755b96ac3a9547e4d7f6b70d603fc721a7d7896"
+dependencies = [
+ "sha2 0.10.6",
+ "tinyvec",
+]
+
+[[package]]
 name = "bstr"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5588,7 +5598,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52be35a205369d480378646bff9c9fedafd8efe8af1e0e54bb858f405883f2b2"
 dependencies = [
  "bech32",
- "bs58",
+ "bs58 0.4.0",
  "f4jumble",
  "zcash_encoding",
 ]
@@ -5726,7 +5736,7 @@ dependencies = [
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
- "bs58",
+ "bs58 0.5.0",
  "byteorder",
  "chrono",
  "color-eyre",
