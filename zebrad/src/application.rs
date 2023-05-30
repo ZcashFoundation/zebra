@@ -158,7 +158,7 @@ impl Application for ZebradApp {
         // Automatically use color if we're outputting to a terminal
         //
         // The `abcissa` docs claim that abscissa implements `Auto`, but it
-        // does not - except in `color_backtrace` backtraces.
+        // does not.
         // let mut term_colors = self.term_colors(command);
         // if term_colors == ColorChoice::Auto {
         //     // We want to disable colors on a per-stream basis, but that feature
@@ -175,6 +175,10 @@ impl Application for ZebradApp {
 
         // The Tracing component uses stdout directly and will apply colors
         // `if Self::outputs_are_ttys() && config.tracing.use_colors`
+        //
+        // Note: It's important to use `ColorChoice::Never` here to avoid panicking in
+        //       `register_components()` below if `color_eyre::install()` is called
+        //       after `color_spantrace` has been initialized.
         let terminal = Terminal::new(ColorChoice::Never);
 
         Ok(vec![Box::new(terminal)])
@@ -489,7 +493,7 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
         // update last_top_level_arg_idx to the number of top-level args
         for (idx, arg) in args.iter().enumerate() {
             num_top_level_args = match arg.to_str() {
-                Some("--verbose" | "-v") => idx + 1,
+                Some("--verbose" | "-v" | "--version" | "--help") => idx + 1,
                 Some("--config" | "-c") => idx + 2,
                 _ => num_top_level_args,
             }

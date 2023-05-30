@@ -11,6 +11,7 @@ pub struct GenerateCmd {
     /// The file to write the generated config to.
     #[clap(
         long,
+        short,
         help = "The file to write the generated config to (stdout if unspecified)"
     )]
     output_file: Option<String>,
