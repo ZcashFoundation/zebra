@@ -17,6 +17,7 @@ use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
+use zebra_network::CacheDir;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt},
@@ -175,8 +176,8 @@ where
         let cache_dir = PathBuf::from(dir);
 
         // If the peer cache has already been disabled, don't re-enable it
-        if config.network.cache_dir.is_some() {
-            config.network.cache_dir = Some(cache_dir.clone());
+        if config.network.cache_dir.is_enabled() {
+            config.network.cache_dir = CacheDir::custom_path(&cache_dir);
         }
 
         // Only replace the state cache directory if it's going to be used

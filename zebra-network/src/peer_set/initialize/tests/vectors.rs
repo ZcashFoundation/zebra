@@ -31,6 +31,7 @@ use zebra_test::net::random_known_port;
 
 use crate::{
     address_book_updater::AddressBookUpdater,
+    config::CacheDir,
     constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
     peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest},
@@ -325,7 +326,7 @@ async fn written_peer_cache_can_be_read_manually() {
         assert!(
             !cached_peers.is_empty(),
             "unexpected empty peer cache from manual load: {:?}",
-            config.peer_cache_file_path(config.network)
+            config.cache_dir.peer_cache_file_path(config.network)
         );
     }
 }
@@ -371,7 +372,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         assert!(
             approximate_cached_peer_count > 0,
             "unexpected empty address book using cache from previous instance: {:?}",
-            config.peer_cache_file_path(config.network)
+            config.cache_dir.peer_cache_file_path(config.network)
         );
     }
 }
@@ -1214,7 +1215,7 @@ async fn self_connections_should_fail() {
 
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
-        cache_dir: None,
+        cache_dir: CacheDir::disabled(),
 
         ..Config::default()
     };
@@ -1460,7 +1461,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
-        cache_dir: None,
+        cache_dir: CacheDir::disabled(),
 
         ..Config::default()
     };
@@ -1797,7 +1798,7 @@ where
     let config = Config {
         initial_mainnet_peers: peers,
         // We want exactly the above list of peers, without any cached peers.
-        cache_dir: None,
+        cache_dir: CacheDir::disabled(),
 
         network: Network::Mainnet,
         listen_addr: unused_v4,
