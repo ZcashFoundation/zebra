@@ -180,18 +180,18 @@ RUN set -ex; \
   { \
     echo "[network]"; \
     echo "network = '${NETWORK}'"; \
-    echo "listen_addr = '127.0.0.1'"; \
+    echo "listen_addr = '0.0.0.0'"; \
     echo "[consensus]"; \
     echo "checkpoint_sync = ${CHECKPOINT_SYNC}"; \
     echo "[state]"; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[rpc]"; \
-    [ -n "$RPC_PORT" ] && echo "listen_addr = '127.0.0.1:${RPC_PORT}'"; \
+    [ -n "$RPC_PORT" ] && echo "listen_addr = '0.0.0.0:${RPC_PORT}'"; \
     echo "parallel_cpu_threads = 0"; \
     echo "[metrics]"; \
-    echo "#endpoint_addr = '127.0.0.1:9999'"; \
+    echo "#endpoint_addr = '0.0.0.0:9999'"; \
     echo "[tracing]"; \
-    echo "#endpoint_addr = '127.0.0.1:3000'"; \
+    echo "#endpoint_addr = '0.0.0.0:3000'"; \
   } > "${ZEBRA_CONF_PATH}"
 
 

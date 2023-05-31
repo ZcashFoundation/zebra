@@ -110,8 +110,7 @@ pub trait GetBlockTemplateRpc {
     /// - the parent block is a valid block that Zebra already has, or will receive soon.
     ///
     /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
-    /// so moving between chains is very cheap. (But forking a new chain may take some time,
-    /// until bug #4794 is fixed.)
+    /// so moving between chains and forking chains is very cheap.
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
@@ -744,7 +743,7 @@ where
             let block: Block = match block_bytes.zcash_deserialize_into() {
                 Ok(block_bytes) => block_bytes,
                 Err(error) => {
-                    tracing::info!(?error, "submit block failed");
+                    tracing::info!(?error, "submit block failed: block bytes could not be deserialized into a structurally valid block");
 
                     return Ok(submit_block::ErrorResponse::Rejected.into());
                 }
@@ -754,6 +753,7 @@ where
                 .coinbase_height()
                 .map(|height| height.0.to_string())
                 .unwrap_or_else(|| "invalid coinbase height".to_string());
+            let block_hash = block.hash();
 
             let router_verifier_response = router_verifier
                 .ready()
@@ -785,8 +785,7 @@ where
                         .downcast::<RouterError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
-                    // TODO: add block hash to error?
-                    tracing::info!(?error, ?block_height, "submit block failed");
+                    tracing::info!(?error, ?block_hash, ?block_height, "submit block failed verification");
 
                     error
                 }

@@ -43,7 +43,7 @@ bitflags = "2.2.1"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.1"
 blake2s_simd = "1.0.1"
-bs58 = { version = "0.4.0", features = ["check"] }
+bs58 = { version = "0.5.0", features = ["check"] }
 byteorder = "1.4.3"
 equihash = "0.2.0"
 group = "0.13.0"
@@ -69,7 +69,7 @@ zcash_note_encryption = "0.3.0"
 zcash_primitives = { version = "0.11.0", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.24", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.25", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
@@ -101,19 +101,19 @@ serde_json = { version = "1.0.95", optional = true }
 zcash_address = { version = "0.2.1", optional = true }
 
 # Optional testing dependencies
-proptest = { version = "1.1.0", optional = true }
+proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 rand = { version = "0.8.5", optional = true, package = "rand" }
 rand_chacha = { version = "0.3.1", optional = true }
 
-tokio = { version = "1.28.0", features = ["tracing"], optional = true }
+tokio = { version = "1.28.2", features = ["tracing"], optional = true }
 
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 # Benchmarks
-criterion = { version = "0.4.0", features = ["html_reports"] }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = "0.6.2"
@@ -124,13 +124,13 @@ spandoc = "0.2.2"
 tracing = "0.1.37"
 
 # Make the optional testing dependencies required
-proptest = "1.1.0"
+proptest = "1.2.0"
 proptest-derive = "0.3.0"
 
 rand = { version = "0.8.5", package = "rand" }
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.28.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }
 

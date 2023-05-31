@@ -740,10 +740,6 @@ where
             orchard_shielded_data,
             &shielded_sighash,
         )?))
-
-        // TODO:
-        // - verify orchard shielded pool (ZIP-224) (#2105)
-        // - shielded input and output limits? (#2379)
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.

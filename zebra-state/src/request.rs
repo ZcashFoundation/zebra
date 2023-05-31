@@ -308,8 +308,8 @@ impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
 }
 
 impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
-    fn from(prepared: &SemanticallyVerifiedBlock) -> Self {
-        prepared.clone()
+    fn from(semantically_verified: &SemanticallyVerifiedBlock) -> Self {
+        semantically_verified.clone()
     }
 }
 
@@ -321,14 +321,14 @@ impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
-    /// When combined, `prepared.new_outputs` and `spent_utxos` must contain
+    /// When combined, `semantically_verified.new_outputs` and `spent_utxos` must contain
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
     /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
-    /// `Chain::update_chain_state_with` returns success.
+    /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
     pub fn with_block_and_spent_utxos(
-        prepared: SemanticallyVerifiedBlock,
+        semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
@@ -337,7 +337,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-        } = prepared;
+        } = semantically_verified;
 
         // This is redundant for the non-finalized state,
         // but useful to make some tests pass more easily.
@@ -966,9 +966,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            Request::CheckBlockProposalValidity(prepared) => {
-                Ok(ReadRequest::CheckBlockProposalValidity(prepared))
-            }
+            Request::CheckBlockProposalValidity(semantically_verified) => Ok(
+                ReadRequest::CheckBlockProposalValidity(semantically_verified),
+            ),
         }
     }
 }

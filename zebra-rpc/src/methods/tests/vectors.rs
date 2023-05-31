@@ -951,8 +951,10 @@ async fn rpc_getpeerinfo() {
         )
         .into(),
     )
-    .into_new_meta_addr()
-    .unwrap();
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
+    );
 
     let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
 

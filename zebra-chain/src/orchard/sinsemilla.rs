@@ -159,10 +159,6 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
     extract_p_bottom(sinsemilla_hash_to_point(D, M))
 }
 
-// TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
-// https://github.com/ZcashFoundation/zebra/issues/2079
-// https://github.com/zcash-hackworks/zcash-test-vectors/pulls
-
 #[cfg(test)]
 mod tests {
 

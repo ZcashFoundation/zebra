@@ -26,7 +26,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 bitflags = "2.2.1"
 byteorder = "1.4.3"
 bytes = "1.4.0"
-chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.25", default-features = false, features = ["clock", "std"] }
 hex = "0.4.3"
 humantime-serde = "1.1.1"
 indexmap = { version = "1.9.3", features = ["serde"] }
@@ -35,12 +35,12 @@ ordered-map = "0.4.2"
 pin-project = "1.1.0"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
-regex = "1.8.1"
+regex = "1.8.3"
 serde = { version = "1.0.163", features = ["serde_derive"] }
 thiserror = "1.0.40"
 
 futures = "0.3.28"
-tokio = { version = "1.28.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.28.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "time"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
@@ -59,17 +59,17 @@ howudoin = { version = "0.1.2", optional = true }
 # tor-rtcompat  = { version = "0.0.2", optional = true }
 
 # proptest dependencies
-proptest = { version = "1.1.0", optional = true }
+proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
 
 [dev-dependencies]
-proptest = "1.1.0"
+proptest = "1.2.0"
 proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.28.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
 toml = "0.7.4"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

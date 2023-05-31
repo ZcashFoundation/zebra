@@ -34,17 +34,17 @@ jubjub = "0.10.0"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
 
-chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.25", default-features = false, features = ["clock", "std"] }
 displaydoc = "0.2.4"
 lazy_static = "1.4.0"
-once_cell = "1.17.1"
+once_cell = "1.17.2"
 serde = { version = "1.0.163", features = ["serde_derive"] }
 
 futures = "0.3.28"
 futures-util = "0.3.28"
 metrics = "0.21.0"
 thiserror = "1.0.40"
-tokio = { version = "1.28.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio = { version = "1.28.2", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
@@ -65,7 +65,7 @@ zebra-chain = { path = "../zebra-chain" }
 howudoin = { version = "0.1.2", optional = true }
 
 # Test-only dependencies
-proptest = { version = "1.1.0", optional = true }
+proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
@@ -76,11 +76,11 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 hex = "0.4.3"
 num-integer = "0.1.45"
-proptest = "1.1.0"
+proptest = "1.2.0"
 proptest-derive = "0.3.0"
 spandoc = "0.2.2"
 
-tokio = { version = "1.28.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.17"
 

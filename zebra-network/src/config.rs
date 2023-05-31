@@ -347,7 +347,6 @@ impl<'de> Deserialize<'de> for Config {
 
         let config = DConfig::deserialize(deserializer)?;
 
-        // TODO: perform listener DNS lookups asynchronously with a timeout (#1631)
         let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
             Err(_) => match config.listen_addr.parse::<IpAddr>() {

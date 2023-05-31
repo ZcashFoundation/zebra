@@ -81,6 +81,11 @@ jobs:
             rust: beta
           - os: macos-latest
             features: " --features getblocktemplate-rpcs"
+        # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
+        # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
+          - os: ubuntu-latest
+            rust: beta
+            features: " --features getblocktemplate-rpcs"
 
     steps:
       - uses: actions/checkout@v3.5.2
@@ -89,7 +94,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v1.3.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '3.20.1'
@@ -101,7 +106,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
 
 
-      - uses: Swatinem/rust-cache@v2.3.0
+      - uses: Swatinem/rust-cache@v2.4.0
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -225,7 +230,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v1.3.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '3.20.1'
@@ -236,7 +241,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-      - uses: Swatinem/rust-cache@v2.3.0
+      - uses: Swatinem/rust-cache@v2.4.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -252,7 +257,10 @@ jobs:
         checks:
           - bans
           - sources
-        features: ['', '--all-features', '--no-default-features']
+        # We don't need to check `--no-default-features` here, because (except in very rare cases):
+        # - disabling features isn't going to add duplicate dependencies
+        # - disabling features isn't going to add more crate sources
+        features: ['', '--all-features']
       # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
       fail-fast: false
 

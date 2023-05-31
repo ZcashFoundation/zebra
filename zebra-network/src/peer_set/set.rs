@@ -418,8 +418,6 @@ where
         for guard in self.guards.iter() {
             guard.abort();
         }
-
-        // TODO: implement graceful shutdown for InventoryRegistry (#1678)
     }
 
     /// Check busy peer services for request completion or errors.
@@ -504,15 +502,12 @@ where
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            // TODO: Remove when the code base migrates to Rust 2021 edition (#2709).
-            let preselected_p2c_peer = &mut self.preselected_p2c_peer;
-
             self.ready_services.retain(|address, peer| {
                 if peer.remote_version() >= minimum_version {
                     true
                 } else {
-                    if *preselected_p2c_peer == Some(*address) {
-                        *preselected_p2c_peer = None;
+                    if self.preselected_p2c_peer == Some(*address) {
+                        self.preselected_p2c_peer = None;
                     }
 
                     false

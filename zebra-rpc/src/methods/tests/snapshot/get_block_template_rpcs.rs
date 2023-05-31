@@ -5,7 +5,10 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Instant,
+};
 
 use hex::FromHex;
 use insta::Settings;
@@ -133,8 +136,7 @@ pub async fn test_responses<State, ReadState>(
         )
         .into(),
     )
-    .into_new_meta_addr()
-    .unwrap()]);
+    .into_new_meta_addr(Instant::now(), DateTime32::now())]);
 
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
