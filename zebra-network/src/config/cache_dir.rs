@@ -14,7 +14,7 @@ use zebra_chain::parameters::Network;
 pub enum CacheDir {
     /// Whether the cache directory is enabled with the default path (`true`),
     /// or disabled (`false`).
-    Enabled(bool),
+    IsEnabled(bool),
 
     /// Enable the cache directory and use a custom path.
     CustomPath(PathBuf),
@@ -22,18 +22,26 @@ pub enum CacheDir {
 
 impl CacheDir {
     /// Returns a `CacheDir` enabled with the default path.
-    pub fn enabled() -> Self {
-        Self::Enabled(true)
+    pub fn default_path() -> Self {
+        Self::IsEnabled(true)
     }
 
     /// Returns a disabled `CacheDir`.
     pub fn disabled() -> Self {
-        Self::Enabled(false)
+        Self::IsEnabled(false)
     }
 
     /// Returns a custom `CacheDir` enabled with `path`.
     pub fn custom_path(path: impl AsRef<Path>) -> Self {
         Self::CustomPath(path.as_ref().to_owned())
+    }
+
+    /// Returns `true` if this `CacheDir` is enabled with the default or a custom path.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            CacheDir::IsEnabled(is_enabled) => *is_enabled,
+            CacheDir::CustomPath(_) => true,
+        }
     }
 
     /// Returns the peer cache file path for `network`, if enabled.
@@ -48,7 +56,7 @@ impl CacheDir {
     /// Returns the `zebra-network` base cache directory, if enabled.
     pub fn cache_dir(&self) -> Option<PathBuf> {
         match self {
-            Self::Enabled(should_cache) => should_cache.then(|| {
+            Self::IsEnabled(is_enabled) => is_enabled.then(|| {
                 dirs::cache_dir()
                     .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
                     .join("zebra")
@@ -61,6 +69,6 @@ impl CacheDir {
 
 impl Default for CacheDir {
     fn default() -> Self {
-        Self::enabled()
+        Self::default_path()
     }
 }
