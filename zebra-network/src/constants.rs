@@ -316,6 +316,25 @@ pub const EWMA_DECAY_TIME_NANOS: f64 = 200.0 * NANOS_PER_SECOND;
 /// The number of nanoseconds in one second.
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 
+/// The duration it takes for the drop probability of an overloaded connection to
+/// reach [`MIN_OVERLOAD_DROP_PROBABILITY`].
+///
+/// Peer connections that receive multiple overloads have a higher probability of being dropped.
+///
+/// The probability of a connection being dropped gradually decreases during this interval
+/// until it reaches the default drop probability ([`MIN_OVERLOAD_DROP_PROBABILITY`]).
+///
+/// Increasing this number increases the rate at which connections are dropped.
+pub const OVERLOAD_PROTECTION_INTERVAL: Duration = MIN_INBOUND_PEER_CONNECTION_INTERVAL;
+
+/// The minimum probability of dropping a peer connection when it receives an
+/// [`Overloaded`](crate::PeerError::Overloaded) error.
+pub const MIN_OVERLOAD_DROP_PROBABILITY: f32 = 0.05;
+
+/// The maximum probability of dropping a peer connection when it receives an
+/// [`Overloaded`](crate::PeerError::Overloaded) error.
+pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.95;
+
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
     /// represented as a network upgrade.
