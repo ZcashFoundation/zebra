@@ -435,6 +435,9 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+/// Check that the state directory created on disk matches the state config.
+///
+/// TODO: do a similar test for `network.cache_dir`
 #[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
@@ -460,7 +463,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -483,7 +486,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["state", "zebrad.toml"].iter()
+            ["state", "network", "zebrad.toml"].iter()
         }
 
         // we didn't create the state directory, so it should not exist
@@ -501,7 +504,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["zebrad.toml"].iter()
+            ["network", "zebrad.toml"].iter()
         }
     };
 
