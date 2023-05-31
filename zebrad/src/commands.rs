@@ -6,9 +6,6 @@ mod generate;
 mod start;
 mod tip_height;
 
-#[cfg(test)]
-mod tests;
-
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
@@ -135,7 +132,7 @@ impl Configurable<ZebradConfig> for ZebradCmd {
 //
 // Handles obtaining toplevel help as well as verbosity settings.
 #[derive(Debug, clap::Parser)]
-#[clap(version = clap::crate_version!())]
+#[clap(version = clap::crate_version!(), help_template = "{name} ({version}) - {usage}")]
 pub struct EntryPoint {
     /// Subcommand to execute.
     ///
