@@ -18,8 +18,7 @@ use zebra_state::LatestChainTip;
 
 use crate::prelude::APPLICATION;
 
-// `zebra-tip-height` subcommand
-/// get the block height of Zebra's persisted chain state
+/// Print the tip block height of Zebra's chain state on disk
 #[derive(Command, Debug, Default, Parser)]
 pub struct TipHeightCmd {
     /// Path to Zebra's cached state.

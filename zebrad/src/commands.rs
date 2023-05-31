@@ -27,24 +27,21 @@ pub const CONFIG_FILE: &str = "zebrad.toml";
 /// Zebrad Subcommands
 #[derive(Command, Debug, clap::Subcommand)]
 pub enum ZebradCmd {
-    /// The `copy-state` subcommand, used to debug cached chain state
+    /// The `copy-state` subcommand, used to debug cached chain state (expert users only)
     // TODO: hide this command from users in release builds (#3279)
     CopyState(CopyStateCmd),
 
     // The `download` subcommand
-    /// Pre-download required parameter files
+    /// Pre-download required Zcash Sprout and Sapling parameter files
     Download(DownloadCmd),
 
-    // The `generate` subcommand
-    /// Generate a skeleton configuration
+    /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
 
-    // The `start` subcommand
-    /// Start the application
+    /// Start the application (default command)
     Start(StartCmd),
 
-    // The `tip-height` subcommand
-    /// Get the block height of Zebra's persisted chain state
+    /// Print the tip block height of Zebra's chain state on disk
     TipHeight(TipHeightCmd),
 }
 
@@ -182,7 +179,7 @@ impl EntryPoint {
         "start"
     }
 
-    /// Process arguments from [`env::args_os()`] and insert the default subcommand
+    /// Process command arguments and insert the default subcommand
     /// if no subcommand is provided.
     pub fn process_cli_args(args: Vec<OsString>) -> Vec<OsString> {
         // Check if the provided arguments include a subcommand

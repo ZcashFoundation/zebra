@@ -91,8 +91,7 @@ use crate::{
     prelude::*,
 };
 
-// `start` subcommand
-/// start the application
+/// Start the application (default command)
 #[derive(Command, Debug, Default, clap::Parser)]
 pub struct StartCmd {
     /// Filter strings which override the config file and defaults

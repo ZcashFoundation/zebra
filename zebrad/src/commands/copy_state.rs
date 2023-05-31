@@ -55,8 +55,7 @@ use crate::{
 /// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 
-// `copy-state` subcommand
-/// copy cached chain state (debug only)
+/// copy cached chain state (expert users only)
 #[derive(Command, Debug, clap::Parser)]
 pub struct CopyStateCmd {
     /// Source height that the copy finishes at.
