@@ -47,7 +47,7 @@ pub struct Tracing {
     /// responsible for flushing any remaining logs when the program terminates.
     //
     // Correctness: must be listed last in the struct, so it drops after other drops have logged.
-    _guard: WorkerGuard,
+    _guard: Option<WorkerGuard>,
 }
 
 impl Tracing {
@@ -94,7 +94,7 @@ impl Tracing {
         // Builds a lossy NonBlocking logger with a default line limit of 128_000 or an explicit buffer_limit.
         // The write method queues lines down a bounded channel with this capacity to a worker thread that writes to stdout.
         // Increments error_counter and drops lines when the buffer is full.
-        let (non_blocking, _guard) = NonBlockingBuilder::default()
+        let (non_blocking, worker_guard) = NonBlockingBuilder::default()
             .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(writer);
 
@@ -275,8 +275,14 @@ impl Tracing {
             initial_filter: filter,
             #[cfg(feature = "flamegraph")]
             flamegrapher,
-            _guard,
+            _guard: Some(worker_guard),
         })
+    }
+
+    /// Drops guard for worker thread of non-blocking logger,
+    /// to flush any remaining logs when the program terminates.
+    pub fn shutdown(&mut self) {
+        self._guard.take();
     }
 
     /// Return the currently-active tracing filter.

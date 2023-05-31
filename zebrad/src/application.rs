@@ -455,15 +455,17 @@ impl Application for ZebradApp {
         if let Err(e) = self.state().components().shutdown(self, shutdown) {
             let app_name = self.name().to_string();
 
-            // TODO: find a way to trigger component destructors, maybe get_downcast_mut?
-            // Swap out a fake app so we can trigger the destructor on the original
-            // let _ = std::mem::take(&mut APPLICATION.state);
+            self.state()
+                .components_mut()
+                .get_downcast_mut::<Tracing>()
+                .map(Tracing::shutdown);
+
             fatal_error(app_name, &e);
         }
-
-        // TODO: find a way to trigger component destructors, maybe get_downcast_mut?
-        // Swap out a fake app so we can trigger the destructor on the original
-        // let _ = std::mem::take(APPLICATION.state_mut());
+        self.state()
+            .components_mut()
+            .get_downcast_mut::<Tracing>()
+            .map(Tracing::shutdown);
 
         match shutdown {
             Shutdown::Graceful => process::exit(0),
