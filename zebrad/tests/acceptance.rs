@@ -1038,7 +1038,8 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    let checkpoint_stop_regex = format!("{STOP_AT_HEIGHT_REGEX}.*CommitFinalized request");
+    let checkpoint_stop_regex =
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit checkpoint-verified request");
 
     create_cached_database_height(
         network,
