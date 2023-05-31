@@ -5,7 +5,6 @@ use std::{
     ffi::OsString,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
     string::String,
     time::Duration,
 };
@@ -26,8 +25,12 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
+mod cache_dir;
+
 #[cfg(test)]
 mod tests;
+
+pub use cache_dir::CacheDir;
 
 /// The number of times Zebra will retry each initial peer's DNS resolution,
 /// before checking if any other initial peers have returned addresses.
@@ -77,10 +80,18 @@ pub struct Config {
     pub initial_testnet_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
-    /// If this is `None`, then peer addresses are not read or written to disk.
     ///
-    /// If you change this directory, you might also want to change `state.cache_dir`.
+    /// # Configuration
+    ///
+    /// Set to:
+    /// - `true` to read and write peer addresses to disk using the default cache path,
+    /// - `false` to disable reading and writing peer addresses to disk,
+    /// - `'/custom/cache/directory'` to read and write peer addresses to a custom directory.
+    ///
     /// By default, all Zebra instances run by the same user will share a single peer cache.
+    /// If you use a custom cache path, you might also want to change `state.cache_dir`.
+    ///
+    /// # Functionality
     ///
     /// The peer cache is a list of the addresses of some recently useful peers.
     ///
@@ -92,6 +103,8 @@ pub struct Config {
     /// - security: if DNS is compromised with malicious peers
     ///
     /// If you delete it, Zebra will replace it with a fresh set of peers from the DNS seeders.
+    ///
+    /// # Defaults
     ///
     /// The default directory is platform dependent, based on
     /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
@@ -118,7 +131,7 @@ pub struct Config {
     ///
     /// Previous peer lists are automatically loaded at startup, and used to populate the
     /// initial peer set and address book.
-    pub cache_dir: Option<PathBuf>,
+    pub cache_dir: CacheDir,
 
     /// The initial target size for the peer set.
     ///
@@ -333,19 +346,9 @@ impl Config {
         }
     }
 
-    /// Returns the path for the peer list cache file, if set.
-    pub fn peer_cache_file_path(&self, network: Network) -> Option<PathBuf> {
-        Some(
-            self.cache_dir
-                .as_ref()?
-                .join("network")
-                .join(format!("{}.peers", network.lowercase_name())),
-        )
-    }
-
     /// Returns the addresses in the peer list cache file, if available.
     pub async fn load_peer_cache(&self) -> io::Result<HashSet<PeerSocketAddr>> {
-        let Some(peer_cache_file) = self.peer_cache_file_path(self.network) else {
+        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(self.network) else {
             return Ok(HashSet::new());
         };
 
@@ -421,7 +424,7 @@ impl Config {
     /// Atomic writes avoid corrupting the cache if Zebra panics or crashes, or if multiple Zebra
     /// instances try to read and write the same cache file.
     pub async fn update_peer_cache(&self, peer_list: HashSet<PeerSocketAddr>) -> io::Result<()> {
-        let Some(peer_cache_file) = self.peer_cache_file_path(self.network) else {
+        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(self.network) else {
             return Ok(());
         };
 
@@ -549,10 +552,6 @@ impl Default for Config {
         .map(|&s| String::from(s))
         .collect();
 
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
-            .join("zebra");
-
         Config {
             listen_addr: "0.0.0.0:8233"
                 .parse()
@@ -560,7 +559,7 @@ impl Default for Config {
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
-            cache_dir: Some(cache_dir),
+            cache_dir: CacheDir::default(),
             crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
             // # Security
@@ -587,7 +586,7 @@ impl<'de> Deserialize<'de> for Config {
             network: Network,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
-            cache_dir: Option<PathBuf>,
+            cache_dir: CacheDir,
             peerset_initial_target_size: usize,
             #[serde(alias = "new_peer_interval", with = "humantime_serde")]
             crawl_new_peer_interval: Duration,
