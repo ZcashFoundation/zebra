@@ -230,11 +230,11 @@ impl Handler {
                 if missing_transaction_ids != pending_ids {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
                     // if these errors are noisy, we should replace them with debugs
-                    info!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
+                    debug!("unexpected notfound message from peer: all remaining transaction hashes should be listed in the notfound. Using partial received transactions as the peer response");
                 }
                 if missing_transaction_ids.len() != missing_invs.len() {
                     trace!(?missing_invs, ?missing_transaction_ids, ?pending_ids);
-                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
+                    debug!("unexpected notfound message from peer: notfound contains duplicate hashes or non-transaction hashes. Using partial received transactions as the peer response");
                 }
 
                 if transactions.is_empty() {
@@ -334,11 +334,11 @@ impl Handler {
                 if missing_blocks != pending_hashes {
                     trace!(?missing_invs, ?missing_blocks, ?pending_hashes);
                     // if these errors are noisy, we should replace them with debugs
-                    info!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
+                    debug!("unexpected notfound message from peer: all remaining block hashes should be listed in the notfound. Using partial received blocks as the peer response");
                 }
                 if missing_blocks.len() != missing_invs.len() {
                     trace!(?missing_invs, ?missing_blocks, ?pending_hashes);
-                    info!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
+                    debug!("unexpected notfound message from peer: notfound contains duplicate hashes or non-block hashes. Using partial received blocks as the peer response");
                 }
 
                 if blocks.is_empty() {
