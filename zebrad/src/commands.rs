@@ -32,19 +32,19 @@ pub enum ZebradCmd {
     CopyState(CopyStateCmd),
 
     // The `download` subcommand
-    /// pre-download required parameter files
+    /// Pre-download required parameter files
     Download(DownloadCmd),
 
     // The `generate` subcommand
-    /// generate a skeleton configuration
+    /// Generate a skeleton configuration
     Generate(GenerateCmd),
 
     // The `start` subcommand
-    /// start the application
+    /// Start the application
     Start(StartCmd),
 
     // The `tip-height` subcommand
-    /// get the block height of Zebra's persisted chain state
+    /// Get the block height of Zebra's persisted chain state
     TipHeight(TipHeightCmd),
 }
 
@@ -134,7 +134,7 @@ impl Configurable<ZebradConfig> for ZebradCmd {
 /// Handles obtaining toplevel help as well as verbosity settings.
 #[derive(Debug, clap::Parser)]
 #[clap(
-    version = clap::crate_version!(), 
+    version = clap::crate_version!(),
     author="Zcash Foundation <zebra@zfnd.org>",
     help_template = "\
 {name} {version}\n
