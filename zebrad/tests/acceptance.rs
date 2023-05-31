@@ -547,7 +547,15 @@ fn version_args() -> Result<()> {
     // unrecognized option `-f`
     let child = testdir.spawn_child(args!["--version", "-f"])?;
     let output = child.wait_with_output()?;
-    output.assert_failure()?;
+    let output = output.assert_success()?;
+
+    // The output should only contain the version
+    output.output_check(
+        is_zebrad_version,
+        &output.output.stdout,
+        "stdout",
+        "a valid zebrad semantic version",
+    )?;
 
     Ok(())
 }
