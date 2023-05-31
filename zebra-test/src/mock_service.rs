@@ -742,13 +742,17 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # Panics
     ///
-    /// If one of the `respond*` methods isn't called, the caller will panic.
+    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
+    /// timeout error.
     ///
     /// # Example
     ///
     /// ```
     /// # use zebra_test::mock_service::MockService;
     /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// # struct Request;
     /// #
     /// # let reactor = tokio::runtime::Builder::new_current_thread()
     /// #     .enable_all()
@@ -762,19 +766,19 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # let mut service = mock_service.clone();
     /// # let task = tokio::spawn(async move {
-    /// #     let first_call_result = (&mut service).oneshot(1).await;
-    /// #     let second_call_result = service.oneshot(1).await;
+    /// #     let first_call_result = (&mut service).oneshot(Request).await;
+    /// #     let second_call_result = service.oneshot(Request).await;
     /// #
     /// #     (first_call_result, second_call_result)
     /// # });
     /// #
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
-    ///     .respond("Received one".to_owned());
+    ///     .respond("Received Request".to_owned());
     ///
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
     ///     .respond(Err("Duplicate request"));
     /// # });
@@ -793,13 +797,17 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # Panics
     ///
-    /// If one of the `respond*` methods isn't called, the caller will panic.
+    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
+    /// timeout error.
     ///
     /// # Example
     ///
     /// ```
     /// # use zebra_test::mock_service::MockService;
     /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// # struct Request;
     /// #
     /// # let reactor = tokio::runtime::Builder::new_current_thread()
     /// #     .enable_all()
@@ -813,21 +821,21 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # let mut service = mock_service.clone();
     /// # let task = tokio::spawn(async move {
-    /// #     let first_call_result = (&mut service).oneshot(1).await;
-    /// #     let second_call_result = service.oneshot(1).await;
+    /// #     let first_call_result = (&mut service).oneshot(Request).await;
+    /// #     let second_call_result = service.oneshot(Request).await;
     /// #
     /// #     (first_call_result, second_call_result)
     /// # });
     /// #
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
-    ///     .respond_with(|req| format!("Received: {}", req));
+    ///     .respond_with(|req| format!("Received: {req:?}"));
     ///
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
-    ///     .respond_with(|req| Err(format!("Duplicate request: {}", req)));
+    ///     .respond_with(|req| Err(format!("Duplicate request: {req:?}")));
     /// # });
     /// ```
     pub fn respond_with<F, R>(self, response_fn: F)
@@ -849,13 +857,18 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # Panics
     ///
-    /// If one of the `respond*` methods isn't called, the caller will panic.
+    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
+    /// timeout error.
     ///
     /// # Example
     ///
     /// ```
     /// # use zebra_test::mock_service::MockService;
     /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// # struct Request;
+    /// # struct Response;
     /// #
     /// # let reactor = tokio::runtime::Builder::new_current_thread()
     /// #     .enable_all()
@@ -864,21 +877,21 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// #
     /// # reactor.block_on(async {
     /// // Mock a service with a `String` as the service `Error` type.
-    /// let mut mock_service: MockService<_, _, _, String> =
+    /// let mut mock_service: MockService<Request, Response, _, String> =
     ///     MockService::build().for_unit_tests();
     ///
     /// # let mut service = mock_service.clone();
     /// # let task = tokio::spawn(async move {
-    /// #     let first_call_result = (&mut service).oneshot(1).await;
-    /// #     let second_call_result = service.oneshot(1).await;
+    /// #     let first_call_result = (&mut service).oneshot(Request).await;
+    /// #     let second_call_result = service.oneshot(Request).await;
     /// #
     /// #     (first_call_result, second_call_result)
     /// # });
     /// #
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
-    ///     .respond_error("Duplicate request");
+    ///     .respond_error("Duplicate request".to_string());
     /// # });
     /// ```
     pub fn respond_error(self, error: Error) {
@@ -897,13 +910,18 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// # Panics
     ///
-    /// If one of the `respond*` methods isn't called, the caller will panic.
+    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
+    /// timeout error.
     ///
     /// # Example
     ///
     /// ```
     /// # use zebra_test::mock_service::MockService;
     /// # use tower::{Service, ServiceExt};
+    /// #
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// # struct Request;
+    /// # struct Response;
     /// #
     /// # let reactor = tokio::runtime::Builder::new_current_thread()
     /// #     .enable_all()
@@ -912,21 +930,21 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// #
     /// # reactor.block_on(async {
     /// // Mock a service with a `String` as the service `Error` type.
-    /// let mut mock_service: MockService<_, _, _, String> =
+    /// let mut mock_service: MockService<Request, Response, _, String> =
     ///     MockService::build().for_unit_tests();
     ///
     /// # let mut service = mock_service.clone();
     /// # let task = tokio::spawn(async move {
-    /// #     let first_call_result = (&mut service).oneshot(1).await;
-    /// #     let second_call_result = service.oneshot(1).await;
+    /// #     let first_call_result = (&mut service).oneshot(Request).await;
+    /// #     let second_call_result = service.oneshot(Request).await;
     /// #
     /// #     (first_call_result, second_call_result)
     /// # });
     /// #
     /// mock_service
-    ///     .expect_request(1)
+    ///     .expect_request(Request)
     ///     .await
-    ///     .respond_with_error(|req| format!("Duplicate request: {}", req));
+    ///     .respond_with_error(|req| format!("Duplicate request: {req:?}"));
     /// # });
     /// ```
     pub fn respond_with_error<F>(self, response_fn: F)
