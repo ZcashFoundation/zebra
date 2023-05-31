@@ -209,6 +209,10 @@ impl Config {
 
     /// Resolve initial seed peer IP addresses, based on the configured network,
     /// and load cached peers from disk, if available.
+    ///
+    /// # Panics
+    ///
+    /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
         // TODO: do DNS and disk in parallel if startup speed becomes important
         let dns_peers =
@@ -271,6 +275,10 @@ impl Config {
     /// `max_retries` times.
     ///
     /// If DNS continues to fail, returns an empty list of addresses.
+    ///
+    /// # Panics
+    ///
+    /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     async fn resolve_host(host: &str, max_retries: usize) -> HashSet<PeerSocketAddr> {
         for retries in 0..=max_retries {
             if let Ok(addresses) = Config::resolve_host_once(host).await {
@@ -300,6 +308,10 @@ impl Config {
     ///
     /// If `host` is a DNS name, performs DNS resolution with a timeout of a few seconds.
     /// If DNS resolution fails or times out, returns an error.
+    ///
+    /// # Panics
+    ///
+    /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     async fn resolve_host_once(host: &str) -> Result<HashSet<PeerSocketAddr>, BoxError> {
         let fut = tokio::net::lookup_host(host);
         let fut = tokio::time::timeout(DNS_LOOKUP_TIMEOUT, fut);
@@ -334,6 +346,13 @@ impl Config {
                 }
 
                 Ok(ip_addrs.into_iter().collect())
+            }
+            Ok(Err(e)) if e.kind() == ErrorKind::InvalidInput => {
+                // TODO: add testnet/mainnet ports, like we do with the listener address
+                panic!(
+                    "Invalid peer IP address in Zebra config: addresses must have ports:\n\
+                     resolving {host:?} returned {e:?}"
+                );
             }
             Ok(Err(e)) => {
                 tracing::info!(?host, ?e, "DNS error resolving peer IP addresses");
