@@ -264,10 +264,10 @@ fn help_no_args() -> Result<()> {
         is_zebrad_version,
         &output.output.stdout,
         "stdout",
-        "with a valid zebrad semantic version",
+        "are valid zebrad semantic versions",
     )?;
 
-    // Make sure we are in help by looking usage string
+    // Make sure we are in help by looking for the usage string
     output.stdout_line_contains("Usage:")?;
 
     Ok(())

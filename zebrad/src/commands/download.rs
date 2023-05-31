@@ -7,8 +7,7 @@
 
 use abscissa_core::{Command, Runnable};
 
-// `download` subcommand
-/// pre-download required parameter files
+/// Pre-download required Zcash Sprout and Sapling parameter files
 #[derive(Command, Debug, Default, clap::Parser)]
 pub struct DownloadCmd {}
 

@@ -477,6 +477,7 @@ impl Application for ZebradApp {
 
 /// Boot the given application, parsing subcommand and options from
 /// command-line arguments, and terminating when complete.
+// <https://docs.rs/abscissa_core/latest/src/abscissa_core/application.rs.html#174-178>
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
     let args = EntryPoint::process_cli_args(env::args_os().collect());
 
