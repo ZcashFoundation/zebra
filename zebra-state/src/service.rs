@@ -804,7 +804,7 @@ impl StateService {
         )
     }
 
-    /// Assert some assumptions about the prepared `block` before it is queued.
+    /// Assert some assumptions about the semantically verified `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
@@ -907,11 +907,11 @@ impl Service<Request> for StateService {
         match req {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
-            Request::CommitSemanticallyVerifiedBlock(prepared) => {
-                self.assert_block_can_be_validated(&prepared);
+            Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
+                self.assert_block_can_be_validated(&semantically_verified);
 
                 self.pending_utxos
-                    .check_against_ordered(&prepared.new_outputs);
+                    .check_against_ordered(&semantically_verified.new_outputs);
 
                 // # Performance
                 //
@@ -925,7 +925,7 @@ impl Service<Request> for StateService {
                 // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
 
                 let rsp_rx = tokio::task::block_in_place(move || {
-                    span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
+                    span.in_scope(|| self.queue_and_commit_non_finalized(semantically_verified))
                 });
 
                 // TODO:
@@ -1759,7 +1759,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::CheckBlockProposalValidity(prepared) => {
+            ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
                 let state = self.clone();
 
                 // # Performance
@@ -1776,7 +1776,7 @@ impl Service<ReadRequest> for ReadStateService {
                             return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
                         };
 
-                        if prepared.block.header.previous_block_hash != best_tip_hash {
+                        if semantically_verified.block.header.previous_block_hash != best_tip_hash {
                             return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
                         }
 
@@ -1790,7 +1790,7 @@ impl Service<ReadRequest> for ReadStateService {
                         write::validate_and_commit_non_finalized(
                             &state.db,
                             &mut latest_non_finalized_state,
-                            prepared,
+                            semantically_verified,
                         )?;
 
                         // The work is done in the future.
