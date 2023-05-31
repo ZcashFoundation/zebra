@@ -10,7 +10,6 @@ use abscissa_core::{
     Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
-use clap::Parser;
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
@@ -477,36 +476,7 @@ impl Application for ZebradApp {
 /// Boot the given application, parsing subcommand and options from
 /// command-line arguments, and terminating when complete.
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
-    let args: Vec<_> = env::args_os().collect();
-
-    // Check if the provided arguments include a subcommand
-    let should_add_default_subcommand = EntryPoint::try_parse_from(&args)
-        .unwrap_or_else(|err| err.exit())
-        .cmd
-        .is_none();
-
-    // Add the default subcommand to args after the top-level args if cmd is None
-    let args = if should_add_default_subcommand {
-        // try_parse_from currently produces an error if the first argument is not the binary name,
-        let mut num_top_level_args = 1;
-
-        // update last_top_level_arg_idx to the number of top-level args
-        for (idx, arg) in args.iter().enumerate() {
-            num_top_level_args = match arg.to_str() {
-                Some("--verbose" | "-v" | "--version" | "--help") => idx + 1,
-                Some("--config" | "-c") => idx + 2,
-                _ => num_top_level_args,
-            }
-        }
-
-        let mut updated_args: Vec<_> = args.iter().take(num_top_level_args).cloned().collect();
-        updated_args.push(EntryPoint::default_cmd_as_str().into());
-        updated_args.extend(args.into_iter().skip(num_top_level_args));
-
-        updated_args
-    } else {
-        args
-    };
+    let args = EntryPoint::process_cli_args(env::args_os().collect());
 
     ZebradApp::run(app_cell, args);
     process::exit(0);

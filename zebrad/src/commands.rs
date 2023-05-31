@@ -6,6 +6,9 @@ mod generate;
 mod start;
 mod tip_height;
 
+#[cfg(test)]
+mod tests;
+
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
@@ -17,6 +20,8 @@ pub use self::start::StartCmd;
 use crate::config::ZebradConfig;
 
 use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
+use clap::Parser;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// Zebrad Configuration Filename
@@ -168,6 +173,39 @@ impl EntryPoint {
     /// Returns a string that parses to the default subcommand
     pub fn default_cmd_as_str() -> &'static str {
         "start"
+    }
+
+    /// Process arguments from [`env::args_os()`] and insert the default subcommand
+    /// if no subcommand is provided.
+    pub fn process_cli_args(args: Vec<OsString>) -> Vec<OsString> {
+        // Check if the provided arguments include a subcommand
+        let should_add_default_subcommand = EntryPoint::try_parse_from(&args)
+            .unwrap_or_else(|err| err.exit())
+            .cmd
+            .is_none();
+
+        // Add the default subcommand to args after the top-level args if cmd is None
+        if should_add_default_subcommand {
+            // try_parse_from currently produces an error if the first argument is not the binary name,
+            let mut num_top_level_args = 1;
+
+            // update last_top_level_arg_idx to the number of top-level args
+            for (idx, arg) in args.iter().enumerate() {
+                num_top_level_args = match arg.to_str() {
+                    Some("--verbose" | "-v" | "--version" | "-V" | "--help") => idx + 1,
+                    Some("--config" | "-c") => idx + 2,
+                    _ => num_top_level_args,
+                }
+            }
+
+            let mut updated_args: Vec<_> = args.iter().take(num_top_level_args).cloned().collect();
+            updated_args.push(EntryPoint::default_cmd_as_str().into());
+            updated_args.extend(args.into_iter().skip(num_top_level_args));
+
+            updated_args
+        } else {
+            args
+        }
     }
 }
 
