@@ -31,16 +31,20 @@ pub enum ZebradCmd {
     // TODO: hide this command from users in release builds (#3279)
     CopyState(CopyStateCmd),
 
-    /// The `download` subcommand
+    // The `download` subcommand
+    /// pre-download required parameter files
     Download(DownloadCmd),
 
-    /// The `generate` subcommand
+    // The `generate` subcommand
+    /// generate a skeleton configuration
     Generate(GenerateCmd),
 
-    /// The `start` subcommand
+    // The `start` subcommand
+    /// start the application
     Start(StartCmd),
 
-    /// The `tip-height` subcommand
+    // The `tip-height` subcommand
+    /// get the block height of Zebra's persisted chain state
     TipHeight(TipHeightCmd),
 }
 
