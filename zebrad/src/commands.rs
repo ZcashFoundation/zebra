@@ -125,14 +125,20 @@ impl Configurable<ZebradConfig> for ZebradCmd {
     }
 }
 
-/// zebrad 1.0.0-rc.8
+/// Toplevel entrypoint command.
 ///
-/// Zcash Foundation <zebra@zfnd.org>
-// Toplevel entrypoint command.
-//
-// Handles obtaining toplevel help as well as verbosity settings.
+/// Handles obtaining toplevel help as well as verbosity settings.
 #[derive(Debug, clap::Parser)]
-#[clap(version = clap::crate_version!(), help_template = "{name} ({version}) - {usage}")]
+#[clap(
+    version = clap::crate_version!(), 
+    author="Zcash Foundation <zebra@zfnd.org>",
+    help_template = "\
+{name} {version}\n
+{author}\n
+{usage-heading} {usage}\n
+{all-args}\
+"
+)]
 pub struct EntryPoint {
     /// Subcommand to execute.
     ///
