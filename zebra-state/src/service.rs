@@ -61,8 +61,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, Config, FinalizedBlock, PreparedBlock, ReadRequest, ReadResponse,
-    Request, Response,
+    BoxError, CheckpointVerifiedBlock, CloneError, Config, ReadRequest, ReadResponse, Request,
+    Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -345,7 +345,7 @@ impl StateService {
         let initial_tip = finalized_state
             .db
             .tip_block()
-            .map(FinalizedBlock::from)
+            .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
         timer.finish(module_path!(), line!(), "fetching database tip");
 
@@ -459,25 +459,25 @@ impl StateService {
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_finalized(
         &mut self,
-        finalized: FinalizedBlock,
+        checkpoint_verified: CheckpointVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         // # Correctness & Performance
         //
         // This method must not block, access the database, or perform CPU-intensive tasks,
         // because it is called directly from the tokio executor's Future threads.
 
-        let queued_prev_hash = finalized.block.header.previous_block_hash;
-        let queued_height = finalized.height;
+        let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
+        let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
         // full verification of non-finalized blocks, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.sent_non_finalized_block_hashes
-                .add_finalized(&finalized)
+                .add_finalized(&checkpoint_verified)
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (finalized, rsp_tx);
+        let queued = (checkpoint_verified, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
             // We're still committing finalized blocks
@@ -636,17 +636,17 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(level = "debug", skip(self, prepared))]
+    #[instrument(level = "debug", skip(self, semantically_verrified))]
     fn queue_and_commit_non_finalized(
         &mut self,
-        prepared: PreparedBlock,
+        semantically_verrified: SemanticallyVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
-        tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
-        let parent_hash = prepared.block.header.previous_block_hash;
+        tracing::debug!(block = %semantically_verrified.block, "queueing block for contextual verification");
+        let parent_hash = semantically_verrified.block.header.previous_block_hash;
 
         if self
             .sent_non_finalized_block_hashes
-            .contains(&prepared.hash)
+            .contains(&semantically_verrified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err(
@@ -655,7 +655,11 @@ impl StateService {
             return rsp_rx;
         }
 
-        if self.read_service.db.contains_height(prepared.height) {
+        if self
+            .read_service
+            .db
+            .contains_height(semantically_verrified.height)
+        {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err(
                 "block height is in the finalized state: block is already committed to the state"
@@ -664,11 +668,12 @@ impl StateService {
             return rsp_rx;
         }
 
-        // Request::CommitBlock contract: a request to commit a block which has
-        // been queued but not yet committed to the state fails the older
-        // request and replaces it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx)) =
-            self.queued_non_finalized_blocks.get_mut(&prepared.hash)
+        // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
+        // has been queued but not yet committed to the state fails the older request and replaces
+        // it with the newer request.
+        let rsp_rx = if let Some((_, old_rsp_tx)) = self
+            .queued_non_finalized_blocks
+            .get_mut(&semantically_verrified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
@@ -677,7 +682,8 @@ impl StateService {
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.queued_non_finalized_blocks.queue((prepared, rsp_tx));
+            self.queued_non_finalized_blocks
+                .queue((semantically_verrified, rsp_tx));
             rsp_rx
         };
 
@@ -763,7 +769,7 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let (PreparedBlock { hash, .. }, _) = queued_child;
+                    let (SemanticallyVerifiedBlock { hash, .. }, _) = queued_child;
 
                     self.sent_non_finalized_block_hashes.add(&queued_child.0);
                     let send_result = non_finalized_block_write_sender.send(queued_child);
@@ -798,9 +804,9 @@ impl StateService {
         )
     }
 
-    /// Assert some assumptions about the prepared `block` before it is queued.
-    fn assert_block_can_be_validated(&self, block: &PreparedBlock) {
-        // required by CommitBlock call
+    /// Assert some assumptions about the semantically verified `block` before it is queued.
+    fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
+        // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
             "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
@@ -901,11 +907,11 @@ impl Service<Request> for StateService {
         match req {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
-            Request::CommitBlock(prepared) => {
-                self.assert_block_can_be_validated(&prepared);
+            Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
+                self.assert_block_can_be_validated(&semantically_verified);
 
                 self.pending_utxos
-                    .check_against_ordered(&prepared.new_outputs);
+                    .check_against_ordered(&semantically_verified.new_outputs);
 
                 // # Performance
                 //
@@ -919,7 +925,7 @@ impl Service<Request> for StateService {
                 // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
 
                 let rsp_rx = tokio::task::block_in_place(move || {
-                    span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
+                    span.in_scope(|| self.queue_and_commit_non_finalized(semantically_verified))
                 });
 
                 // TODO:
@@ -927,14 +933,16 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitBlock");
+                timer.finish(module_path!(), line!(), "CommitSemanticallyVerifiedBlock");
 
                 let span = Span::current();
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from("block was dropped from the state CommitBlock queue")
+                            BoxError::from(
+                                "block was dropped from the queue of non-finalized blocks",
+                            )
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
@@ -948,7 +956,7 @@ impl Service<Request> for StateService {
 
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
-            Request::CommitFinalizedBlock(finalized) => {
+            Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
                 // A non-finalized block verification could have called AwaitUtxo
@@ -970,15 +978,13 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
+                timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
 
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from(
-                                "block was dropped from the state CommitFinalizedBlock queue",
-                            )
+                            BoxError::from("block was dropped from the queue of finalized blocks")
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
@@ -1753,7 +1759,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::CheckBlockProposalValidity(prepared) => {
+            ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
                 let state = self.clone();
 
                 // # Performance
@@ -1770,7 +1776,7 @@ impl Service<ReadRequest> for ReadStateService {
                             return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
                         };
 
-                        if prepared.block.header.previous_block_hash != best_tip_hash {
+                        if semantically_verified.block.header.previous_block_hash != best_tip_hash {
                             return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
                         }
 
@@ -1778,13 +1784,13 @@ impl Service<ReadRequest> for ReadStateService {
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         //
-                        // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
+                        // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                         latest_non_finalized_state.disable_metrics();
 
                         write::validate_and_commit_non_finalized(
                             &state.db,
                             &mut latest_non_finalized_state,
-                            prepared,
+                            semantically_verified,
                         )?;
 
                         // The work is done in the future.

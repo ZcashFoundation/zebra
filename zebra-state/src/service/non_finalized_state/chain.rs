@@ -28,7 +28,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyValidBlock, HashOrHeight, OutputLocation,
+    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
     TransactionLocation, ValidateContextError,
 };
 
@@ -50,7 +50,7 @@ pub struct Chain {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
-    pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
+    pub(crate) blocks: BTreeMap<block::Height, ContextuallyVerifiedBlock>,
 
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -318,10 +318,10 @@ impl Chain {
     ///
     /// If the block is invalid, drops this chain, and returns an error.
     ///
-    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
     /// [`Self::update_chain_tip_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
+    pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
         self.update_chain_tip_with(&block)?;
 
@@ -334,7 +334,7 @@ impl Chain {
     /// Pops the lowest height block of the non-finalized portion of a chain,
     /// and returns it with its associated treestate.
     #[instrument(level = "debug", skip(self))]
-    pub(crate) fn pop_root(&mut self) -> (ContextuallyValidBlock, Treestate) {
+    pub(crate) fn pop_root(&mut self) -> (ContextuallyVerifiedBlock, Treestate) {
         // Obtain the lowest height.
         let block_height = self.non_finalized_root_height();
 
@@ -388,9 +388,9 @@ impl Chain {
         self.network
     }
 
-    /// Returns the [`ContextuallyValidBlock`] with [`block::Hash`] or
+    /// Returns the [`ContextuallyVerifiedBlock`] with [`block::Hash`] or
     /// [`Height`](zebra_chain::block::Height), if it exists in this chain.
-    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyValidBlock> {
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyVerifiedBlock> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
@@ -969,7 +969,7 @@ impl Chain {
 
     /// Return the non-finalized tip block for this chain,
     /// or `None` if `self.blocks` is empty.
-    pub fn tip_block(&self) -> Option<&ContextuallyValidBlock> {
+    pub fn tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
         self.blocks.values().next_back()
     }
 
@@ -1123,12 +1123,12 @@ impl Chain {
     /// Update the chain tip with the `contextually_valid` block,
     /// running note commitment tree updates in parallel with other updates.
     ///
-    /// Used to implement `update_chain_tip_with::<ContextuallyValidBlock>`.
+    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_parallel(
         &mut self,
-        contextually_valid: &ContextuallyValidBlock,
+        contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         let height = contextually_valid.height;
 
@@ -1186,12 +1186,12 @@ impl Chain {
     /// Update the chain tip with the `contextually_valid` block,
     /// except for the note commitment and history tree updates.
     ///
-    /// Used to implement `update_chain_tip_with::<ContextuallyValidBlock>`.
+    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_except_trees(
         &mut self,
-        contextually_valid: &ContextuallyValidBlock,
+        contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         let (
             block,
@@ -1327,12 +1327,12 @@ trait UpdateWith<T> {
     fn revert_chain_with(&mut self, _: &T, position: RevertPosition);
 }
 
-impl UpdateWith<ContextuallyValidBlock> for Chain {
+impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        contextually_valid: &ContextuallyValidBlock,
+        contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         self.update_chain_tip_with_block_parallel(contextually_valid)
     }
@@ -1340,7 +1340,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     fn revert_chain_with(
         &mut self,
-        contextually_valid: &ContextuallyValidBlock,
+        contextually_valid: &ContextuallyVerifiedBlock,
         position: RevertPosition,
     ) {
         let (

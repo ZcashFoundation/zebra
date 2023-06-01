@@ -56,18 +56,18 @@ digraph services {
     inbound -> state
     rpc_server -> state
     mempool -> transaction_verifier
-    chain_verifier -> checkpoint_verifier
+    router_verifier -> checkpoint_verifier
     inbound -> mempool
     rpc_server -> mempool
-    inbound -> chain_verifier
-    syncer -> chain_verifier
-    rpc_server -> chain_verifier [style=dotted]
+    inbound -> router_verifier
+    syncer -> router_verifier
+    rpc_server -> router_verifier [style=dotted]
     syncer -> peer_set
     mempool -> peer_set
     block_verifier -> state
     checkpoint_verifier -> state
     block_verifier -> transaction_verifier
-    chain_verifier -> block_verifier
+    router_verifier -> block_verifier
     rpc_server -> inbound [style=invis] // for layout of the diagram
 }
 

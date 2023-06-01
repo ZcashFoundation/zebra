@@ -66,14 +66,14 @@ async fn verifiers_from_network(
         + 'static,
 ) {
     let state_service = zs::init_test(network);
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        crate::chain::init(Config::default(), network, state_service.clone(), true).await;
+    let (router_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
+        crate::router::init(Config::default(), network, state_service.clone(), true).await;
 
     // We can drop the download task handle here, because:
     // - if the download task fails, the tests will panic, and
     // - if the download task hangs, the tests will hang.
 
-    (chain_verifier, state_service)
+    (router_verifier, state_service)
 }
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
@@ -165,15 +165,15 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     // init_from_verifiers.
     //
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
+    let (router_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         super::init(config.clone(), network, zs::init_test(network), true).await;
 
     // Add a timeout layer
-    let chain_verifier =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
+    let router_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(router_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(chain_verifier).await.unwrap();
+    transcript.check(router_verifier).await.unwrap();
 
     Ok(())
 }
@@ -183,22 +183,22 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
     verify_fail_no_coinbase().await
 }
 
-/// Test that blocks with no coinbase height are rejected by the ChainVerifier
+/// Test that blocks with no coinbase height are rejected by the BlockVerifierRouter
 ///
-/// ChainVerifier uses the block height to decide between the CheckpointVerifier
-/// and BlockVerifier. This is the error case, where there is no height.
+/// BlockVerifierRouter uses the block height to decide between the CheckpointVerifier
+/// and SemanticBlockVerifier. This is the error case, where there is no height.
 #[spandoc::spandoc]
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
+    let (router, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
-    let chain_verifier =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
+    let router_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(router);
 
     let transcript = Transcript::from(NO_COINBASE_TRANSCRIPT.iter().cloned());
-    transcript.check(chain_verifier).await.unwrap();
+    transcript.check(router_verifier).await.unwrap();
 
     let transcript = Transcript::from(NO_COINBASE_STATE_TRANSCRIPT.iter().cloned());
     transcript.check(state_service).await.unwrap();
@@ -216,14 +216,14 @@ async fn round_trip_checkpoint_test() -> Result<(), Report> {
 async fn round_trip_checkpoint() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
+    let (router_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
-    let chain_verifier =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
+    let router_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(router_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(chain_verifier).await.unwrap();
+    transcript.check(router_verifier).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service).await.unwrap();
@@ -241,20 +241,20 @@ async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
 async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
+    let (router_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
-    let chain_verifier =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(chain_verifier);
+    let router_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(router_verifier);
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(chain_verifier.clone()).await.unwrap();
+    transcript.check(router_verifier.clone()).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service.clone()).await.unwrap();
 
     let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
-    transcript.check(chain_verifier.clone()).await.unwrap();
+    transcript.check(router_verifier.clone()).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service.clone()).await.unwrap();

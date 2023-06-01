@@ -326,7 +326,7 @@ async fn continuous_blockchain(
 
                     // SPANDOC: Add block directly to the state {?height}
                     ready_state_service
-                        .call(zebra_state::Request::CommitFinalizedBlock(
+                        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
                             block.clone().into(),
                         ))
                         .await

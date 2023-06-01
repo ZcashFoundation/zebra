@@ -10,20 +10,20 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, FinalizedBlock, PreparedBlock};
+use crate::{BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
 
 #[cfg(test)]
 mod tests;
 
 /// A queued finalized block, and its corresponding [`Result`] channel.
 pub type QueuedFinalized = (
-    FinalizedBlock,
+    CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
 /// A queued non-finalized block, and its corresponding [`Result`] channel.
 pub type QueuedNonFinalized = (
-    PreparedBlock,
+    SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
@@ -242,7 +242,7 @@ impl SentHashes {
     ///
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
-    pub fn add(&mut self, block: &PreparedBlock) {
+    pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
         // Track known UTXOs in sent blocks.
         let outpoints = block
             .new_outputs
@@ -271,7 +271,7 @@ impl SentHashes {
     /// for efficient pruning.
     ///
     /// For more details see `add()`.
-    pub fn add_finalized(&mut self, block: &FinalizedBlock) {
+    pub fn add_finalized(&mut self, block: &CheckpointVerifiedBlock) {
         // Track known UTXOs in sent blocks.
         let outpoints = block
             .new_outputs

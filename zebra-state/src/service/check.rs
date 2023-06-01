@@ -16,7 +16,7 @@ use crate::{
         block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
         finalized_state::ZebraDb, non_finalized_state::NonFinalizedState,
     },
-    BoxError, PreparedBlock, ValidateContextError,
+    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // use self as check
@@ -52,7 +52,7 @@ pub(crate) use difficulty::AdjustedDifficulty;
 /// If the state contains less than 28 ([`POW_ADJUSTMENT_BLOCK_SPAN`]) blocks.
 #[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
 pub(crate) fn block_is_valid_for_recent_chain<C>(
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
     relevant_chain: C,
@@ -369,7 +369,7 @@ where
 pub(crate) fn initial_contextual_validity(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,

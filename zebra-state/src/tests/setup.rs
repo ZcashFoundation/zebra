@@ -18,7 +18,7 @@ use crate::{
     service::{
         check, finalized_state::FinalizedState, non_finalized_state::NonFinalizedState, read,
     },
-    Config, FinalizedBlock,
+    CheckpointVerifiedBlock, Config,
 };
 
 /// Generate a chain that allows us to make tests for the legacy chain rules.
@@ -83,8 +83,8 @@ pub(crate) fn partial_nu5_chain_strategy(
 
 /// Return a new `StateService` containing the mainnet genesis block.
 /// Also returns the finalized genesis block itself.
-pub(crate) fn new_state_with_mainnet_genesis() -> (FinalizedState, NonFinalizedState, FinalizedBlock)
-{
+pub(crate) fn new_state_with_mainnet_genesis(
+) -> (FinalizedState, NonFinalizedState, CheckpointVerifiedBlock) {
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .expect("block should deserialize");
@@ -105,7 +105,7 @@ pub(crate) fn new_state_with_mainnet_genesis() -> (FinalizedState, NonFinalizedS
         read::best_tip(&non_finalized_state, &finalized_state.db)
     );
 
-    let genesis = FinalizedBlock::from(genesis);
+    let genesis = CheckpointVerifiedBlock::from(genesis);
     finalized_state
         .commit_finalized_direct(genesis.clone().into(), "test")
         .expect("unexpected invalid genesis block test vector");
