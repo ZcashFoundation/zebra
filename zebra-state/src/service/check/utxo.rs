@@ -10,14 +10,14 @@ use zebra_chain::{
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
     service::finalized_state::ZebraDb,
-    PreparedBlock,
+    SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
         MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
     },
 };
 
-/// Lookup all the [`transparent::Utxo`]s spent by a [`PreparedBlock`].
+/// Lookup all the [`transparent::Utxo`]s spent by a [`SemanticallyVerifiedBlock`].
 /// If any of the spends are invalid, return an error.
 /// Otherwise, return the looked up UTXOs.
 ///
@@ -36,7 +36,7 @@ use crate::{
 /// - spends of an immature transparent coinbase output,
 /// - unshielded spends of a transparent coinbase output.
 pub fn transparent_spend(
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
     finalized_state: &ZebraDb,
@@ -225,7 +225,7 @@ pub fn transparent_coinbase_spend(
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
 pub fn remaining_transaction_value(
-    prepared: &PreparedBlock,
+    prepared: &SemanticallyVerifiedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {

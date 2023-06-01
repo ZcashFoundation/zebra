@@ -137,7 +137,7 @@ impl std::str::FromStr for HashOrHeight {
 /// the *service caller*'s task, not inside the service call itself. This allows
 /// moving work out of the single-threaded state service.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedBlock {
+pub struct SemanticallyVerifiedBlock {
     /// The block to commit to the state.
     pub block: Arc<Block>,
     /// The hash of the block.
@@ -165,12 +165,16 @@ pub struct PreparedBlock {
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
 
-/// A contextually validated block, ready to be committed directly to the finalized state with
-/// no checks, if it becomes the root of the best non-finalized chain.
+/// A contextually verified block, ready to be committed directly to the finalized state with no
+/// checks, if it becomes the root of the best non-finalized chain.
 ///
 /// Used by the state service and non-finalized `Chain`.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextuallyValidBlock {
+pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
     pub(crate) block: Arc<Block>,
 
@@ -207,12 +211,16 @@ pub struct ContextuallyValidBlock {
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
 
-/// A finalized block, ready to be committed directly to the finalized state with
+/// A block ready to be committed directly to the finalized state with
 /// no checks.
 ///
 /// This is exposed for use in checkpointing.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FinalizedBlock {
+pub struct CheckpointVerifiedBlock {
     /// The block to commit to the state.
     pub block: Arc<Block>,
     /// The hash of the block.
@@ -266,42 +274,42 @@ impl Treestate {
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
 /// database and recompute the new one.
-pub struct FinalizedWithTrees {
+pub struct ContextuallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub finalized: FinalizedBlock,
+    pub checkpoint_verified: CheckpointVerifiedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
-impl FinalizedWithTrees {
-    pub fn new(block: ContextuallyValidBlock, treestate: Treestate) -> Self {
-        let finalized = FinalizedBlock::from(block);
+impl ContextuallyVerifiedBlockWithTrees {
+    pub fn new(block: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block);
 
         Self {
-            finalized,
+            checkpoint_verified,
             treestate: Some(treestate),
         }
     }
 }
 
-impl From<Arc<Block>> for FinalizedWithTrees {
+impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
     fn from(block: Arc<Block>) -> Self {
-        Self::from(FinalizedBlock::from(block))
+        Self::from(CheckpointVerifiedBlock::from(block))
     }
 }
 
-impl From<FinalizedBlock> for FinalizedWithTrees {
-    fn from(block: FinalizedBlock) -> Self {
+impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
+    fn from(block: CheckpointVerifiedBlock) -> Self {
         Self {
-            finalized: block,
+            checkpoint_verified: block,
             treestate: None,
         }
     }
 }
 
-impl From<&PreparedBlock> for PreparedBlock {
-    fn from(prepared: &PreparedBlock) -> Self {
-        prepared.clone()
+impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
+    fn from(semantically_verified: &SemanticallyVerifiedBlock) -> Self {
+        semantically_verified.clone()
     }
 }
 
@@ -309,27 +317,27 @@ impl From<&PreparedBlock> for PreparedBlock {
 // the *service caller*'s task, not inside the service call itself.
 // This allows moving work out of the single-threaded state service.
 
-impl ContextuallyValidBlock {
+impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
-    /// using a [`PreparedBlock`] and the UTXOs it spends.
+    /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
-    /// When combined, `prepared.new_outputs` and `spent_utxos` must contain
+    /// When combined, `semantically_verified.new_outputs` and `spent_utxos` must contain
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
-    /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
+    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
     /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
     pub fn with_block_and_spent_utxos(
-        prepared: PreparedBlock,
+        semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
-        let PreparedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        } = prepared;
+        } = semantically_verified;
 
         // This is redundant for the non-finalized state,
         // but useful to make some tests pass more easily.
@@ -350,12 +358,12 @@ impl ContextuallyValidBlock {
     }
 }
 
-impl FinalizedBlock {
+impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
     ///
-    /// Note: a [`FinalizedBlock`] isn't actually finalized
-    /// until [`Request::CommitFinalizedBlock`] returns success.
+    /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
+    /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         let height = block
             .coinbase_height()
@@ -373,17 +381,17 @@ impl FinalizedBlock {
     }
 }
 
-impl From<Arc<Block>> for FinalizedBlock {
+impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
         let hash = block.hash();
 
-        FinalizedBlock::with_hash(block, hash)
+        CheckpointVerifiedBlock::with_hash(block, hash)
     }
 }
 
-impl From<ContextuallyValidBlock> for FinalizedBlock {
-    fn from(contextually_valid: ContextuallyValidBlock) -> Self {
-        let ContextuallyValidBlock {
+impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
+    fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
+        let ContextuallyVerifiedBlock {
             block,
             hash,
             height,
@@ -428,7 +436,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitBlock(PreparedBlock),
+    CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most block validation.
     ///
@@ -474,7 +482,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    CommitFinalizedBlock(FinalizedBlock),
+    CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -619,14 +627,15 @@ pub enum Request {
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
-    CheckBlockProposalValidity(PreparedBlock),
+    CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 }
 
 impl Request {
     fn variant_name(&self) -> &'static str {
         match self {
-            Request::CommitBlock(_) => "commit_block",
-            Request::CommitFinalizedBlock(_) => "commit_finalized_block",
+            Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
+
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
@@ -870,7 +879,7 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
-    CheckBlockProposalValidity(PreparedBlock),
+    CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 }
 
 impl ReadRequest {
@@ -947,9 +956,8 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::CheckBestChainTipNullifiersAndAnchors(tx))
             }
 
-            Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
-                Err("ReadService does not write blocks")
-            }
+            Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitCheckpointVerifiedBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
@@ -958,9 +966,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            Request::CheckBlockProposalValidity(prepared) => {
-                Ok(ReadRequest::CheckBlockProposalValidity(prepared))
-            }
+            Request::CheckBlockProposalValidity(semantically_verified) => Ok(
+                ReadRequest::CheckBlockProposalValidity(semantically_verified),
+            ),
         }
     }
 }

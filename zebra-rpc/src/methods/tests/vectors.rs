@@ -830,11 +830,11 @@ async fn rpc_getblockcount() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         Mainnet,
         state.clone(),
@@ -849,7 +849,7 @@ async fn rpc_getblockcount() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        chain_verifier,
+        router_verifier,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -880,11 +880,11 @@ async fn rpc_getblockcount_empty_state() {
         zebra_state::init_test_services(Mainnet);
 
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         Mainnet,
         state.clone(),
@@ -899,7 +899,7 @@ async fn rpc_getblockcount_empty_state() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        chain_verifier,
+        router_verifier,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -932,11 +932,11 @@ async fn rpc_getpeerinfo() {
         zebra_state::init_test_services(Mainnet);
 
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         network,
         state.clone(),
@@ -965,7 +965,7 @@ async fn rpc_getpeerinfo() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        chain_verifier,
+        router_verifier,
         MockSyncStatus::default(),
         mock_address_book,
     );
@@ -1007,11 +1007,11 @@ async fn rpc_getblockhash() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         Mainnet,
         state.clone(),
@@ -1026,7 +1026,7 @@ async fn rpc_getblockhash() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(chain_verifier),
+        tower::ServiceBuilder::new().service(router_verifier),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -1195,7 +1195,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let read_state = MockService::build().for_unit_tests();
-    let chain_verifier = MockService::build().for_unit_tests();
+    let router_verifier = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -1236,7 +1236,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        chain_verifier,
+        router_verifier,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );
@@ -1481,11 +1481,11 @@ async fn rpc_submitblock_errors() {
 
     // Init RPCs
     let (
-        chain_verifier,
+        router_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         Mainnet,
         state.clone(),
@@ -1500,7 +1500,7 @@ async fn rpc_submitblock_errors() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        chain_verifier,
+        router_verifier,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -1648,7 +1648,7 @@ async fn rpc_getdifficulty() {
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let read_state = MockService::build().for_unit_tests();
-    let chain_verifier = MockService::build().for_unit_tests();
+    let router_verifier = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -1683,7 +1683,7 @@ async fn rpc_getdifficulty() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        chain_verifier,
+        router_verifier,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );

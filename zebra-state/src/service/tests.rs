@@ -23,7 +23,7 @@ use crate::{
     init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
+    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -216,7 +216,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
 
     let iter = vec![
-        // No checks for CommitBlock or CommitFinalizedBlock because empty state
+        // No checks for SemanticallyVerifiedBlock or CommitCheckpointVerifiedBlock because empty state
         // precondition doesn't matter to them
         (Request::Depth(block.hash()), Ok(Response::Depth(None))),
         (Request::Tip, Ok(Response::Tip(None))),
@@ -555,8 +555,8 @@ proptest! {
 fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
     Value = (
         Network,
-        SummaryDebug<Vec<FinalizedBlock>>,
-        SummaryDebug<Vec<PreparedBlock>>,
+        SummaryDebug<Vec<CheckpointVerifiedBlock>>,
+        SummaryDebug<Vec<SemanticallyVerifiedBlock>>,
     ),
 > {
     any::<Network>()
@@ -567,7 +567,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
                 Network::Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
             };
 
-            // Transform the test vector's block bytes into a vector of `PreparedBlock`s.
+            // Transform the test vector's block bytes into a vector of `SemanticallyVerifiedBlock`s.
             let blocks: Vec<_> = raw_blocks
                 .iter()
                 .map(|(_height, &block_bytes)| {
@@ -591,7 +591,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
             let finalized_blocks: Vec<_> = blocks
                 .into_iter()
-                .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
+                .map(|prepared_block| CheckpointVerifiedBlock::from(prepared_block.block))
                 .collect();
 
             (

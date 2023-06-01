@@ -32,9 +32,12 @@ mod tests;
 pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{
-    BoxError, CloneError, CommitBlockError, DuplicateNullifierError, ValidateContextError,
+    BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
+    ValidateContextError,
 };
-pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
+pub use request::{
+    CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
+};
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
@@ -54,4 +57,4 @@ pub use service::{
     init_test, init_test_services, ReadStateService,
 };
 
-pub(crate) use request::ContextuallyValidBlock;
+pub(crate) use request::ContextuallyVerifiedBlock;

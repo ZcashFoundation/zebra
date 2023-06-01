@@ -412,7 +412,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .ready()
         .await
         .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block1.clone().into(),
         ))
         .await
@@ -457,7 +457,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
     // Push block 2 to the state
     state_service
-        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block2.clone().into(),
         ))
         .await
@@ -545,7 +545,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         .ready()
         .await
         .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block1.clone().into(),
         ))
         .await
@@ -822,7 +822,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .ready()
         .await
         .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block1.clone().into(),
         ))
         .await
@@ -882,7 +882,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .ready()
         .await
         .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block2.clone().into(),
         ))
         .await
@@ -955,7 +955,7 @@ async fn setup(
             .ready()
             .await
             .unwrap()
-            .call(zebra_state::Request::CommitFinalizedBlock(
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
                 genesis_block.clone().into(),
             ))
             .await

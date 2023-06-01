@@ -25,7 +25,7 @@ static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<
     let hash = block.hash();
     vec![
         (
-            Request::CommitFinalizedBlock(block.into()),
+            Request::CommitCheckpointVerifiedBlock(block.into()),
             Ok(Response::Committed(hash)),
         ),
         (
@@ -46,7 +46,7 @@ static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<
     let hash = block.hash();
     vec![
         (
-            Request::CommitFinalizedBlock(block.into()),
+            Request::CommitCheckpointVerifiedBlock(block.into()),
             Ok(Response::Committed(hash)),
         ),
         (

@@ -75,7 +75,7 @@ use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
-use zebra_consensus::chain::BackgroundTaskHandles;
+use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -104,7 +104,7 @@ impl StartCmd {
         let config = app_config().clone();
 
         info!("initializing node state");
-        let (_, max_checkpoint_height) = zebra_consensus::chain::init_checkpoint_list(
+        let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
             config.network.network,
         );
@@ -147,8 +147,8 @@ impl StartCmd {
         .await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::chain::init(
+        let (router_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
+            zebra_consensus::router::init(
                 config.consensus.clone(),
                 config.network.network,
                 state.clone(),
@@ -161,7 +161,7 @@ impl StartCmd {
             &config,
             max_checkpoint_height,
             peer_set.clone(),
-            chain_verifier.clone(),
+            router_verifier.clone(),
             state.clone(),
             latest_chain_tip.clone(),
         );
@@ -186,7 +186,7 @@ impl StartCmd {
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
             block_download_peer_set: peer_set.clone(),
-            block_verifier: chain_verifier.clone(),
+            block_verifier: router_verifier.clone(),
             mempool: mempool.clone(),
             state,
             latest_chain_tip: latest_chain_tip.clone(),
@@ -207,7 +207,7 @@ impl StartCmd {
             app_version(),
             mempool.clone(),
             read_only_state_service,
-            chain_verifier,
+            router_verifier,
             sync_status.clone(),
             address_book,
             latest_chain_tip.clone(),
