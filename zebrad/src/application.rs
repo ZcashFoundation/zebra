@@ -153,24 +153,6 @@ impl Application for ZebradApp {
         // TODO: Open a PR in abscissa to add a TerminalBuilder for opting out
         //       of the `color_eyre::install` part of `Terminal::new` without
         //       ColorChoice::Never?
-        //
-        // Automatically use color if we're outputting to a terminal
-        //
-        // The `abcissa` docs claim that abscissa implements `Auto`, but it
-        // does not.
-        // let mut term_colors = self.term_colors(command);
-        // if term_colors == ColorChoice::Auto {
-        //     // We want to disable colors on a per-stream basis, but that feature
-        //     // can only be implemented inside the terminal component streams.
-        //     // Instead, if either output stream is not a terminal, disable
-        //     // colors.
-        //     //
-        //     // We'd also like to check `config.tracing.use_color` here, but the
-        //     // config has not been loaded yet.
-        //     if !Self::outputs_are_ttys() {
-        //         term_colors = ColorChoice::Never;
-        //     }
-        // }
 
         // The Tracing component uses stdout directly and will apply colors
         // `if Self::outputs_are_ttys() && config.tracing.use_colors`
@@ -452,20 +434,17 @@ impl Application for ZebradApp {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
-        if let Err(e) = self.state().components().shutdown(self, shutdown) {
-            let app_name = self.name().to_string();
+        let shutdown_result = self.state().components().shutdown(self, shutdown);
 
-            self.state()
-                .components_mut()
-                .get_downcast_mut::<Tracing>()
-                .map(Tracing::shutdown);
-
-            fatal_error(app_name, &e);
-        }
         self.state()
             .components_mut()
             .get_downcast_mut::<Tracing>()
             .map(Tracing::shutdown);
+
+        if let Err(e) = shutdown_result {
+            let app_name = self.name().to_string();
+            fatal_error(app_name, &e);
+        }
 
         match shutdown {
             Shutdown::Graceful => process::exit(0),
@@ -477,7 +456,7 @@ impl Application for ZebradApp {
 
 /// Boot the given application, parsing subcommand and options from
 /// command-line arguments, and terminating when complete.
-// <https://docs.rs/abscissa_core/latest/src/abscissa_core/application.rs.html#174-178>
+// <https://docs.rs/abscissa_core/0.7.0/src/abscissa_core/application.rs.html#174-178>
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
     let args = EntryPoint::process_cli_args(env::args_os().collect());
 

@@ -1,3 +1,5 @@
+//! Tests for parsing zebrad commands
+
 use clap::Parser;
 
 use crate::commands::ZebradCmd;
@@ -10,8 +12,8 @@ fn args_with_subcommand_pass_through() {
         (true, false, vec!["zebrad"]),
         (true, true, vec!["zebrad", "-v"]),
         (true, true, vec!["zebrad", "--verbose"]),
-        (true, false, vec!["zebrad", "-h"]),
-        (true, false, vec!["zebrad", "--help"]),
+        (false, false, vec!["zebrad", "-h"]),
+        (false, false, vec!["zebrad", "--help"]),
         (true, false, vec!["zebrad", "start"]),
         (true, true, vec!["zebrad", "-v", "start"]),
         (true, false, vec!["zebrad", "warn"]),
@@ -31,11 +33,6 @@ fn args_with_subcommand_pass_through() {
             "process_cli_args should preserve top-level args"
         );
 
-        if should_be_start {
-            assert!(
-                matches!(args.cmd(), ZebradCmd::Start(_)),
-                "args.cmd should be start"
-            );
-        }
+        assert_eq!(matches!(args.cmd(), ZebradCmd::Start(_)), should_be_start,);
     }
 }
