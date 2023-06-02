@@ -6,6 +6,9 @@ mod generate;
 mod start;
 mod tip_height;
 
+#[cfg(test)]
+mod tests;
+
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,

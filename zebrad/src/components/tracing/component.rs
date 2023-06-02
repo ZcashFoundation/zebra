@@ -282,6 +282,11 @@ impl Tracing {
     /// Drops guard for worker thread of non-blocking logger,
     /// to flush any remaining logs when the program terminates.
     pub fn shutdown(&mut self) {
+        self.filter_handle.take();
+
+        #[cfg(feature = "flamegraph")]
+        self.flamegrapher.take();
+
         self._guard.take();
     }
 
