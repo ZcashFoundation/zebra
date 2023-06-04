@@ -1,4 +1,11 @@
-//! Definitions of constants.
+//! Constants that impact state behaviour.
+
+use lazy_static::lazy_static;
+use regex::Regex;
+
+// For doc comment links
+#[allow(unused_imports)]
+use crate::config::{database_format_version_in_code, database_format_version_on_disk};
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
@@ -19,13 +26,29 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 // TODO: change to HeightDiff
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
-/// The database format version, incremented each time the database format changes.
-pub const DATABASE_FORMAT_VERSION: u32 = 25;
+/// The database format major version, incremented each time the on-disk database format has a
+/// breaking change.
+///
+/// Use [`database_format_version_in_code()`] or [`database_format_version_on_disk()`]
+/// to get the full semantic format version.
+pub const DATABASE_FORMAT_VERSION: u64 = 25;
+
+/// The database format minor version, incremented each time the on-disk database format has a
+/// significant functional change.
+pub const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+
+/// The database format patch version, incremented each time the on-disk database format has a
+/// significant bug fix.
+pub const DATABASE_FORMAT_PATCH_VERSION: u64 = 1;
+
+/// The name of the file containing the minor and patch database versions.
+pub const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.
 ///
-/// Zebra usually only has to check back a few blocks, but on testnet it can be a long time between v5 transactions.
+/// Zebra usually only has to check back a few blocks on mainnet, but on testnet it can be a long
+/// time between v5 transactions.
 pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100_000;
 
 /// The maximum number of non-finalized chain forks Zebra will track.
@@ -57,9 +80,6 @@ const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL: u32 = 160;
 /// <https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905>
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA: u32 =
     MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL - 2;
-
-use lazy_static::lazy_static;
-use regex::Regex;
 
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.
