@@ -710,16 +710,18 @@ fn last_config_is_stored() -> Result<()> {
         .flatten()
     {
         let config_file_path = config_file.path();
-
-        if config_file_path
+        let config_file_name = config_file_path
             .file_name()
             .expect("config files must have a file name")
-            .to_string_lossy()
-            .as_ref()
-            .starts_with('.')
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
         {
             // Skip editor files and other invalid config paths
-            tracing::info!(?config_file_path, "skipping hidden config file path");
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
             continue;
         }
 
@@ -862,9 +864,13 @@ fn stored_configs_work() -> Result<()> {
             .expect("config files must have a file name")
             .to_string_lossy();
 
-        if config_file_name.as_ref().starts_with('.') {
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
             // Skip editor files and other invalid config paths
-            tracing::info!(?config_file_path, "skipping hidden config file path");
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
             continue;
         }
 
