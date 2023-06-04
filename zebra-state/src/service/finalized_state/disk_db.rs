@@ -10,13 +10,17 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
 
 use rlimit::increase_nofile_limit;
 
 use zebra_chain::parameters::Network;
 
 use crate::{
+    config::{
+        database_format_version_in_code, database_format_version_on_disk,
+        write_database_format_version_to_disk,
+    },
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -390,6 +394,26 @@ impl DiskDb {
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
+
+        let running_version = database_format_version_in_code();
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file");
+
+        match running_version.cmp(&disk_version) {
+            // TODO: actually run the upgrade task after the database has been opened (#6642)
+            Ordering::Greater => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open older database format: launching upgrade task"
+            ),
+            Ordering::Less => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open newer database format: data should be compatible"
+            ),
+            Ordering::Equal => info!(?disk_version, "trying to open database format"),
+        }
+
         let db_options = DiskDb::options();
 
         let column_families = vec![
@@ -435,7 +459,6 @@ impl DiskDb {
             rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
         ];
 
-        // TODO: move opening the database to a blocking thread (#2188)
         let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
             &db_options,
             &path,
@@ -452,6 +475,13 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
+
+                // Now we've checked that the database format is up-to-date,
+                // mark it as updated on disk.
+                //
+                // TODO: only update the version at the end of the format upgrade task (#6642)
+                write_database_format_version_to_disk(config, network)
+                    .expect("unable to write database format version file to disk");
 
                 db
             }
