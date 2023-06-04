@@ -390,6 +390,38 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    /// The column families supported by the running database code.
+    const COLUMN_FAMILIES_IN_CODE: &[&'static str] = &[
+        // Blocks
+        "hash_by_height",
+        "height_by_hash",
+        "block_header_by_height",
+        // Transactions
+        "tx_by_loc",
+        "hash_by_tx_loc",
+        "tx_loc_by_hash",
+        // Transparent
+        "balance_by_transparent_addr",
+        "tx_loc_by_transparent_addr_loc",
+        "utxo_by_out_loc",
+        "utxo_loc_by_transparent_addr_loc",
+        // Sprout
+        "sprout_nullifiers",
+        "sprout_anchors",
+        "sprout_note_commitment_tree",
+        // Sapling
+        "sapling_nullifiers",
+        "sapling_anchors",
+        "sapling_note_commitment_tree",
+        // Orchard
+        "orchard_nullifiers",
+        "orchard_anchors",
+        "orchard_note_commitment_tree",
+        // Chain
+        "history_tree",
+        "tip_chain_value_pool",
+    ];
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
@@ -416,48 +448,9 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
-        let column_families = vec![
-            // Blocks
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_header_by_height", db_options.clone()),
-            // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_loc_by_hash", db_options.clone()),
-            // Transparent
-            rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "tx_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "utxo_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            // Sprout
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
-            // Sapling
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "sapling_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Orchard
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "orchard_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Chain
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
-        ];
+        let column_families = Self::COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(*cf_name, db_options.clone()));
 
         let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
             &db_options,
