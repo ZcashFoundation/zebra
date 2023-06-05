@@ -27,18 +27,31 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
 /// The database format major version, incremented each time the on-disk database format has a
-/// breaking change.
+/// breaking data format change.
+///
+/// Breaking changes include:
+/// - deleting a column family, or
+/// - changing a column family's data format in an incompatible way.
+///
+/// Breaking changes become minor version changes if:
+/// - we previously added compatibility code, and
+/// - it's available in all supported Zebra versions.
 ///
 /// Use [`database_format_version_in_code()`] or [`database_format_version_on_disk()`]
 /// to get the full semantic format version.
 pub const DATABASE_FORMAT_VERSION: u64 = 25;
 
 /// The database format minor version, incremented each time the on-disk database format has a
-/// significant functional change.
+/// significant data format change.
+///
+/// Significant changes include:
+/// - adding new column families,
+/// - changing the format of a column family in a compatible way, or
+/// - breaking changes with compatibility code in all supported Zebra versions.
 pub const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
-/// significant bug fix.
+/// significant format compatibility fix.
 pub const DATABASE_FORMAT_PATCH_VERSION: u64 = 1;
 
 /// The name of the file containing the minor and patch database versions.

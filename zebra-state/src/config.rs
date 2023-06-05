@@ -330,7 +330,16 @@ pub fn database_format_version_on_disk(
 }
 
 /// Writes the currently running semantic database version to the on-disk database.
+///
+/// # Correctness
+///
 /// This should only be called after all running format upgrades are complete.
+///
+/// # Concurrency
+///
+/// This must only be called while RocksDB has an open database for `config`.
+/// Otherwise, multiple Zebra processes could write the version at the same time,
+/// corrupting the file.
 pub fn write_database_format_version_to_disk(
     config: &Config,
     network: Network,
@@ -343,6 +352,9 @@ pub fn write_database_format_version_to_disk(
         DATABASE_FORMAT_MINOR_VERSION, DATABASE_FORMAT_PATCH_VERSION
     );
 
+    // # Concurrency
+    //
+    // The caller handles locking for this file write.
     fs::write(version_path, version.as_bytes())?;
 
     Ok(())

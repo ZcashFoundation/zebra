@@ -433,7 +433,8 @@ impl DiskDb {
             .expect("unable to read database format version file");
 
         match running_version.cmp(&disk_version) {
-            // TODO: actually run the upgrade task after the database has been opened (#6642)
+            // TODO: if the on-disk format is older, actually run the upgrade task after the
+            //       database has been opened (#6642)
             Ordering::Greater => info!(
                 ?running_version,
                 ?disk_version,
@@ -483,7 +484,21 @@ impl DiskDb {
                 // Now we've checked that the database format is up-to-date,
                 // mark it as updated on disk.
                 //
-                // TODO: only update the version at the end of the format upgrade task (#6642)
+                // # Concurrency
+                //
+                // The version must only be updated while RocksDB is holding the database
+                // directory lock. This prevents multiple Zebra instances corrupting the version
+                // file.
+                //
+                // # TODO
+                //
+                // - only update the version at the end of the format upgrade task (#6642)
+                // - add a note to the format upgrade task code to update the version constants
+                //   whenever the format changes
+                // - add a test that the format upgrade runs exactly once when:
+                //   1. if an older cached state format is opened, the format is upgraded,
+                //      then if Zebra is launched again the format is not upgraded
+                //   2. if the current cached state format is opened, the format is not upgraded
                 write_database_format_version_to_disk(config, network)
                     .expect("unable to write database format version file to disk");
 
