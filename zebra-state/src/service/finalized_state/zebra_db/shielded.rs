@@ -111,15 +111,37 @@ impl ZebraDb {
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Sapling note commitment tree matching the given block height.
+    /// Returns the Sapling note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_note_commitment_tree_by_height(
         &self,
         height: &Height,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
+        let tip_height = self.finalized_tip_height()?;
+
+        // If we're above the tip, searching backwards would always return the tip tree.
+        // But the correct answer is "we don't know that tree yet".
+        if *height > tip_height {
+            return None;
+        }
+
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.zs_get(&sapling_trees, height).map(Arc::new)
+        // If we know there must be a tree, search backwards for it.
+        //
+        // # Compatibility
+        //
+        // Allow older Zebra versions to read future database formats, after note commitment trees
+        // have been deduplicated. See ticket #6642 for details.
+        let (_first_duplicate_height, tree) = self
+            .db
+            .zs_prev_key_value_back_from(&sapling_trees, height)
+            .expect(
+                "Sapling note commitment trees must exist for all heights below the finalized tip",
+            );
+
+        Some(Arc::new(tree))
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
@@ -134,15 +156,34 @@ impl ZebraDb {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Orchard note commitment tree matching the given block height.
+    /// Returns the Orchard note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_note_commitment_tree_by_height(
         &self,
         height: &Height,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+        let tip_height = self.finalized_tip_height()?;
+
+        // If we're above the tip, searching backwards would always return the tip tree.
+        // But the correct answer is "we don't know that tree yet".
+        if *height > tip_height {
+            return None;
+        }
+
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        self.db.zs_get(&orchard_trees, height).map(Arc::new)
+        // # Compatibility
+        //
+        // Allow older Zebra versions to read future database formats. See ticket #6642 for details.
+        let (_first_duplicate_height, tree) = self
+            .db
+            .zs_prev_key_value_back_from(&orchard_trees, height)
+            .expect(
+                "Orchard note commitment trees must exist for all heights below the finalized tip",
+            );
+
+        Some(Arc::new(tree))
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
