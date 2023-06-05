@@ -4,9 +4,7 @@ use abscissa_core::{Command, Configurable, FrameworkError, Runnable};
 use clap::Parser;
 use std::{ffi::OsString, path::PathBuf};
 
-use crate::config::ZebradConfig;
-
-use super::ZebradCmd;
+use crate::{commands::ZebradCmd, config::ZebradConfig};
 
 /// Toplevel entrypoint command.
 ///

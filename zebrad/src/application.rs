@@ -14,10 +14,15 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{
-    commands::EntryPoint,
+    application::entry_point::EntryPoint,
     components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
     config::ZebradConfig,
 };
+
+mod entry_point;
+
+#[cfg(test)]
+mod tests;
 
 /// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit

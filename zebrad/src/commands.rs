@@ -2,13 +2,9 @@
 
 mod copy_state;
 mod download;
-mod entry_point;
 mod generate;
 mod start;
 mod tip_height;
-
-#[cfg(test)]
-mod tests;
 
 use self::ZebradCmd::*;
 use self::{
@@ -16,7 +12,7 @@ use self::{
     tip_height::TipHeightCmd,
 };
 
-pub use self::{entry_point::EntryPoint, start::StartCmd};
+pub use self::start::StartCmd;
 
 use crate::config::ZebradConfig;
 
