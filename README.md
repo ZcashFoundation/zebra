@@ -54,7 +54,7 @@ section in the Zebra book for system requirements.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.8
+docker run zfnd/zebra:1.0.0-rc.9
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -101,7 +101,7 @@ Note that the package `clang` includes `libclang` as well as the C++ compiler.
 Once the dependencies are in place, you can build Zebra
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.8 zebrad
+cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.9 zebrad
 ```
 
 You can start Zebra by
