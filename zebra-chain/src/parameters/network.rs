@@ -119,6 +119,11 @@ impl Network {
             Network::Testnet => "test".to_string(),
         }
     }
+
+    /// Return the lowercase network name.
+    pub fn lowercase_name(&self) -> String {
+        self.to_string().to_ascii_lowercase()
+    }
 }
 
 impl FromStr for Network {

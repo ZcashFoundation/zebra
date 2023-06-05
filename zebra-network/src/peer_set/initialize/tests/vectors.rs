@@ -31,6 +31,7 @@ use zebra_test::net::random_known_port;
 
 use crate::{
     address_book_updater::AddressBookUpdater,
+    config::CacheDir,
     constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
     peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest},
@@ -52,6 +53,11 @@ use Network::*;
 ///
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
+
+/// The amount of time to run the peer cache updater task, before testing what it has done.
+///
+/// Using a very short time can make the peer cache updater not run at all.
+const PEER_CACHE_UPDATER_TEST_DURATION: Duration = Duration::from_secs(25);
 
 /// The amount of time to run the listener, before testing what it has done.
 ///
@@ -286,6 +292,89 @@ async fn peer_limit_two_testnet() {
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
 
     // Any number of address book peers is valid here, because some peers might have failed.
+}
+
+/// Test zebra-network writes a peer cache file, and can read it back manually.
+#[tokio::test]
+async fn written_peer_cache_can_be_read_manually() {
+    let _init_guard = zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
+
+    // The default config should have an active peer cache
+    let config = Config::default();
+    let address_book =
+        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+
+    // Let the peer cache updater run for a while.
+    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
+
+    let approximate_peer_count = address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .len();
+    if approximate_peer_count > 0 {
+        let cached_peers = config
+            .load_peer_cache()
+            .await
+            .expect("unexpected error reading peer cache");
+
+        assert!(
+            !cached_peers.is_empty(),
+            "unexpected empty peer cache from manual load: {:?}",
+            config.cache_dir.peer_cache_file_path(config.network)
+        );
+    }
+}
+
+/// Test zebra-network writes a peer cache file, and reads it back automatically.
+#[tokio::test]
+async fn written_peer_cache_is_automatically_read_on_startup() {
+    let _init_guard = zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
+
+    // The default config should have an active peer cache
+    let mut config = Config::default();
+    let address_book =
+        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+
+    // Let the peer cache updater run for a while.
+    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
+
+    let approximate_peer_count = address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .len();
+    if approximate_peer_count > 0 {
+        // Make sure our only peers are coming from the disk cache
+        config.initial_mainnet_peers = Default::default();
+
+        let address_book =
+            init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+
+        // Let the peer cache reader run and fill the address book.
+        tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+
+        // We should have loaded at least one peer from the cache
+        let approximate_cached_peer_count = address_book
+            .lock()
+            .expect("previous thread panicked while holding address book lock")
+            .len();
+        assert!(
+            approximate_cached_peer_count > 0,
+            "unexpected empty address book using cache from previous instance: {:?}",
+            config.cache_dir.peer_cache_file_path(config.network)
+        );
+    }
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
@@ -1126,6 +1215,7 @@ async fn self_connections_should_fail() {
 
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
 
         ..Config::default()
     };
@@ -1371,6 +1461,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
 
         ..Config::default()
     };
@@ -1706,6 +1797,8 @@ where
 
     let config = Config {
         initial_mainnet_peers: peers,
+        // We want exactly the above list of peers, without any cached peers.
+        cache_dir: CacheDir::disabled(),
 
         network: Network::Mainnet,
         listen_addr: unused_v4,

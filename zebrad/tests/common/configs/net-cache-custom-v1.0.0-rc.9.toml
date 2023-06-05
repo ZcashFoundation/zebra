@@ -1,0 +1,16 @@
+# Custom network.cache_dir config parsing test
+
+[network]
+# Enable the peer address cache with a custom path
+cache_dir = "/tmp"
+
+# Use a custom seed peer config
+# https://en.wikipedia.org/wiki/IPv6_address#Documentation
+initial_mainnet_peers = [
+    "192.0.2.0:8233",
+    "2001:db8::0:8233",
+]
+initial_testnet_peers = [
+    "192.0.2.1:18233",
+    "2001:db8::1:18233",
+]

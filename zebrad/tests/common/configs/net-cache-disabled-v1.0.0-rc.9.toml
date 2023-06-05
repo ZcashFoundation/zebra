@@ -1,0 +1,9 @@
+# Custom network.cache_dir config parsing test
+
+[network]
+# Disable the peer address cache
+cache_dir = false
+
+# Disable seed peers as well, to create an isolated node
+initial_mainnet_peers = []
+initial_testnet_peers = []

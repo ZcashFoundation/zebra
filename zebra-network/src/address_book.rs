@@ -240,7 +240,8 @@ impl AddressBook {
         self.local_listener
     }
 
-    /// Get the contents of `self` in random order with sanitized timestamps.
+    /// Get the active addresses in `self` in random order with sanitized timestamps,
+    /// including our local listener address.
     pub fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
@@ -254,10 +255,12 @@ impl AddressBook {
         peers.insert(local_listener.addr, local_listener);
 
         // Then sanitize and shuffle
-        let mut peers = peers
+        let mut peers: Vec<MetaAddr> = peers
             .descending_values()
             .filter_map(|meta_addr| meta_addr.sanitize(self.network))
-            // Security: remove peers that:
+            // # Security
+            //
+            // Remove peers that:
             //   - last responded more than three hours ago, or
             //   - haven't responded yet but were reported last seen more than three hours ago
             //
@@ -265,9 +268,34 @@ impl AddressBook {
             // nodes impacts the network health, because connection attempts end up being wasted on
             // peers that are less likely to respond.
             .filter(|addr| addr.is_active_for_gossip(now))
-            .collect::<Vec<_>>();
+            .collect();
+
         peers.shuffle(&mut rand::thread_rng());
+
         peers
+    }
+
+    /// Get the active addresses in `self`, in preferred caching order,
+    /// excluding our local listener address.
+    pub fn cacheable(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+        let _guard = self.span.enter();
+
+        let peers = self.by_addr.clone();
+
+        // Get peers in preferred order, then keep the recently active ones
+        peers
+            .descending_values()
+            // # Security
+            //
+            // Remove peers that:
+            //   - last responded more than three hours ago, or
+            //   - haven't responded yet but were reported last seen more than three hours ago
+            //
+            // This prevents Zebra from caching nodes that are likely unreachable,
+            // which improves startup time and reliability.
+            .filter(|addr| addr.is_active_for_gossip(now))
+            .cloned()
+            .collect()
     }
 
     /// Look up `addr` in the address book, and return its [`MetaAddr`].
