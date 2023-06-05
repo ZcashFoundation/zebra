@@ -299,21 +299,22 @@ pub fn database_format_version_in_code() -> Version {
 }
 
 /// Returns the full semantic version of the on-disk database.
+/// If there is no existing on-disk database, returns `Ok(None)`.
 ///
 /// This is the format of the data on disk, the minor and patch versions
 /// implemented by the running Zebra code can be different.
 pub fn database_format_version_on_disk(
     config: &Config,
     network: Network,
-) -> Result<Version, BoxError> {
+) -> Result<Option<Version>, BoxError> {
     let version_path = config.version_file_path(network);
 
     let version = match fs::read_to_string(version_path) {
         Ok(version) => version,
         Err(e) if e.kind() == ErrorKind::NotFound => {
-            // If the version file doesn't exist, assume both minor and patch are zero.
-            // (The major versions must be the same: we create a new database if they are not.)
-            return Ok(Version::new(DATABASE_FORMAT_VERSION, 0, 0));
+            // If the version file doesn't exist, don't guess the version.
+            // (It will end up being the version in code, once the database is created.)
+            return Ok(None);
         }
         Err(e) => Err(e)?,
     };
@@ -322,11 +323,11 @@ pub fn database_format_version_on_disk(
         .split_once('.')
         .ok_or("invalid database format version file")?;
 
-    Ok(Version::new(
+    Ok(Some(Version::new(
         DATABASE_FORMAT_VERSION,
         minor.parse()?,
         patch.parse()?,
-    ))
+    )))
 }
 
 /// Writes the currently running semantic database version to the on-disk database.

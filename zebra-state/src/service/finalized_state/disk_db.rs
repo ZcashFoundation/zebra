@@ -432,20 +432,29 @@ impl DiskDb {
         let disk_version = database_format_version_on_disk(config, network)
             .expect("unable to read database format version file");
 
-        match running_version.cmp(&disk_version) {
+        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
             // TODO: if the on-disk format is older, actually run the upgrade task after the
             //       database has been opened (#6642)
-            Ordering::Greater => info!(
+            Some(Ordering::Less) => info!(
                 ?running_version,
                 ?disk_version,
                 "trying to open older database format: launching upgrade task"
             ),
-            Ordering::Less => info!(
+            // TODO: if the on-disk format is newer, downgrade the version after the
+            //       database has been opened (#6642)
+            Some(Ordering::Greater) => info!(
                 ?running_version,
                 ?disk_version,
                 "trying to open newer database format: data should be compatible"
             ),
-            Ordering::Equal => info!(?disk_version, "trying to open database format"),
+            Some(Ordering::Equal) => info!(
+                ?running_version,
+                "trying to open compatible database format"
+            ),
+            None => info!(
+                ?running_version,
+                "creating new database with the current format"
+            ),
         }
 
         let db_options = DiskDb::options();
