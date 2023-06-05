@@ -450,12 +450,13 @@ impl DiskDb {
         let db_options = DiskDb::options();
 
         // When opening the database in read/write mode, all column families must be opened.
+        //
         // To make Zebra forward-compatible with databases updated by later versions,
-        // we read that list off the disk, then add any new column families from our list as well.
+        // we read any existing column families off the disk, then add any new column families
+        // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk =
-            DB::list_cf(&db_options, &path).expect("unable to read column families on disk");
+        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
         let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string);
