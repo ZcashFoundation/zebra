@@ -107,16 +107,11 @@ impl ZebraDb {
             None => return Default::default(),
         };
 
-        let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db
-            .zs_get(&sapling_nct_handle, &height)
-            .map(Arc::new)
+        self.sapling_note_commitment_tree_by_height(&height)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Sapling note commitment tree matching the given block height.
-    #[allow(dead_code)]
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_note_commitment_tree_by_height(
         &self,
@@ -135,16 +130,11 @@ impl ZebraDb {
             None => return Default::default(),
         };
 
-        let orchard_nct_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db
-            .zs_get(&orchard_nct_handle, &height)
-            .map(Arc::new)
+        self.orchard_note_commitment_tree_by_height(&height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Orchard note commitment tree matching the given block height.
-    #[allow(dead_code)]
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_note_commitment_tree_by_height(
         &self,
