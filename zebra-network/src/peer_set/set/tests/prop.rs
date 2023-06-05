@@ -306,7 +306,7 @@ where
         .all(|harness| harness.remote_version() < minimum_version);
 
     if all_peers_are_outdated {
-        prop_assert!(matches!(poll_result, None));
+        prop_assert!(poll_result.is_none());
     } else {
         prop_assert!(matches!(poll_result, Some(Ok(_))));
     }
