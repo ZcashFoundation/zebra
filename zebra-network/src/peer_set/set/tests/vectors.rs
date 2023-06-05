@@ -336,12 +336,9 @@ fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
         };
 
         assert!(
-            matches!(
-                other_handle
+            other_handle
                     .try_to_receive_outbound_client_request()
-                    .request(),
-                None
-            ),
+                    .request().is_none(),
             "request routed to non-advertised peer",
         );
     });
@@ -430,12 +427,9 @@ fn peer_set_route_inv_missing_registry_order(missing_first: bool) {
         };
 
         assert!(
-            matches!(
-                missing_handle
+            missing_handle
                     .try_to_receive_outbound_client_request()
-                    .request(),
-                None
-            ),
+                    .request().is_none(),
             "request routed to missing peer",
         );
 
@@ -529,12 +523,9 @@ fn peer_set_route_inv_all_missing_fail() {
         let missing_handle = &mut handles[0];
 
         assert!(
-            matches!(
-                missing_handle
+            missing_handle
                     .try_to_receive_outbound_client_request()
-                    .request(),
-                None
-            ),
+                    .request().is_none(),
             "request routed to missing peer",
         );
 

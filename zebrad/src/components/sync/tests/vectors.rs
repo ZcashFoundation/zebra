@@ -255,7 +255,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
-        matches!(chain_sync_result, None),
+        chain_sync_result.is_none(),
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
@@ -486,7 +486,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
-        matches!(chain_sync_result, None),
+        chain_sync_result.is_none(),
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
@@ -539,7 +539,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
-        matches!(chain_sync_result, None),
+        chain_sync_result.is_none(),
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
@@ -694,7 +694,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
-        matches!(chain_sync_result, None),
+        chain_sync_result.is_none(),
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
@@ -915,7 +915,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
-        matches!(chain_sync_result, None),
+        chain_sync_result.is_none(),
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
