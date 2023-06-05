@@ -12,6 +12,7 @@
 
 use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
 
+use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use zebra_chain::parameters::Network;
@@ -448,15 +449,24 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
-        let column_families = Self::COLUMN_FAMILIES_IN_CODE
+        // When opening the database in read/write mode, all column families must be opened.
+        // To make Zebra forward-compatible with databases updated by later versions,
+        // we read that list off the disk, then add any new column families from our list as well.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
+        let column_families_on_disk =
+            DB::list_cf(&db_options, &path).expect("unable to read column families on disk");
+        let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
             .iter()
-            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(*cf_name, db_options.clone()));
+            .map(ToString::to_string);
 
-        let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
-            &db_options,
-            &path,
-            column_families,
-        );
+        let column_families = column_families_on_disk
+            .into_iter()
+            .chain(column_families_in_code)
+            .unique()
+            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+
+        let db_result = DB::open_cf_descriptors(&db_options, &path, column_families);
 
         match db_result {
             Ok(db) => {
