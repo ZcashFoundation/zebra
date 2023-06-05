@@ -1552,8 +1552,7 @@ where
     // Check for panics or errors in the crawler.
     let crawl_result = crawl_task_handle.now_or_never();
     assert!(
-        crawl_result.is_none()
-            || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
         "unexpected error or panic in peer crawler task: {crawl_result:?}",
     );
 
@@ -1658,8 +1657,7 @@ where
     // Check for panics or errors in the listener.
     let listen_result = listen_task_handle.now_or_never();
     assert!(
-        listen_result.is_none()
-            || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
+        listen_result.is_none() || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
         "unexpected error or panic in inbound peer listener task: {listen_result:?}",
     );
 
