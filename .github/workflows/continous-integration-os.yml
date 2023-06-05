@@ -69,7 +69,8 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macos-latest]
+        # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
+        os: [ubuntu-latest]
         rust: [stable, beta]
         features: ["", " --features getblocktemplate-rpcs"]
         exclude:
