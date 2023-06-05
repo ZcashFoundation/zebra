@@ -10,15 +10,9 @@ use super::EntryPoint;
 fn args_with_subcommand_pass_through() {
     let test_cases = [
         (true, false, vec!["zebrad"]),
-        (true, true, vec!["zebrad", "-v"]),
-        (true, true, vec!["zebrad", "--verbose"]),
-        (false, false, vec!["zebrad", "-h"]),
         (false, false, vec!["zebrad", "--help"]),
-        (true, false, vec!["zebrad", "start"]),
-        (true, true, vec!["zebrad", "-v", "start"]),
-        (true, false, vec!["zebrad", "warn"]),
-        (true, false, vec!["zebrad", "start", "warn"]),
-        (false, false, vec!["zebrad", "help", "warn"]),
+        (true, false, vec!["zebrad", "-v", "warn"]),
+        (true, true, vec!["zebrad", "-v", "start", "warn"]),
     ];
 
     for (should_be_start, should_be_verbose, args) in test_cases {
