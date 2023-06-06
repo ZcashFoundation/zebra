@@ -2,7 +2,7 @@
 //!
 //! ## Application Structure
 //!
-//! A zebra node consists of the following services and tasks:
+//! A zebra node consists of the following major services and tasks:
 //!
 //! Peers:
 //!  * Peer Connection Pool Service
@@ -12,6 +12,9 @@
 //!    * maintains a list of peer addresses, and connection priority metadata
 //!    * discovers new peer addresses from existing peer connections
 //!    * initiates new outbound peer connections in response to demand from tasks within this node
+//!  * Peer Cache Service
+//!    * Reads previous peer cache on startup, and adds it to the configured DNS seed peers
+//!    * Periodically updates the peer cache on disk from the latest address book state
 //!
 //! Blocks & Mempool Transactions:
 //!  * Consensus Service

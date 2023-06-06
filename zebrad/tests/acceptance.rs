@@ -165,7 +165,10 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, EXTENDED_LAUNCH_DELAY,
+        LAUNCH_DELAY,
+    },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -371,6 +374,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     Ok(())
 }
 
+/// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -381,7 +385,7 @@ fn persistent_mode() -> Result<()> {
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -393,6 +397,13 @@ fn persistent_mode() -> Result<()> {
         cache_dir.read_dir()?.count() > 0,
         &output,
         "state directory empty despite persistent state config"
+    );
+
+    let cache_dir = testdir.path().join("network");
+    assert_with_context!(
+        cache_dir.read_dir()?.count() > 0,
+        &output,
+        "network directory empty despite persistent network config"
     );
 
     Ok(())
@@ -424,6 +435,9 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+/// Check that the state directory created on disk matches the state config.
+///
+/// TODO: do a similar test for `network.cache_dir`
 #[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
@@ -449,7 +463,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -472,7 +486,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["state", "zebrad.toml"].iter()
+            ["state", "network", "zebrad.toml"].iter()
         }
 
         // we didn't create the state directory, so it should not exist
@@ -490,7 +504,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["zebrad.toml"].iter()
+            ["network", "zebrad.toml"].iter()
         }
     };
 
@@ -754,7 +768,7 @@ fn last_config_is_stored() -> Result<()> {
          Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
          zebrad/tests/common/configs/{}<next-release-tag>.toml",
         if cfg!(feature = "getblocktemplate-rpcs") {
             GET_BLOCK_TEMPLATE_CONFIG_PREFIX
