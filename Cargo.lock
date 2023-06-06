@@ -2060,6 +2060,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb91780c91bfc79769006a55c49127b83e1c1a6cf2b3b149ce3f247cbe342f0"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2842,7 +2851,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -5663,7 +5672,7 @@ dependencies = [
  "group",
  "hdwallet",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -5716,7 +5725,7 @@ dependencies = [
  "cxx",
  "cxx-gen",
  "group",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "jubjub",
  "libc",
  "memuse",
@@ -5756,7 +5765,7 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.4.0",
  "itertools",
  "jubjub",
  "lazy_static",
