@@ -1,5 +1,7 @@
 //! Zebrad EntryPoint
 
+use std::cmp::min;
+
 use abscissa_core::{Command, Configurable, FrameworkError, Runnable};
 use clap::Parser;
 use std::{ffi::OsString, path::PathBuf};
