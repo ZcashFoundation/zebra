@@ -780,17 +780,71 @@ impl DiskDb {
         let path = self.path();
         debug!(?path, "flushing database to disk");
 
-        self.db
-            .flush()
-            .expect("unexpected failure flushing SST data to disk");
-        self.db
-            .flush_wal(true)
-            .expect("unexpected failure flushing WAL data to disk");
+        // These flushes can fail during forced shutdown or during Drop after a shutdown,
+        // particularly in tests. If they fail, there's nothing we can do about it anyway.
+        if let Err(error) = self.db.flush() {
+            let error = format!("{error:?}");
+            if error.to_ascii_lowercase().contains("shutdown in progress") {
+                debug!(
+                    ?error,
+                    ?path,
+                    "expected shutdown error flushing database SST files to disk"
+                );
+            } else {
+                info!(
+                    ?error,
+                    ?path,
+                    "unexpected error flushing database SST files to disk during shutdown"
+                );
+            }
+        }
 
+        if let Err(error) = self.db.flush_wal(true) {
+            let error = format!("{error:?}");
+            if error.to_ascii_lowercase().contains("shutdown in progress") {
+                debug!(
+                    ?error,
+                    ?path,
+                    "expected shutdown error flushing database WAL buffer to disk"
+                );
+            } else {
+                info!(
+                    ?error,
+                    ?path,
+                    "unexpected error flushing database WAL buffer to disk during shutdown"
+                );
+            }
+        }
+
+        // # Memory Safety
+        //
         // We'd like to call `cancel_all_background_work()` before Zebra exits,
         // but when we call it, we get memory, thread, or C++ errors when the process exits.
         // (This seems to be a bug in RocksDB: cancel_all_background_work() should wait until
         // all the threads have cleaned up.)
+        //
+        // # Change History
+        //
+        // We've changed this setting multiple times since 2021, in response to new RocksDB
+        // and Rust compiler behaviour.
+        //
+        // We enabled cancel_all_background_work() due to failures on:
+        // - Rust 1.57 on Linux
+        //
+        // We disabled cancel_all_background_work() due to failures on:
+        // - Rust 1.64 on Linux
+        //
+        // We tried enabling cancel_all_background_work() due to failures on:
+        // - Rust 1.70 on macOS 12.6.5 on x86_64
+        // but it didn't stop the aborts happening (PR #6820).
+        //
+        // There weren't any failures with cancel_all_background_work() disabled on:
+        // - Rust 1.69 or earlier
+        // - Linux with Rust 1.70
+        // And with cancel_all_background_work() enabled or disabled on:
+        // - macOS 13.2 on aarch64 (M1), native and emulated x86_64, with Rust 1.70
+        //
+        // # Detailed Description
         //
         // We see these kinds of errors:
         // ```
@@ -803,13 +857,26 @@ impl DiskDb {
         // signal: 11, SIGSEGV: invalid memory reference
         // ```
         //
+        // # Reference
+        //
         // The RocksDB wiki says:
         // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
         // >
         // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        // <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ>
+        //
+        // > rocksdb::DB instances need to be destroyed before your main function exits.
+        // > RocksDB instances usually depend on some internal static variables.
+        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Known-Issues>
+        //
+        // # TODO
+        //
+        // Try re-enabling this code and fixing the underlying concurrency bug.
+        //
         //info!(?path, "stopping background database tasks");
         //self.db.cancel_all_background_work(true);
 
@@ -818,14 +885,7 @@ impl DiskDb {
         // But Rust's ownership rules make that difficult,
         // so we just flush and delete ephemeral data instead.
         //
-        // The RocksDB wiki says:
-        // > rocksdb::DB instances need to be destroyed before your main function exits.
-        // > RocksDB instances usually depend on some internal static variables.
-        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
-        //
-        // https://github.com/facebook/rocksdb/wiki/Known-Issues
-        //
-        // But this implementation doesn't seem to cause any issues,
+        // This implementation doesn't seem to cause any issues,
         // and the RocksDB Drop implementation handles any cleanup.
         self.delete_ephemeral();
     }
