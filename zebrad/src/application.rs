@@ -458,7 +458,8 @@ impl Application for ZebradApp {
 /// command-line arguments, and terminating when complete.
 // <https://docs.rs/abscissa_core/0.7.0/src/abscissa_core/application.rs.html#174-178>
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
-    let args = EntryPoint::process_cli_args(env::args_os().collect());
+    let args =
+        EntryPoint::process_cli_args(env::args_os().collect()).unwrap_or_else(|err| err.exit());
 
     ZebradApp::run(app_cell, args);
     process::exit(0);

@@ -9,20 +9,28 @@ use super::EntryPoint;
 #[test]
 fn args_with_subcommand_pass_through() {
     let test_cases = [
-        (true, false, vec!["zebrad"]),
-        (true, true, vec!["zebrad", "-v"]),
-        (true, true, vec!["zebrad", "--verbose"]),
-        (false, false, vec!["zebrad", "-h"]),
-        (false, false, vec!["zebrad", "--help"]),
-        (true, false, vec!["zebrad", "start"]),
-        (true, true, vec!["zebrad", "-v", "start"]),
-        (true, false, vec!["zebrad", "warn"]),
-        (true, false, vec!["zebrad", "start", "warn"]),
-        (false, false, vec!["zebrad", "help", "warn"]),
+        (false, true, false, vec!["zebrad"]),
+        (false, true, true, vec!["zebrad", "-v"]),
+        (false, true, true, vec!["zebrad", "--verbose"]),
+        (true, false, false, vec!["zebrad", "-h"]),
+        (true, false, false, vec!["zebrad", "--help"]),
+        (false, true, false, vec!["zebrad", "start"]),
+        (false, true, true, vec!["zebrad", "-v", "start"]),
+        (false, true, false, vec!["zebrad", "warn"]),
+        (false, true, false, vec!["zebrad", "start", "warn"]),
+        (true, false, false, vec!["zebrad", "help", "warn"]),
     ];
 
-    for (should_be_start, should_be_verbose, args) in test_cases {
+    for (should_exit, should_be_start, should_be_verbose, args) in test_cases {
         let args = EntryPoint::process_cli_args(args.iter().map(Into::into).collect());
+
+        if should_exit {
+            args.expect_err("parsing invalid args or 'help'/'--help' should return an error");
+            continue;
+        }
+
+        let args: Vec<std::ffi::OsString> = args.expect("args should parse into EntryPoint");
+
         let args =
             EntryPoint::try_parse_from(args).expect("hardcoded args should parse successfully");
 
