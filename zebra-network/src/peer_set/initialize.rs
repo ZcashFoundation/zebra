@@ -38,6 +38,7 @@ use crate::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
+    peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
@@ -186,7 +187,7 @@ where
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
-    // 2. Initial peers, specified in the config.
+    // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
         config.clone(),
         outbound_connector.clone(),
@@ -224,8 +225,9 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
+    // Start the peer crawler
     let crawl_fut = crawl_and_dial(
-        config,
+        config.clone(),
         demand_tx,
         demand_rx,
         candidates,
@@ -235,15 +237,24 @@ where
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
+    // Start the peer disk cache updater
+    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
+
     handle_tx
-        .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
+        .send(vec![
+            listen_guard,
+            crawl_guard,
+            address_book_updater_guard,
+            peer_cache_updater_guard,
+        ])
         .unwrap();
 
     (peer_set, address_book)
 }
 
-/// Use the provided `outbound_connector` to connect to the configured initial peers,
-/// then send the resulting peer connections over `peerset_tx`.
+/// Use the provided `outbound_connector` to connect to the configured DNS seeder and
+/// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
 /// Also sends every initial peer address to the `address_book_updater`.
 #[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
@@ -273,9 +284,12 @@ where
         "Outbound Connections",
     );
 
+    // TODO: update when we add Tor peers or other kinds of addresses.
+    let ipv4_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv4()).count();
+    let ipv6_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv6()).count();
     info!(
-        initial_peer_count = ?initial_peers.len(),
-        ?initial_peers,
+        ?ipv4_peer_count,
+        ?ipv6_peer_count,
         "connecting to initial peer set"
     );
 
@@ -385,7 +399,7 @@ where
         ?handshake_success_total,
         ?handshake_error_total,
         ?outbound_connections,
-        "finished connecting to initial seed peers"
+        "finished connecting to initial seed and disk cache peers"
     );
 
     Ok(active_outbound_connections)
@@ -423,10 +437,10 @@ async fn limit_initial_peers(
                 .entry(preference)
                 .or_default()
                 .push(peer_addr),
-            Err(error) => warn!(
+            Err(error) => info!(
                 ?peer_addr,
                 ?error,
-                "invalid initial peer from DNS seeder or configured IP address",
+                "invalid initial peer from DNS seeder, configured IP address, or disk cache",
             ),
         }
     }

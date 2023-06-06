@@ -165,7 +165,10 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, EXTENDED_LAUNCH_DELAY,
+        LAUNCH_DELAY,
+    },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -371,6 +374,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     Ok(())
 }
 
+/// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -381,7 +385,7 @@ fn persistent_mode() -> Result<()> {
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -393,6 +397,13 @@ fn persistent_mode() -> Result<()> {
         cache_dir.read_dir()?.count() > 0,
         &output,
         "state directory empty despite persistent state config"
+    );
+
+    let cache_dir = testdir.path().join("network");
+    assert_with_context!(
+        cache_dir.read_dir()?.count() > 0,
+        &output,
+        "network directory empty despite persistent network config"
     );
 
     Ok(())
@@ -424,6 +435,9 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+/// Check that the state directory created on disk matches the state config.
+///
+/// TODO: do a similar test for `network.cache_dir`
 #[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
@@ -449,7 +463,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -472,7 +486,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["state", "zebrad.toml"].iter()
+            ["state", "network", "zebrad.toml"].iter()
         }
 
         // we didn't create the state directory, so it should not exist
@@ -490,7 +504,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["zebrad.toml"].iter()
+            ["network", "zebrad.toml"].iter()
         }
     };
 
@@ -580,8 +594,8 @@ fn config_tests() -> Result<()> {
     // Check that we have a current version of the config stored
     last_config_is_stored()?;
 
-    // Check that Zebra stored configuration works
-    stored_configs_works()?;
+    // Check that Zebra's previous configurations still work
+    stored_configs_work()?;
 
     // Runs `zebrad` serially to avoid potential port conflicts
     app_no_args()?;
@@ -710,13 +724,31 @@ fn last_config_is_stored() -> Result<()> {
         .to_string();
 
     // Loop all the stored configs
+    //
+    // TODO: use the same filename list code in last_config_is_stored() and stored_configs_work()
     for config_file in configs_dir()
         .read_dir()
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // Read stored config
-        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+        let stored_content = fs::read_to_string(config_file_full_path(config_file_path))
             .expect("Should have been able to read the file")
             .trim()
             .to_string();
@@ -744,7 +776,7 @@ fn last_config_is_stored() -> Result<()> {
          Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
          zebrad/tests/common/configs/{}<next-release-tag>.toml",
         if cfg!(feature = "getblocktemplate-rpcs") {
             GET_BLOCK_TEMPLATE_CONFIG_PREFIX
@@ -840,7 +872,7 @@ fn invalid_generated_config() -> Result<()> {
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
 #[tracing::instrument]
-fn stored_configs_works() -> Result<()> {
+fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
     for config_file in old_configs_dir
@@ -848,15 +880,33 @@ fn stored_configs_works() -> Result<()> {
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // ignore files starting with getblocktemplate prefix
         // if we were not built with the getblocktemplate-rpcs feature.
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file
-            .file_name()
-            .into_string()
-            .expect("all files names should be string convertible")
+        if config_file_name
+            .as_ref()
             .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
         {
+            tracing::info!(
+                ?config_file_path,
+                "skipping getblocktemplate-rpcs config file path"
+            );
             continue;
         }
 
@@ -1046,7 +1096,8 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    let checkpoint_stop_regex = format!("{STOP_AT_HEIGHT_REGEX}.*CommitFinalized request");
+    let checkpoint_stop_regex =
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit checkpoint-verified request");
 
     create_cached_database_height(
         network,
@@ -1064,7 +1115,7 @@ fn create_cached_database(network: Network) -> Result<()> {
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
-        format!("{STOP_AT_HEIGHT_REGEX}.*best non-finalized chain root");
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
 
     create_cached_database_height(
         network,

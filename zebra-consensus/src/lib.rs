@@ -41,8 +41,8 @@ mod parameters;
 mod primitives;
 mod script;
 
-pub mod chain;
 pub mod error;
+pub mod router;
 pub mod transaction;
 
 pub use block::{
@@ -55,7 +55,6 @@ pub use block::{
     },
     Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
-pub use chain::VerifyChainError;
 pub use checkpoint::{
     CheckpointList, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,
 };
@@ -63,6 +62,7 @@ pub use config::Config;
 pub use error::BlockError;
 pub use parameters::FundingStreamReceiver;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
+pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

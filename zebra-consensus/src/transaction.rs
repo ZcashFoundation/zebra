@@ -58,7 +58,7 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// # Correctness
 ///
 /// Transaction verification requests should be wrapped in a timeout, so that
-/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {

@@ -23,9 +23,9 @@ use std::{
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
-    request::FinalizedWithTrees,
+    request::ContextuallyVerifiedBlockWithTrees,
     service::{check, QueuedFinalized},
-    BoxError, CloneError, Config, FinalizedBlock,
+    BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
 
 mod disk_db;
@@ -161,23 +161,25 @@ impl FinalizedState {
         self.network
     }
 
-    /// Commit a finalized block to the state.
+    /// Commit a checkpoint-verified block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedFinalized,
-    ) -> Result<FinalizedBlock, BoxError> {
-        let (finalized, rsp_tx) = ordered_block;
-        let result =
-            self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
+    ) -> Result<CheckpointVerifiedBlock, BoxError> {
+        let (checkpoint_verified, rsp_tx) = ordered_block;
+        let result = self.commit_finalized_direct(
+            checkpoint_verified.clone().into(),
+            "commit checkpoint-verified request",
+        );
 
         if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
-                finalized.height.0 as f64,
+                checkpoint_verified.height.0 as f64,
             );
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
@@ -185,14 +187,14 @@ impl FinalizedState {
             // are committed in order.
             metrics::gauge!(
                 "zcash.chain.verified.block.height",
-                finalized.height.0 as f64,
+                checkpoint_verified.height.0 as f64,
             );
             metrics::counter!("zcash.chain.verified.block.total", 1);
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.error.block.height",
-                finalized.height.0 as f64,
+                checkpoint_verified.height.0 as f64,
             );
         };
 
@@ -202,7 +204,9 @@ impl FinalizedState {
 
         let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
 
-        result.map(|_hash| finalized).map_err(BoxError::from)
+        result
+            .map(|_hash| checkpoint_verified)
+            .map_err(BoxError::from)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -221,10 +225,10 @@ impl FinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
-        finalized_with_trees: FinalizedWithTrees,
+        contextually_verified_with_trees: ContextuallyVerifiedBlockWithTrees,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized = finalized_with_trees.finalized;
+        let finalized = contextually_verified_with_trees.checkpoint_verified;
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 
@@ -252,7 +256,8 @@ impl FinalizedState {
             );
         }
 
-        let (history_tree, note_commitment_trees) = match finalized_with_trees.treestate {
+        let (history_tree, note_commitment_trees) = match contextually_verified_with_trees.treestate
+        {
             // If the treestate associated with the block was supplied, use it
             // without recomputing it.
             Some(ref treestate) => (

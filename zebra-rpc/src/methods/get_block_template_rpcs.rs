@@ -24,7 +24,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
-    VerifyChainError,
+    RouterError,
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
@@ -217,8 +217,14 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
-where
+pub struct GetBlockTemplateRpcImpl<
+    Mempool,
+    State,
+    Tip,
+    BlockVerifierRouter,
+    SyncStatus,
+    AddressBook,
+> where
     Mempool: Service<
         mempool::Request,
         Response = mempool::Response,
@@ -229,7 +235,7 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -267,7 +273,7 @@ where
     latest_chain_tip: Tip,
 
     /// The chain verifier, used for submitting blocks.
-    chain_verifier: ChainVerifier,
+    router_verifier: BlockVerifierRouter,
 
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
@@ -276,8 +282,8 @@ where
     address_book: AddressBook,
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
-    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -293,7 +299,7 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -313,7 +319,7 @@ where
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        chain_verifier: ChainVerifier,
+        router_verifier: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
@@ -352,15 +358,15 @@ where
             mempool,
             state,
             latest_chain_tip,
-            chain_verifier,
+            router_verifier,
             sync_status,
             address_book,
         }
     }
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -378,12 +384,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -448,7 +454,7 @@ where
             .and_then(get_block_template::JsonParameters::block_proposal_data)
         {
             return validate_block_proposal(
-                self.chain_verifier.clone(),
+                self.router_verifier.clone(),
                 block_proposal_bytes,
                 network,
                 latest_chain_tip,
@@ -731,7 +737,7 @@ where
         HexData(block_bytes): HexData,
         _parameters: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
-        let mut chain_verifier = self.chain_verifier.clone();
+        let mut router_verifier = self.router_verifier.clone();
 
         async move {
             let block: Block = match block_bytes.zcash_deserialize_into() {
@@ -749,7 +755,7 @@ where
                 .unwrap_or_else(|| "invalid coinbase height".to_string());
             let block_hash = block.hash();
 
-            let chain_verifier_response = chain_verifier
+            let router_verifier_response = router_verifier
                 .ready()
                 .await
                 .map_err(|error| Error {
@@ -760,7 +766,7 @@ where
                 .call(zebra_consensus::Request::Commit(Arc::new(block)))
                 .await;
 
-            let chain_error = match chain_verifier_response {
+            let chain_error = match router_verifier_response {
                 // Currently, this match arm returns `null` (Accepted) for blocks committed
                 // to any chain, but Accepted is only for blocks in the best chain.
                 //
@@ -776,7 +782,7 @@ where
                 // by downcasting from Any to VerifyChainError.
                 Err(box_error) => {
                     let error = box_error
-                        .downcast::<VerifyChainError>()
+                        .downcast::<RouterError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
                     tracing::info!(?error, ?block_hash, ?block_height, "submit block failed verification");
@@ -802,7 +808,7 @@ where
                 //   and return a duplicate error for the newer request immediately.
                 //   This improves the speed of the RPC response.
                 //
-                // Checking the download queues and ChainVerifier buffer for duplicates
+                // Checking the download queues and BlockVerifierRouter buffer for duplicates
                 // might require architectural changes to Zebra, so we should only do it
                 // if mining pools really need it.
                 Ok(_verify_chain_error) => submit_block::ErrorResponse::Rejected,

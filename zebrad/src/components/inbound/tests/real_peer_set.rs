@@ -18,9 +18,9 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTx, UnminedTxId, WtxId},
 };
-use zebra_consensus::{chain::VerifyChainError, error::TransactionError, transaction};
+use zebra_consensus::{error::TransactionError, router::RouterError, transaction};
 use zebra_network::{
-    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash,
+    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash, CacheDir,
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
@@ -609,7 +609,7 @@ async fn setup(
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
-    MockService<zebra_consensus::Request, block::Hash, PanicAssertion, VerifyChainError>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion, RouterError>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     // real tasks
     JoinHandle<Result<(), BlockGossipError>>,
@@ -647,6 +647,7 @@ async fn setup(
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
 
         ..NetworkConfig::default()
     };

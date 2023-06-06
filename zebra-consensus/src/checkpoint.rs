@@ -32,7 +32,7 @@ use zebra_chain::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     work::equihash,
 };
-use zebra_state::{self as zs, FinalizedBlock};
+use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
     block::VerifyBlockError,
@@ -59,7 +59,7 @@ pub use list::CheckpointList;
 #[derive(Debug)]
 struct QueuedBlock {
     /// The block, with additional precalculated data.
-    block: FinalizedBlock,
+    block: CheckpointVerifiedBlock,
     /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
 }
@@ -68,7 +68,7 @@ struct QueuedBlock {
 #[derive(Debug)]
 struct RequestBlock {
     /// The block, with additional precalculated data.
-    block: FinalizedBlock,
+    block: CheckpointVerifiedBlock,
     /// The receiving end of the oneshot channel for this block's result.
     rx: oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>>,
 }
@@ -580,7 +580,7 @@ where
 
     /// Check that the block height, proof of work, and Merkle root are valid.
     ///
-    /// Returns a [`FinalizedBlock`] with precalculated block data.
+    /// Returns a [`CheckpointVerifiedBlock`] with precalculated block data.
     ///
     /// ## Security
     ///
@@ -590,7 +590,10 @@ where
     /// Checking the Merkle root ensures that the block hash binds the block
     /// contents. To prevent malleability (CVE-2012-2459), we also need to check
     /// whether the transaction hashes are unique.
-    fn check_block(&self, block: Arc<Block>) -> Result<FinalizedBlock, VerifyCheckpointError> {
+    fn check_block(
+        &self,
+        block: Arc<Block>,
+    ) -> Result<CheckpointVerifiedBlock, VerifyCheckpointError> {
         let hash = block.hash();
         let height = block
             .coinbase_height()
@@ -601,7 +604,7 @@ where
         crate::block::check::equihash_solution_is_valid(&block.header)?;
 
         // don't do precalculation until the block passes basic difficulty checks
-        let block = FinalizedBlock::with_hash(block, hash);
+        let block = CheckpointVerifiedBlock::with_hash(block, hash);
 
         crate::block::check::merkle_root_validity(
             self.network,
@@ -1092,7 +1095,7 @@ where
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
             match state_service
-                .oneshot(zs::Request::CommitFinalizedBlock(req_block.block))
+                .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
                 .map_err(VerifyCheckpointError::CommitFinalized)
                 .await?
             {
@@ -1100,7 +1103,7 @@ where
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                _ => unreachable!("wrong response for CommitFinalizedBlock"),
+                _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
             }
         });
 

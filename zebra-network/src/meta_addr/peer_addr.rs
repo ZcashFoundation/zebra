@@ -64,3 +64,11 @@ impl DerefMut for PeerSocketAddr {
         &mut self.0
     }
 }
+
+impl PeerSocketAddr {
+    /// Return the underlying [`SocketAddr`], which allows sensitive peer address information to
+    /// be printed and logged.
+    pub fn remove_socket_addr_privacy(&self) -> SocketAddr {
+        **self
+    }
+}

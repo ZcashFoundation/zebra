@@ -16,9 +16,9 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyValidBlock, FinalizedWithTrees},
+    request::{ContextuallyVerifiedBlock, ContextuallyVerifiedBlockWithTrees},
     service::{check, finalized_state::ZebraDb},
-    PreparedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -174,7 +174,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedWithTrees {
+    pub fn finalize(&mut self) -> ContextuallyVerifiedBlockWithTrees {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -226,7 +226,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizedWithTrees::new(best_chain_root, root_treestate)
+        ContextuallyVerifiedBlockWithTrees::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -235,7 +235,7 @@ impl NonFinalizedState {
     #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_block(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
@@ -266,7 +266,7 @@ impl NonFinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_new_chain(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let finalized_tip_height = finalized_state.finalized_tip_height();
@@ -308,7 +308,7 @@ impl NonFinalizedState {
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         // Reads from disk
@@ -336,7 +336,7 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
+        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
         )
@@ -358,7 +358,7 @@ impl NonFinalizedState {
     #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
-        contextual: ContextuallyValidBlock,
+        contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
@@ -489,7 +489,7 @@ impl NonFinalizedState {
 
     /// Returns the block at the tip of the best chain.
     #[allow(dead_code)]
-    pub fn best_tip_block(&self) -> Option<&ContextuallyValidBlock> {
+    pub fn best_tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
         let best_chain = self.best_chain()?;
 
         best_chain.tip_block()

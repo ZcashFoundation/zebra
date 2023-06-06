@@ -235,7 +235,7 @@ impl CopyStateCmd {
             let target_block_commit_hash = target_state
                 .ready()
                 .await?
-                .call(new_zs::Request::CommitFinalizedBlock(
+                .call(new_zs::Request::CommitCheckpointVerifiedBlock(
                     source_block.clone().into(),
                 ))
                 .await?;
@@ -245,7 +245,7 @@ impl CopyStateCmd {
                     target_block_commit_hash
                 }
                 response => Err(format!(
-                    "unexpected response to CommitFinalizedBlock request, height: {height}\n \
+                    "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
                      response: {response:?}",
                 ))?,
             };
