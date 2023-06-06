@@ -112,7 +112,7 @@ proptest! {
 
             // Check the state after the response
             let error = shared_error_slot.try_get_error();
-            assert!(matches!(error, None));
+            assert!(error.is_none());
 
             inbound_service.expect_no_requests().await?;
 

@@ -52,7 +52,7 @@ async fn rpc_getinfo() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -211,7 +211,7 @@ async fn rpc_getblock() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -253,7 +253,7 @@ async fn rpc_getblock_parse_error() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -307,7 +307,7 @@ async fn rpc_getblock_missing_error() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -355,7 +355,7 @@ async fn rpc_getbestblockhash() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -519,7 +519,7 @@ async fn rpc_getrawtransaction() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -625,7 +625,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

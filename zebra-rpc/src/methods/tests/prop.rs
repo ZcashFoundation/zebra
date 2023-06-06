@@ -76,7 +76,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -137,7 +137,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -197,7 +197,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -251,7 +251,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -307,7 +307,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -405,7 +405,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -461,7 +461,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -519,7 +519,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -552,7 +552,7 @@ proptest! {
 
         // The queue task should continue without errors or panics
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         runtime.block_on(async move {
             mempool.expect_no_requests().await?;
@@ -631,7 +631,7 @@ proptest! {
 
         // The queue task should continue without errors or panics
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -855,7 +855,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -955,7 +955,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
