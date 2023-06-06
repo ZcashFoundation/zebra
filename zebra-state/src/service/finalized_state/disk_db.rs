@@ -10,13 +10,18 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
 
+use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use zebra_chain::parameters::Network;
 
 use crate::{
+    config::{
+        database_format_version_in_code, database_format_version_on_disk,
+        write_database_format_version_to_disk,
+    },
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -386,61 +391,93 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    /// The column families supported by the running database code.
+    const COLUMN_FAMILIES_IN_CODE: &[&'static str] = &[
+        // Blocks
+        "hash_by_height",
+        "height_by_hash",
+        "block_header_by_height",
+        // Transactions
+        "tx_by_loc",
+        "hash_by_tx_loc",
+        "tx_loc_by_hash",
+        // Transparent
+        "balance_by_transparent_addr",
+        "tx_loc_by_transparent_addr_loc",
+        "utxo_by_out_loc",
+        "utxo_loc_by_transparent_addr_loc",
+        // Sprout
+        "sprout_nullifiers",
+        "sprout_anchors",
+        "sprout_note_commitment_tree",
+        // Sapling
+        "sapling_nullifiers",
+        "sapling_anchors",
+        "sapling_note_commitment_tree",
+        // Orchard
+        "orchard_nullifiers",
+        "orchard_anchors",
+        "orchard_note_commitment_tree",
+        // Chain
+        "history_tree",
+        "tip_chain_value_pool",
+    ];
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
+
+        let running_version = database_format_version_in_code();
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file");
+
+        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
+            // TODO: if the on-disk format is older, actually run the upgrade task after the
+            //       database has been opened (#6642)
+            Some(Ordering::Less) => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open older database format: launching upgrade task"
+            ),
+            // TODO: if the on-disk format is newer, downgrade the version after the
+            //       database has been opened (#6642)
+            Some(Ordering::Greater) => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open newer database format: data should be compatible"
+            ),
+            Some(Ordering::Equal) => info!(
+                ?running_version,
+                "trying to open compatible database format"
+            ),
+            None => info!(
+                ?running_version,
+                "creating new database with the current format"
+            ),
+        }
+
         let db_options = DiskDb::options();
 
-        let column_families = vec![
-            // Blocks
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_header_by_height", db_options.clone()),
-            // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_loc_by_hash", db_options.clone()),
-            // Transparent
-            rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "tx_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "utxo_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            // Sprout
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
-            // Sapling
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "sapling_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Orchard
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "orchard_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Chain
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
-        ];
+        // When opening the database in read/write mode, all column families must be opened.
+        //
+        // To make Zebra forward-compatible with databases updated by later versions,
+        // we read any existing column families off the disk, then add any new column families
+        // from the current implementation.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
+        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string);
 
-        // TODO: move opening the database to a blocking thread (#2188)
-        let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
-            &db_options,
-            &path,
-            column_families,
-        );
+        let column_families = column_families_on_disk
+            .into_iter()
+            .chain(column_families_in_code)
+            .unique()
+            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+
+        let db_result = DB::open_cf_descriptors(&db_options, &path, column_families);
 
         match db_result {
             Ok(db) => {
@@ -452,6 +489,27 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
+
+                // Now we've checked that the database format is up-to-date,
+                // mark it as updated on disk.
+                //
+                // # Concurrency
+                //
+                // The version must only be updated while RocksDB is holding the database
+                // directory lock. This prevents multiple Zebra instances corrupting the version
+                // file.
+                //
+                // # TODO
+                //
+                // - only update the version at the end of the format upgrade task (#6642)
+                // - add a note to the format upgrade task code to update the version constants
+                //   whenever the format changes
+                // - add a test that the format upgrade runs exactly once when:
+                //   1. if an older cached state format is opened, the format is upgraded,
+                //      then if Zebra is launched again the format is not upgraded
+                //   2. if the current cached state format is opened, the format is not upgraded
+                write_database_format_version_to_disk(config, network)
+                    .expect("unable to write database format version file to disk");
 
                 db
             }
