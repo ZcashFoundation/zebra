@@ -1,15 +1,25 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fs::{canonicalize, remove_dir_all, DirEntry, ReadDir},
+    fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
 use zebra_chain::parameters::Network;
+
+use crate::{
+    constants::{
+        DATABASE_FORMAT_MINOR_VERSION, DATABASE_FORMAT_PATCH_VERSION, DATABASE_FORMAT_VERSION,
+        DATABASE_FORMAT_VERSION_FILE_NAME,
+    },
+    BoxError,
+};
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -123,6 +133,15 @@ impl Config {
                 .join(format!("v{}", crate::constants::DATABASE_FORMAT_VERSION))
                 .join(net_dir)
         }
+    }
+
+    /// Returns the path of the database format version file.
+    pub fn version_file_path(&self, network: Network) -> PathBuf {
+        let mut version_path = self.db_path(network);
+
+        version_path.push(DATABASE_FORMAT_VERSION_FILE_NAME);
+
+        version_path
     }
 
     /// Construct a config for an ephemeral database
@@ -267,8 +286,83 @@ fn parse_dir_name(entry: &DirEntry) -> Option<String> {
 /// Parse the state version number from `dir_name`.
 ///
 /// Returns `None` if parsing fails, or the directory name is not in the expected format.
-fn parse_version_number(dir_name: &str) -> Option<u32> {
+fn parse_version_number(dir_name: &str) -> Option<u64> {
     dir_name
         .strip_prefix('v')
         .and_then(|version| version.parse().ok())
+}
+
+/// Returns the full semantic version of the currently running database format code.
+///
+/// This is the version implemented by the Zebra code that's currently running,
+/// the minor and patch versions on disk can be different.
+pub fn database_format_version_in_code() -> Version {
+    Version::new(
+        DATABASE_FORMAT_VERSION,
+        DATABASE_FORMAT_MINOR_VERSION,
+        DATABASE_FORMAT_PATCH_VERSION,
+    )
+}
+
+/// Returns the full semantic version of the on-disk database.
+/// If there is no existing on-disk database, returns `Ok(None)`.
+///
+/// This is the format of the data on disk, the minor and patch versions
+/// implemented by the running Zebra code can be different.
+pub fn database_format_version_on_disk(
+    config: &Config,
+    network: Network,
+) -> Result<Option<Version>, BoxError> {
+    let version_path = config.version_file_path(network);
+
+    let version = match fs::read_to_string(version_path) {
+        Ok(version) => version,
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            // If the version file doesn't exist, don't guess the version.
+            // (It will end up being the version in code, once the database is created.)
+            return Ok(None);
+        }
+        Err(e) => Err(e)?,
+    };
+
+    let (minor, patch) = version
+        .split_once('.')
+        .ok_or("invalid database format version file")?;
+
+    Ok(Some(Version::new(
+        DATABASE_FORMAT_VERSION,
+        minor.parse()?,
+        patch.parse()?,
+    )))
+}
+
+/// Writes the currently running semantic database version to the on-disk database.
+///
+/// # Correctness
+///
+/// This should only be called after all running format upgrades are complete.
+///
+/// # Concurrency
+///
+/// This must only be called while RocksDB has an open database for `config`.
+/// Otherwise, multiple Zebra processes could write the version at the same time,
+/// corrupting the file.
+pub fn write_database_format_version_to_disk(
+    config: &Config,
+    network: Network,
+) -> Result<(), BoxError> {
+    let version_path = config.version_file_path(network);
+
+    // The major version is already in the directory path.
+    let version = format!(
+        "{}.{}",
+        DATABASE_FORMAT_MINOR_VERSION, DATABASE_FORMAT_PATCH_VERSION
+    );
+
+    // # Concurrency
+    //
+    // The caller handles locking for this file write.
+    fs::write(version_path, version.as_bytes())?;
+
+    Ok(())
 }
