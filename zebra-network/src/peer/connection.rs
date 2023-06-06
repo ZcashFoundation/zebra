@@ -451,7 +451,10 @@ impl From<Request> for InboundMessage {
 }
 
 /// The channels, services, and associated state for a peer connection.
-pub struct Connection<S, Tx> {
+pub struct Connection<S, Tx>
+where
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
     /// The metadata for the connected peer `service`.
     ///
     /// This field is used for debugging.
@@ -519,7 +522,10 @@ pub struct Connection<S, Tx> {
     last_overload_time: Option<Instant>,
 }
 
-impl<S, Tx> fmt::Debug for Connection<S, Tx> {
+impl<S, Tx> fmt::Debug for Connection<S, Tx>
+where
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // skip the channels, they don't tell us anything useful
         f.debug_struct(std::any::type_name::<Connection<S, Tx>>())
@@ -534,7 +540,10 @@ impl<S, Tx> fmt::Debug for Connection<S, Tx> {
     }
 }
 
-impl<S, Tx> Connection<S, Tx> {
+impl<S, Tx> Connection<S, Tx>
+where
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
     /// Return a new connection from its channels, services, and shared state.
     pub(crate) fn new(
         inbound_service: S,
@@ -1499,7 +1508,10 @@ fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> 
     raw_drop_probability.clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY)
 }
 
-impl<S, Tx> Connection<S, Tx> {
+impl<S, Tx> Connection<S, Tx>
+where
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
     /// Update the connection state metrics for this connection,
     /// using `extra_state_info` as additional state information.
     fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
@@ -1617,7 +1629,10 @@ impl<S, Tx> Connection<S, Tx> {
     }
 }
 
-impl<S, Tx> Drop for Connection<S, Tx> {
+impl<S, Tx> Drop for Connection<S, Tx>
+where
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
     fn drop(&mut self) {
         self.shutdown(PeerError::ConnectionDropped);
 
