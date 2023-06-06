@@ -776,13 +776,15 @@ impl DiskDb {
         // We disabled cancel_all_background_work() due to failures on:
         // - Rust 1.64 on Linux
         //
-        // We conditionally enabled cancel_all_background_work() due to failures on:
-        // - macOS 12.6.5 on x86_64
-        // But there weren't any failures without cancel_all_background_work() on:
+        // We tried enabling cancel_all_background_work() due to failures on:
+        // - Rust 1.70 on macOS 12.6.5 on x86_64
+        // but it didn't stop the aborts happening (PR #6820).
+        //
+        // There weren't any failures with cancel_all_background_work() disabled on:
         // - Rust 1.69 or earlier
-        // - macOS 13.2 on aarch64 (M1), native and emulated x86_64, with Rust 1.70
         // - Linux with Rust 1.70
-        // We didn't check if Linux failed with cancel_all_background_work() enabled.
+        // And with cancel_all_background_work() enabled or disabled on:
+        // - macOS 13.2 on aarch64 (M1), native and emulated x86_64, with Rust 1.70
         //
         // # Detailed Description
         //
@@ -812,11 +814,13 @@ impl DiskDb {
         // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
         //
         // <https://github.com/facebook/rocksdb/wiki/Known-Issues>
-        #[cfg(target_os = "macos")]
-        {
-            info!(?path, "stopping background database tasks");
-            self.db.cancel_all_background_work(true);
-        }
+        //
+        // # TODO
+        //
+        // Try re-enabling this code and fixing the underlying concurrency bug.
+        //
+        //info!(?path, "stopping background database tasks");
+        //self.db.cancel_all_background_work(true);
 
         // We'd like to drop the database before deleting its files,
         // because that closes the column families and the database correctly.
