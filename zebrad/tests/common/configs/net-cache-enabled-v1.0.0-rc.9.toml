@@ -1,0 +1,18 @@
+# Custom network.cache_dir config parsing test
+
+[network]
+# Enable the peer address cache with the default path
+cache_dir = true
+
+# Use the default seed peer config
+initial_mainnet_peers = [
+    "dnsseed.z.cash:8233",
+    "dnsseed.str4d.xyz:8233",
+    "mainnet.seeder.zfnd.org:8233",
+    "mainnet.is.yolo.money:8233",
+]
+initial_testnet_peers = [
+    "dnsseed.testnet.z.cash:18233",
+    "testnet.seeder.zfnd.org:18233",
+    "testnet.is.yolo.money:18233",
+]

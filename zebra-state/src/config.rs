@@ -15,22 +15,19 @@ use zebra_chain::parameters::Network;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// The root directory for storing cached data.
+    /// The root directory for storing cached block data.
     ///
-    /// Cached data includes any state that can be replicated from the network
-    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
-    /// include private data that cannot be replicated from the network, such as
-    /// wallet data.  That data is not handled by `zebra-state`.
+    /// If you change this directory, you might also want to change `network.cache_dir`.
     ///
-    /// Each state format version and network has a separate state.
-    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
-    /// underneath the `cache_dir` path, where `N` is the state format version.
+    /// This cache stores permanent blockchain state that can be replicated from
+    /// the network, including the best chain, blocks, the UTXO set, and other indexes.
+    /// Any state that can be rolled back is only stored in memory.
     ///
-    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
-    /// and re-syncs from genesis.
+    /// The `zebra-state` cache does *not* include any private data, such as wallet data.
     ///
-    /// It is ok to delete the entire cached state directory.
-    /// If you do, Zebra will re-sync from genesis next time it is launched.
+    /// You can delete the entire cached state directory, but it will impact your node's
+    /// readiness and network usage. If you do, Zebra will re-sync from genesis the next
+    /// time it is launched.
     ///
     /// The default directory is platform dependent, based on
     /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
@@ -48,6 +45,18 @@ pub struct Config {
     /// directory for this file before running Zebra, and make sure the Zebra user
     /// account has exclusive access to that directory, and other users can't modify
     /// its parent directories.
+    ///
+    /// # Implementation Details
+    ///
+    /// Each state format version and network has a separate state.
+    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
+    /// underneath the `cache_dir` path, where `N` is the state format version.
+    ///
+    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
+    /// and re-syncs from genesis.
+    ///
+    /// Old state versions are automatically deleted at startup. You can also manually delete old
+    /// state versions.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.
@@ -100,10 +109,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 impl Config {
     /// Returns the path for the finalized state database
     pub fn db_path(&self, network: Network) -> PathBuf {
-        let net_dir = match network {
-            Network::Mainnet => "mainnet",
-            Network::Testnet => "testnet",
-        };
+        let net_dir = network.lowercase_name();
 
         if self.ephemeral {
             gen_temp_path(&format!(

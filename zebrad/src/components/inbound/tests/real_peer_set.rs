@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, router::RouterError, transaction};
 use zebra_network::{
-    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash,
+    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash, CacheDir,
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
@@ -647,6 +647,7 @@ async fn setup(
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
 
         ..NetworkConfig::default()
     };
