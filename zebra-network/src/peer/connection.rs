@@ -654,9 +654,9 @@ where
                     // the request completes (or times out).
                     match future::select(peer_rx.next(), self.client_rx.next()).await {
                         Either::Left((None, _)) => {
-                            self.fail_with(PeerError::ConnectionClosed);
+                            self.fail_with(PeerError::ConnectionClosed).await;
                         }
-                        Either::Left((Some(Err(e)), _)) => self.fail_with(e),
+                        Either::Left((Some(Err(e)), _)) => self.fail_with(e).await,
                         Either::Left((Some(Ok(msg)), _)) => {
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
@@ -672,7 +672,8 @@ where
 
                             // There are no requests to be flushed,
                             // but we need to set an error and update metrics.
-                            self.shutdown(PeerError::ClientDropped);
+                            // (We don't want to log this error, because it's normal behaviour.)
+                            self.shutdown_async(PeerError::ClientDropped).await;
                             break;
                         }
                         Either::Right((Some(req), _)) => {
@@ -762,8 +763,10 @@ where
                         .instrument(span.clone())
                         .await
                     {
-                        Either::Right((None, _)) => self.fail_with(PeerError::ConnectionClosed),
-                        Either::Right((Some(Err(e)), _)) => self.fail_with(e),
+                        Either::Right((None, _)) => {
+                            self.fail_with(PeerError::ConnectionClosed).await
+                        }
+                        Either::Right((Some(Err(e)), _)) => self.fail_with(e).await,
                         Either::Right((Some(Ok(peer_msg)), _cancel)) => {
                             self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
 
@@ -822,7 +825,7 @@ where
                                     // So we do the state request cleanup manually.
                                     let e = SharedPeerError::from(e);
                                     let _ = tx.send(Err(e.clone()));
-                                    self.fail_with(e);
+                                    self.fail_with(e).await;
                                     State::Failed
                                 }
                                 // Other request timeouts fail the request.
@@ -858,18 +861,21 @@ where
         self.update_state_metrics(error.expect("checked is_some").to_string());
     }
 
-    /// Fail this connection.
+    /// Fail this connection, log the failure, and shut it down.
+    /// See [`Self::shutdown_async()`] for details.
     ///
-    /// If the connection has errored already, re-use the original error.
-    /// Otherwise, fail the connection with `error`.
-    fn fail_with(&mut self, error: impl Into<SharedPeerError>) {
+    /// Use [`Self::shutdown_async()`] to avoid logging the failure,
+    /// and [`Self::shutdown()`] from non-async code.
+    async fn fail_with(&mut self, error: impl Into<SharedPeerError>) {
         let error = error.into();
 
-        debug!(%error,
-               client_receiver = ?self.client_rx,
-               "failing peer service with error");
+        debug!(
+            %error,
+            client_receiver = ?self.client_rx,
+            "failing peer service with error"
+        );
 
-        self.shutdown(error);
+        self.shutdown_async(error).await;
     }
 
     /// Handle an internal client request, possibly generating outgoing messages to the
@@ -1061,7 +1067,7 @@ where
             Err(error) => {
                 let error = SharedPeerError::from(error);
                 let _ = tx.send(Err(error.clone()));
-                self.fail_with(error);
+                self.fail_with(error).await;
             }
         };
     }
@@ -1084,17 +1090,17 @@ where
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
                 if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
-                    self.fail_with(e);
+                    self.fail_with(e).await;
                 }
                 Consumed
             }
             // These messages shouldn't be sent outside of a handshake.
             Message::Version { .. } => {
-                self.fail_with(PeerError::DuplicateHandshake);
+                self.fail_with(PeerError::DuplicateHandshake).await;
                 Consumed
             }
             Message::Verack { .. } => {
-                self.fail_with(PeerError::DuplicateHandshake);
+                self.fail_with(PeerError::DuplicateHandshake).await;
                 Consumed
             }
             // These messages should already be handled as a response if they
@@ -1276,7 +1282,7 @@ where
         tokio::task::yield_now().await;
 
         if self.svc.ready().await.is_err() {
-            self.fail_with(PeerError::ServiceShutdown);
+            self.fail_with(PeerError::ServiceShutdown).await;
             return;
         }
 
@@ -1321,7 +1327,7 @@ where
             Response::Nil => { /* generic success, do nothing */ }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
-                    self.fail_with(e);
+                    self.fail_with(e).await;
                 }
             }
             Response::Transactions(transactions) => {
@@ -1333,7 +1339,7 @@ where
                     match transaction {
                         Available(transaction) => {
                             if let Err(e) = self.peer_tx.send(Message::Tx(transaction)).await {
-                                self.fail_with(e);
+                                self.fail_with(e).await;
                                 return;
                             }
                         }
@@ -1343,7 +1349,7 @@ where
 
                 if !missing_ids.is_empty() {
                     if let Err(e) = self.peer_tx.send(Message::NotFound(missing_ids)).await {
-                        self.fail_with(e);
+                        self.fail_with(e).await;
                         return;
                     }
                 }
@@ -1357,7 +1363,7 @@ where
                     match block {
                         Available(block) => {
                             if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
-                                self.fail_with(e);
+                                self.fail_with(e).await;
                                 return;
                             }
                         }
@@ -1367,7 +1373,7 @@ where
 
                 if !missing_hashes.is_empty() {
                     if let Err(e) = self.peer_tx.send(Message::NotFound(missing_hashes)).await {
-                        self.fail_with(e);
+                        self.fail_with(e).await;
                         return;
                     }
                 }
@@ -1378,12 +1384,12 @@ where
                     .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))
                     .await
                 {
-                    self.fail_with(e)
+                    self.fail_with(e).await
                 }
             }
             Response::BlockHeaders(headers) => {
                 if let Err(e) = self.peer_tx.send(Message::Headers(headers)).await {
-                    self.fail_with(e)
+                    self.fail_with(e).await
                 }
             }
             Response::TransactionIds(hashes) => {
@@ -1411,7 +1417,7 @@ where
                     .collect();
 
                 if let Err(e) = self.peer_tx.send(Message::Inv(hashes)).await {
-                    self.fail_with(e)
+                    self.fail_with(e).await
                 }
             }
         }
@@ -1463,7 +1469,7 @@ where
             );
 
             self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Error", req.command()));
-            self.fail_with(PeerError::Overloaded);
+            self.fail_with(PeerError::Overloaded).await;
         } else {
             self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Ignored", req.command()));
             metrics::counter!("pool.ignored.loadshed", 1);
@@ -1550,18 +1556,32 @@ where
         }
     }
 
-    /// Marks the peer as having failed with `error`, and performs connection cleanup.
+    /// Marks the peer as having failed with `error`, and performs connection cleanup,
+    /// including async channel closes.
     ///
     /// If the connection has errored already, re-use the original error.
     /// Otherwise, fail the connection with `error`.
+    async fn shutdown_async(&mut self, error: impl Into<SharedPeerError>) {
+        // Close async channels first, so other tasks can start shutting down.
+        // There's nothing we can do about errors while shutting down, and some errors are expected.
+        //
+        // TODO: close peer_tx and peer_rx in shutdown() and Drop, after:
+        // - using channels instead of streams/sinks?
+        // - exposing the underlying implementation rather than using generics and closures?
+        // - adding peer_rx to the connection struct (optional)
+        let _ = self.peer_tx.close().await;
+
+        self.shutdown(error);
+    }
+
+    /// Marks the peer as having failed with `error`, and performs connection cleanup.
+    /// See [`Self::shutdown_async()`] for details.
+    ///
+    /// Call [`Self::shutdown_async()`] in async code, because it can shut down more channels.
     fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
         let mut error = error.into();
 
         // Close channels first, so other tasks can start shutting down.
-        //
-        // TODO: close peer_tx and peer_rx, after:
-        // - adapting them using a struct with a Stream impl, rather than closures
-        // - making the struct forward `close` to the inner channel
         self.client_rx.close();
 
         // Update the shared error slot
