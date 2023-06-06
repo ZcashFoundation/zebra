@@ -63,7 +63,7 @@ impl EntryPoint {
 
     /// Process command arguments and insert the default subcommand
     /// if no subcommand is provided.
-    pub fn process_cli_args(args: Vec<OsString>) -> Vec<OsString> {
+    pub fn process_cli_args(mut args: Vec<OsString>) -> Vec<OsString> {
         // Check if the provided arguments include a subcommand
         let should_add_default_subcommand = EntryPoint::try_parse_from(&args)
             .unwrap_or_else(|err| err.exit())
@@ -84,14 +84,10 @@ impl EntryPoint {
                 }
             }
 
-            let mut updated_args: Vec<_> = args.iter().take(num_top_level_args).cloned().collect();
-            updated_args.push(EntryPoint::default_cmd_as_str().into());
-            updated_args.extend(args.into_iter().skip(num_top_level_args));
-
-            updated_args
-        } else {
-            args
+            args.insert(num_top_level_args, EntryPoint::default_cmd_as_str().into());
         }
+
+        args
     }
 }
 
