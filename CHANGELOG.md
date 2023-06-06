@@ -5,6 +5,18 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - XXXX-XX-XX
+
+In this release ...
+
+### Breaking Changes
+
+- The version subcommand has been replaced with a --version/-V flag ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+
+...
+
+
 ## [Zebra 1.0.0-rc.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.8) - 2023-05-10
 
 Starting in this release, Zebra has implemented an "end of support" halt. Just like `zcashd`, the `zebrad` binary will stop running 16 weeks after the last release date.
