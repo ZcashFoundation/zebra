@@ -5852,6 +5852,7 @@ dependencies = [
  "howudoin",
  "humantime-serde",
  "indexmap",
+ "itertools",
  "lazy_static",
  "metrics 0.21.0",
  "ordered-map",

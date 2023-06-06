@@ -335,6 +335,9 @@ pub const MIN_OVERLOAD_DROP_PROBABILITY: f32 = 0.05;
 /// [`Overloaded`](crate::PeerError::Overloaded) error.
 pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.95;
 
+/// The minimum interval between logging peer set status updates.
+pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
     /// represented as a network upgrade.

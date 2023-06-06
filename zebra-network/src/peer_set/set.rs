@@ -98,6 +98,7 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
+    net::IpAddr,
     pin::Pin,
     task::{Context, Poll},
     time::Instant,
@@ -109,6 +110,7 @@ use futures::{
     prelude::*,
     stream::FuturesUnordered,
 };
+use itertools::Itertools;
 use tokio::{
     sync::{broadcast, oneshot::error::TryRecvError, watch},
     task::JoinHandle,
@@ -123,6 +125,7 @@ use zebra_chain::chain_tip::ChainTip;
 
 use crate::{
     address_book::AddressMetrics,
+    constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -810,33 +813,84 @@ where
         (self.ready_services.len() + 1) / 2
     }
 
-    /// Logs the peer set size.
+    /// Returns the list of addresses in the peer set.
+    fn peer_set_addresses(&self) -> Vec<PeerSocketAddr> {
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .cloned()
+            .collect()
+    }
+
+    /// Logs the peer set size, and any potential connectivity issues.
     fn log_peer_set_size(&mut self) {
         let ready_services_len = self.ready_services.len();
         let unready_services_len = self.unready_services.len();
         trace!(ready_peers = ?ready_services_len, unready_peers = ?unready_services_len);
 
-        if ready_services_len > 0 {
-            return;
-        }
+        let now = Instant::now();
 
         // These logs are designed to be human-readable in a terminal, at the
         // default Zebra log level. If you need to know the peer set size for
         // every request, use the trace-level logs, or the metrics exporter.
         if let Some(last_peer_log) = self.last_peer_log {
             // Avoid duplicate peer set logs
-            if Instant::now().duration_since(last_peer_log).as_secs() < 60 {
+            if now.duration_since(last_peer_log) < MIN_PEER_SET_LOG_INTERVAL {
                 return;
             }
         } else {
             // Suppress initial logs until the peer set has started up.
             // There can be multiple initial requests before the first peer is
             // ready.
-            self.last_peer_log = Some(Instant::now());
+            self.last_peer_log = Some(now);
             return;
         }
 
-        self.last_peer_log = Some(Instant::now());
+        self.last_peer_log = Some(now);
+
+        // Log potential duplicate connections.
+        let peers = self.peer_set_addresses();
+
+        // Check for duplicates by address and port: these are unexpected and represent a bug.
+        let duplicates: Vec<PeerSocketAddr> = peers.iter().duplicates().cloned().collect();
+
+        let mut peer_counts = peers.iter().counts();
+        peer_counts.retain(|peer, _count| duplicates.contains(peer));
+
+        if !peer_counts.is_empty() {
+            let duplicate_connections: usize = peer_counts.values().sum();
+
+            warn!(
+                ?duplicate_connections,
+                duplicated_peers = ?peer_counts.len(),
+                peers = ?peers.len(),
+                "duplicate peer connections in peer set"
+            );
+        }
+
+        // Check for duplicates by address: these can happen if there are multiple nodes
+        // behind a NAT or on a single server.
+        let peers: Vec<IpAddr> = peers.iter().map(|addr| addr.ip()).collect();
+        let duplicates: Vec<IpAddr> = peers.iter().duplicates().cloned().collect();
+
+        let mut peer_counts = peers.iter().counts();
+        peer_counts.retain(|peer, _count| duplicates.contains(peer));
+
+        if !peer_counts.is_empty() {
+            let duplicate_connections: usize = peer_counts.values().sum();
+
+            info!(
+                ?duplicate_connections,
+                duplicated_peers = ?peer_counts.len(),
+                peers = ?peers.len(),
+                "duplicate IP addresses in peer set"
+            );
+        }
+
+        // Only log connectivity warnings if all our peers are busy (or there are no peers).
+        if ready_services_len > 0 {
+            return;
+        }
 
         let address_metrics = *self.address_metrics.borrow();
         if unready_services_len == 0 {
