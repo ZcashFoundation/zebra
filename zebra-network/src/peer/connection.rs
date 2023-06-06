@@ -852,6 +852,8 @@ where
             }
         }
 
+        // TODO: close peer_rx here, after changing it from a stream to a channel
+
         let error = self.error_slot.try_get_error();
         assert!(
             error.is_some(),
