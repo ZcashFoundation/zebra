@@ -69,7 +69,8 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macos-latest]
+        # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
+        os: [ubuntu-latest]
         rust: [stable, beta]
         features: ["", " --features getblocktemplate-rpcs"]
         exclude:
@@ -94,10 +95,10 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.3.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with ${{ matrix.rust }} toolchain and minimal profile
@@ -230,10 +231,10 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.3.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile
