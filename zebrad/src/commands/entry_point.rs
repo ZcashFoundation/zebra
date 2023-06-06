@@ -84,6 +84,7 @@ impl EntryPoint {
                 }
             }
 
+            num_top_level_args = min(num_top_level_args, args.len());
             args.insert(num_top_level_args, EntryPoint::default_cmd_as_str().into());
         }
 
