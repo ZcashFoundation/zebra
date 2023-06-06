@@ -67,10 +67,10 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.3.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check workflow permissions
@@ -118,10 +118,10 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.3.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and default profile
@@ -157,10 +157,10 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.3.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and default profile
