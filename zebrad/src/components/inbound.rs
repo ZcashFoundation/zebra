@@ -29,7 +29,7 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
-use zebra_consensus::chain::VerifyChainError;
+use zebra_consensus::router::RouterError;
 use zebra_network::{
     constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     AddressBook, InventoryResponse,
@@ -73,12 +73,12 @@ type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
-type BlockVerifier = Buffer<
-    BoxService<zebra_consensus::Request, block::Hash, VerifyChainError>,
+type SemanticBlockVerifier = Buffer<
+    BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
 >;
 type GossipedBlockDownloads =
-    BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<BlockVerifier>, State>;
+    BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<SemanticBlockVerifier>, State>;
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
@@ -91,7 +91,7 @@ pub struct InboundSetupData {
     /// A service that verifies downloaded blocks.
     ///
     /// Given to `Inbound.block_downloads` after the required services are set up.
-    pub block_verifier: BlockVerifier,
+    pub block_verifier: SemanticBlockVerifier,
 
     /// A service that manages transactions in the memory pool.
     pub mempool: Mempool,

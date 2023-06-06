@@ -586,8 +586,8 @@ fn config_tests() -> Result<()> {
     // Check that we have a current version of the config stored
     last_config_is_stored()?;
 
-    // Check that Zebra stored configuration works
-    stored_configs_works()?;
+    // Check that Zebra's previous configurations still work
+    stored_configs_work()?;
 
     // Runs `zebrad` serially to avoid potential port conflicts
     app_no_args()?;
@@ -716,13 +716,31 @@ fn last_config_is_stored() -> Result<()> {
         .to_string();
 
     // Loop all the stored configs
+    //
+    // TODO: use the same filename list code in last_config_is_stored() and stored_configs_work()
     for config_file in configs_dir()
         .read_dir()
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // Read stored config
-        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+        let stored_content = fs::read_to_string(config_file_full_path(config_file_path))
             .expect("Should have been able to read the file")
             .trim()
             .to_string();
@@ -846,7 +864,7 @@ fn invalid_generated_config() -> Result<()> {
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
 #[tracing::instrument]
-fn stored_configs_works() -> Result<()> {
+fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
     for config_file in old_configs_dir
@@ -854,15 +872,33 @@ fn stored_configs_works() -> Result<()> {
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // ignore files starting with getblocktemplate prefix
         // if we were not built with the getblocktemplate-rpcs feature.
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file
-            .file_name()
-            .into_string()
-            .expect("all files names should be string convertible")
+        if config_file_name
+            .as_ref()
             .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
         {
+            tracing::info!(
+                ?config_file_path,
+                "skipping getblocktemplate-rpcs config file path"
+            );
             continue;
         }
 
@@ -1052,7 +1088,8 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    let checkpoint_stop_regex = format!("{STOP_AT_HEIGHT_REGEX}.*CommitFinalized request");
+    let checkpoint_stop_regex =
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit checkpoint-verified request");
 
     create_cached_database_height(
         network,
@@ -1070,7 +1107,7 @@ fn create_cached_database(network: Network) -> Result<()> {
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
-        format!("{STOP_AT_HEIGHT_REGEX}.*best non-finalized chain root");
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
 
     create_cached_database_height(
         network,

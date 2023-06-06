@@ -23,7 +23,7 @@ use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
-        FinalizedBlock,
+        CheckpointVerifiedBlock,
     },
     BoxError,
 };
@@ -179,9 +179,9 @@ impl DiskWriteBatch {
     pub fn prepare_shielded_transaction_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &CheckpointVerifiedBlock,
     ) -> Result<(), BoxError> {
-        let FinalizedBlock { block, .. } = finalized;
+        let CheckpointVerifiedBlock { block, .. } = finalized;
 
         // Index each transaction's shielded data
         for transaction in &block.transactions {
@@ -234,7 +234,7 @@ impl DiskWriteBatch {
     pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &CheckpointVerifiedBlock,
         note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
     ) -> Result<(), BoxError> {
@@ -246,7 +246,7 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let CheckpointVerifiedBlock { height, .. } = finalized;
 
         // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
@@ -297,13 +297,13 @@ impl DiskWriteBatch {
     pub fn prepare_genesis_note_commitment_tree_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &CheckpointVerifiedBlock,
     ) {
         let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let CheckpointVerifiedBlock { height, .. } = finalized;
 
         // Insert empty note commitment trees. Note that these can't be
         // used too early (e.g. the Orchard tree before Nu5 activates)

@@ -35,7 +35,7 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, FinalizedBlock,
+    BoxError, CheckpointVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -369,13 +369,13 @@ impl DiskWriteBatch {
     pub fn prepare_transparent_transaction_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &CheckpointVerifiedBlock,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let FinalizedBlock { block, height, .. } = finalized;
+        let CheckpointVerifiedBlock { block, height, .. } = finalized;
 
         // Update created and spent transparent outputs
         self.prepare_new_transparent_outputs_batch(

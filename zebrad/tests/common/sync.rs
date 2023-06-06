@@ -52,7 +52,7 @@ pub const SYNC_PROGRESS_REGEX: &str = r"sync_percent";
 /// The text that should be logged when Zebra loads its compiled-in checkpoints.
 #[cfg(feature = "zebra-checkpoints")]
 pub const CHECKPOINT_VERIFIER_REGEX: &str =
-    r"initializing chain verifier.*max_checkpoint_height.*=.*Height";
+    r"initializing block verifier router.*max_checkpoint_height.*=.*Height";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///

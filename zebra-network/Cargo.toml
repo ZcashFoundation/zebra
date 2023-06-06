@@ -26,7 +26,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 bitflags = "2.2.1"
 byteorder = "1.4.3"
 bytes = "1.4.0"
-chrono = { version = "0.4.25", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"

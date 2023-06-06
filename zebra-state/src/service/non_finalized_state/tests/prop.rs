@@ -17,7 +17,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    request::ContextuallyValidBlock,
+    request::ContextuallyVerifiedBlock,
     service::{
         arbitrary::PreparedChain,
         finalized_state::FinalizedState,
@@ -55,7 +55,7 @@ fn push_genesis_chain() -> Result<()> {
 
             for block in chain.iter().take(count).cloned() {
                 let block =
-                    ContextuallyValidBlock::with_block_and_spent_utxos(
+                ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                         block,
                         only_chain.unspent_utxos(),
                     )
@@ -104,7 +104,7 @@ fn push_history_tree_chain() -> Result<()> {
         for block in chain
             .iter()
             .take(count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_chain_pool_change) {
                 only_chain = only_chain.push(block)?;
             }
 
@@ -151,7 +151,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             ValueBalance::zero(),
         );
         for block in chain.iter().take(fork_at_count).cloned() {
-            let block = ContextuallyValidBlock::with_block_and_spent_utxos(
+            let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                 block,
                 partial_chain.unspent_utxos(),
             )?;
@@ -172,7 +172,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         );
         for block in chain.iter().cloned() {
             let block =
-                ContextuallyValidBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
             full_chain = full_chain
                 .push(block.clone())
                 .expect("full chain push is valid");
@@ -216,7 +216,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // same original full chain.
         for block in chain.iter().skip(fork_at_count).cloned() {
             let block =
-                ContextuallyValidBlock::with_block_and_spent_utxos(block, forked.unspent_utxos())?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos())?;
             forked = forked.push(block).expect("forked chain push is valid");
         }
 
@@ -256,13 +256,13 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
         for block in chain
             .iter()
             .take(fork_at_count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_chain_pool_change) {
                 partial_chain = partial_chain.push(block)?;
             }
 
         for block in chain
             .iter()
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_chain_pool_change) {
                 full_chain = full_chain.push(block.clone())?;
             }
 
@@ -279,7 +279,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
         for block in chain
             .iter()
             .skip(fork_at_count)
-            .map(ContextuallyValidBlock::test_with_zero_chain_pool_change) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_chain_pool_change) {
                 forked = forked.push(block)?;
         }
 
@@ -310,7 +310,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         // TODO: fix this test or the code so the full_chain temporary trees aren't overwritten
         let chain = chain.iter()
             .filter(|block| block.height != Height(0))
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos);
+            .map(ContextuallyVerifiedBlock::test_with_zero_spent_utxos);
 
         // use `end_count` as the number of non-finalized blocks at the end of the chain,
         // make sure this test pushes at least 1 block in the partial chain.
@@ -399,7 +399,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
         for block in chain
             .iter()
             .take(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_spent_utxos) {
                 full_chain = full_chain.push(block)?;
             }
 
@@ -416,14 +416,14 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
         for block in chain
             .iter()
             .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_spent_utxos) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
 
         for block in chain
             .iter()
             .skip(finalized_count)
-            .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
+            .map(ContextuallyVerifiedBlock::test_with_zero_spent_utxos) {
                 full_chain= full_chain.push(block.clone())?;
             }
 

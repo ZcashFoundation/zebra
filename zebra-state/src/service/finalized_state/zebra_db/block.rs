@@ -38,7 +38,7 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        FinalizedBlock,
+        CheckpointVerifiedBlock,
     },
     BoxError, HashOrHeight,
 };
@@ -282,7 +282,7 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: FinalizedBlock,
+        finalized: CheckpointVerifiedBlock,
         history_tree: Arc<HistoryTree>,
         note_commitment_trees: NoteCommitmentTrees,
         network: Network,
@@ -420,7 +420,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
-        finalized: FinalizedBlock,
+        finalized: CheckpointVerifiedBlock,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
@@ -429,7 +429,7 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let FinalizedBlock {
+        let CheckpointVerifiedBlock {
             block,
             hash,
             height,
@@ -485,7 +485,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &CheckpointVerifiedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
@@ -497,7 +497,7 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let FinalizedBlock {
+        let CheckpointVerifiedBlock {
             block,
             hash,
             height,
@@ -541,8 +541,12 @@ impl DiskWriteBatch {
     /// If `finalized.block` is not a genesis block, does nothing.
     ///
     /// This method never returns an error.
-    pub fn prepare_genesis_batch(&mut self, db: &DiskDb, finalized: &FinalizedBlock) -> bool {
-        let FinalizedBlock { block, .. } = finalized;
+    pub fn prepare_genesis_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &CheckpointVerifiedBlock,
+    ) -> bool {
+        let CheckpointVerifiedBlock { block, .. } = finalized;
 
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             self.prepare_genesis_note_commitment_tree_batch(db, finalized);

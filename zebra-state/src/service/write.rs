@@ -20,7 +20,7 @@ use crate::{
         queued_blocks::{QueuedFinalized, QueuedNonFinalized},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
     },
-    CommitBlockError, PreparedBlock,
+    CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
 
 // These types are used in doc links
@@ -49,8 +49,8 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
-    prepared: PreparedBlock,
-) -> Result<(), CommitBlockError> {
+    prepared: SemanticallyVerifiedBlock,
+) -> Result<(), CommitSemanticallyVerifiedError> {
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
@@ -288,9 +288,9 @@ pub fn write_blocks_from_channels(
 
         while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
-            let finalized_with_trees = non_finalized_state.finalize();
+            let contextually_verified_with_trees = non_finalized_state.finalize();
             finalized_state
-                        .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
+                        .commit_finalized_direct(contextually_verified_with_trees, "commit contextually-verified request")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
