@@ -157,8 +157,8 @@ Response diff (between zcashd port and port 28232):
 +++ /run/user/1000/tmp.g9CJecu2Wo/zcashd-main-1649797-getinfo.json      2022-04-29 14:08:46.769240315 +1000
 @@ -1,4 +1,16 @@
  {
--  "build": "1.0.0-rc.9+54.ge83e93a",
--  "subversion": "/Zebra:1.0.0-rc.9/"
+-  "build": "1.0.0-beta.8+54.ge83e93a",
+-  "subversion": "/Zebra:1.0.0-beta.8/"
 +  "version": 4070050,
 +  "build": "v4.7.0-gitian",
 +  "subversion": "/MagicBean:4.7.0/",
