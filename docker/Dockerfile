@@ -136,6 +136,11 @@ COPY . .
 # Build zebra
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
+# TODO: remove this before merging
+RUN pwd
+RUN ls / ./ ./docker
+RUN find / -name runtime-entrypoint.sh
+
 # See note above about COPY and caching.
 RUN cp ./docker/runtime-entrypoint.sh /
 RUN chmod u+x /runtime-entrypoint.sh
