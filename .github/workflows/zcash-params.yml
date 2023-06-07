@@ -9,11 +9,13 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
       no_cache:
         description: 'Disable the Docker cache for this build'
         required: false
         type: boolean
         default: false
+
   push:
     branches:
       - 'main'
