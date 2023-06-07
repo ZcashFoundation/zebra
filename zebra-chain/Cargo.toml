@@ -65,7 +65,7 @@ halo2 = { package = "halo2_proofs", version = "0.3.0" }
 orchard = "0.4.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
-zcash_note_encryption = "0.3.0"
+zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.11.0", features = ["transparent-inputs"] }
 
 # Time

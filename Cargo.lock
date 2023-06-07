@@ -2825,7 +2825,7 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
 ]
 
 [[package]]
@@ -5552,6 +5552,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_note_encryption"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b4580cd6cee12e44421dac43169be8d23791650816bdb34e6ddfa70ac89c1c5"
+dependencies = [
+ "chacha20",
+ "chacha20poly1305",
+ "cipher",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5584,7 +5597,7 @@ dependencies = [
  "subtle",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
 ]
 
 [[package]]
@@ -5636,7 +5649,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
  "zcash_primitives",
  "zcash_proofs",
 ]
@@ -5696,7 +5709,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_history",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.4.0",
  "zcash_primitives",
  "zebra-test",
 ]
