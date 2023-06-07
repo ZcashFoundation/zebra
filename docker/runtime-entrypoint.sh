@@ -49,4 +49,7 @@ listen_addr = "0.0.0.0:${RPC_PORT}"
 EOF
 fi
 
+echo "Using zebrad.toml:"
+cat "$ZEBRA_CONF_PATH"
+
 exec zebrad -c "$ZEBRA_CONF_PATH" "$@"
