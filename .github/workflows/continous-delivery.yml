@@ -212,6 +212,8 @@ jobs:
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
+          --user-output-enabled \
+          --metadata google-logging-enabled=true \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --container-env "NETWORK=${{ matrix.network }}" \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
@@ -309,6 +311,8 @@ jobs:
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
+          --user-output-enabled \
+          --metadata google-logging-enabled=true \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
