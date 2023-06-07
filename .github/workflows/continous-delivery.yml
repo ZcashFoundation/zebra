@@ -109,7 +109,12 @@ jobs:
           docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
           echo "missing container, or missing exit status for container" \
           )
+          docker logs default-conf-tests
           echo "docker exit status: $EXIT_STATUS"
+          if [[ "$EXIT_STATUS" = "137" ]]; then
+          echo "ignoring expected signal status"
+          exit 0
+          fi
           exit "$EXIT_STATUS"
 
       # Make sure Zebra can sync the genesis block on testnet
@@ -130,7 +135,12 @@ jobs:
           docker inspect --format "{{.State.ExitCode}}" testnet-conf-tests || \
           echo "missing container, or missing exit status for container" \
           )
+          docker logs testnet-conf-tests
           echo "docker exit status: $EXIT_STATUS"
+          if [[ "$EXIT_STATUS" = "137" ]]; then
+          echo "ignoring expected signal status"
+          exit 0
+          fi
           exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
