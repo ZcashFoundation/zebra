@@ -27,8 +27,6 @@ This is the last release candidate before the 1.0.0 stable release. Please repor
 
 - Report compiler version and Zebra features when starting Zebra ([#6606](https://github.com/ZcashFoundation/zebra/pull/6606))
 - Update Zebra book summary to include supported platforms, platform tier policy, and versioning ([#6683](https://github.com/ZcashFoundation/zebra/pull/6683))
-- Limit RPC failure log length, add details to RPC failure logs ([#6754](https://github.com/ZcashFoundation/zebra/pull/6754))
-- Stop logging peer IP addresses, to protect user privacy ([#6662](https://github.com/ZcashFoundation/zebra/pull/6662))
 - Change `zebrad`'s argument handling to make it more user-friendly ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
 ### Fixed
