@@ -25,7 +25,6 @@ information logging, and is the last release candidate.
 
 - Report compiler version and Zebra features when starting Zebra ([#6606](https://github.com/ZcashFoundation/zebra/pull/6606))
 - Update Zebra book summary to include supported platforms, platform tier policy, and versioning ([#6683](https://github.com/ZcashFoundation/zebra/pull/6683))
-- Add cargo update steps to task list ([#6657](https://github.com/ZcashFoundation/zebra/pull/6657))
 - Limit RPC failure log length, add details to RPC failure logs ([#6754](https://github.com/ZcashFoundation/zebra/pull/6754))
 - Stop logging peer IP addresses, to protect user privacy ([#6662](https://github.com/ZcashFoundation/zebra/pull/6662))
 - Change `zebrad`'s argument handling to make it more user-friendly ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
