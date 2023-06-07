@@ -2048,6 +2048,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb91780c91bfc79769006a55c49127b83e1c1a6cf2b3b149ce3f247cbe342f0"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2815,7 +2824,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -2825,7 +2834,35 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
+]
+
+[[package]]
+name = "orchard"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f4e7a52f510cb8c39e639e662a353adbaf86025478af89ae54a0551f8ca35e2"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "ff",
+ "fpe",
+ "group",
+ "halo2_gadgets",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree 0.4.0",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand 0.8.5",
+ "reddsa",
+ "serde",
+ "subtle",
+ "tracing",
+ "zcash_note_encryption 0.4.0",
 ]
 
 [[package]]
@@ -5552,6 +5589,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_note_encryption"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b4580cd6cee12e44421dac43169be8d23791650816bdb34e6ddfa70ac89c1c5"
+dependencies = [
+ "chacha20",
+ "chacha20poly1305",
+ "cipher",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5570,12 +5620,12 @@ dependencies = [
  "group",
  "hdwallet",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "jubjub",
  "lazy_static",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.4.0",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "ripemd",
@@ -5584,7 +5634,7 @@ dependencies = [
  "subtle",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
 ]
 
 [[package]]
@@ -5623,12 +5673,12 @@ dependencies = [
  "cxx",
  "cxx-gen",
  "group",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "jubjub",
  "libc",
  "memuse",
  "metrics 0.20.1",
- "orchard",
+ "orchard 0.4.0",
  "rand_core 0.6.4",
  "rayon",
  "subtle",
@@ -5636,7 +5686,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
  "zcash_primitives",
  "zcash_proofs",
 ]
@@ -5663,12 +5713,12 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.3.1",
  "itertools",
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard",
+ "orchard 0.5.0",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5696,7 +5746,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_history",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.3.0",
  "zcash_primitives",
  "zebra-test",
 ]
@@ -5721,7 +5771,7 @@ dependencies = [
  "metrics 0.21.0",
  "num-integer",
  "once_cell",
- "orchard",
+ "orchard 0.5.0",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
