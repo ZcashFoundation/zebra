@@ -28,7 +28,7 @@ information logging, and is the last release candidate.
 - Add cargo update steps to task list ([#6657](https://github.com/ZcashFoundation/zebra/pull/6657))
 - Limit RPC failure log length, add details to RPC failure logs ([#6754](https://github.com/ZcashFoundation/zebra/pull/6754))
 - Stop logging peer IP addresses, to protect user privacy ([#6662](https://github.com/ZcashFoundation/zebra/pull/6662))
-- Accept default subcommand arguments and print consistent usage information for top-level 'help' subcommand ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Change `zebrad`'s argument handling to make it more user-friendly ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
 ### Fixed
 
