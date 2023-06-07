@@ -203,7 +203,7 @@ jobs:
           --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --region "${{ vars.GCP_REGION }}"
 
-  # This jobs handles the deployment of a single node (1) in the us-central1-a zone
+  # This jobs handles the deployment of a single node (1) in the configured GCP zone
   # when an instance is required to test a specific commit
   #
   # Runs:
@@ -211,7 +211,7 @@ jobs:
   #
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
-    name: Deploy single instance
+    name: Deploy single ${{ inputs.network }} instance
     needs: [ build, test-configuration-file ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -243,9 +243,9 @@ jobs:
         uses: google-github-actions/setup-gcloud@v1.1.1
 
       # Create instance template from container image
-      - name: Manual deploy of a single instance running zebrad
+      - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
         run: |
-          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --boot-disk-size 300GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
@@ -253,9 +253,10 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
+          --container-env "NETWORK=${{ inputs.network }}" \
           --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
