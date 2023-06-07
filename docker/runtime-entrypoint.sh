@@ -14,8 +14,6 @@ echo "ZEBRA_CONF_DIR=$ZEBRA_CONF_DIR"
 echo "ZEBRA_CONF_FILE=$ZEBRA_CONF_FILE"
 echo "ZEBRA_CONF_PATH=$ZEBRA_CONF_PATH"
 
-
-
 # Create the conf path and file if it does not exist.
 mkdir -p "$ZEBRA_CONF_DIR"
 touch "$ZEBRA_CONF_PATH"
