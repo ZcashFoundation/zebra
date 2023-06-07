@@ -55,6 +55,9 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
+# This is required for cache invalidation, even though the files aren't used in this image.
+COPY . .
+
 # Build arguments and variables set to change how tests are run, tracelog levels,
 # and Network to be used (Mainnet or Testnet)
 #
