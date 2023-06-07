@@ -14,10 +14,6 @@ on:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
-      checkpoint_sync:
-        default: 'true'
-        description: 'Use as many checkpoints as possible when syncing'
-        required: true
       no_cache:
         description: 'Disable the Docker cache for this build'
         required: false
@@ -73,7 +69,6 @@ jobs:
       no_cache: ${{ inputs.no_cache || false }}
       # We hard-code Mainnet here, because the config is modified before running zebrad
       network: 'Mainnet'
-      checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
       rust_log: info

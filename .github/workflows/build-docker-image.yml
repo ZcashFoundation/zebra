@@ -6,9 +6,6 @@ on:
       network:
         required: false
         type: string
-      checkpoint_sync:
-        required: false
-        type: boolean
       image_name:
         required: true
         type: string
@@ -163,7 +160,6 @@ jobs:
             RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
             COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
             ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
-            CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
             FEATURES=${{ inputs.features }}
             TEST_FEATURES=${{ inputs.test_features }}
