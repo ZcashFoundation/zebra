@@ -26,6 +26,7 @@ This is the last release candidate before the 1.0.0 stable release. Please repor
 - Limit blocks and transactions sent in response to a single request  ([#6679](https://github.com/ZcashFoundation/zebra/pull/6679))
 - Rate-limit and size-limit peer transaction ID messages ([#6625](https://github.com/ZcashFoundation/zebra/pull/6625))
 - Stop panicking on state RPC or block requests with very large heights ([#6699](https://github.com/ZcashFoundation/zebra/pull/6699))
+- Try harder to drop connections when they shut down, Credit: Ziggurat Team ([#6832](https://github.com/ZcashFoundation/zebra/pull/6832))
 
 ### Added
 
