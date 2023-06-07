@@ -7,12 +7,17 @@ set -e
 # exit if any command in a pipeline fails
 set -o pipefail
 
-echo "Runtime variables:"
+echo "Config variables:"
 echo "NETWORK=$NETWORK"
 echo "RPC_PORT=$RPC_PORT"
+echo "LOG_FILE=$LOG_FILE"
+
+echo "Config location:"
 echo "ZEBRA_CONF_DIR=$ZEBRA_CONF_DIR"
 echo "ZEBRA_CONF_FILE=$ZEBRA_CONF_FILE"
 echo "ZEBRA_CONF_PATH=$ZEBRA_CONF_PATH"
+
+echo "Other variables:"
 echo "SHORT_SHA=$SHORT_SHA"
 echo "SENTRY_DSN=$SENTRY_DSN"
 
@@ -39,15 +44,22 @@ cache_dir = "/zebrad-cache"
 
 [metrics]
 #endpoint_addr = "0.0.0.0:9999"
-
-[tracing]
-#endpoint_addr = "0.0.0.0:3000"
 EOF
 
 if [[ -n "$RPC_PORT" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [rpc]
 listen_addr = "0.0.0.0:${RPC_PORT}"
+EOF
+fi
+
+if [[ -n "$LOG_FILE" ]]; then
+mkdir -p $(dirname "$LOG_FILE")
+
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+[tracing]
+log_file = "${LOG_FILE}"
+#endpoint_addr = "0.0.0.0:3000"
 EOF
 fi
 

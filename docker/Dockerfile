@@ -149,11 +149,24 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
 
+# Config settings
+
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
+# Set this to enable the RPC port
 ARG RPC_PORT
 ENV RPC_PORT ${RPC_PORT}
+
+# Set this to log to a file, if not set, logs to standard output
+ARG LOG_FILE
+ENV LOG_FILE ${LOG_FILE}
+
+# Expose configured ports
+
+EXPOSE 8233 18233 $RPC_PORT
+
+# Config location
 
 # Use a configurable dir and file for the zebrad configuration file
 ARG ZEBRA_CONF_DIR
@@ -165,11 +178,12 @@ ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE:-zebrad.toml}
 ARG ZEBRA_CONF_PATH
 ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH:-$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE}
 
-EXPOSE 8233 18233 $RPC_PORT
+# Other settings
 
 ARG SHORT_SHA
 ENV SHORT_SHA ${SHORT_SHA}
 
+# Set this to send sentry reports when Zebra crashes
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 

@@ -17,6 +17,8 @@ on:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
+      log_file:
+        description: 'Log to a file path rather than standard output'
       no_cache:
         description: 'Disable the Docker cache for this build'
         required: false
@@ -215,7 +217,7 @@ jobs:
           --user-output-enabled \
           --metadata google-logging-enabled=true \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
@@ -316,7 +318,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ inputs.network }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file || vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
           --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
