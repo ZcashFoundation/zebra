@@ -31,7 +31,7 @@ This is the last release candidate before the 1.0.0 stable release. Please repor
 
 - Report compiler version and Zebra features when starting Zebra ([#6606](https://github.com/ZcashFoundation/zebra/pull/6606))
 - Update Zebra book summary to include supported platforms, platform tier policy, and versioning ([#6683](https://github.com/ZcashFoundation/zebra/pull/6683))
-- Change `zebrad`'s argument handling to make it more user-friendly ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Improve zebrad's help output, credit to @Rqnsom ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
 ### Fixed
 
