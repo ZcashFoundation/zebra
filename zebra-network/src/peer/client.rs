@@ -543,10 +543,14 @@ impl Client {
         // Prevent any senders from sending more messages to this peer.
         self.server_tx.close_channel();
 
-        // Stop the heartbeat task
+        // Ask the heartbeat task to stop.
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             let _ = shutdown_tx.send(CancelHeartbeatTask);
         }
+
+        // Force the connection and heartbeat tasks to stop.
+        self.connection_task.abort();
+        self.heartbeat_task.abort();
     }
 }
 

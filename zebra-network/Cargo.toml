@@ -31,6 +31,7 @@ dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
 indexmap = { version = "1.9.3", features = ["serde"] }
+itertools = "0.10.5"
 lazy_static = "1.4.0"
 ordered-map = "0.4.2"
 pin-project = "1.1.0"
