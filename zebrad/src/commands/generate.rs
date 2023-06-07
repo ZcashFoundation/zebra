@@ -1,13 +1,20 @@
-//! `generate` subcommand - generates a skeleton config.
+//! `generate` subcommand - generates a default `zebrad.toml` config.
 
 use crate::config::ZebradConfig;
-use abscissa_core::{Command, Options, Runnable};
+use abscissa_core::{Command, Runnable};
+use clap::Parser;
 
-/// `generate` subcommand
-#[derive(Command, Debug, Options)]
+/// Generate a default `zebrad.toml` configuration
+#[derive(Command, Debug, Default, Parser)]
 pub struct GenerateCmd {
     /// The file to write the generated config to.
-    #[options(help = "The file to write the generated config to (stdout if unspecified)")]
+    //
+    // TODO: use PathBuf here instead, to support non-UTF-8 paths
+    #[clap(
+        long,
+        short,
+        help = "The file to write the generated config to (stdout if unspecified)"
+    )]
     output_file: Option<String>,
 }
 

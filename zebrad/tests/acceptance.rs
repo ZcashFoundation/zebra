@@ -267,11 +267,11 @@ fn help_no_args() -> Result<()> {
         is_zebrad_version,
         &output.output.stdout,
         "stdout",
-        "a valid zebrad semantic version",
+        "are valid zebrad semantic versions",
     )?;
 
-    // Make sure we are in help by looking usage string
-    output.stdout_line_contains("USAGE:")?;
+    // Make sure we are in help by looking for the usage string
+    output.stdout_line_contains("Usage:")?;
 
     Ok(())
 }
@@ -536,7 +536,7 @@ fn version_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(args!["version"])?;
+    let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -558,15 +558,23 @@ fn version_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    // unexpected free argument `argument`
-    let child = testdir.spawn_child(args!["version", "argument"])?;
+    // unrecognized option `-f`
+    let child = testdir.spawn_child(args!["tip-height", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
-    // unrecognized option `-f`
-    let child = testdir.spawn_child(args!["version", "-f"])?;
+    // unrecognized option `-f` is ignored
+    let child = testdir.spawn_child(args!["--version", "-f"])?;
     let output = child.wait_with_output()?;
-    output.assert_failure()?;
+    let output = output.assert_success()?;
+
+    // The output should only contain the version
+    output.output_check(
+        is_zebrad_version,
+        &output.output.stdout,
+        "stdout",
+        "a valid zebrad semantic version",
+    )?;
 
     Ok(())
 }
