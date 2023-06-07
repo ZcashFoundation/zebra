@@ -94,7 +94,7 @@ jobs:
           MAIN_BRANCH_CACHE_FILTERS=""
           if [[ "${{ env.GITHUB_REF_SLUG_URL }}" = "main" ]]; then
             # TODO: add "deps" if it is caching an outdated version of any files
-            MAIN_BRANCH_CACHE_FILTERS=",no-cache-filters=tests,release,runtime"
+            MAIN_BRANCH_CACHE_FILTERS="tests,release,runtime"
           fi
           echo "MAIN_BRANCH_CACHE_FILTERS=${MAIN_BRANCH_CACHE_FILTERS}" >> "$GITHUB_ENV"
 
@@ -181,7 +181,12 @@ jobs:
             TEST_FEATURES=${{ inputs.test_features }}
             RPC_PORT=${{ inputs.rpc_port }}
           push: true
+          # Don't read from the cache if the caller disabled it.
+          # Don't write commonly changing content to the main branch cache.
+          #
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
+          no-cache-filters: ${{ env.MAIN_BRANCH_CACHE_FILTERS }}
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
@@ -195,4 +200,4 @@ jobs:
             type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
             type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-to: |
-            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max${MAIN_BRANCH_CACHE_FILTERS}
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
