@@ -86,18 +86,6 @@ jobs:
         with:
           short-length: 7
 
-      # When we're caching stages on the main branch, we need to make sure we don't accidentally
-      # include old checkouts of the Zebra repository. So we disable the cache for stages that
-      # change in almost every PR.
-      - name: Configure main branch cache filters
-        run: |
-          MAIN_BRANCH_CACHE_FILTERS=""
-          if [[ "${{ env.GITHUB_REF_SLUG_URL }}" = "main" ]]; then
-            # TODO: add "deps" if it is caching an outdated version of any files
-            MAIN_BRANCH_CACHE_FILTERS="tests,release,runtime"
-          fi
-          echo "MAIN_BRANCH_CACHE_FILTERS=${MAIN_BRANCH_CACHE_FILTERS}" >> "$GITHUB_ENV"
-
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
@@ -182,17 +170,14 @@ jobs:
             RPC_PORT=${{ inputs.rpc_port }}
           push: true
           # Don't read from the cache if the caller disabled it.
-          # Don't write commonly changing content to the main branch cache.
-          #
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
-          no-cache-filters: ${{ env.MAIN_BRANCH_CACHE_FILTERS }}
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
-          # and if there's no hit, then continue with a filtered `main` branch cache. The `main`
-          # branch cache helps us avoid rebuilding cargo-chef and most dependencies.
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache.
+          # If there's no hit, we continue with a `main` branch cache, which helps us avoid
+          # rebuilding cargo-chef, most dependencies, and possibly some Zebra crates.
           #
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
