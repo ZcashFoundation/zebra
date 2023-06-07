@@ -19,7 +19,7 @@ on:
         description: 'Use as many checkpoints as possible when syncing'
         required: true
       no_cache:
-        description: 'Set to "true" to disable the Docker cache for this build'
+        description: 'Disable the Docker cache for this build'
         required: false
         type: boolean
         default: false
