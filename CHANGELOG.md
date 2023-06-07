@@ -16,7 +16,6 @@ This is the last release candidate before the 1.0.0 stable release. Please repor
 ### Breaking Changes
 
 - The version subcommand has been replaced with a --version/-V flag ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
-- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
 ### Security
 
@@ -38,6 +37,7 @@ This is the last release candidate before the 1.0.0 stable release. Please repor
 
 - Limit RPC failure log length, add details to RPC failure logs ([#6754](https://github.com/ZcashFoundation/zebra/pull/6754))
 - Allow inbound connections to Zebra running in Docker ([#6755](https://github.com/ZcashFoundation/zebra/pull/6755))
+- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
 ### Contributors
 
