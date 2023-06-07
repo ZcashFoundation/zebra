@@ -570,59 +570,6 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-
-  # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
-  #
-  # If `inputs.is_long_test` is `false`, this job is skipped.
-  logs-sprout:
-    name: Log ${{ inputs.test_id }} test (sprout)
-    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
-    needs: [ launch-with-cached-state, launch-without-cached-state ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.5.2
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      # We can't use the standard Rust problem matchers on these jobs,
-      # because they produce a lot of output.
-      #
-      # TODO: create a custom matcher config for these specific jobs
-      #- uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
   #
   # If `inputs.is_long_test` is `false`, this job is skipped.
