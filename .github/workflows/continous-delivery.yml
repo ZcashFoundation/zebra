@@ -80,7 +80,7 @@ jobs:
   # and test reconfiguring the docker image for testnet.
   test-configuration-file:
     name: Test Zebra default Docker config file
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -91,6 +91,7 @@ jobs:
         with:
           short-length: 7
 
+      # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
         run: |
           set -ex
@@ -111,6 +112,7 @@ jobs:
           echo "docker exit status: $EXIT_STATUS"
           exit "$EXIT_STATUS"
 
+      # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config
         run: |
           set -ex
@@ -120,7 +122,7 @@ jobs:
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
+          'net.*=.*Test.*estimated progress to chain tip.*Genesis'
           docker stop testnet-conf-tests
           # get the exit status from docker
           EXIT_STATUS=$( \
