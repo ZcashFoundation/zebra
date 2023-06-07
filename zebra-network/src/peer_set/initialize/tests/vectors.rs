@@ -1176,7 +1176,7 @@ async fn add_initial_peers_is_rate_limited() {
     // Check for panics or errors in the address book updater task.
     let updater_result = address_book_updater_task_handle.now_or_never();
     assert!(
-        matches!(updater_result, None)
+        updater_result.is_none()
             || matches!(updater_result, Some(Err(ref join_error)) if join_error.is_cancelled())
             // The task method only returns one kind of error.
             // We can't check for error equality due to type erasure,
@@ -1643,8 +1643,7 @@ where
     // Check for panics or errors in the crawler.
     let crawl_result = crawl_task_handle.now_or_never();
     assert!(
-        matches!(crawl_result, None)
-            || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
         "unexpected error or panic in peer crawler task: {crawl_result:?}",
     );
 
@@ -1749,8 +1748,7 @@ where
     // Check for panics or errors in the listener.
     let listen_result = listen_task_handle.now_or_never();
     assert!(
-        matches!(listen_result, None)
-            || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
+        listen_result.is_none() || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
         "unexpected error or panic in inbound peer listener task: {listen_result:?}",
     );
 
