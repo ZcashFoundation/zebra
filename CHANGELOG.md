@@ -8,8 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - 2023-06-07
 
-This release continues to address audit findings and reduces sensitive
-information logging, and is the last release candidate.
+This release continues to address audit findings. It fixes multiple network protocol and RPC bugs,
+and reduces sensitive information logging.
+
+This is the last release candidate before the 1.0.0 stable release. Please report bugs to:
+https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.md&title=
 
 ### Security
 
