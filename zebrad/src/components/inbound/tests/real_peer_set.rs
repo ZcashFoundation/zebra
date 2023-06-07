@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, router::RouterError, transaction};
 use zebra_network::{
-    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash,
+    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash, CacheDir,
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
@@ -108,13 +108,13 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
-        matches!(block_gossip_result, None),
+        block_gossip_result.is_none(),
         "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -191,13 +191,13 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
-        matches!(block_gossip_result, None),
+        block_gossip_result.is_none(),
         "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -311,13 +311,13 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
-        matches!(block_gossip_result, None),
+        block_gossip_result.is_none(),
         "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -461,13 +461,13 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
-        matches!(block_gossip_result, None),
+        block_gossip_result.is_none(),
         "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -574,13 +574,13 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
-        matches!(block_gossip_result, None),
+        block_gossip_result.is_none(),
         "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -647,6 +647,7 @@ async fn setup(
         // Stop Zebra making outbound connections
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
 
         ..NetworkConfig::default()
     };

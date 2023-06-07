@@ -1,11 +1,5 @@
 # Zebra cargo configuration
 
-# Disabled until we upgrade to abscissa 0.7 or later:
-# https://github.com/ZcashFoundation/zebra/issues/5502
-# https://doc.rust-lang.org/cargo/reference/future-incompat-report.html
-[future-incompat-report]
-frequency = "never"
-
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [

@@ -17,6 +17,7 @@ use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
+use zebra_network::CacheDir;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt},
@@ -35,6 +36,10 @@ use crate::common::{
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
+
+/// After we launch `zebrad`, wait this long in extended tests.
+/// See [`LAUNCH_DELAY`] for details.
+pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(25);
 
 /// After we launch `lightwalletd`, wait this long for the command to start up,
 /// take the actions expected by the quick tests, and log the expected logs.
@@ -167,9 +172,16 @@ where
     }
 
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
+        let dir = self.as_ref();
+        let cache_dir = PathBuf::from(dir);
+
+        // If the peer cache has already been disabled, don't re-enable it
+        if config.network.cache_dir.is_enabled() {
+            config.network.cache_dir = CacheDir::custom_path(&cache_dir);
+        }
+
+        // Only replace the state cache directory if it's going to be used
         if !config.state.ephemeral {
-            let dir = self.as_ref();
-            let cache_dir = PathBuf::from(dir);
             config.state.cache_dir = cache_dir;
         }
 
@@ -232,6 +244,8 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     if !use_internet_connection {
         config.network.initial_mainnet_peers = IndexSet::new();
         config.network.initial_testnet_peers = IndexSet::new();
+        // Avoid re-using cached peers from disk when we're supposed to be a disconnected instance
+        config.network.cache_dir = CacheDir::disabled();
 
         config.mempool.debug_enable_at_height = Some(0);
     }

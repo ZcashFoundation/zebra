@@ -140,6 +140,22 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// don't synchronise with other crawls.
 pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
+/// The peer address disk cache update interval.
+///
+/// This should be longer than [`DEFAULT_CRAWL_NEW_PEER_INTERVAL`],
+/// but shorter than [`MAX_PEER_ACTIVE_FOR_GOSSIP`].
+///
+/// We use a short interval so Zebra instances which are restarted frequently
+/// still have useful caches.
+pub const PEER_DISK_CACHE_UPDATE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// The maximum number of addresses in the peer disk cache.
+///
+/// This is chosen to be less than the number of active peers,
+/// and approximately the same as the number of seed peers returned by DNS.
+/// It is a tradeoff between fingerprinting attacks, DNS pollution risk, and cache pollution risk.
+pub const MAX_PEER_DISK_CACHE_SIZE: usize = 75;
+
 /// The maximum duration since a peer was last seen to consider it reachable.
 ///
 /// This is used to prevent Zebra from gossiping addresses that are likely unreachable. Peers that
@@ -334,6 +350,9 @@ pub const MIN_OVERLOAD_DROP_PROBABILITY: f32 = 0.05;
 /// The maximum probability of dropping a peer connection when it receives an
 /// [`Overloaded`](crate::PeerError::Overloaded) error.
 pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.95;
+
+/// The minimum interval between logging peer set status updates.
+pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,

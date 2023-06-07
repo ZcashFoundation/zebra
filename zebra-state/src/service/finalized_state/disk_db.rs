@@ -10,13 +10,18 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
 
+use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use zebra_chain::parameters::Network;
 
 use crate::{
+    config::{
+        database_format_version_in_code, database_format_version_on_disk,
+        write_database_format_version_to_disk,
+    },
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -386,61 +391,93 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    /// The column families supported by the running database code.
+    const COLUMN_FAMILIES_IN_CODE: &[&'static str] = &[
+        // Blocks
+        "hash_by_height",
+        "height_by_hash",
+        "block_header_by_height",
+        // Transactions
+        "tx_by_loc",
+        "hash_by_tx_loc",
+        "tx_loc_by_hash",
+        // Transparent
+        "balance_by_transparent_addr",
+        "tx_loc_by_transparent_addr_loc",
+        "utxo_by_out_loc",
+        "utxo_loc_by_transparent_addr_loc",
+        // Sprout
+        "sprout_nullifiers",
+        "sprout_anchors",
+        "sprout_note_commitment_tree",
+        // Sapling
+        "sapling_nullifiers",
+        "sapling_anchors",
+        "sapling_note_commitment_tree",
+        // Orchard
+        "orchard_nullifiers",
+        "orchard_anchors",
+        "orchard_note_commitment_tree",
+        // Chain
+        "history_tree",
+        "tip_chain_value_pool",
+    ];
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
+
+        let running_version = database_format_version_in_code();
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file");
+
+        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
+            // TODO: if the on-disk format is older, actually run the upgrade task after the
+            //       database has been opened (#6642)
+            Some(Ordering::Less) => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open older database format: launching upgrade task"
+            ),
+            // TODO: if the on-disk format is newer, downgrade the version after the
+            //       database has been opened (#6642)
+            Some(Ordering::Greater) => info!(
+                ?running_version,
+                ?disk_version,
+                "trying to open newer database format: data should be compatible"
+            ),
+            Some(Ordering::Equal) => info!(
+                ?running_version,
+                "trying to open compatible database format"
+            ),
+            None => info!(
+                ?running_version,
+                "creating new database with the current format"
+            ),
+        }
+
         let db_options = DiskDb::options();
 
-        let column_families = vec![
-            // Blocks
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("block_header_by_height", db_options.clone()),
-            // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tx_loc_by_hash", db_options.clone()),
-            // Transparent
-            rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "tx_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "utxo_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            // Sprout
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
-            // Sapling
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "sapling_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Orchard
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "orchard_note_commitment_tree",
-                db_options.clone(),
-            ),
-            // Chain
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
-        ];
+        // When opening the database in read/write mode, all column families must be opened.
+        //
+        // To make Zebra forward-compatible with databases updated by later versions,
+        // we read any existing column families off the disk, then add any new column families
+        // from the current implementation.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
+        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string);
 
-        // TODO: move opening the database to a blocking thread (#2188)
-        let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
-            &db_options,
-            &path,
-            column_families,
-        );
+        let column_families = column_families_on_disk
+            .into_iter()
+            .chain(column_families_in_code)
+            .unique()
+            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+
+        let db_result = DB::open_cf_descriptors(&db_options, &path, column_families);
 
         match db_result {
             Ok(db) => {
@@ -452,6 +489,27 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
+
+                // Now we've checked that the database format is up-to-date,
+                // mark it as updated on disk.
+                //
+                // # Concurrency
+                //
+                // The version must only be updated while RocksDB is holding the database
+                // directory lock. This prevents multiple Zebra instances corrupting the version
+                // file.
+                //
+                // # TODO
+                //
+                // - only update the version at the end of the format upgrade task (#6642)
+                // - add a note to the format upgrade task code to update the version constants
+                //   whenever the format changes
+                // - add a test that the format upgrade runs exactly once when:
+                //   1. if an older cached state format is opened, the format is upgraded,
+                //      then if Zebra is launched again the format is not upgraded
+                //   2. if the current cached state format is opened, the format is not upgraded
+                write_database_format_version_to_disk(config, network)
+                    .expect("unable to write database format version file to disk");
 
                 db
             }
@@ -722,17 +780,71 @@ impl DiskDb {
         let path = self.path();
         debug!(?path, "flushing database to disk");
 
-        self.db
-            .flush()
-            .expect("unexpected failure flushing SST data to disk");
-        self.db
-            .flush_wal(true)
-            .expect("unexpected failure flushing WAL data to disk");
+        // These flushes can fail during forced shutdown or during Drop after a shutdown,
+        // particularly in tests. If they fail, there's nothing we can do about it anyway.
+        if let Err(error) = self.db.flush() {
+            let error = format!("{error:?}");
+            if error.to_ascii_lowercase().contains("shutdown in progress") {
+                debug!(
+                    ?error,
+                    ?path,
+                    "expected shutdown error flushing database SST files to disk"
+                );
+            } else {
+                info!(
+                    ?error,
+                    ?path,
+                    "unexpected error flushing database SST files to disk during shutdown"
+                );
+            }
+        }
 
+        if let Err(error) = self.db.flush_wal(true) {
+            let error = format!("{error:?}");
+            if error.to_ascii_lowercase().contains("shutdown in progress") {
+                debug!(
+                    ?error,
+                    ?path,
+                    "expected shutdown error flushing database WAL buffer to disk"
+                );
+            } else {
+                info!(
+                    ?error,
+                    ?path,
+                    "unexpected error flushing database WAL buffer to disk during shutdown"
+                );
+            }
+        }
+
+        // # Memory Safety
+        //
         // We'd like to call `cancel_all_background_work()` before Zebra exits,
         // but when we call it, we get memory, thread, or C++ errors when the process exits.
         // (This seems to be a bug in RocksDB: cancel_all_background_work() should wait until
         // all the threads have cleaned up.)
+        //
+        // # Change History
+        //
+        // We've changed this setting multiple times since 2021, in response to new RocksDB
+        // and Rust compiler behaviour.
+        //
+        // We enabled cancel_all_background_work() due to failures on:
+        // - Rust 1.57 on Linux
+        //
+        // We disabled cancel_all_background_work() due to failures on:
+        // - Rust 1.64 on Linux
+        //
+        // We tried enabling cancel_all_background_work() due to failures on:
+        // - Rust 1.70 on macOS 12.6.5 on x86_64
+        // but it didn't stop the aborts happening (PR #6820).
+        //
+        // There weren't any failures with cancel_all_background_work() disabled on:
+        // - Rust 1.69 or earlier
+        // - Linux with Rust 1.70
+        // And with cancel_all_background_work() enabled or disabled on:
+        // - macOS 13.2 on aarch64 (M1), native and emulated x86_64, with Rust 1.70
+        //
+        // # Detailed Description
         //
         // We see these kinds of errors:
         // ```
@@ -745,13 +857,26 @@ impl DiskDb {
         // signal: 11, SIGSEGV: invalid memory reference
         // ```
         //
+        // # Reference
+        //
         // The RocksDB wiki says:
         // > Q: Is it safe to close RocksDB while another thread is issuing read, write or manual compaction requests?
         // >
         // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        // <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ>
+        //
+        // > rocksdb::DB instances need to be destroyed before your main function exits.
+        // > RocksDB instances usually depend on some internal static variables.
+        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Known-Issues>
+        //
+        // # TODO
+        //
+        // Try re-enabling this code and fixing the underlying concurrency bug.
+        //
         //info!(?path, "stopping background database tasks");
         //self.db.cancel_all_background_work(true);
 
@@ -760,14 +885,7 @@ impl DiskDb {
         // But Rust's ownership rules make that difficult,
         // so we just flush and delete ephemeral data instead.
         //
-        // The RocksDB wiki says:
-        // > rocksdb::DB instances need to be destroyed before your main function exits.
-        // > RocksDB instances usually depend on some internal static variables.
-        // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
-        //
-        // https://github.com/facebook/rocksdb/wiki/Known-Issues
-        //
-        // But this implementation doesn't seem to cause any issues,
+        // This implementation doesn't seem to cause any issues,
         // and the RocksDB Drop implementation handles any cleanup.
         self.delete_ephemeral();
     }

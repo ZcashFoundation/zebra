@@ -78,10 +78,10 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         // The server and queue tasks should continue without errors or panics
         let rpc_server_task_result = rpc_server_task_handle.now_or_never();
-        assert!(matches!(rpc_server_task_result, None));
+        assert!(rpc_server_task_result.is_none());
 
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        assert!(matches!(rpc_tx_queue_task_result, None));
+        assert!(rpc_tx_queue_task_result.is_none());
     });
 
     info!("waiting for RPC server to shut down...");
@@ -184,10 +184,10 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
         } else {
             // The server and queue tasks should continue without errors or panics
             let rpc_server_task_result = rpc_server_task_handle.now_or_never();
-            assert!(matches!(rpc_server_task_result, None));
+            assert!(rpc_server_task_result.is_none());
 
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            assert!(matches!(rpc_tx_queue_task_result, None));
+            assert!(rpc_tx_queue_task_result.is_none());
         }
     });
 

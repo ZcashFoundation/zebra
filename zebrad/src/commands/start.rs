@@ -2,7 +2,7 @@
 //!
 //! ## Application Structure
 //!
-//! A zebra node consists of the following services and tasks:
+//! A zebra node consists of the following major services and tasks:
 //!
 //! Peers:
 //!  * Peer Connection Pool Service
@@ -12,6 +12,9 @@
 //!    * maintains a list of peer addresses, and connection priority metadata
 //!    * discovers new peer addresses from existing peer connections
 //!    * initiates new outbound peer connections in response to demand from tasks within this node
+//!  * Peer Cache Service
+//!    * Reads previous peer cache on startup, and adds it to the configured DNS seed peers
+//!    * Periodically updates the peer cache on disk from the latest address book state
 //!
 //! Blocks & Mempool Transactions:
 //!  * Consensus Service
@@ -68,7 +71,7 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use abscissa_core::{config, Command, FrameworkError, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
@@ -91,17 +94,17 @@ use crate::{
     prelude::*,
 };
 
-/// `start` subcommand
-#[derive(Command, Debug, Options, Default)]
+/// Start the application (default command)
+#[derive(Command, Debug, Default, clap::Parser)]
 pub struct StartCmd {
     /// Filter strings which override the config file and defaults
-    #[options(free, help = "tracing filters which override the zebrad.toml config")]
+    #[clap(help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
-        let config = app_config().clone();
+        let config = APPLICATION.config();
 
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
@@ -199,9 +202,9 @@ impl StartCmd {
 
         // Launch RPC server
         let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
-            config.rpc,
+            config.rpc.clone(),
             #[cfg(feature = "getblocktemplate-rpcs")]
-            config.mining,
+            config.mining.clone(),
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
             app_version(),
@@ -425,7 +428,7 @@ impl StartCmd {
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
     fn state_buffer_bound() -> usize {
-        let config = app_config().clone();
+        let config = APPLICATION.config();
 
         // Ignore the checkpoint verify limit, because it is very large.
         //
@@ -447,9 +450,9 @@ impl Runnable for StartCmd {
     /// Start the application.
     fn run(&self) {
         info!("Starting zebrad");
-        let rt = app_writer()
-            .state_mut()
-            .components
+        let rt = APPLICATION
+            .state()
+            .components_mut()
             .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt

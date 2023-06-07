@@ -5,10 +5,10 @@
 //! This command should be used if you're launching lots of `zebrad start` instances for testing,
 //! or you want to include the parameter files in a distribution package.
 
-use abscissa_core::{Command, Options, Runnable};
+use abscissa_core::{Command, Runnable};
 
-/// `download` subcommand
-#[derive(Command, Debug, Default, Options)]
+/// Pre-download required Zcash Sprout and Sapling parameter files
+#[derive(Command, Debug, Default, clap::Parser)]
 pub struct DownloadCmd {}
 
 impl DownloadCmd {
