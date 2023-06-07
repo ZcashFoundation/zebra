@@ -53,6 +53,11 @@ on:
       tag_suffix:
         required: false
         type: string
+      no_cache:
+        description: 'Set to "true" to disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       image_digest:
@@ -164,6 +169,7 @@ jobs:
             TEST_FEATURES=${{ inputs.test_features }}
             RPC_PORT=${{ inputs.rpc_port }}
           push: true
+          no-cache: ${{ inputs.no_cache }}
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #

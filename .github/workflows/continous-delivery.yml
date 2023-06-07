@@ -18,6 +18,12 @@ on:
         default: 'true'
         description: 'Use as many checkpoints as possible when syncing'
         required: true
+      no_cache:
+        description: 'Set to "true" to disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
+
   push:
     branches:
       - main
@@ -64,6 +70,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
+      no-cache: ${{ inputs.no_cache }}
       # We hard-code Mainnet here, because the config is modified before running zebrad
       network: 'Mainnet'
       checkpoint_sync: true
