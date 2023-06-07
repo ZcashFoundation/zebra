@@ -93,9 +93,18 @@ jobs:
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          # show the logs, even if the job times out
+          docker logs --tail all --follow default-conf-tests | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
+          # get the exit status from docker
+          EXIT_STATUS=$( \
+          docker wait default-conf-tests || \
+          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
+          echo "missing container, or missing exit status for container" \
+          )
           docker stop default-conf-tests
-          docker logs default-conf-tests
           exit "$EXIT_STATUS"
 
       - name: Run tests using a testnet config
@@ -103,9 +112,20 @@ jobs:
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          # show the logs, even if the job times out
+          docker logs --tail all --follow testnet-conf-tests | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
+          # get the exit status from docker
+          EXIT_STATUS=$( \
+          docker wait testnet-conf-tests || \
+          docker inspect --format "{{.State.ExitCode}}" testnet-conf-tests || \
+          echo "missing container, or missing exit status for container" \
+          )
+          echo "docker exit status: $EXIT_STATUS"
           EXIT_STATUS=$(docker logs --tail all --follow testnet-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop testnet-conf-tests
-          docker logs testnet-conf-tests
           exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
