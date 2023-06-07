@@ -116,7 +116,9 @@ RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --wo
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
-COPY ./docker/entrypoint.sh /
+# This needs to be "RUN cp" so changes to the file are picked up immediately.
+# COPY uses the main branch cache, so it can get out of date files.
+RUN cp ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
@@ -134,7 +136,7 @@ COPY . .
 # Build zebra
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-# TODO: should this be COPY instead?
+# See note above about COPY and caching.
 RUN cp ./docker/runtime-entrypoint.sh /
 RUN chmod u+x /runtime-entrypoint.sh
 
