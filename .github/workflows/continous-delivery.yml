@@ -70,7 +70,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
-      no-cache: ${{ inputs.no_cache }}
+      no_cache: ${{ inputs.no_cache || false }}
       # We hard-code Mainnet here, because the config is modified before running zebrad
       network: 'Mainnet'
       checkpoint_sync: true

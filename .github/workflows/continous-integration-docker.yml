@@ -119,7 +119,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
-      no-cache: ${{ inputs.no_cache }}
+      no_cache: ${{ inputs.no_cache || false }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       checkpoint_sync: true
       rust_backtrace: full
