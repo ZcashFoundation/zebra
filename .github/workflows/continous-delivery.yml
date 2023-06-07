@@ -93,7 +93,7 @@ jobs:
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net=Main.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop default-conf-tests
           docker logs default-conf-tests
           exit "$EXIT_STATUS"
@@ -103,7 +103,7 @@ jobs:
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          EXIT_STATUS=$(docker logs --tail all --follow testnet-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net=Test.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          EXIT_STATUS=$(docker logs --tail all --follow testnet-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop testnet-conf-tests
           docker logs testnet-conf-tests
           exit "$EXIT_STATUS"
