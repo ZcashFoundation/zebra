@@ -134,10 +134,8 @@ COPY . .
 # Build zebra
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-# TODO: temporary debugging
-RUN ls / ./ ./docker
-
-COPY ./docker/runtime-entrypoint.sh /
+# TODO: should this be COPY instead?
+RUN cp ./docker/runtime-entrypoint.sh /
 RUN chmod u+x /runtime-entrypoint.sh
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
