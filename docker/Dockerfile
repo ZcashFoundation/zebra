@@ -1,3 +1,5 @@
+# If you want to include a file in the Docker image, add it to .dockerignore.
+#
 # We are using five stages:
 # - chef: installs cargo-chef
 # - planner: computes the recipe file
@@ -116,9 +118,7 @@ RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --wo
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
-# This needs to be "RUN cp" so changes to the file are picked up immediately.
-# COPY uses the main branch cache, so it can get out of date files.
-RUN cp ./docker/entrypoint.sh /
+COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
@@ -136,13 +136,7 @@ COPY . .
 # Build zebra
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-# TODO: remove this before merging
-RUN pwd
-RUN ls / ./ ./docker
-RUN find / -name runtime-entrypoint.sh
-
-# See note above about COPY and caching.
-RUN cp ./docker/runtime-entrypoint.sh /
+COPY ./docker/runtime-entrypoint.sh /
 RUN chmod u+x /runtime-entrypoint.sh
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
