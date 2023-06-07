@@ -174,8 +174,14 @@ jobs:
           #
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
+          #
+          # TODO:
+          #
+          # The main-cache is not being invalidated when non-Rust files change,
+          # so stale entrypoint.sh files were being used to build images.
+          # This could cause CI failures but also hide failures in PR code.
+          #type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-from: |
             type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
           cache-to: |
             type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
