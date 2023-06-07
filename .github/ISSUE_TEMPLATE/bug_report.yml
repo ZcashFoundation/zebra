@@ -1,4 +1,4 @@
-name: User bug report
+name: Bug report
 description: Create a report to help us improve
 title: '[User reported bug]: '
 labels: C-bug, S-needs-triage
@@ -23,7 +23,7 @@ body:
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
+      label:  What were you doing when the issue happened?
       description: Copy and paste the exact commands or code here.
       placeholder: "Behavior or code sample that causes the bug"
     validations:
@@ -33,57 +33,39 @@ body:
     attributes:
       label: Zebra logs
       description: Copy and paste the last 100 Zebra log lines or upload the full logs to https://gist.github.com/ and add a link to them here.
-      placeholder: "copy and paste the logs here"
+      placeholder: "Copy and paste the logs here"
     validations:
       required: false
-  - type: checkboxes
-    id: crate
-    attributes:
-      label: In what crates the bug is located, if in any?
-      description: You may select more than one.
-      options:
-        - label: zebrad
-        - label: zebra-chain
-        - label: zebra-consensus
-        - label: zebra-network
-        - label: zebra-node-services
-        - label: zebra-rpc
-        - label: zebra-script
-        - label: zebra-state
-        - label: zebra-test
-        - label: zebra-utils
-        - label: tower-batch
-        - label: tower-fallback
   - type: input
     id: zebrad-version
     attributes:
       label: Zebra Version
-      description: "For bugs in `zebrad`, run `zebrad version`."
-    validations:
-      required: false
-  - type: textarea
-    id: libraries
-    attributes:
-      label: Zebra libraries
-      description: For bugs in the `zebra` libraries, list the `zebra` crate versions.
-      placeholder: "You can get the crate version by checking the Cargo.toml inside the crate folder."
+      description: "For bugs in `zebrad`, run `zebrad --version`."
+      placeholder: "zebrad 1.0.0-rc.9"
     validations:
       required: false
   - type: checkboxes
     id: os
     attributes:
-      label: Which operating systems have you used?
+      label: Which operating systems does the issue happen on?
       description: You may select more than one.
       options:
         - label: macOS
         - label: Windows
         - label: Linux
+        - label: Other OS
   - type: input
     id: os-details
     attributes:
       label: OS details
-      description: "Linux, macOS, BSD: the output of `uname -a`
-Windows: Windows version and 32-bit or 64-bit"
+      description: "Linux, macOS, BSD: the output of `uname -a`; Windows: version and 32-bit or 64-bit; Other OS: name and version"
       placeholder:
+    validations:
+      required: false
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Additional information
+      description: Is there anything else that could help us solve this issue?
     validations:
       required: false
