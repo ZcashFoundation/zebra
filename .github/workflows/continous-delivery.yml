@@ -98,13 +98,14 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
+          docker stop default-conf-tests
           # get the exit status from docker
           EXIT_STATUS=$( \
           docker wait default-conf-tests || \
           docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
           echo "missing container, or missing exit status for container" \
           )
-          docker stop default-conf-tests
+          echo "docker exit status: $EXIT_STATUS"
           exit "$EXIT_STATUS"
 
       - name: Run tests using a testnet config
@@ -116,7 +117,8 @@ jobs:
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
+          'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
+          docker stop testnet-conf-tests
           # get the exit status from docker
           EXIT_STATUS=$( \
           docker wait testnet-conf-tests || \
@@ -124,8 +126,6 @@ jobs:
           echo "missing container, or missing exit status for container" \
           )
           echo "docker exit status: $EXIT_STATUS"
-          EXIT_STATUS=$(docker logs --tail all --follow testnet-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
-          docker stop testnet-conf-tests
           exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
