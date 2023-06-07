@@ -117,13 +117,13 @@ async fn mempool_requests_for_transactions() {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 }
@@ -208,13 +208,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -313,13 +313,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -629,13 +629,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -727,13 +727,13 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
