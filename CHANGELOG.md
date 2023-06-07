@@ -13,6 +13,11 @@ and reduces sensitive information logging.
 
 This is the last release candidate before the 1.0.0 stable release. Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.md&title=)
 
+### Breaking Changes
+
+- The version subcommand has been replaced with a --version/-V flag ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+
 ### Security
 
 - Stop logging peer IP addresses, to protect user privacy ([#6662](https://github.com/ZcashFoundation/zebra/pull/6662))
