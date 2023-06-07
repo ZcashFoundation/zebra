@@ -71,7 +71,8 @@ jobs:
       zebra_skip_ipv6_tests: '1'
       rust_log: info
 
-  # Test that Zebra works using the default config with the latest Zebra version
+  # Test that Zebra works using the default config with the latest Zebra version,
+  # and test reconfiguring the docker image for testnet.
   test-configuration-file:
     name: Test Zebra default Docker config file
     timeout-minutes: 5
@@ -90,9 +91,19 @@ jobs:
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net=Main.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop default-conf-tests
           docker logs default-conf-tests
+          exit "$EXIT_STATUS"
+
+      - name: Run tests using a testnet config
+        run: |
+          set -ex
+          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          EXIT_STATUS=$(docker logs --tail all --follow testnet-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'net=Test.*estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          docker stop testnet-conf-tests
+          docker logs testnet-conf-tests
           exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
