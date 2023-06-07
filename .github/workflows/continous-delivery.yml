@@ -64,8 +64,8 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
-      # We need to hard-code Mainnet here, because env is not allowed in this context
-      network: ${{ inputs.network || 'Mainnet' }}
+      # We hard-code Mainnet here, because the config is modified before running zebrad
+      network: 'Mainnet'
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
@@ -95,19 +95,26 @@ jobs:
           docker logs default-conf-tests
           exit "$EXIT_STATUS"
 
-  # This jobs handles the deployment of a Managed Instance Group (MiG) with 2 nodes in
-  # the us-central1 region. Two different groups of MiGs are deployed one for pushes to
-  # the main branch and another for version releases of Zebra
+  # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
+  # with one node in the configured GCP region.
   #
-  # Once this workflow is triggered the previous MiG is replaced, on pushes to main its
-  # always replaced, and with releases its only replaced if the same major version is
-  # being deployed, otherwise a new major version is deployed
+  # Separate Mainnet and Testnet MiGs are deployed whenever there are:
+  # - pushes to the main branch, or
+  # - version releases of Zebra.
+  #
+  # Once this workflow is triggered:
+  # - by pushes to main: the MiG is always replaced,
+  # - by releases: the MiG is only replaced if the same major version is being deployed,
+  #   otherwise a new major version is deployed in a new MiG.
   #
   # Runs:
   # - on every push/merge to the `main` branch
   # - on every release, when it's published
   deploy-nodes:
-    name: Deploy ${{ inputs.network || 'Mainnet' }} nodes
+    strategy:
+      matrix:
+        network: [Mainnet, Testnet]
+    name: Deploy ${{ matrix.network }} nodes
     needs: [ build, test-configuration-file, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -129,12 +136,12 @@ jobs:
       # Makes the Zcash network name lowercase.
       #
       # Labels in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase ${{ inputs.network || 'Mainnet' }}.
+      # uses sentence case, so we need to downcase the network.
       #
       # Passes the lowercase network to subsequent steps using $NETWORK env variable.
       - name: Downcase network name for labels
         run: |
-          NETWORK_CAPS="${{ inputs.network || 'Mainnet' }}"
+          NETWORK_CAPS="${{ matrix.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
       # Setup gcloud CLI
@@ -151,15 +158,16 @@ jobs:
 
       # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
       # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
-      - name: Create instance template
+      - name: Create instance template for ${{ matrix.network }}
         run: |
-          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
+          --container-env "NETWORK=${{ matrix.network }}" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
+          --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
@@ -168,31 +176,31 @@ jobs:
           --tags zebrad
 
       # Check if our destination instance group exists already
-      - name: Check if instance group exists
+      - name: Check if ${{ matrix.network }} instance group exists
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" | grep "${{ vars.GCP_REGION }}"
+          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" | grep "${{ vars.GCP_REGION }}"
 
       # Deploy new managed instance group using the new instance template
-      - name: Create managed instance group
+      - name: Create managed instance group for ${{ matrix.network }}
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" \
-          --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" \
+          --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ vars.GCP_REGION }}" \
           --size 1
 
       # Rolls out update to existing group using the new instance template
-      - name: Update managed instance group
+      - name: Update managed instance group for ${{ matrix.network }}
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" \
-          --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" \
+          --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --region "${{ vars.GCP_REGION }}"
 
   # This jobs handles the deployment of a single node (1) in the us-central1-a zone
