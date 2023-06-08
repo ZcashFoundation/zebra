@@ -6,9 +6,6 @@ on:
       network:
         required: false
         type: string
-      checkpoint_sync:
-        required: false
-        type: boolean
       image_name:
         required: true
         type: string
@@ -53,6 +50,11 @@ on:
       tag_suffix:
         required: false
         type: string
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       image_digest:
@@ -158,19 +160,20 @@ jobs:
             RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
             COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
             ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
-            CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
             FEATURES=${{ inputs.features }}
             TEST_FEATURES=${{ inputs.test_features }}
             RPC_PORT=${{ inputs.rpc_port }}
           push: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
-          # and if there's no hit, then continue with the `main` branch. When changes are added to a PR,
-          # they are usually smaller than the diff between the PR and `main` branch. So this provides the
-          # best performance.
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache.
+          # If there's no hit, we continue with a `main` branch cache, which helps us avoid
+          # rebuilding cargo-chef, most dependencies, and possibly some Zebra crates.
           #
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550

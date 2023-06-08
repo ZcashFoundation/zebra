@@ -9,6 +9,13 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
+
   push:
     branches:
       - 'main'
@@ -30,6 +37,7 @@ jobs:
       dockerfile_path: ./docker/zcash-params/Dockerfile
       dockerfile_target: release
       image_name: zcash-params
+      no_cache: ${{ inputs.no_cache || false }}
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'

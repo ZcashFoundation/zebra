@@ -14,10 +14,6 @@ on:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
-      checkpoint_sync:
-        default: 'true'
-        description: 'Configures `zebrad` to use as many checkpoints as possible'
-        required: true
       regenerate-disks:
         type: boolean
         default: false
@@ -33,6 +29,11 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
 
   pull_request:
     paths:
@@ -114,8 +115,8 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
+      no_cache: ${{ inputs.no_cache || false }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-      checkpoint_sync: true
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
