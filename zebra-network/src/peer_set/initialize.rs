@@ -676,16 +676,11 @@ enum CrawlerAction {
     DemandHandshakeOrCrawl,
     /// Crawl existing peers for more peers in response to a timer `tick`.
     TimerCrawl { tick: Instant },
-    /// Handle a successfully connected handshake `peer_set_change`.
-    HandshakeConnected {
-        address: PeerSocketAddr,
-        client: peer::Client,
-    },
-    /// Handle a handshake failure to `failed_addr`.
-    HandshakeFailed { failed_addr: MetaAddr },
-    /// Handle a finished demand crawl (DemandHandshakeOrCrawl with no peers).
+    /// Clear a finished handshake.
+    HandshakeFinished,
+    /// Clear a finished demand crawl (DemandHandshakeOrCrawl with no peers).
     DemandCrawlFinished,
-    /// Handle a finished TimerCrawl.
+    /// Clear a finished TimerCrawl.
     TimerCrawlFinished,
 }
 
@@ -722,11 +717,11 @@ enum CrawlerAction {
 )]
 async fn crawl_and_dial<C, S>(
     config: Config,
-    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+    demand_tx: futures::channel::mpsc::Sender<MorePeers>,
     mut demand_rx: futures::channel::mpsc::Receiver<MorePeers>,
     candidates: CandidateSet<S>,
     outbound_connector: C,
-    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where
@@ -792,35 +787,37 @@ where
                 "handshakes never terminates, because it contains a future that never resolves"
             ),
             // The timer is rate-limited
-            next_timer = crawl_timer.next() => next_timer.expect("timers never terminate"),
+            next_timer = crawl_timer.next() => Ok(next_timer.expect("timers never terminate")),
             // Turn any new demand into an action, based on the crawler's current state.
             //
             // # Concurrency
             //
             // Demand is potentially unlimited, so it must go last in a biased select!.
-            _ = demand_rx.next() => {
+            next_demand = demand_rx.next() => next_demand.ok_or("demand stream closed, is Zebra shutting down?".into()).map(|MorePeers|{
                 if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
                     // Too many open outbound connections or pending handshakes already
                     DemandDrop
                 } else {
                     DemandHandshakeOrCrawl
                 }
-            }
+            })
         };
 
         match crawler_action {
             // Dummy actions
-            DemandDrop => {
+            Ok(DemandDrop) => {
                 // This is set to trace level because when the peerset is
                 // congested it can generate a lot of demand signal very rapidly.
                 trace!("too many open connections or in-flight handshakes, dropping demand signal");
             }
 
-            // Spawned futures
-            DemandHandshakeOrCrawl => {
+            // Spawned tasks
+            Ok(DemandHandshakeOrCrawl) => {
                 let candidates = candidates.clone();
-                let demand_tx = demand_tx.clone();
                 let outbound_connector = outbound_connector.clone();
+                let peerset_tx = peerset_tx.clone();
+                let address_book = address_book.clone();
+                let demand_tx = demand_tx.clone();
 
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
@@ -842,27 +839,37 @@ where
 
                     if let Some(candidate) = candidate {
                         // we don't need to spawn here, because there's nothing running concurrently
-                        dial(candidate, outbound_connector, outbound_connection_tracker).await
+                        dial(
+                            candidate,
+                            outbound_connector,
+                            outbound_connection_tracker,
+                            peerset_tx,
+                            address_book,
+                            demand_tx,
+                        )
+                        .await?;
+
+                        Ok(HandshakeFinished)
                     } else {
                         // There weren't any peers, so try to get more peers.
                         debug!("demand for peers but no available candidates");
 
-                        crawl(candidates, demand_tx).await;
+                        crawl(candidates, demand_tx).await?;
 
-                        DemandCrawlFinished
+                        Ok(DemandCrawlFinished)
                     }
                 })
                 .map(move |res| match res {
                     Ok(crawler_action) => crawler_action,
                     Err(e) => {
-                        panic!("panic during handshaking: {e:?} ");
+                        panic!("panic during handshaking: {e:?}");
                     }
                 })
                 .in_current_span();
 
                 handshakes.push(Box::pin(handshake_or_crawl_handle));
             }
-            TimerCrawl { tick } => {
+            Ok(TimerCrawl { tick }) => {
                 let candidates = candidates.clone();
                 let demand_tx = demand_tx.clone();
 
@@ -872,14 +879,14 @@ where
                         "crawling for more peers in response to the crawl timer"
                     );
 
-                    crawl(candidates, demand_tx).await;
+                    crawl(candidates, demand_tx).await?;
 
-                    TimerCrawlFinished
+                    Ok(TimerCrawlFinished)
                 })
                 .map(move |res| match res {
                     Ok(crawler_action) => crawler_action,
                     Err(e) => {
-                        panic!("panic during TimerCrawl: {tick:?} {e:?} ");
+                        panic!("panic during TimerCrawl: {tick:?} {e:?}");
                     }
                 })
                 .in_current_span();
@@ -887,33 +894,23 @@ where
                 handshakes.push(Box::pin(crawl_handle));
             }
 
-            // Completed futures
-            HandshakeConnected { address, client } => {
-                debug!(candidate.addr = ?address, "successfully dialed new peer");
-
-                // The connection limit makes sure this send doesn't block.
-                peerset_tx.send((address, client)).await?;
+            // Completed spawned tasks
+            Ok(HandshakeFinished) => {
+                // Already logged in dial()
             }
-            HandshakeFailed { failed_addr } => {
-                // The connection was never opened, or it failed the handshake and was dropped.
-                debug!(?failed_addr.addr, "marking candidate as failed");
-                report_failed(address_book.clone(), failed_addr).await;
-
-                // The demand signal that was taken out of the queue to attempt to connect to the
-                // failed candidate never turned into a connection, so add it back.
-                //
-                // # Security
-                //
-                // Handshake failures are rate-limited by peer attempt timeouts.
-                let _ = demand_tx.try_send(MorePeers);
-            }
-            DemandCrawlFinished => {
+            Ok(DemandCrawlFinished) => {
                 // This is set to trace level because when the peerset is
                 // congested it can generate a lot of demand signal very rapidly.
                 trace!("demand-based crawl finished");
             }
-            TimerCrawlFinished => {
+            Ok(TimerCrawlFinished) => {
                 debug!("timer-based crawl finished");
+            }
+
+            // Fatal errors and shutdowns
+            Err(error) => {
+                info!(?error, "crawler task exiting due to an error");
+                return Err(error);
             }
         }
 
@@ -930,7 +927,8 @@ where
 async fn crawl<S>(
     candidates: Arc<futures::lock::Mutex<CandidateSet<S>>>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
-) where
+) -> Result<(), BoxError>
+where
     S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
@@ -949,7 +947,7 @@ async fn crawl<S>(
                 ?e,
                 "candidate set returned an error, is Zebra shutting down?"
             );
-            return;
+            return Err(e);
         }
     };
 
@@ -964,21 +962,38 @@ async fn crawl<S>(
     // with no peers, the channel will drain. This prevents useless update attempt
     // loops.
     if let Some(more_peers) = more_peers {
-        let _ = demand_tx.try_send(more_peers);
+        if let Err(send_error) = demand_tx.try_send(more_peers) {
+            if send_error.is_disconnected() {
+                // Zebra is shutting down
+                return Err(send_error.into());
+            }
+        }
     }
+
+    Ok(())
 }
 
 /// Try to connect to `candidate` using `outbound_connector`.
 /// Uses `outbound_connection_tracker` to track the active connection count.
 ///
-/// Returns a `HandshakeConnected` action on success, and a
-/// `HandshakeFailed` action on error.
-#[instrument(skip(outbound_connector, outbound_connection_tracker))]
+/// On success, sends peers to `peerset_tx`.
+/// On failure, marks the peer as failed in the address book,
+/// then re-adds demand to `demand_tx`.
+#[instrument(skip(
+    outbound_connector,
+    outbound_connection_tracker,
+    peerset_tx,
+    address_book,
+    demand_tx
+))]
 async fn dial<C>(
     candidate: MetaAddr,
     mut outbound_connector: C,
     outbound_connection_tracker: ConnectionTracker,
-) -> CrawlerAction
+    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+) -> Result<(), BoxError>
 where
     C: Service<
             OutboundConnectorRequest,
@@ -998,10 +1013,7 @@ where
     debug!(?candidate.addr, "attempting outbound connection in response to demand");
 
     // the connector is always ready, so this can't hang
-    let outbound_connector = outbound_connector
-        .ready()
-        .await
-        .expect("outbound connector never errors");
+    let outbound_connector = outbound_connector.ready().await?;
 
     let req = OutboundConnectorRequest {
         addr: candidate.addr,
@@ -1009,11 +1021,36 @@ where
     };
 
     // the handshake has timeouts, so it shouldn't hang
-    outbound_connector
-        .call(req)
-        .map_err(|e| (candidate, e))
-        .map(Into::into)
-        .await
+    let handshake_result = outbound_connector.call(req).map(Into::into).await;
+
+    match handshake_result {
+        Ok((address, client)) => {
+            debug!(?candidate.addr, "successfully dialed new peer");
+
+            // The connection limit makes sure this send doesn't block.
+            peerset_tx.send((address, client)).await?;
+        }
+        // The connection was never opened, or it failed the handshake and was dropped.
+        Err(error) => {
+            debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            report_failed(address_book.clone(), candidate).await;
+
+            // The demand signal that was taken out of the queue to attempt to connect to the
+            // failed candidate never turned into a connection, so add it back.
+            //
+            // # Security
+            //
+            // Handshake failures are rate-limited by peer attempt timeouts.
+            if let Err(send_error) = demand_tx.try_send(MorePeers) {
+                if send_error.is_disconnected() {
+                    // Zebra is shutting down
+                    return Err(send_error.into());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Mark `addr` as a failed peer in `address_book`.
@@ -1031,19 +1068,4 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
     })
     .await
     .expect("panic in peer failure address book update task");
-}
-
-impl From<Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>> for CrawlerAction {
-    fn from(dial_result: Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>) -> Self {
-        use CrawlerAction::*;
-        match dial_result {
-            Ok((address, client)) => HandshakeConnected { address, client },
-            Err((candidate, e)) => {
-                debug!(?candidate.addr, ?e, "failed to connect to candidate");
-                HandshakeFailed {
-                    failed_addr: candidate,
-                }
-            }
-        }
-    }
 }
