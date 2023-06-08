@@ -57,6 +57,8 @@ skip-tree = [
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
+    # wait for metrics-exporter-prometheus to upgrade
+    { name = "hashbrown", version = "=0.13.2" },
 
     # ECC crates
 
