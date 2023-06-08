@@ -27,6 +27,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
+use tracing::Span;
 use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::ChainTip;
@@ -752,6 +753,8 @@ where
         "starting the peer address crawler",
     );
 
+    let address_book = candidates.address_book().await;
+
     let mut handshakes = FuturesUnordered::new();
     // <FuturesUnordered as Stream> returns None when empty.
     // Keeping an unresolved future in the pool means the stream
@@ -882,9 +885,9 @@ where
             }
             HandshakeFailed { failed_addr } => {
                 // The connection was never opened, or it failed the handshake and was dropped.
-
                 debug!(?failed_addr.addr, "marking candidate as failed");
-                candidates.report_failed(&failed_addr).await;
+                report_failed(address_book.clone(), failed_addr).await;
+
                 // The demand signal that was taken out of the queue
                 // to attempt to connect to the failed candidate never
                 // turned into a connection, so add it back:
@@ -899,6 +902,22 @@ where
         // Avoids remote peers starving other Zebra tasks using outbound connection errors.
         tokio::task::yield_now().await;
     }
+}
+
+/// Mark `addr` as a failed peer.
+async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: MetaAddr) {
+    let addr = MetaAddr::new_errored(addr.addr, addr.services);
+
+    // # Correctness
+    //
+    // Spawn address book accesses on a blocking thread,
+    // to avoid deadlocks (see #1976).
+    let span = Span::current();
+    tokio::task::spawn_blocking(move || {
+        span.in_scope(|| address_book.lock().unwrap().update(addr))
+    })
+    .await
+    .expect("panic in peer failure address book update task");
 }
 
 /// Try to connect to `candidate` using `outbound_connector`.

@@ -180,8 +180,6 @@ where
     /// The handshaker sets up the peer message receiver so it also sends a
     /// [`Responded`] peer address update.
     ///
-    /// [`report_failed`][Self::report_failed] puts peers into the [`Failed`] state.
-    ///
     /// [`next`][Self::next] puts peers into the [`AttemptPending`] state.
     ///
     /// ## Security
@@ -410,22 +408,12 @@ where
 
         Some(next_peer)
     }
+}
 
-    /// Mark `addr` as a failed peer.
-    pub async fn report_failed(&mut self, addr: &MetaAddr) {
-        let addr = MetaAddr::new_errored(addr.addr, addr.services);
-
-        // # Correctness
-        //
-        // Spawn address book accesses on a blocking thread,
-        // to avoid deadlocks (see #1976).
-        let address_book = self.address_book.clone();
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().update(addr))
-        })
-        .await
-        .expect("panic in peer failure address book update task");
+impl<S> CandidateSet<S> {
+    /// Returns the address book for this `CandidateSet`.
+    pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
+        self.address_book.clone()
     }
 }
 
