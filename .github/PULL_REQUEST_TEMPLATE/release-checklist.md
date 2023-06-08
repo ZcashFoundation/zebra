@@ -61,7 +61,7 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, you can do something like:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.0' '1.0.0' zebrad README.md zebra-network/src/constants.rs book/src/user/docker.md
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.9' '1.0.0' zebrad README.md zebra-network/src/constants.rs book/src/user/docker.md
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.15' '1.0.0-beta.16' zebra-*
 fastmod --extensions rs,toml,md --fixed-strings '0.2.30' '0.2.31' tower-batch tower-fallback
 cargo build
