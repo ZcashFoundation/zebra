@@ -125,7 +125,11 @@ mod tests;
 // When we add the Seed state:
 //   * show that seed peers that transition to other never attempted
 //     states are already in the address book
-pub(crate) struct CandidateSet<S> {
+pub(crate) struct CandidateSet<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S::Future: Send + 'static,
+{
     // Correctness: the address book must be private,
     //              so all operations are performed on a blocking thread (see #1976).
     address_book: Arc<std::sync::Mutex<AddressBook>>,
@@ -136,7 +140,7 @@ pub(crate) struct CandidateSet<S> {
 
 impl<S> CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError>,
+    S: Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
     /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
@@ -408,9 +412,7 @@ where
 
         Some(next_peer)
     }
-}
 
-impl<S> CandidateSet<S> {
     /// Returns the address book for this `CandidateSet`.
     pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
         self.address_book.clone()

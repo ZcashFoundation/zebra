@@ -734,7 +734,7 @@ where
         + Send
         + 'static,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxError>,
+    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     use CrawlerAction::*;
