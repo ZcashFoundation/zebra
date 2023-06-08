@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal

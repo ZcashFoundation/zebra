@@ -1,6 +1,6 @@
 [package]
 name = "zebra-utils"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
