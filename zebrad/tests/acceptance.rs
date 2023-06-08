@@ -1494,12 +1494,20 @@ async fn rpc_endpoint_ignore_client_content_type() -> Result<()> {
     // Create an http client
     let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
-    // Make the call to the `getinfo` RPC method
+    // Make the call to the `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
     let res = client
-        .call_with_content_type("getinfo", "[]".to_string(), "text/plain;".to_string())
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
         .await?;
 
-    // Test rpc endpoint response
+    // Test if rpc endpoint respond
+    assert!(res.status().is_success());
+
+    // Make the call to the `getinfo` RPC method with a random string as content type.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "whatever".to_string())
+        .await?;
+
+    // Test if rpc endpoint respond
     assert!(res.status().is_success());
 
     Ok(())
