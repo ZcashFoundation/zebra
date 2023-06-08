@@ -55,7 +55,7 @@ section in the Zebra book for system requirements.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0
+docker run zfnd/zebra:latest
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
