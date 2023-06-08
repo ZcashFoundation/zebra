@@ -38,7 +38,7 @@ pin-project = "1.1.0"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.7.0"
 regex = "1.8.4"
-serde = { version = "1.0.163", features = ["serde_derive"] }
+serde = { version = "1.0.164", features = ["serde_derive"] }
 tempfile = "3.5.0"
 thiserror = "1.0.40"
 
