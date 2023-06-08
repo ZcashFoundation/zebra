@@ -54,7 +54,7 @@ section in the Zebra book for system requirements.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.8
+docker run zfnd/zebra:1.0.0-rc.9
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -101,7 +101,7 @@ Note that the package `clang` includes `libclang` as well as the C++ compiler.
 Once the dependencies are in place, you can build Zebra
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.8 zebrad
+cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.9 zebrad
 ```
 
 You can start Zebra by
@@ -161,7 +161,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
 
-- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent [#5502](https://github.com/ZcashFoundation/zebra/issues/5502). See the issue for details.
 
 ## Future Work
 
