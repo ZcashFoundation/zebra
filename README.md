@@ -16,6 +16,7 @@
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
+- [User support](#user-support)
 - [Security](#security)
 - [License](#license)
 
@@ -176,6 +177,12 @@ developer documentation, such as design documents. We also render [API
 documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
+
+## User support
+
+For bug reports please [open a bug report ticket in the Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=%5BUser+reported+bug%5D%3A+).
+
+Alternatively by chat, [Join the Zcash Foundation Discord Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support channel.
 
 ## Security
 
