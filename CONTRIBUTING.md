@@ -14,8 +14,7 @@ how to build, run, and instrument Zebra.
 ## Bug Reports
 [bug-reports]: #bug-reports
 
-[File an issue](https://github.com/ZcashFoundation/zebra/issues/new/choose)
-on the issue tracker using the bug report template.
+Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=) on the Zebra issue tracker.
 
 ## Pull Requests
 [pull-requests]: #pull-requests
