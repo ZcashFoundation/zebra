@@ -11,7 +11,7 @@ You can deploy Zebra for a daily use with the images available in [Docker Hub](h
 ### Ready to use image
 
 ```shell
-docker run --detach zfnd/zebra:1.0.0
+docker run --detach zfnd/zebra:latest
 ```
 
 ### Build it locally
