@@ -139,7 +139,7 @@ proptest! {
 /// - if no reconnection peer is returned at all.
 async fn check_candidates_rate_limiting<S>(candidate_set: &mut CandidateSet<S>, candidates: u32)
 where
-    S: tower::Service<Request, Response = Response, Error = BoxError>,
+    S: tower::Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
     let mut now = Instant::now();
