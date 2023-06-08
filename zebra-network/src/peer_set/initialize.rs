@@ -669,11 +669,10 @@ where
 enum CrawlerAction {
     /// Drop the demand signal because there are too many pending handshakes.
     DemandDrop,
-    /// Initiate a handshake to `candidate` in response to demand.
-    DemandHandshake { candidate: MetaAddr },
-    /// Crawl existing peers for more peers in response to demand, because there
-    /// are no available candidates.
-    DemandCrawl,
+    /// Initiate a handshake to the next candidate peer in response to demand.
+    ///
+    /// If there are no available candidates, crawl existing peers.
+    DemandHandshakeOrCrawl,
     /// Crawl existing peers for more peers in response to a timer `tick`.
     TimerCrawl { tick: Instant },
     /// Handle a successfully connected handshake `peer_set_change`.
@@ -778,21 +777,25 @@ where
         );
 
         let crawler_action = tokio::select! {
+            biased;
+            // Check for completed handshakes first, because the rest of the app needs them.
+            // Pending handshakes are limited by the connection limit.
             next_handshake_res = handshakes.next() => next_handshake_res.expect(
                 "handshakes never terminates, because it contains a future that never resolves"
             ),
+            // The timer is rate-limited
             next_timer = crawl_timer.next() => next_timer.expect("timers never terminate"),
-            // turn the demand into an action, based on the crawler's current state
+            // Turn any new demand into an action, based on the crawler's current state.
+            //
+            // # Concurrency
+            //
+            // Demand is potentially unlimited, so it must go last in a biased select!.
             _ = demand_rx.next() => {
                 if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
                     // Too many open outbound connections or pending handshakes already
                     DemandDrop
-                } else if let Some(candidate) = candidates.next().await {
-                    // candidates.next has a short delay, and briefly holds the address
-                    // book lock, so it shouldn't hang
-                    DemandHandshake { candidate }
                 } else {
-                    DemandCrawl
+                    DemandHandshakeOrCrawl
                 }
             }
         };
@@ -804,53 +807,61 @@ where
                 // rapidly.
                 trace!("too many open connections or in-flight handshakes, dropping demand signal");
             }
-            DemandHandshake { candidate } => {
-                // Increment the connection count before we spawn the connection.
-                let outbound_connection_tracker = active_outbound_connections.track_connection();
-                debug!(
-                    outbound_connections = ?active_outbound_connections.update_count(),
-                    "opening an outbound peer connection"
-                );
+            DemandHandshakeOrCrawl => {
+                // Try to get the next available peer for a handshake.
+                //
+                // candidates.next has a short timeout, and briefly holds the address
+                // book lock, so it shouldn't hang
+                if let Some(candidate) = candidates.next().await {
+                    // Increment the connection count before we spawn the connection.
+                    let outbound_connection_tracker =
+                        active_outbound_connections.track_connection();
+                    debug!(
+                        outbound_connections = ?active_outbound_connections.update_count(),
+                        "opening an outbound peer connection"
+                    );
 
-                // Spawn each handshake into an independent task, so it can make
-                // progress independently of the crawls.
-                let hs_join = tokio::spawn(dial(
-                    candidate,
-                    outbound_connector.clone(),
-                    outbound_connection_tracker,
-                ))
-                .map(move |res| match res {
-                    Ok(crawler_action) => crawler_action,
-                    Err(e) => {
-                        panic!("panic during handshaking with {candidate:?}: {e:?} ");
+                    // Spawn each handshake into an independent task, so it can make
+                    // progress independently of the crawls.
+                    let hs_join = tokio::spawn(dial(
+                        candidate,
+                        outbound_connector.clone(),
+                        outbound_connection_tracker,
+                    ))
+                    .map(move |res| match res {
+                        Ok(crawler_action) => crawler_action,
+                        Err(e) => {
+                            panic!("panic during handshaking with {candidate:?}: {e:?} ");
+                        }
+                    })
+                    .in_current_span();
+
+                    handshakes.push(Box::pin(hs_join));
+                } else {
+                    // There weren't any peers, so try to get more peers.
+                    debug!("demand for peers but no available candidates");
+
+                    // update has timeouts, and briefly holds the address book
+                    // lock, so it shouldn't hang
+                    //
+                    // TODO: refactor candidates into a buffered service, so we can
+                    //       spawn independent tasks to avoid deadlocks
+                    let more_peers = candidates.update().await?;
+
+                    // If we got more peers, try to connect to a new peer on our next loop.
+                    //
+                    // # Security
+                    //
+                    // Update attempts are rate-limited by the candidate set.
+                    //
+                    // We only try peers if there was actually an update.
+                    // So if all peers have had a recent attempt,
+                    // and there was recent update with no peers,
+                    // the channel will drain.
+                    // This prevents useless update attempt loops.
+                    if let Some(more_peers) = more_peers {
+                        let _ = demand_tx.try_send(more_peers);
                     }
-                })
-                .in_current_span();
-
-                handshakes.push(Box::pin(hs_join));
-            }
-            DemandCrawl => {
-                debug!("demand for peers but no available candidates");
-                // update has timeouts, and briefly holds the address book
-                // lock, so it shouldn't hang
-                //
-                // TODO: refactor candidates into a buffered service, so we can
-                //       spawn independent tasks to avoid deadlocks
-                let more_peers = candidates.update().await?;
-
-                // If we got more peers, try to connect to a new peer.
-                //
-                // # Security
-                //
-                // Update attempts are rate-limited by the candidate set.
-                //
-                // We only try peers if there was actually an update.
-                // So if all peers have had a recent attempt,
-                // and there was recent update with no peers,
-                // the channel will drain.
-                // This prevents useless update attempt loops.
-                if let Some(more_peers) = more_peers {
-                    let _ = demand_tx.try_send(more_peers);
                 }
             }
             TimerCrawl { tick } => {
