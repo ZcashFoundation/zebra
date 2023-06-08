@@ -11,7 +11,6 @@ use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
 
-use rayon::prelude::*;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
@@ -135,21 +134,22 @@ impl Verifier {
 
     /// Verify a single item using a thread pool, and return the result.
     /// This function returns a future that becomes ready when the item is completed.
-    fn verify_single_spawning(item: Item) -> impl Future<Output = VerifyResult> {
+    async fn verify_single_spawning(item: Item) -> VerifyResult {
+        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        tokio::task::spawn_blocking(|| {
+        rayon::spawn_fifo(move || {
             // Rayon doesn't have a spawn function that returns a value,
-            // so we use a parallel iterator instead.
+            // so we use a oneshot channel instead.
             //
             // TODO:
             // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
             // - spawn fallback individual verifications so rayon executes them in FIFO order,
             //   if possible
-            rayon::iter::once(item)
-                .map(|item| item.verify_single())
-                .collect()
-        })
-        .map(|join_result| join_result.expect("panic in ed25519 fallback verifier"))
+            let _ = rsp_tx.send(item.verify_single());
+        });
+
+        rsp_rx.await.expect("sender should not be dropped")
     }
 }
 
