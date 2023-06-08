@@ -55,9 +55,6 @@ skip-tree = [
     # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
     { name = "ahash", version = "=0.7.6" },
 
-    # wait for ed25519-zebra to upgrade
-    { name = "curve25519-dalek", version = "=3.2.0" },
-
     # ECC crates
 
     # wait for zcash_primitives to remove duplicated dependencies
