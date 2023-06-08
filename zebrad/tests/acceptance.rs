@@ -1467,6 +1467,44 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+/// Test that the JSON-RPC endpoint responds to a request even if the content type is not json.
+///
+/// This test ensures that the examples of zcashd rpc methods will also work in Zebra.
+///
+/// https://zcash.github.io/rpc/getblockchaininfo.html
+#[tokio::test]
+async fn rpc_endpoint_ignore_client_content_type() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    // Write a configuration that has RPC listen_addr set
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config(true)?;
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(args!["start"])?;
+
+    // Wait until port is open.
+    child.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
+
+    // Create an http client
+    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
+
+    // Make the call to the `getinfo` RPC method
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain;".to_string())
+        .await?;
+
+    // Test rpc endpoint response
+    assert!(res.status().is_success());
+
+    Ok(())
+}
+
 /// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
 /// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
 ///

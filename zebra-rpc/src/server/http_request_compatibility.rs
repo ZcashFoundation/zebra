@@ -103,11 +103,13 @@ impl FixHttpRequestMiddleware {
             .replace(", \"jsonrpc\": \"1.0\"", "")
     }
 
-    /// If the `content-type` HTTP header is not present,
-    /// add an `application/json` content type header.
+    /// Ignore client supplied `content-type` HTTP header if any and always send requests with `application/json`.
+    ///
+    /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint.
     pub fn add_missing_content_type_header(headers: &mut hyper::header::HeaderMap) {
-        headers
-            .entry(hyper::header::CONTENT_TYPE)
-            .or_insert(hyper::header::HeaderValue::from_static("application/json"));
+        headers.insert(
+            hyper::header::CONTENT_TYPE,
+            hyper::header::HeaderValue::from_static("application/json"),
+        );
     }
 }

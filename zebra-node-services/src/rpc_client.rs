@@ -43,6 +43,26 @@ impl RpcRequestClient {
             .await
     }
 
+    /// Builds rpc request with a variable `content-type`. Used only for testing.
+    pub async fn call_with_content_type(
+        &self,
+        method: impl AsRef<str>,
+        params: impl AsRef<str>,
+        content_type: String,
+    ) -> reqwest::Result<reqwest::Response> {
+        let method = method.as_ref();
+        let params = params.as_ref();
+
+        self.client
+            .post(format!("http://{}", &self.rpc_address))
+            .body(format!(
+                r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
+            ))
+            .header("Content-Type", content_type)
+            .send()
+            .await
+    }
+
     /// Builds rpc request and gets text from response
     pub async fn text_from_call(
         &self,
