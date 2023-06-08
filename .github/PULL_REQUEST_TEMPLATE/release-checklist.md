@@ -61,7 +61,7 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, you can do something like:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.0' '1.0.0-rc.1' zebrad README.md zebra-network/src/constants.rs book/src/user/docker.md
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.9' '1.0.0' zebrad README.md zebra-network/src/constants.rs book/src/user/docker.md
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.15' '1.0.0-beta.16' zebra-*
 fastmod --extensions rs,toml,md --fixed-strings '0.2.30' '0.2.31' tower-batch tower-fallback
 cargo build
@@ -147,7 +147,7 @@ and the updated changelog:
 
 - [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged
 - [ ] Push the version increments, the updated changelog and the release constants into a branch
-      (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
+      (for example: `bump-v1.0.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
@@ -157,10 +157,10 @@ and the updated changelog:
 
 - [ ] Once the PR has been merged, create a new release using the draft release as a base, by clicking the Edit icon in the [draft release](https://github.com/ZcashFoundation/zebra/releases)
 - [ ] Set the tag name to the version tag,
-      for example: `v1.0.0-rc.0`
+      for example: `v1.0.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Set the release title to `Zebra ` followed by the version tag,
-      for example: `Zebra 1.0.0-rc.0`
+      for example: `Zebra 1.0.0`
 - [ ] Replace the prepopulated draft changelog in the release description with the final changelog you created;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
       and ending just _before_ the title of the previous release.
@@ -175,8 +175,9 @@ and the updated changelog:
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
-- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>`,
-      and put the output in a comment on the PR
+- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra`,
+      and put the output in a comment on the PR. 
+      (You can use [gcloud cloud shell](https://console.cloud.google.com/home/dashboard?cloudshell=true)) 
       <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 
