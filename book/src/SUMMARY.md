@@ -36,5 +36,6 @@
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [Continuous Integration](dev/continuous-integration.md)
   - [Continuous Delivery](dev/continuous-delivery.md)
-  - [zebra-checkpoints](dev/zebra-checkpoints.md)
+  - [Generating Zebra Checkpoints](dev/zebra-checkpoints.md)
+  - [Doing Mass Renames](dev/mass-renames.md)
 - [API Reference](api.md)
