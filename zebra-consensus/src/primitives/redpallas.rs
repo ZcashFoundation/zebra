@@ -120,17 +120,21 @@ impl Verifier {
 
     /// Flush the batch using a thread pool, and return the result via the channel.
     /// This function returns a future that becomes ready when the batch is completed.
-    fn flush_spawning(batch: BatchVerifier, tx: Sender) -> impl Future<Output = ()> {
+    async fn flush_spawning(batch: BatchVerifier, tx: Sender) {
+        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        tokio::task::spawn_blocking(|| {
+        rayon::spawn_fifo(|| {
             // TODO:
             // - spawn batches so rayon executes them in FIFO order
             //   possible implementation: return a closure in a Future,
             //   then run it using scope_fifo() in the worker task,
             //   limiting the number of concurrent batches to the number of rayon threads
-            rayon::scope_fifo(|s| s.spawn_fifo(|_s| Self::verify(batch, tx)))
-        })
-        .map(|join_result| join_result.expect("panic in ed25519 batch verifier"))
+            Self::verify(batch, tx);
+            let _ = rsp_tx.send(());
+        });
+
+        rsp_rx.await.expect("sender should not be dropped")
     }
 
     /// Verify a single item using a thread pool, and return the result.
