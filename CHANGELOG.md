@@ -5,16 +5,49 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - XXXX-XX-XX
 
-In this release ...
+## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - 2023-06-07
+
+This release continues to address audit findings. It fixes multiple network protocol and RPC bugs,
+and reduces sensitive information logging.
+
+This is the last release candidate before the 1.0.0 stable release. Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
 
 ### Breaking Changes
 
 - The version subcommand has been replaced with a --version/-V flag ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
-- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
 
-...
+### Security
+
+- Stop logging peer IP addresses, to protect user privacy ([#6662](https://github.com/ZcashFoundation/zebra/pull/6662))
+- Stop logging potentially sensitive user information from unmined transactions ([#6616](https://github.com/ZcashFoundation/zebra/pull/6616))
+- Rate-limit MetaAddrChange::Responded from peers ([#6738](https://github.com/ZcashFoundation/zebra/pull/6738))
+- Ignore out of order Address Book changes, unless they are concurrent ([#6717](https://github.com/ZcashFoundation/zebra/pull/6717))
+- Limit blocks and transactions sent in response to a single request  ([#6679](https://github.com/ZcashFoundation/zebra/pull/6679))
+- Rate-limit and size-limit peer transaction ID messages ([#6625](https://github.com/ZcashFoundation/zebra/pull/6625))
+- Stop panicking on state RPC or block requests with very large heights ([#6699](https://github.com/ZcashFoundation/zebra/pull/6699))
+- Try harder to drop connections when they shut down, Credit: Ziggurat Team ([#6832](https://github.com/ZcashFoundation/zebra/pull/6832))
+- Randomly drop connections when inbound service is overloaded ([#6790](https://github.com/ZcashFoundation/zebra/pull/6790))
+
+### Added
+
+- Report compiler version and Zebra features when starting Zebra ([#6606](https://github.com/ZcashFoundation/zebra/pull/6606))
+- Update Zebra book summary to include supported platforms, platform tier policy, and versioning ([#6683](https://github.com/ZcashFoundation/zebra/pull/6683))
+- Improve zebrad's help output, credit to @Rqnsom ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Cache a list of useful peers on disk ([#6739](https://github.com/ZcashFoundation/zebra/pull/6739))
+- Make the first stable release forward-compatible with planned state changes ([#6813](https://github.com/ZcashFoundation/zebra/pull/6813))
+
+### Fixed
+
+- Limit RPC failure log length, add details to RPC failure logs ([#6754](https://github.com/ZcashFoundation/zebra/pull/6754))
+- Allow inbound connections to Zebra running in Docker ([#6755](https://github.com/ZcashFoundation/zebra/pull/6755))
+- Zebra now accepts filters for the start command when no subcommand is provided ([#6801](https://github.com/ZcashFoundation/zebra/pull/6801))
+- Avoid panicking on state errors during shutdown ([#6828](https://github.com/ZcashFoundation/zebra/pull/6828))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @mpguerra, @oxarbitrage, @teor2345 and @upbqdn
 
 
 ## [Zebra 1.0.0-rc.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.8) - 2023-05-10
