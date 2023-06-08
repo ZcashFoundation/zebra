@@ -5,6 +5,7 @@
 
 use std::{
     collections::{BTreeMap, HashSet},
+    convert::Infallible,
     net::SocketAddr,
     sync::Arc,
     time::Duration,
@@ -13,7 +14,7 @@ use std::{
 use futures::{
     future::{self, FutureExt},
     sink::SinkExt,
-    stream::{FuturesUnordered, StreamExt, TryStreamExt},
+    stream::{FuturesUnordered, StreamExt},
     TryFutureExt,
 };
 use rand::seq::SliceRandom;
@@ -46,11 +47,15 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The result of an outbound peer connection attempt or inbound connection
-/// handshake.
+/// A successful outbound peer connection attempt or inbound connection handshake.
 ///
-/// This result comes from the `Handshaker`.
-type DiscoveredPeer = Result<(PeerSocketAddr, peer::Client), BoxError>;
+/// The [`Handshake`](peer::Handshake) service returns a [`Result`]. Only successful connections
+/// should be sent on the channel. Errors should be logged or ignored.
+///
+/// We don't allow any errors in this type, because:
+/// - The connection limits don't include failed connections
+/// - tower::Discover interprets an error as stream termination
+type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -146,14 +151,15 @@ where
 
     // Create an mpsc channel for peer changes,
     // based on the maximum number of inbound and outbound peers.
+    //
+    // The connection limit does not apply to errors,
+    // so they need to be handled before sending to this channel.
     let (peerset_tx, peerset_rx) =
         futures::channel::mpsc::channel::<DiscoveredPeer>(config.peerset_total_connection_limit());
 
-    let discovered_peers = peerset_rx
-        // Discover interprets an error as stream termination,
-        // so discard any errored connections...
-        .filter(|result| future::ready(result.is_ok()))
-        .map_ok(|(address, client)| Change::Insert(address, client.into()));
+    let discovered_peers = peerset_rx.map(|(address, client)| {
+        Result::<_, Infallible>::Ok(Change::Insert(address, client.into()))
+    });
 
     // Create an mpsc channel for peerset demand signaling,
     // based on the maximum number of outbound peers.
@@ -210,6 +216,9 @@ where
     // because zcashd rate-limits `addr`/`addrv2` messages per connection,
     // and if we only have one initial peer,
     // we need to ensure that its `Response::Addr` is used by the crawler.
+    //
+    // TODO: this might not be needed after we added the Connection peer address cache,
+    //       try removing it in a future release?
     info!(
         ?active_initial_peer_count,
         "sending initial request for peers"
@@ -342,7 +351,7 @@ where
         let handshake_result =
             handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
-            Ok(ref change) => {
+            Ok(change) => {
                 handshake_success_total += 1;
                 debug!(
                     ?handshake_success_total,
@@ -350,6 +359,9 @@ where
                     ?change,
                     "an initial peer handshake succeeded"
                 );
+
+                // The connection limit makes sure this send doesn't block
+                peerset_tx.send(change).await?;
             }
             Err((addr, ref e)) => {
                 handshake_error_total += 1;
@@ -383,10 +395,6 @@ where
                 }
             }
         }
-
-        peerset_tx
-            .send(handshake_result.map_err(|(_addr, e)| e))
-            .await?;
 
         // Security: Let other tasks run after each connection is processed.
         //
@@ -617,7 +625,8 @@ where
                         let handshake_result = handshake.await;
 
                         if let Ok(client) = handshake_result {
-                            let _ = peerset_tx.send(Ok((addr, client))).await;
+                            // The connection limit makes sure this send doesn't block
+                            let _ = peerset_tx.send((addr, client)).await;
                         } else {
                             debug!(?handshake_result, "error handshaking with inbound peer");
                         }
@@ -856,9 +865,9 @@ where
             }
             HandshakeConnected { address, client } => {
                 debug!(candidate.addr = ?address, "successfully dialed new peer");
-                // successes are handled by an independent task, except for `candidates.update` in
-                // this task, which has a timeout, so they shouldn't hang
-                peerset_tx.send(Ok((address, client))).await?;
+
+                // The connection limit makes sure this send doesn't block in production code.
+                peerset_tx.send((address, client)).await?;
             }
             HandshakeFailed { failed_addr } => {
                 // The connection was never opened, or it failed the handshake and was dropped.
