@@ -44,7 +44,7 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
         tracing::trace!(?request, "original HTTP request");
 
         // Fix the request headers
-        FixHttpRequestMiddleware::add_missing_content_type_header(request.headers_mut());
+        FixHttpRequestMiddleware::add_content_type_header(request.headers_mut());
 
         // Fix the request body
         let request = request.map(|body| {
@@ -106,7 +106,7 @@ impl FixHttpRequestMiddleware {
     /// Ignore client supplied `content-type` HTTP header if any and always send requests with `application/json`.
     ///
     /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint.
-    pub fn add_missing_content_type_header(headers: &mut hyper::header::HeaderMap) {
+    pub fn add_content_type_header(headers: &mut hyper::header::HeaderMap) {
         headers.insert(
             hyper::header::CONTENT_TYPE,
             hyper::header::HeaderValue::from_static("application/json"),
