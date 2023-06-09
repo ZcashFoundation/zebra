@@ -72,7 +72,7 @@ if [[ "$LOG_COLOR" = "true" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 force_use_color = true
 EOF
-else if [[ "$LOG_COLOR" = "false" ]]; then
+elif [[ "$LOG_COLOR" = "false" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 use_color = false
 EOF
