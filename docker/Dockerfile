@@ -162,6 +162,12 @@ ENV RPC_PORT ${RPC_PORT}
 ARG LOG_FILE
 ENV LOG_FILE ${LOG_FILE}
 
+# Zebra automatically detects if it is attached to a terminal, and uses colored output.
+# Set this to 'true' to force using color even if the output is not a terminal.
+# Set this to 'false' to disable using color even if the output is a terminal.
+ARG LOG_COLOR
+ENV LOG_COLOR ${LOG_COLOR}
+
 # Expose configured ports
 
 EXPOSE 8233 18233 $RPC_PORT
