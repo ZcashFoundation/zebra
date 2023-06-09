@@ -40,7 +40,7 @@ network = "$NETWORK"
 listen_addr = "0.0.0.0"
 
 [state]
-cache_dir = "/zebrad-cache"
+cache_dir = "$ZEBRA_CACHED_STATE_DIR"
 
 [metrics]
 #endpoint_addr = "0.0.0.0:9999"
