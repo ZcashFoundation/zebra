@@ -53,13 +53,28 @@ listen_addr = "0.0.0.0:${RPC_PORT}"
 EOF
 fi
 
+if [[ -n "$LOG_FILE" ]] || [[ -n "$LOG_COLOR" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+[tracing]
+#endpoint_addr = "0.0.0.0:3000"
+EOF
+fi
+
 if [[ -n "$LOG_FILE" ]]; then
 mkdir -p $(dirname "$LOG_FILE")
 
 cat <<EOF >> "$ZEBRA_CONF_PATH"
-[tracing]
 log_file = "${LOG_FILE}"
-#endpoint_addr = "0.0.0.0:3000"
+EOF
+fi
+
+if [[ "$LOG_COLOR" = "true" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+force_use_color = true
+EOF
+elif [[ "$LOG_COLOR" = "false" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+use_color = false
 EOF
 fi
 
