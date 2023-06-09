@@ -4718,7 +4718,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tower-batch"
+name = "tower-batch-control"
 version = "0.2.40"
 dependencies = [
  "color-eyre",
@@ -5728,7 +5728,7 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tower",
- "tower-batch",
+ "tower-batch-control",
  "tower-fallback",
  "tracing",
  "tracing-error",

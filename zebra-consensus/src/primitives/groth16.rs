@@ -22,7 +22,7 @@ use rayon::prelude::*;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 
-use tower_batch::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::{BoxedError, Fallback};
 
 use zebra_chain::{
