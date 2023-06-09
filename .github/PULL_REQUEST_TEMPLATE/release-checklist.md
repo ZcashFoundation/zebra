@@ -167,6 +167,12 @@ and the updated changelog:
 - [ ] Publish the pre-release to GitHub using "Publish Release"
 - [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
+## Publish crates
+
+- [ ] Install `cargo-workspaces` if needed: `cargo install cargo-workspaces`
+- [ ] Check that you are logged into `cargo` as an owner of the crate or a member of the `owners` group
+- [ ] Publish the updated crates in-order: `cargo workspaces publish --from-git`
+
 ## Binary Testing
 
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
