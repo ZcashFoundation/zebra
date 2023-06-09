@@ -1467,13 +1467,13 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
-/// Test that the JSON-RPC endpoint responds to a request even if the content type is not json.
+/// Test that the JSON-RPC endpoint responds to requests with different content types.
 ///
-/// This test ensures that the examples of zcashd rpc methods will also work in Zebra.
+/// This test ensures that the curl examples of zcashd rpc methods will also work in Zebra.
 ///
 /// https://zcash.github.io/rpc/getblockchaininfo.html
 #[tokio::test]
-async fn rpc_endpoint_ignore_client_content_type() -> Result<()> {
+async fn rpc_endpoint_client_content_type() -> Result<()> {
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -1494,21 +1494,37 @@ async fn rpc_endpoint_ignore_client_content_type() -> Result<()> {
     // Create an http client
     let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
-    // Make the call to the `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
+    // Call to `getinfo` RPC method with a no content type.
+    let res = client
+        .call_with_no_content_type("getinfo", "[]".to_string())
+        .await?;
+
+    // Zebra will insert valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
     let res = client
         .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
         .await?;
 
-    // Test if rpc endpoint respond
+    // Zebra will replace to the valid `application/json` content type and succeed.
     assert!(res.status().is_success());
 
-    // Make the call to the `getinfo` RPC method with a random string as content type.
+    // Call to `getinfo` RPC method with a valid `application/json` content type.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
+        .await?;
+
+    // Zebra will not replace valid content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with invalid string as content type.
     let res = client
         .call_with_content_type("getinfo", "[]".to_string(), "whatever".to_string())
         .await?;
 
-    // Test if rpc endpoint respond
-    assert!(res.status().is_success());
+    // Zebra will not replace unrecognized content type and fail.
+    assert!(res.status().is_client_error());
 
     Ok(())
 }

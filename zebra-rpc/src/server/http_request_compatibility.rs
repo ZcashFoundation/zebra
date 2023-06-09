@@ -43,8 +43,8 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
     ) -> jsonrpc_http_server::RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
-        // Fix the request headers
-        FixHttpRequestMiddleware::add_content_type_header(request.headers_mut());
+        // Fix the request headers if needed and we can do so.
+        FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
 
         // Fix the request body
         let request = request.map(|body| {
@@ -103,13 +103,36 @@ impl FixHttpRequestMiddleware {
             .replace(", \"jsonrpc\": \"1.0\"", "")
     }
 
-    /// Ignore client supplied `content-type` HTTP header if any and always send requests with `application/json`.
+    /// Insert or replace client supplied `content-type` HTTP header to `application/json` in the following cases:
     ///
-    /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint.
-    pub fn add_content_type_header(headers: &mut hyper::header::HeaderMap) {
-        headers.insert(
-            hyper::header::CONTENT_TYPE,
-            hyper::header::HeaderValue::from_static("application/json"),
-        );
+    /// - no `content-type` supplied.
+    /// - supplied `content-type` is `text/plain`.
+    ///
+    /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint:
+    ///
+    /// <https://github.com/paritytech/jsonrpc/blob/38af3c9439aa75481805edf6c05c6622a5ab1e70/http/src/handler.rs#L582-L584>
+    pub fn insert_or_replace_content_type_header(headers: &mut hyper::header::HeaderMap) {
+        match headers.entry(hyper::header::CONTENT_TYPE) {
+            hyper::header::Entry::Vacant(_) => {
+                headers.insert(
+                    hyper::header::CONTENT_TYPE,
+                    hyper::header::HeaderValue::from_static("application/json"),
+                );
+            }
+            hyper::header::Entry::Occupied(header_data) => {
+                if header_data
+                    .iter()
+                    .filter_map(|x| x.to_str().ok())
+                    .map(|s| s == "text/plain")
+                    .next()
+                    .unwrap_or(false)
+                {
+                    headers.insert(
+                        hyper::header::CONTENT_TYPE,
+                        hyper::header::HeaderValue::from_static("application/json"),
+                    );
+                }
+            }
+        };
     }
 }
