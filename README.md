@@ -67,7 +67,7 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [pkg-config](http://pkgconf.org/), and a C++ compiler.
 
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
-supported or tested. Any Zebra version can start depending on new features in the
+supported or tested. Any Zebra release can start depending on new features in the
 latest stable Rust.
 
 Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
