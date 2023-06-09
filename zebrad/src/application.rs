@@ -126,6 +126,8 @@ pub fn app_version() -> Version {
 }
 
 /// The Zebra current release version.
+//
+// TODO: deduplicate this code with release_version in zebra_rpc::get_info()
 pub fn release_version() -> String {
     app_version()
         .to_string()
@@ -140,6 +142,8 @@ pub fn release_version() -> String {
 /// This must be a valid [BIP 14] user agent.
 ///
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+//
+// TODO: deduplicate this code with the user agent in zebra_rpc::get_info()
 pub fn user_agent() -> String {
     let release_version = release_version();
     format!("/Zebra:{release_version}/")
