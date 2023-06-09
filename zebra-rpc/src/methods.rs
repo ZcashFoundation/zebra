@@ -374,10 +374,10 @@ where
             // remove everything after the `+` character if any
             .split('+')
             .next()
-            .expect("always at least 1 slice")
-            // remove the previously added `v` character at the start since it's not a part of the user agent.
-            .strip_prefix('v')
-            .expect("we are always expecting the `v` prefix");
+            .expect("always at least 1 slice");
+        // Remove the previously added `v` character at the start since it's not a part of the user agent.
+        let release_version = release_version.strip_prefix('v').unwrap_or(release_version);
+
         let user_agent = format!("/Zebra:{release_version}/");
 
         let response = GetInfo {
