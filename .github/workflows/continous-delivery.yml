@@ -18,7 +18,7 @@ on:
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
       log_file:
-        default: ${{ vars.CD_LOG_FILE }}
+        default: ''
         description: 'Log to a file path rather than standard output'
       no_cache:
         description: 'Disable the Docker cache for this build'
