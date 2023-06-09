@@ -162,6 +162,10 @@ ENV RPC_PORT ${RPC_PORT}
 ARG LOG_FILE
 ENV LOG_FILE ${LOG_FILE}
 
+# Set this to change the default cached state directory
+ARG ZEBRA_CACHED_STATE_DIR
+ENV ZEBRA_CACHED_STATE_DIR ${ZEBRA_CACHED_STATE_DIR:-/var/cache/zebrad-cache}
+
 # Expose configured ports
 
 EXPOSE 8233 18233 $RPC_PORT
