@@ -25,10 +25,10 @@ on:
         required: false
         type: boolean
         default: false
-
-  push:
-    branches:
-      - main
+  # Temporarily disabled to reduce network load, see #6894.
+  #push:
+  #  branches:
+  #    - main
   release:
     types:
       - published
