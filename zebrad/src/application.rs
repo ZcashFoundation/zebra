@@ -48,7 +48,7 @@ pub fn app_version() -> Version {
     // or whatever is specified in zebrad/build.rs.
     const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
-    // We're using the same library as cargo uses internally, so this is guarant
+    // We're using the same library as cargo uses internally, so this is guaranteed.
     let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
         panic!(
             "unexpected invalid CARGO_PKG_VERSION: {error:?} in {CARGO_PKG_VERSION:?}, \
