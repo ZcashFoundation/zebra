@@ -56,13 +56,13 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           repository: adityapk00/lightwalletd
           ref: 'master'
           persist-credentials: false
 
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           path: zebra
           persist-credentials: false
