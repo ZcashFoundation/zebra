@@ -1,9 +1,10 @@
 [package]
 # Crate metadata
 name = "zebrad"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
-license = "MIT OR Apache-2.0"
 version = "1.0.0-rc.9"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
