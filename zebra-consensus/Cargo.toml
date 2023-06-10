@@ -55,8 +55,8 @@ orchard = "0.4.0"
 
 zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
 
-tower-fallback = { path = "../tower-fallback/" }
-tower-batch-control = { path = "../tower-batch-control/" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.40" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.40" }
 
 zebra-script = { path = "../zebra-script", version = "1.0.0-beta.25" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.25" }
