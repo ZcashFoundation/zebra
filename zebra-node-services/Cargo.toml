@@ -28,7 +28,7 @@ rpc-client = [
 ]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.25"}
 
 # Optional dependencies
 
