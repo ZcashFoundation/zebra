@@ -73,7 +73,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.3.0
