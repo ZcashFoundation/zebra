@@ -1,4 +1,4 @@
-name: CI Docker
+name: Test network sync
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -8,17 +8,15 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  schedule:
-    # Run this job every Friday at mid-day UTC
-    # This is limited to the Zebra Full Sync job
-    # TODO: we should move this behavior to a separate workflow
-    - cron:  '0 12 * * 5'
-
   workflow_dispatch:
     inputs:
       network:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
         required: true
       regenerate-disks:
         type: boolean
@@ -35,11 +33,6 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
-      no_cache:
-        description: 'Disable the Docker cache for this build'
-        required: false
-        type: boolean
-        default: false
 
   pull_request:
     paths:
@@ -86,9 +79,6 @@ on:
       - '.github/workflows/find-cached-disks.yml'
 
 jobs:
-  # to also run a job on Mergify head branches,
-  # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
 
   # Check if the cached state disks used by the tests are available for the default network.
   #
@@ -124,189 +114,13 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
-      no_cache: ${{ inputs.no_cache || false }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      checkpoint_sync: true
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
       zebra_skip_ipv6_tests: '1'
       rust_log: info
-
-  # zebrad tests without cached state
-
-  # Run all the zebra tests, including tests that are ignored by default.
-  # Skips tests that need a cached state disk or a lightwalletd binary.
-  #
-  # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
-  # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
-  #
-  # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
-  test-all:
-    name: Test all
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
-      #
-      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
-      - name: Run zebrad tests
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --include-ignored
-
-  # zebrad tests without cached state with `getblocktemplate-rpcs` feature
-  #
-  # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
-  test-all-getblocktemplate-rpcs:
-    name: Test all with getblocktemplate-rpcs feature
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run zebrad tests
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
-
-  # Run state tests with fake activation heights.
-  #
-  # This test changes zebra-chain's activation heights,
-  # which can recompile all the Zebra crates,
-  # so we want its build products to be cached separately.
-  #
-  # Also, we don't want to accidentally use the fake heights in other tests.
-  #
-  # (The gRPC feature is a zebrad feature, so it isn't needed here.)
-  test-fake-activation-heights:
-    name: Test with fake activation heights
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run tests with fake activation heights
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
-        env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
-
-  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
-  #
-  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
-  test-empty-sync:
-    name: Test checkpoint sync from empty state
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run zebrad large sync tests
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
-
-  # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-  #
-  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
-  test-lightwalletd-integration:
-    name: Test integration with lightwalletd
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run tests with empty lightwalletd launch
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
-        env:
-          ZEBRA_TEST_LIGHTWALLETD: '1'
-
-  # Test that Zebra works using the default config with the latest Zebra version
-  test-configuration-file:
-    name: Test Zebra default Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run tests using the default config
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
-          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
-          docker stop default-conf-tests
-          docker logs default-conf-tests
-          exit "$EXIT_STATUS"
-
-  # Test that Zebra works using the $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run tests using the $ZEBRA_CONF_PATH
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
-          EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
-          docker stop variable-conf-tests
-          docker logs variable-conf-tests
-          exit "$EXIT_STATUS"
-        env:
-          ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
 
   # zebrad cached checkpoint state tests
 
@@ -377,7 +191,10 @@ jobs:
     name: Zebra tip
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Mainnet') }}
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Mainnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip
