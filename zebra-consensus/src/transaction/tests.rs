@@ -2153,7 +2153,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
             })
             .await;
 
-        if result == expected_error || i >= 10 {
+        if result == expected_error || i >= 100 {
             break result;
         }
 
