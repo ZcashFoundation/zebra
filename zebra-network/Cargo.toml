@@ -1,9 +1,10 @@
 [package]
 name = "zebra-network"
 version = "1.0.0-beta.25"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
-license = "MIT OR Apache-2.0"
+license = "MIT"
+license-file = "LICENSE"
 repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
 
