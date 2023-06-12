@@ -603,8 +603,7 @@ where
             );
 
             let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
-            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
-            let _guard = accept_span.enter();
+            info!(peer = ?connected_addr, "listen_accept");
 
             debug!("got incoming connection");
             handshaker.ready().await?;
