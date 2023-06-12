@@ -66,8 +66,10 @@ and ask the author to re-run the script on the latest `main`.
 
 You can use `fastmod` to rename some instances, but skip others:
 ```sh
-fastmod --fixed-strings "OldName" "NewName" [paths to change]
+fastmod --hidden --fixed-strings "OldName" "NewName" [paths to change]
 ```
+
+Using the `--hidden` flag does renames in `.github` workflows, issue templates, and other configs.
 
 `fastmod` also supports regular expressions to replace a pattern with another pattern.
 
