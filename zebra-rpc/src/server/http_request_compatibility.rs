@@ -111,6 +111,16 @@ impl FixHttpRequestMiddleware {
     /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint:
     ///
     /// <https://github.com/paritytech/jsonrpc/blob/38af3c9439aa75481805edf6c05c6622a5ab1e70/http/src/handler.rs#L582-L584>
+    ///
+    /// # Security
+    ///
+    /// - `content-type` headers exist so that applications know they are speaking the correct protocol with the correct format.
+    /// We can be a bit flexible, but there are some types (such as binary) we shouldn't allow.
+    /// In particular, the "application/x-www-form-urlencoded" header should be rejected, so browser forms can't be used to attack
+    /// a local RPC port. See "The Role of Routers in the CSRF Attack" in
+    /// <https://www.invicti.com/blog/web-security/importance-content-type-header-http-requests/>
+    /// - Checking all the headers is secure, but only because hyper has custom code that just reads the first content-type header.
+    /// <https://github.com/hyperium/headers/blob/f01cc90cf8d601a716856bc9d29f47df92b779e4/src/common/content_type.rs#L102-L108>
     pub fn insert_or_replace_content_type_header(headers: &mut hyper::header::HeaderMap) {
         if !headers.contains_key(hyper::header::CONTENT_TYPE)
             || headers
