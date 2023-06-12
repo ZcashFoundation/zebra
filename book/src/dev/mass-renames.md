@@ -19,7 +19,7 @@ xargs sed -i 's/OldName/NewName/g'
 Or excluding specific paths:
 ```sh
 git ls-tree --full-tree -r --name-only HEAD | \
-grep -v 'path-to-skip' | \
+grep -v -e 'path-to-skip' -e 'other-path-to-skip' | \
 xargs sed -i 's/OldName/NewName/g'
 ```
 
