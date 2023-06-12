@@ -603,9 +603,17 @@ where
             );
 
             let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
-            info!(peer = ?connected_addr, "listen_accept");
+            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
+            let _guard = accept_span.enter();
 
             debug!("got incoming connection");
+
+            // # Correctness
+            //
+            // Holding the drop guard returned by Span::enter across .await points will
+            // result in incorrect traces if the executor yields.
+            //
+            // This await is okay because the handshaker's `poll_ready` method always returns Ready.
             handshaker.ready().await?;
             // TODO: distinguish between proxied listeners and direct listeners
             let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
@@ -636,6 +644,9 @@ where
 
                 handshakes.push(Box::pin(handshake_task));
             }
+
+            // We need to drop the guard before yielding.
+            std::mem::drop(_guard);
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
