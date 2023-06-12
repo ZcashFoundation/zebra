@@ -7,7 +7,7 @@ use ed25519_zebra::*;
 use futures::stream::{FuturesOrdered, StreamExt};
 use rand::thread_rng;
 use tower::{Service, ServiceExt};
-use tower_batch::Batch;
+use tower_batch_control::Batch;
 use tower_fallback::Fallback;
 
 // ============ service impl ============

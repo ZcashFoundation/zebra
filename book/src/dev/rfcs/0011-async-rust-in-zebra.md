@@ -14,7 +14,7 @@ with the [tokio](https://docs.rs/tokio/) executor.
 
 At a higher level, Zebra also uses [`tower::Service`s](https://docs.rs/tower/0.4.1/tower/trait.Service.html),
 [`tower::Buffer`s](https://docs.rs/tower/0.4.1/tower/buffer/struct.Buffer.html),
-and our own [`tower-batch`](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch)
+and our own [`tower-batch-control`](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch-control)
 implementation.
 
 # Motivation
@@ -737,7 +737,7 @@ particularly important for code that modifies Zebra's highly concurrent crates:
 - `zebra-network`
 - `zebra-state`
 - `zebra-consensus`
-- `tower-batch`
+- `tower-batch-control`
 - `tower-fallback`
 
 ## Monitoring Async Code
