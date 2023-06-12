@@ -8,6 +8,12 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  schedule:
+    # Run this job every Friday at mid-day UTC
+    # This is limited to the Zebra and lightwalletd Full Sync jobs
+    # TODO: we should move this behavior to a separate workflow
+    - cron:  '0 12 * * 5'
+
   workflow_dispatch:
     inputs:
       network:
@@ -80,6 +86,9 @@ on:
       - '.github/workflows/find-cached-disks.yml'
 
 jobs:
+  # to also run a job on Mergify head branches,
+  # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
 
   # Check if the cached state disks used by the tests are available for the default network.
   #
@@ -359,7 +368,7 @@ jobs:
   # This test always runs on mainnet.
   #
   # Runs:
-  # - after every PR is merged to `main`
+  # - on schedule, as defined at the top of the workflow
   # - on every PR update, but only if the state version in constants.rs has no cached disk
   # - in manual workflow runs, when run-full-sync is 'true' and network is 'Mainnet'
   #
@@ -368,10 +377,7 @@ jobs:
     name: Zebra tip
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # to also run on Mergify head branches,
-    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Mainnet') }}
+    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Mainnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip
@@ -473,7 +479,7 @@ jobs:
   # This job always runs on testnet, regardless of any inputs or variable settings.
   #
   # Runs:
-  # - after every PR is merged to `main`
+  # - on schedule, as defined at the top of the workflow
   # - on every PR update, but only if the state version in constants.rs has no cached disk
   # - in manual workflow runs, when run-full-sync is 'true' and network is 'Testnet'
   #
@@ -482,10 +488,7 @@ jobs:
     name: Zebra tip on testnet
     needs: [ build, get-available-disks-testnet ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # to also run on Mergify head branches,
-    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Testnet') }}
+    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Testnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip-testnet
@@ -552,7 +555,9 @@ jobs:
   # Test full sync of lightwalletd with a Zebra tip state
   #
   # Runs:
-  # - after every PR is merged to `main`
+  # - on schedule, as defined at the top of the workflow
+  # - on every PR update, but only if the state version in constants.rs has no cached disk
+  # - in manual workflow runs, when run-lwd-sync is 'true' and network is 'Mainnet' (the network is required by the test-full-sync job)
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -560,10 +565,7 @@ jobs:
     name: lightwalletd tip
     needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # to also run on Mergify head branches,
-    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && ((github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
