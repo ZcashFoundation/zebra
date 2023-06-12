@@ -36,6 +36,7 @@ getblocktemplate-rpcs = [
 
 elasticsearch = [
     "zebra-state/elasticsearch",
+    "zebra-chain/elasticsearch",
 ]
 
 sentry = ["dep:sentry"]
