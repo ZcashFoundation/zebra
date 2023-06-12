@@ -2,7 +2,7 @@
 name = "zebra-utils"
 version = "1.0.0-beta.25"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
-description = "Utilities for Zebra development, not for library or application users"
+description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
