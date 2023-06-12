@@ -10,7 +10,7 @@ concurrency:
 on:
   schedule:
     # Run this job every Friday at mid-day UTC
-    # This is limited to the Zebra Full Sync job
+    # This is limited to the Zebra and lightwalletd Full Sync jobs
     # TODO: we should move this behavior to a separate workflow
     - cron:  '0 12 * * 5'
 
@@ -557,7 +557,7 @@ jobs:
   # Runs:
   # - on schedule, as defined at the top of the workflow
   # - on every PR update, but only if the state version in constants.rs has no cached disk
-  # - in manual workflow runs, when run-lwd-sync is 'true' and network is 'Mainnet'
+  # - in manual workflow runs, when run-lwd-sync is 'true' and network is 'Mainnet' (the network is required by the test-full-sync job)
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
