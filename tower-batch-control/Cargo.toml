@@ -3,7 +3,7 @@ name = "tower-batch-control"
 version = "0.2.40"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Tower middleware for batch request processing"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
 
