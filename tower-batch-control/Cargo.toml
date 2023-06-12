@@ -1,5 +1,5 @@
 [package]
-name = "tower-batch"
+name = "tower-batch-control"
 version = "0.2.40"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"

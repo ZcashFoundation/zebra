@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 use tower::{Service, ServiceExt};
-use tower_batch::{error, Batch};
+use tower_batch_control::{error, Batch};
 use tower_test::mock;
 
 #[tokio::test]
