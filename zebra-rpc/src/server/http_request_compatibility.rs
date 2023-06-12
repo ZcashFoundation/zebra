@@ -112,27 +112,16 @@ impl FixHttpRequestMiddleware {
     ///
     /// <https://github.com/paritytech/jsonrpc/blob/38af3c9439aa75481805edf6c05c6622a5ab1e70/http/src/handler.rs#L582-L584>
     pub fn insert_or_replace_content_type_header(headers: &mut hyper::header::HeaderMap) {
-        match headers.entry(hyper::header::CONTENT_TYPE) {
-            hyper::header::Entry::Vacant(_) => {
-                headers.insert(
-                    hyper::header::CONTENT_TYPE,
-                    hyper::header::HeaderValue::from_static("application/json"),
-                );
-            }
-            hyper::header::Entry::Occupied(header_data) => {
-                if header_data
-                    .iter()
-                    .filter_map(|x| x.to_str().ok())
-                    .map(|s| s == "text/plain")
-                    .next()
-                    .unwrap_or(false)
-                {
-                    headers.insert(
-                        hyper::header::CONTENT_TYPE,
-                        hyper::header::HeaderValue::from_static("application/json"),
-                    );
-                }
-            }
-        };
+        if !headers.contains_key(hyper::header::CONTENT_TYPE)
+            || headers
+                .get(hyper::header::CONTENT_TYPE)
+                .filter(|value| value.to_str().ok() == Some("text/plain"))
+                .is_some()
+        {
+            headers.insert(
+                hyper::header::CONTENT_TYPE,
+                hyper::header::HeaderValue::from_static("application/json"),
+            );
+        }
     }
 }

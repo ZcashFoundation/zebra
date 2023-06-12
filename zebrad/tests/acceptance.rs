@@ -1512,7 +1512,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     // Call to `getinfo` RPC method with a valid `application/json` content type.
     let res = client
-        .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
+        .call_with_content_type("getinfo", "[]".to_string(), "application/json".to_string())
         .await?;
 
     // Zebra will not replace valid content type and succeed.
