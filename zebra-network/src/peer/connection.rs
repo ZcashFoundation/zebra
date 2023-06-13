@@ -1464,7 +1464,7 @@ where
             metrics::counter!("pool.closed.loadshed", 1);
 
             tracing::info!(
-                drop_connection_probability,
+                drop_connection_probability = format!("{drop_connection_probability:.3}"),
                 remote_user_agent = ?self.connection_info.remote.user_agent,
                 negotiated_version = ?self.connection_info.negotiated_version,
                 peer = ?self.metrics_label,
