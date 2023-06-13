@@ -169,10 +169,8 @@ and the updated changelog:
 
 ## Publish crates
 
-- [ ] Install `cargo-release` if needed: `cargo install cargo-release`
-- [ ] Check that you are logged into `cargo` as an owner of the crate or a member of the `owners` group
-- [ ] Do a dry-run: `cargo release --workspace -v`
-- [ ] Publish the crates in tree-order: `cargo release --workspace -v --execute`
+- [ ] Run `cargo login`
+- [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 
 ## Binary Testing
 
