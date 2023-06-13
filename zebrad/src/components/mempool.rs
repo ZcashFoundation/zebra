@@ -415,17 +415,25 @@ impl Mempool {
                 / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
             self.queued_count_bar = Some(*howudoin::new().label("Mempool Queue").set_pos(0u64));
+            // .set_len(
+            //     u64::try_from(downloads::MAX_INBOUND_CONCURRENCY).expect("fits in u64"),
+            // ),
 
             self.transaction_count_bar = Some(*howudoin::new().label("Mempool Txs").set_pos(0u64));
+            // .set_len(max_transaction_count),
 
             self.transaction_cost_bar = Some(
                 howudoin::new()
                     .label("Mempool Cost")
                     .set_pos(0u64)
+                    // .set_len(self.config.tx_cost_limit)
                     .fmt_as_bytes(true),
             );
 
             self.rejected_count_bar = Some(*howudoin::new().label("Mempool Rejects").set_pos(0u64));
+            // .set_len(
+            //     u64::try_from(storage::MAX_EVICTION_MEMORY_ENTRIES).expect("fits in u64"),
+            // ),
         }
 
         // Update if the mempool has ever been active
