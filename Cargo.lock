@@ -5759,6 +5759,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "metrics 0.21.0",
+ "num-integer",
  "ordered-map",
  "pin-project",
  "proptest",
