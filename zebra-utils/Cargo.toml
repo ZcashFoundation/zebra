@@ -65,6 +65,9 @@ thiserror = "1.0.40"
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.25" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.25" }
 
+# These crates are needed for the block-template-to-proposal binary
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.25", optional = true }
+
 # These crates are needed for the zebra-checkpoints binary
 itertools = { version = "0.10.5", optional = true }
 
@@ -75,5 +78,3 @@ reqwest =  { version = "0.11.18", optional = true }
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
 tokio = { version = "1.28.2", features = ["full"], optional = true }
 
-# These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", optional = true }
