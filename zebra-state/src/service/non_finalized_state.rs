@@ -701,6 +701,7 @@ impl NonFinalizedState {
                 chain_length_bar
                     .label(format!("Fork {fork_height}"))
                     .set_pos(u64::try_from(chain.len()).expect("fits in u64"));
+                // TODO: should this be MAX_BLOCK_REORG_HEIGHT?
                 // .set_len(u64::from(
                 //     zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
                 // ));
