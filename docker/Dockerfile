@@ -103,7 +103,11 @@ FROM deps AS tests
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd /usr/local/bin
 
+# Copy across the source files and .git directory, so their timestamps are before the build cache timestamps.
+COPY . .
+
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
+# over the top of the original source files,
 # and build it to cache all possible sentry and test dependencies.
 #
 # This is the caching Docker layer for Rust tests!
@@ -134,6 +138,9 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
+
+# Copy the git sources as a base for the build cache.
+COPY . .
 
 # This is the caching layer for Rust zebrad builds.
 # It creates a fake empty zebrad binary, see above for details.
