@@ -23,7 +23,7 @@ Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoun
 
 ### Fixed
 
-- Stop panicking at startup when parsing the app version - release blocker ([#6888](https://github.com/ZcashFoundation/zebra/pull/6888))
+- Stop panicking at startup when parsing the app version ([#6888](https://github.com/ZcashFoundation/zebra/pull/6888))
 - Allow the container to raise in MIGs ([#6893](https://github.com/ZcashFoundation/zebra/pull/6893))
 - Avoid a race condition in testing modified JoinSplits ([#6921](https://github.com/ZcashFoundation/zebra/pull/6921))
 
