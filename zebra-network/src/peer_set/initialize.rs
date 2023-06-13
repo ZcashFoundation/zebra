@@ -611,7 +611,7 @@ where
             // # Correctness
             //
             // Holding the drop guard returned by Span::enter across .await points will
-            // result in incorrect traces if the executor yields.
+            // result in incorrect traces if it yields.
             //
             // This await is okay because the handshaker's `poll_ready` method always returns Ready.
             handshaker.ready().await?;
