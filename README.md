@@ -164,8 +164,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 ## Future Work
 
-The Zebra team is currently working towards an audited stable release.
-
 We will continue to add new features as part of future network upgrades, and in response to community feedback.
 
 ## Documentation
