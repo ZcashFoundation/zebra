@@ -142,6 +142,10 @@ The end of support height is calculated from the current blockchain height:
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
 
+## Publish Release
+
+- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
+
 ## Publish Crates
 
 - [ ] Run `cargo login`
@@ -149,15 +153,12 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Check that Zebra can be installed from `crates.io`:
       `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
 
-## Publish Release & Docker Images
-
-- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
+## Publish Docker Images
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:v1.0.0`,
       and put the output in a comment on the PR. 
       (You can use [gcloud cloud shell](https://console.cloud.google.com/home/dashboard?cloudshell=true))
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-
 
 ## Release Failures
 
