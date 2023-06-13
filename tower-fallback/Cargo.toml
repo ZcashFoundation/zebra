@@ -13,7 +13,7 @@ edition = "2021"
 # crates.io is limited to 5 keywords and categories
 keywords = ["tower", "batch"]
 # Must be one of <https://crates.io/category_slugs>
-categories = ["algorithms", "asynchronous", "cryptography"]
+categories = ["algorithms", "asynchronous"]
 
 [dependencies]
 pin-project = "1.1.0"
