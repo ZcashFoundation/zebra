@@ -106,7 +106,10 @@ impl FixHttpRequestMiddleware {
     /// Insert or replace client supplied `content-type` HTTP header to `application/json` in the following cases:
     ///
     /// - no `content-type` supplied.
-    /// - supplied `content-type` is `text/plain`.
+    /// - supplied `content-type` start with `text/plain`, for example:
+    ///   - `text/plain`
+    ///   - `text/plain;`
+    ///   - `text/plain; charset=utf-8`
     ///
     /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint:
     ///
@@ -125,7 +128,13 @@ impl FixHttpRequestMiddleware {
         if !headers.contains_key(hyper::header::CONTENT_TYPE)
             || headers
                 .get(hyper::header::CONTENT_TYPE)
-                .filter(|value| value.to_str().ok() == Some("text/plain"))
+                .filter(|value| {
+                    value
+                        .to_str()
+                        .ok()
+                        .unwrap_or_default()
+                        .starts_with("text/plain")
+                })
                 .is_some()
         {
             headers.insert(

@@ -1502,9 +1502,29 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
     // Zebra will insert valid `application/json` content type and succeed.
     assert!(res.status().is_success());
 
-    // Call to `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
+    // Call to `getinfo` RPC method with a `text/plain`.
     let res = client
         .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
+        .await?;
+
+    // Zebra will replace to the valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain;".to_string())
+        .await?;
+
+    // Zebra will replace to the valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain; other string` content type.
+    let res = client
+        .call_with_content_type(
+            "getinfo",
+            "[]".to_string(),
+            "text/plain; other string".to_string(),
+        )
         .await?;
 
     // Zebra will replace to the valid `application/json` content type and succeed.
