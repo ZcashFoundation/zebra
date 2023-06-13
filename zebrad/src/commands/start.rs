@@ -132,6 +132,13 @@ impl StartCmd {
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
+        //
+        // # Security
+        //
+        // This layer stack is security-sensitive, modifying it can cause hangs,
+        // or enable denial of service attacks.
+        //
+        // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()

@@ -1283,6 +1283,12 @@ where
         // before sending the next inbound request.
         tokio::task::yield_now().await;
 
+        // # Security
+        //
+        // Holding buffer slots for a long time can cause hangs:
+        // <https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
+        //
+        // The inbound service must be called immediately after a buffer slot is reserved.
         if self.svc.ready().await.is_err() {
             self.fail_with(PeerError::ServiceShutdown).await;
             return;
