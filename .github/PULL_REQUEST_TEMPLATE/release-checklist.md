@@ -174,6 +174,8 @@ and the updated changelog:
 
 ## Binary Testing
 
+- [ ] Check that Zebra can be installed from `crates.io`:
+      `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
