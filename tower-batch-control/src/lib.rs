@@ -88,7 +88,7 @@
 //! ## Implementation History
 //!
 //! The `tower-batch-control` code was modified from a 2019 version of:
-//! https://github.com/tower-rs/tower/tree/master/tower/src/buffer
+//! <https://github.com/tower-rs/tower/tree/master/tower/src/buffer>
 //!
 //! A modified fork of this crate is available on crates.io as `tower-batch`.
 //! It is focused on batching disk writes.
