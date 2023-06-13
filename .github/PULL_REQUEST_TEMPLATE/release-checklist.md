@@ -15,7 +15,7 @@ They can be skipped for urgent releases.
 ## Checkpoints
 
 For performance and security, we want to update the Zebra checkpoints in every release.
-You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
+- [ ] You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
 
 ## Missed Dependency Updates
 
