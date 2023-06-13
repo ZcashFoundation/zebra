@@ -9,7 +9,7 @@ use crate::{
     transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 
-#[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
