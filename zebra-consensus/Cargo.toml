@@ -65,10 +65,10 @@ zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "d
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.1" }
 tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.1" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.25" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.25" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.25" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.25" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.26" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.26" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }

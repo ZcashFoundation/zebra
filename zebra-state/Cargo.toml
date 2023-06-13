@@ -69,13 +69,13 @@ tracing = "0.1.37"
 elasticsearch = { version = "8.5.0-alpha.1", package = "elasticsearch", optional = true }
 serde_json = { version = "1.0.96", package = "serde_json", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.25" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.25", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.26", optional = true }
 proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
