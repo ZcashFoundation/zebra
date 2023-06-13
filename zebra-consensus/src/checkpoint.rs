@@ -311,9 +311,7 @@ where
         if matches!(howudoin::cancelled(), Some(true)) {
             self.finish_diagnostics();
         } else {
-            self.queued_blocks_bar
-                .set_pos(max_queued_height.0)
-                .set_len(u64::from(self.checkpoint_list.max_height().0));
+            self.queued_blocks_bar.set_pos(max_queued_height.0);
         }
     }
 

@@ -662,9 +662,7 @@ impl NonFinalizedState {
                 .best_chain()
                 .map(|chain| chain.non_finalized_root_height().0 - 1);
 
-            chain_count_bar
-                .set_pos(u64::try_from(self.chain_count()).expect("fits in u64"))
-                .set_len(u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"));
+            chain_count_bar.set_pos(u64::try_from(self.chain_count()).expect("fits in u64"));
 
             if let Some(finalized_tip_height) = finalized_tip_height {
                 chain_count_bar.desc(format!("Finalized Root {finalized_tip_height}"));
@@ -701,10 +699,7 @@ impl NonFinalizedState {
                 // - the chain this bar was previously assigned to might have changed position.
                 chain_length_bar
                     .label(format!("Fork {fork_height}"))
-                    .set_pos(u64::try_from(chain.len()).expect("fits in u64"))
-                    .set_len(u64::from(
-                        zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
-                    ));
+                    .set_pos(u64::try_from(chain.len()).expect("fits in u64"));
 
                 // display work as bits
                 let mut desc = format!(
