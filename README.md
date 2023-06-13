@@ -58,7 +58,7 @@ This command will run our latest release, and sync it to the tip:
 docker run zfnd/zebra:1.0.0-rc.9
 ```
 
-For more information, read our [Docker documentation](book/src/user/docker.md).
+For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Building Zebra
 

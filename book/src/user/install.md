@@ -1,6 +1,6 @@
 # Installing Zebra
 
-Follow the [Docker or compilation instructions in the README](https://github.com/ZcashFoundation/zebra#getting-started).
+Follow the [Docker or compilation instructions](https://zebra.zfnd.org/index.html#getting-started).
 
 #### ARM
 
