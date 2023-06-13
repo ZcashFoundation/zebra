@@ -18,6 +18,7 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
+use num_integer::div_ceil;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
@@ -374,10 +375,7 @@ impl Service<zn::Request> for Inbound {
                     let mut peers = peers.sanitized(now);
 
                     // Truncate the list
-                    //
-                    // TODO: replace with div_ceil once it stabilises
-                    //       https://github.com/rust-lang/rust/issues/88581
-                    let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+                    let address_limit = div_ceil(peers.len(), ADDR_RESPONSE_LIMIT_DENOMINATOR);
                     let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
                     peers.truncate(address_limit);
 
