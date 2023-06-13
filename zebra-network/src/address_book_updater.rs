@@ -98,19 +98,14 @@ impl AddressBookUpdater {
                     let address_info = *address_info.borrow_and_update();
 
                     address_bar
-                        .set_pos(u64::try_from(address_info.num_addresses).expect("fits in u64"))
-                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+                        .set_pos(u64::try_from(address_info.num_addresses).expect("fits in u64"));
 
                     let never_attempted = address_info.never_attempted_alternate
                         + address_info.never_attempted_gossiped;
 
-                    never_bar
-                        .set_pos(u64::try_from(never_attempted).expect("fits in u64"))
-                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+                    never_bar.set_pos(u64::try_from(never_attempted).expect("fits in u64"));
 
-                    failed_bar
-                        .set_pos(u64::try_from(address_info.failed).expect("fits in u64"))
-                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+                    failed_bar.set_pos(u64::try_from(address_info.failed).expect("fits in u64"));
                 }
             }
 
