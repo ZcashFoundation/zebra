@@ -123,7 +123,7 @@ into several components:
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts. Internally, the library
-  uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
+  uses [`tower-batch-control`](https://doc.zebra.zfnd.org/tower_batch_control/index.html) to
   perform automatic, transparent batch processing of contemporaneous
   verification requests.
 
