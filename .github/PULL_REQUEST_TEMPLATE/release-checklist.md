@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-# Release Preparation
+# Prepare for the Release
 
 These release steps can be done a week before the release, in separate PRs.
 They can be skipped for urgent releases.
@@ -28,7 +28,7 @@ Here's how we make sure we got everything:
 - [ ] Add the output of `cargo update` to that PR as a comment
 
 
-# Release Changes
+# Make Release Changes
 
 These release steps can be done a few days before the release, in the same PR:
 - [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged
@@ -98,12 +98,11 @@ To create the final change log:
 
 The end of support height is calculated from the current blockchain height:
 - [ ] Find where the Zcash blockchain tip is now by using a [Zcash explorer](https://zcashblockexplorer.com/blocks) or other tool.
-- [ ] Replace `ESTIMATED_RELEASE_HEIGHT` in [`end_of_support.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs)
-      with the height you estimate the release will be tagged.
+- [ ] Replace `ESTIMATED_RELEASE_HEIGHT` in [`end_of_support.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs) with the height you estimate the release will be tagged.
 
 <details>
 
-<summary>Optional: calculate the release tagging height<summary>
+<summary>Optional: calculate the release tagging height</summary>
 
 - Add `1152` blocks for each day until the release
 - For example, if the release is in 3 days, add `1152 * 3` to the current Mainnet block height
@@ -119,9 +118,9 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 
 
-# Releasing Zebra
+# Release Zebra
 
-### Create the Release
+## Create the GitHub Pre-Release
 
 - [ ] Wait for all the release PRs to be merged
 - [ ] Create a new release using the draft release as a base, by clicking the Edit icon in the [draft release](https://github.com/ZcashFoundation/zebra/releases)
@@ -137,18 +136,21 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Publish the pre-release to GitHub using "Publish Release"
 - [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
-## Publish crates
+## Test the Pre-Release
 
-- [ ] Run `cargo login`
-- [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
-
-## Binary Testing
-
-- [ ] Check that Zebra can be installed from `crates.io`:
-      `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
+
+## Publish Crates
+
+- [ ] Run `cargo login`
+- [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
+- [ ] Check that Zebra can be installed from `crates.io`:
+      `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
+
+## Publish Release & Docker Images
+
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:v1.0.0`,
