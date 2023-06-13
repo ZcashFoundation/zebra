@@ -29,7 +29,7 @@ FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 COPY --from=planner /opt/zebrad/recipe.json recipe.json
 
-# Install zebra build deps
+# Install zebra build deps and Dockerfile deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     llvm \
@@ -37,6 +37,7 @@ RUN apt-get -qq update && \
     clang \
     ca-certificates \
     protobuf-compiler \
+    git \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -105,12 +106,18 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # and build it to cache all possible sentry and test dependencies.
 #
-# This is the caching Docker layer for Rust!
+# This is the caching Docker layer for Rust tests!
+# It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
 #
 # TODO: add --locked when cargo-chef supports it
 RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
-# Test Zebra
+# Undo the source file changes made by cargo-chef.
+# This also invalidates the cargo cache for those files by updating their timestamps,
+# which makes sure the fake empty binaries created by cargo-chef are rebuilt.
+RUN git reset --hard HEAD
+
+# Build Zebra test binaries, but don't run them
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
@@ -128,8 +135,14 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # zebrad binary from this step.
 FROM deps AS release
 
+# This is the caching layer for Rust zebrad builds.
+# It creates a fake empty zebrad binary, see above for details.
+#
 # TODO: add --locked when cargo-chef supports it
 RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
+
+# Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
+RUN git reset --hard HEAD
 
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
