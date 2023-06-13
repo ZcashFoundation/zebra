@@ -146,7 +146,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v4.1.0
+        uses: docker/build-push-action@v4.1.1
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
