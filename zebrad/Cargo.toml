@@ -1,9 +1,10 @@
 [package]
 # Crate metadata
 name = "zebrad"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
-license = "MIT OR Apache-2.0"
 version = "1.0.0-rc.9"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
@@ -18,6 +19,13 @@ rust-version = "1.66"
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
 default-run = "zebrad"
+
+readme = "../README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
@@ -108,12 +116,14 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" }
-zebra-consensus = { path = "../zebra-consensus" }
-zebra-network = { path = "../zebra-network" }
-zebra-node-services = { path = "../zebra-node-services" }
-zebra-rpc = { path = "../zebra-rpc" }
-zebra-state = { path = "../zebra-state" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.25" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.25" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.25" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.25" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.25" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.25" }
+# Required for crates.io publishing, but it's only used in tests
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.25", optional = true }
 
 abscissa_core = "0.7.0"
 clap = { version = "4.3.3", features = ["cargo"] }
