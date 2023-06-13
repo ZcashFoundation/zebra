@@ -21,6 +21,9 @@ use crate::{application::app_version, components::tracing::Config};
 #[cfg(feature = "flamegraph")]
 use super::flame;
 
+#[cfg(feature = "progress-bar")]
+static ZEBRA_ART: [u8; include_bytes!("zebra.utf8").len()] = *include_bytes!("zebra.utf8");
+
 /// A type-erased boxed writer that can be sent between threads safely.
 pub type BoxWrite = Box<dyn Write + Send + Sync + 'static>;
 
@@ -52,7 +55,7 @@ pub struct Tracing {
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
-    #[allow(clippy::print_stdout, clippy::print_stderr)]
+    #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
     pub fn new(config: Config) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
@@ -266,7 +269,19 @@ impl Tracing {
             info!("activated progress bar");
 
             if config.log_file.is_some() {
-                eprintln!("waiting for initial progress reports...");
+                // Clear screen
+                eprint!("\x1B[2J");
+                {
+                    eprintln!(
+                        "{}",
+                        std::str::from_utf8(&ZEBRA_ART)
+                            .expect("should always work on a UTF-8 encoded constant")
+                    );
+                }
+                eprintln!("Thank you for running a zebrad {} node!", app_version());
+                eprintln!(
+                    "You're helping to strengthen the network and contributing to a social good :)"
+                );
             }
         }
 
