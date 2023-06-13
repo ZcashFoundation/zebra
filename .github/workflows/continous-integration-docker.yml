@@ -488,7 +488,7 @@ jobs:
     name: Zebra tip on testnet
     needs: [ build, get-available-disks-testnet ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Testnet') }}
+    if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && github.event.inputs.network == 'Testnet') }}
     with:
       app_name: zebrad
       test_id: full-sync-to-tip-testnet
