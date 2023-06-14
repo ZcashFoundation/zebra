@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
+## [Zebra 1.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0) - 2023-06-14
+
+This is our 1.0.0 stable release.
+
+This release also fixes a panic at startup when parsing the app version, [publishes `zebrad` to crates.io](https://crates.io/crates/zebrad), and [publishes to Docker Hub under the `latest` tag](https://hub.docker.com/r/zfnd/zebra/tags).
+
+Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
+
+### Security
+
+- Avoid potential concurrency bugs in outbound handshakes ([#6869](https://github.com/ZcashFoundation/zebra/pull/6869))
+
+### Changed
+
+- Publish to [crates.io](https://crates.io/crates/zebrad) ([#6908(https://github.com/ZcashFoundation/zebra/pull/6908))
+- Rename tower-batch to tower-batch-control ([#6907](https://github.com/ZcashFoundation/zebra/pull/6907))
+- Upgrade to ed25519-zebra 4.0.0 ([#6881](https://github.com/ZcashFoundation/zebra/pull/6881))
+
+### Fixed
+
+- Stop panicking at startup when parsing the app version ([#6888](https://github.com/ZcashFoundation/zebra/pull/6888))
+- Avoid a race condition in testing modified JoinSplits ([#6921](https://github.com/ZcashFoundation/zebra/pull/6921))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@dconnolly, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn
+
+
 ## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - 2023-06-07
 
 This release continues to address audit findings. It fixes multiple network protocol and RPC bugs,

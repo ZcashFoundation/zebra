@@ -1,9 +1,19 @@
 [package]
 name = "tower-fallback"
-version = "0.2.40"
+version = "0.2.41-beta.2"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
-license = "MIT"
+description = "A Tower service combinator that sends requests to a first service, then retries processing on a second fallback service if the first service errors."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
+
+# TODO: decide if we want to use the Zebra readme and home page
+#readme = "../README.md"
+#homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["tower", "batch"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["algorithms", "asynchronous"]
 
 [dependencies]
 pin-project = "1.1.0"

@@ -1,9 +1,25 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.40"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "0.2.41-beta.2"
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
+description = "Tower middleware for batch request processing"
+# # Legal
+#
+# This licence is deliberately different to the rest of Zebra.
+#
+# This code was modified from a 2019 version of:
+# https://github.com/tower-rs/tower/tree/master/tower/src/buffer
 license = "MIT"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
+
+# TODO: decide if we want to use the Zebra readme and home page
+#readme = "../README.md"
+#homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["tower", "batch"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["algorithms", "asynchronous"]
 
 [dependencies]
 futures = "0.3.28"
