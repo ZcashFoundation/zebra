@@ -182,7 +182,7 @@ metrics-exporter-prometheus = { version = "0.12.0", default-features = false, fe
 #
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
-log = "0.4.18"
+log = "0.4.19"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
