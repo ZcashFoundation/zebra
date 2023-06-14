@@ -11,6 +11,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::Utc;
@@ -18,6 +19,7 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
+use num_integer::div_ceil;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
@@ -49,6 +51,12 @@ pub(crate) mod downloads;
 mod tests;
 
 use downloads::Downloads as BlockDownloads;
+
+/// The maximum amount of time an inbound service response can take.
+///
+/// If the response takes longer than this time, it will be cancelled,
+/// and the peer might be disconnected.
+pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 
 /// The number of bytes the [`Inbound`] service will queue in response to a single block or
 /// transaction request, before ignoring any additional block or transaction IDs in that request.
@@ -374,10 +382,7 @@ impl Service<zn::Request> for Inbound {
                     let mut peers = peers.sanitized(now);
 
                     // Truncate the list
-                    //
-                    // TODO: replace with div_ceil once it stabilises
-                    //       https://github.com/rust-lang/rust/issues/88581
-                    let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+                    let address_limit = div_ceil(peers.len(), ADDR_RESPONSE_LIMIT_DENOMINATOR);
                     let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
                     peers.truncate(address_limit);
 

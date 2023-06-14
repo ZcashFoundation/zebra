@@ -349,7 +349,7 @@ pub const MIN_OVERLOAD_DROP_PROBABILITY: f32 = 0.05;
 
 /// The maximum probability of dropping a peer connection when it receives an
 /// [`Overloaded`](crate::PeerError::Overloaded) error.
-pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.95;
+pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
