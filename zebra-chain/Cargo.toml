@@ -46,7 +46,7 @@ bench = ["zebra-test"]
 
 # Cryptography
 bitvec = "1.0.1"
-bitflags = "2.2.1"
+bitflags = "2.3.2"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.1"
 blake2s_simd = "1.0.1"
