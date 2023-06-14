@@ -29,6 +29,9 @@ getblocktemplate-rpcs = [
     "zcash_address",
 ]
 
+# Experimental elasticsearch support
+elasticsearch = []
+
 # Test-only features
 
 proptest-impl = [
