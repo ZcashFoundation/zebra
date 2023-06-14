@@ -39,6 +39,7 @@ proptest-impl = [
 elasticsearch = [
     "dep:elasticsearch",
     "dep:serde_json",
+    "zebra-chain/elasticsearch",
 ]
 
 [dependencies]
