@@ -115,8 +115,8 @@ impl ActiveConnectionCounter {
 
         #[cfg(feature = "progress-bar")]
         self.connection_bar
-            .set_pos(u64::try_from(self.count).expect("fits in u64"))
-            .set_len(u64::try_from(self.limit).expect("fits in u64"));
+            .set_pos(u64::try_from(self.count).expect("fits in u64"));
+        // .set_len(u64::try_from(self.limit).expect("fits in u64"));
 
         self.count
     }
