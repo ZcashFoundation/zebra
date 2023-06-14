@@ -43,8 +43,8 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
     ) -> jsonrpc_http_server::RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
-        // Fix the request headers
-        FixHttpRequestMiddleware::add_missing_content_type_header(request.headers_mut());
+        // Fix the request headers if needed and we can do so.
+        FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
 
         // Fix the request body
         let request = request.map(|body| {
@@ -103,11 +103,44 @@ impl FixHttpRequestMiddleware {
             .replace(", \"jsonrpc\": \"1.0\"", "")
     }
 
-    /// If the `content-type` HTTP header is not present,
-    /// add an `application/json` content type header.
-    pub fn add_missing_content_type_header(headers: &mut hyper::header::HeaderMap) {
-        headers
-            .entry(hyper::header::CONTENT_TYPE)
-            .or_insert(hyper::header::HeaderValue::from_static("application/json"));
+    /// Insert or replace client supplied `content-type` HTTP header to `application/json` in the following cases:
+    ///
+    /// - no `content-type` supplied.
+    /// - supplied `content-type` start with `text/plain`, for example:
+    ///   - `text/plain`
+    ///   - `text/plain;`
+    ///   - `text/plain; charset=utf-8`
+    ///
+    /// `application/json` is the only `content-type` accepted by the Zebra rpc endpoint:
+    ///
+    /// <https://github.com/paritytech/jsonrpc/blob/38af3c9439aa75481805edf6c05c6622a5ab1e70/http/src/handler.rs#L582-L584>
+    ///
+    /// # Security
+    ///
+    /// - `content-type` headers exist so that applications know they are speaking the correct protocol with the correct format.
+    /// We can be a bit flexible, but there are some types (such as binary) we shouldn't allow.
+    /// In particular, the "application/x-www-form-urlencoded" header should be rejected, so browser forms can't be used to attack
+    /// a local RPC port. See "The Role of Routers in the CSRF Attack" in
+    /// <https://www.invicti.com/blog/web-security/importance-content-type-header-http-requests/>
+    /// - Checking all the headers is secure, but only because hyper has custom code that just reads the first content-type header.
+    /// <https://github.com/hyperium/headers/blob/f01cc90cf8d601a716856bc9d29f47df92b779e4/src/common/content_type.rs#L102-L108>
+    pub fn insert_or_replace_content_type_header(headers: &mut hyper::header::HeaderMap) {
+        if !headers.contains_key(hyper::header::CONTENT_TYPE)
+            || headers
+                .get(hyper::header::CONTENT_TYPE)
+                .filter(|value| {
+                    value
+                        .to_str()
+                        .ok()
+                        .unwrap_or_default()
+                        .starts_with("text/plain")
+                })
+                .is_some()
+        {
+            headers.insert(
+                hyper::header::CONTENT_TYPE,
+                hyper::header::HeaderValue::from_static("application/json"),
+            );
+        }
     }
 }
