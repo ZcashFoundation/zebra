@@ -22,12 +22,3 @@
 !zebrad
 !docker/entrypoint.sh
 !docker/runtime-entrypoint.sh
-
-# TODO:
-# replace git with a supported way of resetting files modified by cargo-chef, with the correct timestamps.
-# (This will improve Docker cache performance when the changes in a PR don't impact Rust builds.)
-#
-# Background:
-# https://hackmd.io/@kobzol/S17NS71bh#Using-cargo-chef
-# https://github.com/LukeMathWalker/cargo-chef/issues/180#issuecomment-1552965888
-!.git
