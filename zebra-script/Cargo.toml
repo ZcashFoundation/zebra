@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Zebra script verification wrapping zcashd's zcash_script library"
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ categories = ["api-bindings", "cryptography::cryptocurrencies"]
 [dependencies]
 zcash_script = "0.1.12"
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.25" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
 
 thiserror = "1.0.40"
 displaydoc = "0.2.4"
