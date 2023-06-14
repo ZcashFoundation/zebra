@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 This is our 1.0.0 stable release.
 
-This release also fixes a panic at startup when parsing the app version, begins publishing to crates.io, and publishes to Docker Hub under the `latest` tag.
+This release also fixes a panic at startup when parsing the app version, [publishes `zebrad` to crates.io](https://crates.io/crates/zebrad), and [publishes to Docker Hub under the `latest` tag](https://hub.docker.com/r/zfnd/zebra/tags).
 
 Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
 
