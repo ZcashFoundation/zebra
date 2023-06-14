@@ -57,7 +57,8 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 
 </details>
 
-- [ ] Update crate versions and do a release dry-run:
+- [ ] Update crate versions and do a release dry-run
+    - [ ] `cargo clean` (optional)
     - [ ] `cargo release version --verbose --execute --workspace --exclude zebrad beta`
     - [ ] `cargo release version --verbose --execute --package zebrad [ major | minor | patch ]`
     - [ ] `cargo release publish --verbose --dry-run --workspace`
@@ -149,15 +150,16 @@ The end of support height is calculated from the current blockchain height:
 ## Publish Crates
 
 - [ ] Run `cargo login`
-- [ ] Run `cargo clean` in the zebra repo
+- [ ] Run `cargo clean` in the zebra repo (optional)
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
       `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
+      and put the output in a comment on the PR.
 
 ## Publish Docker Images
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:v1.0.0`,
-      and put the output in a comment on the PR. 
+      and put the output in a comment on the PR.
       (You can use [gcloud cloud shell](https://console.cloud.google.com/home/dashboard?cloudshell=true))
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 
