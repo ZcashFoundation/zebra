@@ -106,6 +106,8 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # cargo uses timestamps for its cache, so they need to be in this order:
 # unmodified source files < previous build cache < modified source files
 # Check the source timestamps:
+RUN ls -l
+COPY . .
 RUN ls -l zebrad/src zebra-network/src
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
@@ -148,6 +150,8 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 FROM deps AS release
 
 # Check the source timestamps:
+RUN ls -l
+COPY . .
 RUN ls -l zebrad/src zebra-network/src
 
 # This is the caching layer for Rust zebrad builds.
