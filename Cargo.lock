@@ -4719,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41-beta.1"
+version = "0.2.41-beta.2"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4743,7 +4743,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.41-beta.1"
+version = "0.2.41-beta.2"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -5639,7 +5639,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "bitflags 2.3.1",
  "bitflags-serde-legacy",
@@ -5699,7 +5699,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5744,7 +5744,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "bitflags 2.3.1",
  "byteorder",
@@ -5784,7 +5784,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "color-eyre",
  "jsonrpc-core",
@@ -5796,7 +5796,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "chrono",
  "futures",
@@ -5828,7 +5828,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5841,7 +5841,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "bincode",
  "chrono",
@@ -5882,7 +5882,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5909,7 +5909,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.26"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5930,7 +5930,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-rc.9"
+version = "1.0.0"
 dependencies = [
  "abscissa_core",
  "atty",
