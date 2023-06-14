@@ -235,7 +235,7 @@ pub struct CheckpointVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -369,7 +369,7 @@ impl CheckpointVerifiedBlock {
             .coinbase_height()
             .expect("coinbase height was already checked");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_outputs(&block, &transaction_hashes);
+        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
 
         Self {
             block,
@@ -405,7 +405,7 @@ impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
             block,
             hash,
             height,
-            new_outputs: utxos_from_ordered_utxos(new_outputs),
+            new_outputs,
             transaction_hashes,
         }
     }
