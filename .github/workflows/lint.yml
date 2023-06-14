@@ -145,8 +145,8 @@ jobs:
     # cargo doc doesn't support '--  -D warnings', so we have to add it here
     # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
     #
-    # These -A and -W settings must be the same as the rustdoc settings in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L53
+    # The -A and -W settings must be the same as the `rustdocflags` in:
+    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
     env:
       RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
