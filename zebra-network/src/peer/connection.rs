@@ -16,7 +16,7 @@ use futures::{
 };
 use rand::{thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
-use tower::{load_shed::error::Overloaded, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -1296,8 +1296,22 @@ where
 
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
-                if e.is::<Overloaded>() {
+                if e.is::<tower::load_shed::error::Overloaded>() {
+                    // # Security
+                    //
+                    // The peer request queue must have a limited length.
+                    // The buffer and load shed layers are added in `start::start()`.
                     tracing::debug!("inbound service is overloaded, may close connection");
+
+                    let now = Instant::now();
+
+                    self.handle_inbound_overload(req, now).await;
+                } else if e.is::<tower::timeout::error::Elapsed>() {
+                    // # Security
+                    //
+                    // Peer requests must have a timeout.
+                    // The timeout layer is added in `start::start()`.
+                    tracing::info!(%req, "inbound service request timed out, may close connection");
 
                     let now = Instant::now();
 

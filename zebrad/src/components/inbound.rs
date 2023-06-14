@@ -11,6 +11,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::Utc;
@@ -50,6 +51,12 @@ pub(crate) mod downloads;
 mod tests;
 
 use downloads::Downloads as BlockDownloads;
+
+/// The maximum amount of time an inbound service response can take.
+///
+/// If the response takes longer than this time, it will be cancelled,
+/// and the peer might be disconnected.
+pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 
 /// The number of bytes the [`Inbound`] service will queue in response to a single block or
 /// transaction request, before ignoring any additional block or transaction IDs in that request.
