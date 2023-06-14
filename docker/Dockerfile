@@ -37,7 +37,7 @@ RUN apt-get -qq update && \
     clang \
     ca-certificates \
     protobuf-compiler \
-    git \
+    rsync \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -103,8 +103,10 @@ FROM deps AS tests
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd /usr/local/bin
 
-# Copy across the source files and .git directory, so their timestamps are before the build cache timestamps.
-COPY . .
+# cargo uses timestamps for its cache, so they need to be in this order:
+# unmodified source files < previous build cache < modified source files
+# Check the source timestamps:
+RUN ls -l zebrad/src zebra-network/src
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -117,9 +119,15 @@ COPY . .
 RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef.
-# This also invalidates the cargo cache for those files by updating their timestamps,
-# which makes sure the fake empty binaries created by cargo-chef are rebuilt.
-RUN git reset --hard HEAD
+# rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
+# This makes sure the fake empty binaries created by cargo-chef are rebuilt.
+COPY --from=planner /opt/zebrad zebra-original
+RUN rsync --checksum --itemize-changes zebra-original .
+RUN rm -r zebra-original
+
+# Check the source and cache timestamps:
+RUN ls -l zebrad/src zebra-network/src
+RUN ls -l target/release target/release/deps/libvergen*
 
 # Build Zebra test binaries, but don't run them
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
@@ -139,8 +147,8 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # zebrad binary from this step.
 FROM deps AS release
 
-# Copy the git sources as a base for the build cache.
-COPY . .
+# Check the source timestamps:
+RUN ls -l zebrad/src zebra-network/src
 
 # This is the caching layer for Rust zebrad builds.
 # It creates a fake empty zebrad binary, see above for details.
@@ -149,7 +157,13 @@ COPY . .
 RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
-RUN git reset --hard HEAD
+COPY --from=planner /opt/zebrad zebra-original
+RUN rsync --checksum --itemize-changes zebra-original .
+RUN rm -r zebra-original
+
+# Check the source and cache timestamps:
+RUN ls -l zebrad/src zebra-network/src
+RUN ls -l target/release target/release/deps/libvergen*
 
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
