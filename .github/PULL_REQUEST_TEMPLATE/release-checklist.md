@@ -58,9 +58,9 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 </details>
 
 - [ ] Update crate versions and do a release dry-run:
-    - [ ] `cargo release version --execute --verbose --workspace --exclude zebrad beta`
-    - [ ] `cargo release version --execute --verbose --package zebrad [ major | minor | patch ]`
-    - [ ] `cargo release publish --verbose --workspace --dry-run`
+    - [ ] `cargo release version --verbose --execute --workspace --exclude zebrad beta`
+    - [ ] `cargo release version --verbose --execute --package zebrad [ major | minor | patch ]`
+    - [ ] `cargo release publish --verbose --dry-run --workspace`
 - [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --workspace`
 
 ## README
