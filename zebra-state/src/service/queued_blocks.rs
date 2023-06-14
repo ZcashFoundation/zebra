@@ -15,13 +15,13 @@ use crate::{BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
 #[cfg(test)]
 mod tests;
 
-/// A queued finalized block, and its corresponding [`Result`] channel.
+/// A finalized state queue block, and its corresponding [`Result`] channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
-/// A queued non-finalized block, and its corresponding [`Result`] channel.
+/// A non-finalized state queue block, and its corresponding [`Result`] channel.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,

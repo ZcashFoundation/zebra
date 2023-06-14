@@ -252,10 +252,10 @@ impl Drop for StateService {
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
         self.clear_finalized_block_queue(
-            "dropping the state: dropped unused queued finalized block",
+            "dropping the state: dropped unused finalized state queue block",
         );
         self.clear_non_finalized_block_queue(
-            "dropping the state: dropped unused queued non-finalized block",
+            "dropping the state: dropped unused non-finalized state queue block",
         );
 
         // Then drop self.read_service, which checks the block write task for panics,
@@ -536,7 +536,7 @@ impl StateService {
         rsp_rx
     }
 
-    /// Finds queued finalized blocks to be committed to the state in order,
+    /// Finds finalized state queue blocks to be committed to the state in order,
     /// removes them from the queue, and sends them to the block commit task.
     ///
     /// After queueing a finalized block, this method checks whether the newly
@@ -596,7 +596,7 @@ impl StateService {
         }
     }
 
-    /// Drops all queued finalized blocks, and sends an error on their result channels.
+    /// Drops all finalized state queue blocks, and sends an error on their result channels.
     fn clear_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
         for (_hash, queued) in self.finalized_state_queued_blocks.drain() {
             Self::send_checkpoint_verified_block_error(queued, error.clone());
@@ -616,7 +616,7 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
-    /// Drops all queued non-finalized blocks, and sends an error on their result channels.
+    /// Drops all non-finalized state queue blocks, and sends an error on their result channels.
     fn clear_non_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
         for (_hash, queued) in self.non_finalized_state_queued_blocks.drain() {
             Self::send_semantically_verified_block_error(queued, error.clone());
