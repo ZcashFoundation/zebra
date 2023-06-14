@@ -107,10 +107,11 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 #
 # This is the caching Docker layer for Rust!
 #
-# TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
+# TODO: add --locked when cargo-chef supports it
+RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
 COPY . .
+# Test Zebra
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
@@ -127,10 +128,12 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
-RUN cargo chef cook --release --features "${FEATURES}" --recipe-path recipe.json
+
+# TODO: add --locked when cargo-chef supports it
+RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
 
 COPY . .
-# Build zebra
+# Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
 COPY ./docker/runtime-entrypoint.sh /
