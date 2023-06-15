@@ -337,6 +337,13 @@ pub struct VerifiedUnminedTx {
     /// transparent inputs and outputs.
     pub legacy_sigop_count: u64,
 
+    /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
+    ///
+    /// The number of actions is limited by [`MAX_BLOCK_BYTES`], so it fits in a u32.
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+    pub conventional_actions: u32,
+
     /// The number of unpaid actions for `transaction`,
     /// as defined by [ZIP-317] for block production.
     ///
@@ -381,6 +388,7 @@ impl VerifiedUnminedTx {
         legacy_sigop_count: u64,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
+        let conventional_actions = zip317::conventional_actions(&transaction.transaction);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
         zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size)?;
@@ -390,6 +398,7 @@ impl VerifiedUnminedTx {
             miner_fee,
             legacy_sigop_count,
             fee_weight_ratio,
+            conventional_actions,
             unpaid_actions,
         })
     }
