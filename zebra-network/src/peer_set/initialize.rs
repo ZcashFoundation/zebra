@@ -34,7 +34,7 @@ use zebra_chain::chain_tip::ChainTip;
 
 use crate::{
     address_book_updater::AddressBookUpdater,
-    constants,
+    constants::{self, HANDSHAKE_TIMEOUT},
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
@@ -612,7 +612,17 @@ where
             )
             .await?;
 
-            handshakes.push(Box::pin(handshake_task));
+            // This timeout helps locate inbound peer connection hangs, see #6763 for details.
+            handshakes.push(Box::pin(
+                tokio::time::timeout(
+                    // Only trigger this timeout if the inner handshake timeout fails
+                    HANDSHAKE_TIMEOUT + Duration::from_millis(500),
+                    handshake_task,
+                )
+                .inspect_err(|_elapsed| {
+                    info!("timeout in spawned accept_inbound_handshake() task")
+                }),
+            ));
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
