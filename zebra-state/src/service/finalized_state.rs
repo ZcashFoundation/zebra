@@ -24,7 +24,7 @@ use zebra_chain::{block, parameters::Network};
 
 use crate::{
     request::ContextuallyVerifiedBlockWithTrees,
-    service::{check, QueuedFinalized},
+    service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
 
@@ -167,7 +167,7 @@ impl FinalizedState {
     /// order.
     pub fn commit_finalized(
         &mut self,
-        ordered_block: QueuedFinalized,
+        ordered_block: QueuedCheckpointVerified,
     ) -> Result<CheckpointVerifiedBlock, BoxError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(

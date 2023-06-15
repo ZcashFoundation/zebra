@@ -9,17 +9,17 @@ use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    service::queued_blocks::{QueuedBlocks, QueuedNonFinalized},
+    service::queued_blocks::{QueuedBlocks, QueuedSemanticallyVerified},
     tests::FakeChainHelper,
 };
 
 // Quick helper trait for making queued blocks with throw away channels
 trait IntoQueued {
-    fn into_queued(self) -> QueuedNonFinalized;
+    fn into_queued(self) -> QueuedSemanticallyVerified;
 }
 
 impl IntoQueued for Arc<Block> {
-    fn into_queued(self) -> QueuedNonFinalized {
+    fn into_queued(self) -> QueuedSemanticallyVerified {
         let (rsp_tx, _) = oneshot::channel();
         (self.prepare(), rsp_tx)
     }
