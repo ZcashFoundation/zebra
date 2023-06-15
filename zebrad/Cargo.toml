@@ -10,7 +10,7 @@ repository = "https://github.com/ZcashFoundation/zebra"
 readme = "../README.md"
 homepage = "https://zfnd.org/zebra/"
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash", "node"]
+keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
@@ -27,14 +27,7 @@ rust-version = "1.66"
 # when run in the workspace directory
 default-run = "zebrad"
 
-readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
-# crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
-# Must be one of <https://crates.io/category_slugs>
-categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
-
-# Release settings
+# `cargo release` settings
 [metadata.release]
 pre-release-replacements = [
   {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout {{version}}"},
