@@ -153,7 +153,7 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Run `cargo clean` in the zebra repo (optional)
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
-      `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
+      `cargo install --locked --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
