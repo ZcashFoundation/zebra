@@ -58,10 +58,10 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 </details>
 
 - [ ] Update crate versions and do a release dry-run:
-    - [ ] `cargo release version --verbose --workspace --exclude zebrad beta`
-    - [ ] `cargo release version --verbose --package zebrad [ major | minor | patch ]`
-    - [ ] `cargo release publish --verbose --workspace --dry-run`
-- [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --workspace`
+    - [ ] `cargo release version --verbose --execute --workspace --exclude zebrad beta`
+    - [ ] `cargo release version --verbose --execute --package zebrad [ major | minor | patch ]`
+    - [ ] `cargo release publish --verbose --dry-run --workspace`
+- [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --execute --workspace`
 
 ## README
 
@@ -149,6 +149,7 @@ The end of support height is calculated from the current blockchain height:
 ## Publish Crates
 
 - [ ] Run `cargo login`
+- [ ] Run `cargo clean` in the zebra repo
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
       `cargo install --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`

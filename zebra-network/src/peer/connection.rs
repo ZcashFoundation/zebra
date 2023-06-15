@@ -16,7 +16,7 @@ use futures::{
 };
 use rand::{thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
-use tower::{load_shed::error::Overloaded, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -1283,6 +1283,12 @@ where
         // before sending the next inbound request.
         tokio::task::yield_now().await;
 
+        // # Security
+        //
+        // Holding buffer slots for a long time can cause hangs:
+        // <https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
+        //
+        // The inbound service must be called immediately after a buffer slot is reserved.
         if self.svc.ready().await.is_err() {
             self.fail_with(PeerError::ServiceShutdown).await;
             return;
@@ -1290,12 +1296,28 @@ where
 
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
-                if e.is::<Overloaded>() {
+                if e.is::<tower::load_shed::error::Overloaded>() {
+                    // # Security
+                    //
+                    // The peer request queue must have a limited length.
+                    // The buffer and load shed layers are added in `start::start()`.
                     tracing::debug!("inbound service is overloaded, may close connection");
 
                     let now = Instant::now();
 
-                    self.handle_inbound_overload(req, now).await;
+                    self.handle_inbound_overload(req, now, PeerError::Overloaded)
+                        .await;
+                } else if e.is::<tower::timeout::error::Elapsed>() {
+                    // # Security
+                    //
+                    // Peer requests must have a timeout.
+                    // The timeout layer is added in `start::start()`.
+                    tracing::info!(%req, "inbound service request timed out, may close connection");
+
+                    let now = Instant::now();
+
+                    self.handle_inbound_overload(req, now, PeerError::InboundTimeout)
+                        .await;
                 } else {
                     // We could send a reject to the remote peer, but that might cause
                     // them to disconnect, and we might be using them to sync blocks.
@@ -1431,7 +1453,8 @@ where
         tokio::task::yield_now().await;
     }
 
-    /// Handle inbound service overload error responses by randomly terminating some connections.
+    /// Handle inbound service overload and timeout error responses by randomly terminating some
+    /// connections.
     ///
     /// # Security
     ///
@@ -1450,15 +1473,19 @@ where
     /// The inbound connection rate-limit also makes it hard for multiple peers to perform this
     /// attack, because each inbound connection can only send one inbound request before its
     /// probability of being disconnected increases.
-    async fn handle_inbound_overload(&mut self, req: Request, now: Instant) {
+    async fn handle_inbound_overload(&mut self, req: Request, now: Instant, error: PeerError) {
         let prev = self.last_overload_time.replace(now);
         let drop_connection_probability = overload_drop_connection_probability(now, prev);
 
         if thread_rng().gen::<f32>() < drop_connection_probability {
-            metrics::counter!("pool.closed.loadshed", 1);
+            if matches!(error, PeerError::Overloaded) {
+                metrics::counter!("pool.closed.loadshed", 1);
+            } else {
+                metrics::counter!("pool.closed.inbound.timeout", 1);
+            }
 
             tracing::info!(
-                drop_connection_probability,
+                drop_connection_probability = format!("{drop_connection_probability:.3}"),
                 remote_user_agent = ?self.connection_info.remote.user_agent,
                 negotiated_version = ?self.connection_info.negotiated_version,
                 peer = ?self.metrics_label,
@@ -1467,14 +1494,19 @@ where
                 remote_height = ?self.connection_info.remote.start_height,
                 cached_addrs = ?self.cached_addrs.len(),
                 connection_state = ?self.state,
-                "inbound service is overloaded, closing connection",
+                "inbound service {error} error, closing connection",
             );
 
-            self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Error", req.command()));
-            self.fail_with(PeerError::Overloaded).await;
+            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Error", req.command()));
+            self.fail_with(error).await;
         } else {
-            self.update_state_metrics(format!("In::Req::{}/Rsp::Overload::Ignored", req.command()));
-            metrics::counter!("pool.ignored.loadshed", 1);
+            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Ignored", req.command()));
+
+            if matches!(error, PeerError::Overloaded) {
+                metrics::counter!("pool.ignored.loadshed", 1);
+            } else {
+                metrics::counter!("pool.ignored.inbound.timeout", 1);
+            }
         }
     }
 }

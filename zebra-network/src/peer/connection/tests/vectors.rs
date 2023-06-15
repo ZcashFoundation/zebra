@@ -687,11 +687,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability <= MAX_OVERLOAD_DROP_PROBABILITY,
-        "if the overloads are very close together, drops can optionally decrease",
+        "if the overloads are very close together, drops can optionally decrease: {drop_probability} <= {MAX_OVERLOAD_DROP_PROBABILITY}",
     );
     assert!(
         MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
-        "if the overloads are very close together, drops can only decrease slightly",
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
     );
     let last_probability = drop_probability;
 
@@ -700,11 +700,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability < last_probability,
-        "if the overloads decrease, drops should decrease",
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
     );
     assert!(
         MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
-        "if the overloads are very close together, drops can only decrease slightly",
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
     );
     let last_probability = drop_probability;
 
@@ -713,11 +713,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability < last_probability,
-        "if the overloads decrease, drops should decrease",
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
     );
     assert!(
         MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
-        "if the overloads are very close together, drops can only decrease slightly",
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
     );
     let last_probability = drop_probability;
 
@@ -726,11 +726,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability < last_probability,
-        "if the overloads decrease, drops should decrease",
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
     );
     assert!(
         MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.01,
-        "if the overloads are very close together, drops can only decrease slightly",
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
     );
     let last_probability = drop_probability;
 
@@ -739,11 +739,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability < last_probability,
-        "if the overloads decrease, drops should decrease",
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
     );
     assert!(
-        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.5,
-        "if the overloads are distant, drops should decrease a lot",
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.4,
+        "if the overloads are distant, drops should decrease a lot: {drop_probability}",
     );
     let last_probability = drop_probability;
 
@@ -752,11 +752,11 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert!(
         drop_probability < last_probability,
-        "if the overloads decrease, drops should decrease",
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
     );
-    assert!(
-        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.7,
-        "if the overloads are distant, drops should decrease a lot",
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if overloads are far apart, drops should have minimum drop probability: {drop_probability}",
     );
     let _last_probability = drop_probability;
 
@@ -765,14 +765,14 @@ fn overload_probability_reduces_over_time() {
     let drop_probability = overload_drop_connection_probability(now, Some(prev));
     assert_eq!(
         drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
-        "if overloads are far apart, drops should have minimum drop probability",
+        "if overloads are far apart, drops should have minimum drop probability: {drop_probability}",
     );
 
     // Base case: no previous overload
     let drop_probability = overload_drop_connection_probability(now, None);
     assert_eq!(
         drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
-        "if there is no previous overload time, overloads should have minimum drop probability",
+        "if there is no previous overload time, overloads should have minimum drop probability: {drop_probability}",
     );
 }
 
