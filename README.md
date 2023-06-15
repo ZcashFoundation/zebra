@@ -74,7 +74,9 @@ Every few weeks, we release a [new Zebra version](https://github.com/ZcashFounda
 
 Below are quick summaries for installing the dependencies on your machine.
 
-<details><summary><h4>General instructions for installing dependencies</h4></summary>
+<details>
+
+<summary>General instructions for installing dependencies</summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
 
@@ -88,7 +90,9 @@ Below are quick summaries for installing the dependencies on your machine.
 
 </details>
 
-<details><summary><h4>Dependencies on Arch</h4></summary>
+<details>
+
+<summary>Dependencies on Arch</summary>
 
 ```sh
 sudo pacman -S rust clang pkgconf
@@ -98,10 +102,10 @@ Note that the package `clang` includes `libclang` as well as the C++ compiler.
 
 </details>
 
-Once the dependencies are in place, you can build Zebra
+Once the dependencies are in place, you can build and install Zebra:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0 zebrad
+cargo install --locked zebrad
 ```
 
 You can start Zebra by
@@ -110,8 +114,8 @@ You can start Zebra by
 zebrad start
 ```
 
-See the [Running Zebra](https://zebra.zfnd.org/user/run.html) section in the
-book for more details.
+See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
+sections in the book for more details.
 
 #### Optional Features
 
