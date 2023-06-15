@@ -124,7 +124,7 @@ RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" 
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
 # This makes sure the fake empty binaries created by cargo-chef are rebuilt.
 COPY --from=planner /opt/zebrad zebra-original
-RUN rsync --checksum --itemize-changes zebra-original .
+RUN rsync --recursive --checksum --itemize-changes zebra-original .
 RUN rm -r zebra-original
 
 # Check the source and cache timestamps:
@@ -162,7 +162,7 @@ RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin ze
 
 # Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
 COPY --from=planner /opt/zebrad zebra-original
-RUN rsync --checksum --itemize-changes zebra-original .
+RUN rsync --recursive --checksum --itemize-changes zebra-original .
 RUN rm -r zebra-original
 
 # Check the source and cache timestamps:
