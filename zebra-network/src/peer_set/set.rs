@@ -509,7 +509,8 @@ where
                     trace!(?key, "got Change::Insert from Discover");
                     self.remove(&key);
 
-                    // drop the new peer if its IP is in cancel_handles or ready_services,
+                    // drop the new peer if there are already `MAX_CONNS_PER_IP` peers with
+                    // the same IP address in the peer set
                     // this is skipped for tests so we can mock peer connections
                     #[cfg(not(test))]
                     if self.num_peers_with_ip(key.ip()) > crate::constants::MAX_CONNS_PER_IP {
