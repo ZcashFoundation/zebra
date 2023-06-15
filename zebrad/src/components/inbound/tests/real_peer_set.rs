@@ -6,10 +6,7 @@ use futures::FutureExt;
 use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
-    buffer::Buffer,
-    builder::ServiceBuilder,
-    util::{BoxCloneService, BoxService},
-    ServiceExt,
+    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
 };
 
 use zebra_chain::{
@@ -600,7 +597,12 @@ async fn setup(
     // connected peer which responds with isolated_peer_response
     Buffer<zebra_network::Client, zebra_network::Request>,
     // inbound service
-    BoxCloneService<zebra_network::Request, zebra_network::Response, BoxError>,
+    LoadShed<
+        Buffer<
+            BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
+            zebra_network::Request,
+        >,
+    >,
     // outbound peer set (only has the connected peer)
     Buffer<
         BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
@@ -626,11 +628,11 @@ async fn setup(
     // Inbound
     let (setup_tx, setup_rx) = oneshot::channel();
     let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+    // TODO: add a timeout just above the service, if needed
     let inbound_service = ServiceBuilder::new()
-        .boxed_clone()
         .load_shed()
         .buffer(10)
-        .service(inbound_service);
+        .service(BoxService::new(inbound_service));
 
     // State
     // UTXO verification doesn't matter for these tests.
