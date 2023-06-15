@@ -76,7 +76,7 @@ Below are quick summaries for installing the dependencies on your machine.
 
 <details>
 
-<summary>General instructions for installing dependencies</summary>
+<summary><h4>General instructions for installing dependencies</h4></summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
 
@@ -92,7 +92,7 @@ Below are quick summaries for installing the dependencies on your machine.
 
 <details>
 
-<summary>Dependencies on Arch</summary>
+<summary><h4>Dependencies on Arch</h4></summary>
 
 ```sh
 sudo pacman -S rust clang pkgconf
