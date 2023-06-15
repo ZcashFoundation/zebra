@@ -7,13 +7,14 @@ use std::{
 };
 
 use futures::prelude::*;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, time::timeout};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 
 use crate::{
+    constants::HANDSHAKE_TIMEOUT,
     peer::{Client, ConnectedAddr, Handshake, HandshakeRequest},
     peer_set::ConnectionTracker,
     BoxError, PeerSocketAddr, Request, Response,
@@ -93,7 +94,7 @@ where
         let connector_span = info_span!("connector", peer = ?connected_addr);
 
         async move {
-            let tcp_stream = TcpStream::connect(*addr).await?;
+            let tcp_stream = timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(*addr)).await??;
             let client = hs
                 .oneshot(HandshakeRequest::<TcpStream> {
                     data_stream: tcp_stream,

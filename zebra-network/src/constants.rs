@@ -83,7 +83,11 @@ pub const PEERSET_BUFFER_SIZE: usize = 3;
 /// and receiving a response from a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The timeout for handshakes when connecting to new peers.
+/// The timeout for connections and handshakes when connecting to new peers.
+///
+/// Outbound TCP connections must complete within this timeout,
+/// then the handshake messages get an additional `HANDSHAKE_TIMEOUT` to complete.
+/// (Inbound TCP accepts can't have a timeout, because they are handled by the OS.)
 ///
 /// This timeout should remain small, because it helps stop slow peers getting
 /// into the peer set. This is particularly important for network-constrained

@@ -320,11 +320,6 @@ impl Config {
             Ok(Ok(ip_addrs)) => {
                 let ip_addrs: Vec<PeerSocketAddr> = ip_addrs.map(canonical_peer_addr).collect();
 
-                // if we're logging at debug level,
-                // the full list of IP addresses will be shown in the log message
-                let debug_span = debug_span!("", remote_ip_addrs = ?ip_addrs);
-                let _span_guard = debug_span.enter();
-
                 // This log is needed for user debugging, but it's annoying during tests.
                 #[cfg(not(test))]
                 info!(seed = ?host, remote_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");

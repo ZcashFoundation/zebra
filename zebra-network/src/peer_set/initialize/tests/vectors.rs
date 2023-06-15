@@ -1453,7 +1453,7 @@ async fn init_with_peer_limit<S>(
     default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     // This test might fail on machines with no configured IPv4 addresses
@@ -1610,6 +1610,7 @@ where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone
         + Send
+        + Sync
         + 'static,
     S::Future: Send + 'static,
 {
