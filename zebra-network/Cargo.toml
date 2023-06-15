@@ -46,6 +46,7 @@ humantime-serde = "1.1.1"
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.10.5"
 lazy_static = "1.4.0"
+num-integer = "0.1.45"
 ordered-map = "0.4.2"
 pin-project = "1.1.0"
 rand = { version = "0.8.5", package = "rand" }

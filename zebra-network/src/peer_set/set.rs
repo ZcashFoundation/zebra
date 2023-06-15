@@ -111,6 +111,7 @@ use futures::{
     stream::FuturesUnordered,
 };
 use itertools::Itertools;
+use num_integer::div_ceil;
 use tokio::{
     sync::{broadcast, oneshot::error::TryRecvError, watch},
     task::JoinHandle,
@@ -808,9 +809,11 @@ where
     /// Given a number of ready peers calculate to how many of them Zebra will
     /// actually send the request to. Return this number.
     pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
-        // We are currently sending broadcast messages to half of the total peers.
+        // We are currently sending broadcast messages to a third of the total peers.
+        const PEER_FRACTION_TO_BROADCAST: usize = 3;
+
         // Round up, so that if we have one ready peer, it gets the request.
-        (self.ready_services.len() + 1) / 2
+        div_ceil(self.ready_services.len(), PEER_FRACTION_TO_BROADCAST)
     }
 
     /// Returns the list of addresses in the peer set.
