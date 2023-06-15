@@ -476,6 +476,17 @@ where
         }
     }
 
+    /// Returns the number of peer connections Zebra already has with
+    /// the provided IP address
+    #[cfg(not(test))]
+    fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .filter(|addr| addr.ip() == ip)
+            .count()
+    }
+
     /// Checks for newly inserted or removed services.
     ///
     /// Puts inserted services in the unready list.
@@ -497,6 +508,14 @@ where
                     // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
                     self.remove(&key);
+
+                    // drop the new peer if its IP is in cancel_handles or ready_services,
+                    // this is skipped for tests so we can mock peer connections
+                    #[cfg(not(test))]
+                    if self.num_peers_with_ip(key.ip()) > crate::constants::MAX_CONNS_PER_IP {
+                        continue;
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
