@@ -1170,7 +1170,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
         serialization::DateTime32,
-        transaction::VerifiedUnminedTx,
+        transaction::{zip317, VerifiedUnminedTx},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -1425,10 +1425,13 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         conventional_fee: 0.try_into().unwrap(),
     };
 
+    let conventional_actions = zip317::conventional_actions(&unmined_tx.transaction);
+
     let verified_unmined_tx = VerifiedUnminedTx {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
         legacy_sigop_count: 0,
+        conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
     };
