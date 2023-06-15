@@ -100,9 +100,9 @@ pub async fn init<S, C>(
     Arc<std::sync::Mutex<AddressBook>>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
-    C: ChainTip + Clone + Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
 {
     // If we want Zebra to operate with no network,
     // we should implement a `zebrad` command that doesn't use `zebra-network`.
@@ -551,7 +551,7 @@ async fn accept_inbound_connections<S>(
     config: Config,
     listener: TcpListener,
     min_inbound_peer_connection_interval: Duration,
-    mut handshaker: S,
+    handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
@@ -579,6 +579,7 @@ where
                 None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
             },
 
+            // This future must wait until new connections are available: it can't have a timeout.
             inbound_result = listener.accept() => inbound_result,
         };
 
@@ -602,51 +603,16 @@ where
                 "handshaking on an open inbound peer connection"
             );
 
-            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
-            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
-            let _guard = accept_span.enter();
-
-            debug!("got incoming connection");
-
-            // # Correctness
-            //
-            // Holding the drop guard returned by Span::enter across .await points will
-            // result in incorrect traces if it yields.
-            //
-            // This await is okay because the handshaker's `poll_ready` method always returns Ready.
-            handshaker.ready().await?;
-            // TODO: distinguish between proxied listeners and direct listeners
-            let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
-
-            // Construct a handshake future but do not drive it yet....
-            let handshake = handshaker.call(HandshakeRequest {
-                data_stream: tcp_stream,
-                connected_addr,
+            let handshake_task = accept_inbound_handshake(
+                addr,
+                handshaker.clone(),
+                tcp_stream,
                 connection_tracker,
-            });
-            // ... instead, spawn a new task to handle this connection
-            {
-                let mut peerset_tx = peerset_tx.clone();
+                peerset_tx.clone(),
+            )
+            .await?;
 
-                let handshake_task = tokio::spawn(
-                    async move {
-                        let handshake_result = handshake.await;
-
-                        if let Ok(client) = handshake_result {
-                            // The connection limit makes sure this send doesn't block
-                            let _ = peerset_tx.send((addr, client)).await;
-                        } else {
-                            debug!(?handshake_result, "error handshaking with inbound peer");
-                        }
-                    }
-                    .instrument(handshaker_span),
-                );
-
-                handshakes.push(Box::pin(handshake_task));
-            }
-
-            // We need to drop the guard before yielding.
-            std::mem::drop(_guard);
+            handshakes.push(Box::pin(handshake_task));
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
@@ -674,6 +640,63 @@ where
         // the next connection after other tasks have run. (Sleeps are not guaranteed to do that.)
         tokio::task::yield_now().await;
     }
+}
+
+/// Set up a new inbound connection as a Zcash peer.
+///
+/// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
+/// the [`peer::Client`] result over `peerset_tx`.
+#[instrument(skip(handshaker, tcp_stream, connection_tracker, peerset_tx))]
+async fn accept_inbound_handshake<S>(
+    addr: PeerSocketAddr,
+    mut handshaker: S,
+    tcp_stream: TcpStream,
+    connection_tracker: ConnectionTracker,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+) -> Result<tokio::task::JoinHandle<()>, BoxError>
+where
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
+        + Clone,
+    S::Future: Send + 'static,
+{
+    let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+
+    debug!("got incoming connection");
+
+    // # Correctness
+    //
+    // Holding the drop guard returned by Span::enter across .await points will
+    // result in incorrect traces if it yields.
+    //
+    // This await is okay because the handshaker's `poll_ready` method always returns Ready.
+    handshaker.ready().await?;
+    // TODO: distinguish between proxied listeners and direct listeners
+    let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
+
+    // Construct a handshake future but do not drive it yet....
+    let handshake = handshaker.call(HandshakeRequest {
+        data_stream: tcp_stream,
+        connected_addr,
+        connection_tracker,
+    });
+    // ... instead, spawn a new task to handle this connection
+    let mut peerset_tx = peerset_tx.clone();
+
+    let handshake_task = tokio::spawn(
+        async move {
+            let handshake_result = handshake.await;
+
+            if let Ok(client) = handshake_result {
+                // The connection limit makes sure this send doesn't block
+                let _ = peerset_tx.send((addr, client)).await;
+            } else {
+                debug!(?handshake_result, "error handshaking with inbound peer");
+            }
+        }
+        .instrument(handshaker_span),
+    );
+
+    Ok(handshake_task)
 }
 
 /// An action that the peer crawler can take.
