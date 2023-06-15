@@ -17,15 +17,6 @@ members = [
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
 resolver = "2"
 
-# Release settings
-
-[package.metadata.release]
-pre-release-replacements = [
-  {file="book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout {{version}}"} ,
-  {file="book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag {{version}}"} ,
-  {file="book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch {{version}}"} ,
-]
-
 # Compilation settings
 
 [profile.dev]
