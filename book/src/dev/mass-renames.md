@@ -13,14 +13,14 @@ so changing them can lead to unexpected test failures or hangs.
 You can use `sed` to rename all the instances of a name in Zebra's code, documentation, and tests:
 ```sh
 git ls-tree --full-tree -r --name-only HEAD | \
-xargs sed -i 's/OldName/NewName/g'
+xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 ```
 
 Or excluding specific paths:
 ```sh
 git ls-tree --full-tree -r --name-only HEAD | \
-grep -v 'path-to-skip' | \
-xargs sed -i 's/OldName/NewName/g'
+grep -v -e 'path-to-skip' -e 'other-path-to-skip' | \
+xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 ```
 
 `sed` also supports regular expressions to replace a pattern with another pattern.
@@ -47,7 +47,8 @@ git worktree add ../zebra-pr origin/pr-branch-name
 cd ../zebra-sed
 # run the scripts in the PR or commit message
 git ls-tree --full-tree -r --name-only HEAD | \
-xargs sed -i 's/OldName/NewName/g'
+grep -v -e 'path-to-skip' -e 'other-path-to-skip' | \
+xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 cargo fmt --all
 ```
 
@@ -66,8 +67,10 @@ and ask the author to re-run the script on the latest `main`.
 
 You can use `fastmod` to rename some instances, but skip others:
 ```sh
-fastmod --fixed-strings "OldName" "NewName" [paths to change]
+fastmod --hidden --fixed-strings "OldName" "NewName" [paths to change]
 ```
+
+Using the `--hidden` flag does renames in `.github` workflows, issue templates, and other configs.
 
 `fastmod` also supports regular expressions to replace a pattern with another pattern.
 
