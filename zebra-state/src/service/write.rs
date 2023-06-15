@@ -17,7 +17,7 @@ use crate::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
-        queued_blocks::{QueuedFinalized, QueuedNonFinalized},
+        queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
     },
     CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
@@ -131,8 +131,8 @@ fn update_latest_chain_channels(
     )
 )]
 pub fn write_blocks_from_channels(
-    mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,
-    mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedNonFinalized>,
+    mut finalized_block_write_receiver: UnboundedReceiver<QueuedCheckpointVerified>,
+    mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedSemanticallyVerified>,
     mut finalized_state: FinalizedState,
     mut non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
