@@ -566,14 +566,8 @@ where
         "Inbound Connections",
     );
 
-    let mut handshakes: FuturesUnordered<
-        Pin<
-            Box<
-                dyn Future<Output = Result<Result<(), JoinError>, tokio::time::error::Elapsed>>
-                    + Send,
-            >,
-        >,
-    > = FuturesUnordered::new();
+    let mut handshakes: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
+        FuturesUnordered::new();
     // Keeping an unresolved future in the pool means the stream never terminates.
     handshakes.push(future::pending().boxed());
 
@@ -583,20 +577,7 @@ where
             biased;
             next_handshake_res = handshakes.next() => match next_handshake_res {
                 // The task has already sent the peer change to the peer set.
-                Some(Ok(Ok(()))) => continue,
-
-                // Handle the outer error layer: timeout
-                Some(Err(_timeout @ Elapsed { .. })) => {
-                    info!("timeout in spawned accept_inbound_handshake() task");
-                    continue;
-                }
-
-                // Handle the inner error layer: task
-                Some(Ok(Err(ref join_error @ JoinError { .. }))) if join_error.is_panic() => panic!("panic in inbound handshake task: {join_error:?}"),
-                Some(Ok(Err(ref join_error @ JoinError { .. }))) => {
-                    info!("error in inbound handshake task: {join_error:?}, is Zebra shutting down?");
-                    continue;
-                }
+                Some(()) => continue,
                 None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
             },
 
@@ -631,14 +612,37 @@ where
                 connection_tracker,
                 peerset_tx.clone(),
             )
-            .await?;
+            .await?
+            .map(move |res| match res {
+                Ok(()) => (),
+                Err(e @ JoinError { .. }) => {
+                    if e.is_panic() {
+                        panic!("panic during inbound handshaking: {e:?}");
+                    } else {
+                        info!(
+                            "task error during inbound handshaking: {e:?}, is Zebra shutting down?"
+                        )
+                    }
+                }
+            });
 
-            // This timeout helps locate inbound peer connection hangs, see #6763 for details.
-            handshakes.push(Box::pin(tokio::time::timeout(
+            let handshake_timeout = tokio::time::timeout(
                 // Only trigger this timeout if the inner handshake timeout fails
                 HANDSHAKE_TIMEOUT + Duration::from_millis(500),
                 handshake_task,
-            )));
+            )
+            .map(move |res| match res {
+                Ok(()) => (),
+                Err(_e @ Elapsed { .. }) => {
+                    info!(
+                        "timeout in spawned accept_inbound_handshake() task: \
+                         inner task should have timeout out already"
+                    );
+                }
+            });
+
+            // This timeout helps locate inbound peer connection hangs, see #6763 for details.
+            handshakes.push(Box::pin(handshake_timeout));
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
@@ -922,11 +926,11 @@ where
                 })
                 .map(move |res| match res {
                     Ok(crawler_action) => crawler_action,
-                    Err(e) => {
+                    Err(e @ JoinError {..}) => {
                         if e.is_panic() {
-                            panic!("panic during handshaking: {e:?}");
+                            panic!("panic during outbound handshake: {e:?}");
                         } else {
-                            info!("task error during handshaking: {e:?}, is Zebra shutting down?")
+                            info!("task error during outbound handshake: {e:?}, is Zebra shutting down?")
                         }
                         // Just fake it
                         Ok(HandshakeFinished)
@@ -952,11 +956,11 @@ where
                 })
                 .map(move |res| match res {
                     Ok(crawler_action) => crawler_action,
-                    Err(e) => {
+                    Err(e @ JoinError {..}) => {
                         if e.is_panic() {
-                            panic!("panic during TimerCrawl: {tick:?} {e:?}");
+                            panic!("panic during outbound TimerCrawl: {tick:?} {e:?}");
                         } else {
-                            info!("task error during TimerCrawl: {e:?}, is Zebra shutting down?")
+                            info!("task error during outbound TimerCrawl: {e:?}, is Zebra shutting down?")
                         }
                         // Just fake it
                         Ok(TimerCrawlFinished)
