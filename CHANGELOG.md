@@ -20,7 +20,7 @@ Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoun
 
 ### Changed
 
-- Publish to [crates.io](https://crates.io/crates/zebrad) ([#6908(https://github.com/ZcashFoundation/zebra/pull/6908))
+- Publish to [crates.io](https://crates.io/crates/zebrad) ([#6908](https://github.com/ZcashFoundation/zebra/pull/6908))
 - Rename tower-batch to tower-batch-control ([#6907](https://github.com/ZcashFoundation/zebra/pull/6907))
 - Upgrade to ed25519-zebra 4.0.0 ([#6881](https://github.com/ZcashFoundation/zebra/pull/6881))
 
