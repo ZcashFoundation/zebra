@@ -478,6 +478,11 @@ where
 
     /// Returns the number of peer connections Zebra already has with
     /// the provided IP address
+    ///
+    /// # Performance
+    ///
+    /// This method is `O(connected peers)`, so it should not be called from a loop
+    /// that is already iterating through the peer set.
     #[cfg(not(test))]
     fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
         self.ready_services
@@ -485,6 +490,11 @@ where
             .chain(self.cancel_handles.keys())
             .filter(|addr| addr.ip() == ip)
             .count()
+    }
+
+    /// Returns `true` if Zebra is already connected to the IP and port in `addr`.
+    fn has_peer_with_addr(&self, addr: PeerSocketAddr) -> bool {
+        self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
     }
 
     /// Checks for newly inserted or removed services.
@@ -507,6 +517,15 @@ where
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
+
+                    // # Security
+                    //
+                    // Drop the new peer if we are already connected to it.
+                    // Preferring old connections avoids connection thrashing.
+                    if self.has_peer_with_addr(key) {
+                        std::mem::drop(svc);
+                        continue;
+                    }
 
                     // # Security
                     //
