@@ -251,6 +251,10 @@ where
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
+
+    /// The configured maximum number of peers that can be in the
+    /// peer set per IP, defaults to [`crate::constants::MAX_CONNS_PER_IP`]
+    max_conns_per_ip: usize,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -270,6 +274,7 @@ where
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
+    #[allow(clippy::too_many_arguments)]
     /// Construct a peerset which uses `discover` to manage peer connections.
     ///
     /// Arguments:
@@ -282,6 +287,9 @@ where
     /// - `inv_stream`: receives inventory changes from peers,
     ///                 allowing the peer set to direct inventory requests;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
+    /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
+    /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
+    ///                       peer set per IP, defaults to [`crate::constants::MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
         discover: D,
@@ -290,6 +298,7 @@ where
         inv_stream: broadcast::Receiver<InventoryChange>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
+        max_conns_per_ip: Option<usize>,
     ) -> Self {
         Self {
             // New peers
@@ -317,6 +326,8 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
+
+            max_conns_per_ip: max_conns_per_ip.unwrap_or(crate::constants::MAX_CONNS_PER_IP),
         }
     }
 
@@ -483,7 +494,6 @@ where
     ///
     /// This method is `O(connected peers)`, so it should not be called from a loop
     /// that is already iterating through the peer set.
-    #[cfg(not(test))]
     fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
         self.ready_services
             .keys()
@@ -530,10 +540,8 @@ where
                     // # Security
                     //
                     // drop the new peer if there are already `MAX_CONNS_PER_IP` peers with
-                    // the same IP address in the peer set
-                    // this is skipped for tests so we can mock peer connections
-                    #[cfg(not(test))]
-                    if self.num_peers_with_ip(key.ip()) > crate::constants::MAX_CONNS_PER_IP {
+                    // the same IP address in the peer set.
+                    if self.num_peers_with_ip(key.ip()) > self.max_conns_per_ip {
                         std::mem::drop(svc);
                         continue;
                     }
