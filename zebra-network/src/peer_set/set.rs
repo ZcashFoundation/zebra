@@ -541,7 +541,7 @@ where
                     //
                     // drop the new peer if there are already `MAX_CONNS_PER_IP` peers with
                     // the same IP address in the peer set.
-                    if self.num_peers_with_ip(key.ip()) > self.max_conns_per_ip {
+                    if self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
                         std::mem::drop(svc);
                         continue;
                     }
