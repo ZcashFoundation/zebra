@@ -15,6 +15,7 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
+use zebra_chain::parameters::Network;
 
 use crate::{application::app_version, components::tracing::Config};
 
@@ -56,7 +57,7 @@ pub struct Tracing {
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
     #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
-    pub fn new(config: Config) -> Result<Self, FrameworkError> {
+    pub fn new(network: Network, config: Config) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 
@@ -278,7 +279,11 @@ impl Tracing {
                             .expect("should always work on a UTF-8 encoded constant")
                     );
                 }
-                eprintln!("Thank you for running a zebrad {} node!", app_version());
+                eprintln!(
+                    "Thank you for running a {} zebrad {} node!",
+                    network.lowercase_name(),
+                    app_version()
+                );
                 eprintln!(
                     "You're helping to strengthen the network and contributing to a social good :)"
                 );
