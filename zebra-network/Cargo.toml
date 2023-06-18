@@ -7,7 +7,11 @@ description = "Networking code for Zebra"
 #
 # This licence is deliberately different to the rest of Zebra.
 #
-# zebra-network/src/peer_set/set.rs was modified from a 2019 version of:
+# Some code in:
+# zebra-network/src/peer_set/set.rs
+# zebra-network/src/peer_set/unready_service.rs
+# zebra-network/src/peer_set/initialize.rs
+# was modified from a 2019 version of:
 # https://github.com/tower-rs/tower/tree/master/tower/src/balance/p2c/service.rs
 license = "MIT"
 repository = "https://github.com/ZcashFoundation/zebra"

@@ -1,7 +1,8 @@
 //! A peer set whose size is dynamically determined by resource constraints.
-
-// Portions of this submodule were adapted from tower-balance,
-// which is (c) 2019 Tower Contributors (MIT licensed).
+//!
+//! The [`PeerSet`] implementation is adapted from the one in [tower::Balance][tower-balance].
+//!
+//! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 
 use std::{
     collections::{BTreeMap, HashSet},

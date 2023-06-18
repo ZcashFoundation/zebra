@@ -3,6 +3,7 @@
 //! # Implementation
 //!
 //! The [`PeerSet`] implementation is adapted from the one in [tower::Balance][tower-balance].
+//!
 //! As described in Tower's documentation, it:
 //!
 //! > Distributes requests across inner services using the [Power of Two Choices][p2c].
