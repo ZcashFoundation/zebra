@@ -186,12 +186,12 @@ impl CheckpointVerifiedBlock {
         let new_outputs =
             transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
-        Self {
+        Self(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        }
+        })
     }
 }

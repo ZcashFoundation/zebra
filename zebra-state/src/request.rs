@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::RangeInclusive,
+    ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
@@ -162,6 +162,17 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
+/// A block ready to be committed directly to the finalized state with
+/// no checks.
+///
+/// This is exposed for use in checkpointing.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
 
@@ -209,36 +220,6 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
-}
-
-/// A block ready to be committed directly to the finalized state with
-/// no checks.
-///
-/// This is exposed for use in checkpointing.
-///
-/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
-/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
-/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock {
-    /// The block to commit to the state.
-    pub block: Arc<Block>,
-    /// The hash of the block.
-    pub hash: block::Hash,
-    /// The height of the block.
-    pub height: block::Height,
-    /// New transparent outputs created in this block, indexed by
-    /// [`OutPoint`](transparent::OutPoint).
-    ///
-    /// Note: although these transparent outputs are newly created, they may not
-    /// be unspent, since a later transaction in a block can spend outputs of an
-    /// earlier transaction.
-    ///
-    /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// A precomputed list of the hashes of the transactions in this block,
-    /// in the same order as `block.transactions`.
-    pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -371,13 +352,13 @@ impl CheckpointVerifiedBlock {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
 
-        Self {
+        Self(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        }
+        })
     }
 }
 
@@ -401,13 +382,26 @@ impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
             chain_value_pool_change: _,
         } = contextually_valid;
 
-        Self {
+        Self(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        }
+        })
+    }
+}
+
+impl Deref for CheckpointVerifiedBlock {
+    type Target = SemanticallyVerifiedBlock;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for CheckpointVerifiedBlock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

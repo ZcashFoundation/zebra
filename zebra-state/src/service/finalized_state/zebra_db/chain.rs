@@ -26,7 +26,7 @@ use crate::{
         zebra_db::ZebraDb,
         CheckpointVerifiedBlock,
     },
-    BoxError,
+    BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -75,7 +75,7 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let CheckpointVerifiedBlock { height, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { height, .. }) = finalized;
 
         // Update the tree in state
         let current_tip_height = *height - 1;
@@ -114,7 +114,7 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { block, .. }) = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);

@@ -40,7 +40,7 @@ use crate::{
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         CheckpointVerifiedBlock,
     },
-    BoxError, HashOrHeight,
+    BoxError, HashOrHeight, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -439,12 +439,12 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock {
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             ..
-        } = &finalized;
+        }) = &finalized;
 
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
@@ -507,13 +507,13 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let CheckpointVerifiedBlock {
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             transaction_hashes,
             ..
-        } = finalized;
+        }) = finalized;
 
         // Commit block header data
         self.zs_insert(&block_header_by_height, height, &block.header);
@@ -556,7 +556,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &CheckpointVerifiedBlock,
     ) -> bool {
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { block, .. }) = finalized;
 
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             self.prepare_genesis_note_commitment_tree_batch(db, finalized);

@@ -35,7 +35,7 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, CheckpointVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -375,7 +375,7 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock { block, height, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { block, height, .. }) = finalized;
 
         // Update created and spent transparent outputs
         self.prepare_new_transparent_outputs_batch(

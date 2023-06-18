@@ -25,7 +25,7 @@ use crate::{
         zebra_db::ZebraDb,
         CheckpointVerifiedBlock,
     },
-    BoxError,
+    BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -212,7 +212,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &CheckpointVerifiedBlock,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { block, .. }) = finalized;
 
         // Index each transaction's shielded data
         for transaction in &block.transactions {
@@ -277,7 +277,7 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let CheckpointVerifiedBlock { height, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { height, .. }) = finalized;
 
         // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
@@ -334,7 +334,7 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let CheckpointVerifiedBlock { height, .. } = finalized;
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { height, .. }) = finalized;
 
         // Insert empty note commitment trees. Note that these can't be
         // used too early (e.g. the Orchard tree before Nu5 activates)
