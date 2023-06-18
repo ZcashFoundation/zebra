@@ -637,7 +637,7 @@ where
                 Err(_e @ Elapsed { .. }) => {
                     info!(
                         "timeout in spawned accept_inbound_handshake() task: \
-                         inner task should have timeout out already"
+                         inner task should have timed out already"
                     );
                 }
             });
