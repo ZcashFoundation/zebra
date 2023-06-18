@@ -38,7 +38,6 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        CheckpointVerifiedBlock,
     },
     BoxError, HashOrHeight, SemanticallyVerifiedBlock,
 };
@@ -282,7 +281,7 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: CheckpointVerifiedBlock,
+        finalized: SemanticallyVerifiedBlock,
         history_tree: Arc<HistoryTree>,
         note_commitment_trees: NoteCommitmentTrees,
         network: Network,
@@ -430,7 +429,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
-        finalized: CheckpointVerifiedBlock,
+        finalized: SemanticallyVerifiedBlock,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
@@ -439,12 +438,12 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             ..
-        }) = &finalized;
+        } = &finalized;
 
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
@@ -495,7 +494,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
@@ -507,13 +506,13 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             transaction_hashes,
             ..
-        }) = finalized;
+        } = finalized;
 
         // Commit block header data
         self.zs_insert(&block_header_by_height, height, &block.header);
@@ -554,9 +553,9 @@ impl DiskWriteBatch {
     pub fn prepare_genesis_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> bool {
-        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock { block, .. }) = finalized;
+        let SemanticallyVerifiedBlock { block, .. } = finalized;
 
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             self.prepare_genesis_note_commitment_tree_batch(db, finalized);

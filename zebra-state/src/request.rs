@@ -254,20 +254,18 @@ impl Treestate {
 /// Zebra's non-finalized state passes this `struct` over to the finalized state
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
-/// database and recompute the new one.
+/// database and recompute a new one.
 pub struct ContextuallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub checkpoint_verified: CheckpointVerifiedBlock,
+    pub block: SemanticallyVerifiedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
 impl ContextuallyVerifiedBlockWithTrees {
-    pub fn new(block: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
-        let checkpoint_verified = CheckpointVerifiedBlock::from(block);
-
+    pub fn new(contextually_verified: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
         Self {
-            checkpoint_verified,
+            block: SemanticallyVerifiedBlock::from(contextually_verified),
             treestate: Some(treestate),
         }
     }
@@ -275,14 +273,23 @@ impl ContextuallyVerifiedBlockWithTrees {
 
 impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
     fn from(block: Arc<Block>) -> Self {
-        Self::from(CheckpointVerifiedBlock::from(block))
+        Self::from(SemanticallyVerifiedBlock::from(block))
+    }
+}
+
+impl From<SemanticallyVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
+    fn from(semantically_verified: SemanticallyVerifiedBlock) -> Self {
+        Self {
+            block: semantically_verified,
+            treestate: None,
+        }
     }
 }
 
 impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
-    fn from(block: CheckpointVerifiedBlock) -> Self {
+    fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
         Self {
-            checkpoint_verified: block,
+            block: checkpoint_verified.0,
             treestate: None,
         }
     }
@@ -339,6 +346,24 @@ impl ContextuallyVerifiedBlock {
     }
 }
 
+impl SemanticallyVerifiedBlock {
+    fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
+        let height = block
+            .coinbase_height()
+            .expect("coinbase height was already checked");
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+
+        SemanticallyVerifiedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        }
+    }
+}
+
 impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
@@ -346,19 +371,7 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        let height = block
-            .coinbase_height()
-            .expect("coinbase height was already checked");
-        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
-
-        Self(SemanticallyVerifiedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-        })
+        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
     }
 }
 
@@ -370,7 +383,15 @@ impl From<Arc<Block>> for CheckpointVerifiedBlock {
     }
 }
 
-impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
+impl From<Arc<Block>> for SemanticallyVerifiedBlock {
+    fn from(block: Arc<Block>) -> Self {
+        let hash = block.hash();
+
+        SemanticallyVerifiedBlock::with_hash(block, hash)
+    }
+}
+
+impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
         let ContextuallyVerifiedBlock {
             block,
@@ -382,13 +403,13 @@ impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
             chain_value_pool_change: _,
         } = contextually_valid;
 
-        Self(SemanticallyVerifiedBlock {
+        Self {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        })
+        }
     }
 }
 
