@@ -7,8 +7,9 @@ use abscissa_core::{
     config::CfgCell,
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths,
 };
+use semver::{BuildMetadata, Version};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
@@ -31,11 +32,12 @@ pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
 /// Returns the zebrad version for this build, in SemVer 2.0 format.
 ///
-/// Includes the git commit and the number of commits since the last version
-/// tag, if available.
+/// Includes `git describe` build metatata if available:
+/// - the number of commits since the last version tag, and
+/// - the git commit.
 ///
 /// For details, see <https://semver.org/>
-pub fn app_version() -> Version {
+pub fn build_version() -> Version {
     // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -125,16 +127,13 @@ pub fn app_version() -> Version {
     semver.parse().unwrap_or(fallback_version)
 }
 
-/// The Zebra current release version.
-//
-// TODO: deduplicate this code with release_version in zebra_rpc::get_info()
-pub fn release_version() -> String {
-    app_version()
-        .to_string()
-        .split('+')
-        .next()
-        .expect("always at least 1 slice")
-        .to_string()
+/// The Zebra current release version, without any build metadata.
+pub fn release_version() -> Version {
+    let mut release_version = build_version();
+
+    release_version.build = BuildMetadata::EMPTY;
+
+    release_version
 }
 
 /// The User-Agent string provided by the node.
@@ -142,8 +141,6 @@ pub fn release_version() -> String {
 /// This must be a valid [BIP 14] user agent.
 ///
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
-//
-// TODO: deduplicate this code with the user agent in zebra_rpc::get_info()
 pub fn user_agent() -> String {
     let release_version = release_version();
     format!("/Zebra:{release_version}/")
@@ -260,7 +257,7 @@ impl Application for ZebradApp {
 
         let app_metadata = vec![
             // cargo or git tag + short commit
-            ("version", app_version().to_string()),
+            ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
             // constants
@@ -368,7 +365,7 @@ impl Application for ZebradApp {
         #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
-            release: Some(app_version().to_string().into()),
+            release: Some(build_version().to_string().into()),
             ..Default::default()
         });
 

@@ -43,9 +43,16 @@ mod tests;
 /// Zebra RPC Server
 #[derive(Clone)]
 pub struct RpcServer {
+    /// The RPC config.
     config: Config,
+
+    /// The configured network.
     network: Network,
-    app_version: String,
+
+    /// Zebra's application version, with build metadata.
+    build_version: String,
+
+    /// A handle that shuts down the RPC server.
     close_handle: CloseHandle,
 }
 
@@ -54,7 +61,7 @@ impl fmt::Debug for RpcServer {
         f.debug_struct("RpcServer")
             .field("config", &self.config)
             .field("network", &self.network)
-            .field("app_version", &self.app_version)
+            .field("build_version", &self.build_version)
             .field(
                 "close_handle",
                 // TODO: when it stabilises, use std::any::type_name_of_val(&self.close_handle)
@@ -66,21 +73,26 @@ impl fmt::Debug for RpcServer {
 
 impl RpcServer {
     /// Start a new RPC server endpoint using the supplied configs and services.
-    /// `app_version` is a version string for the application, which is used in RPC responses.
+    ///
+    /// `build_version` and `user_agent` are version strings for the application,
+    /// which are used in RPC responses.
     ///
     /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
     /// and a [`RpcServer`] handle, which can be used to shut down the RPC server task.
     //
-    // TODO: put some of the configs or services in their own struct?
+    // TODO:
+    // - put some of the configs or services in their own struct?
+    // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<Version, Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+    pub fn spawn<VersionString, Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
         config: Config,
         #[cfg(feature = "getblocktemplate-rpcs")]
         mining_config: get_block_template_rpcs::config::Config,
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
         #[allow(unused_variables)]
         mining_config: (),
-        app_version: Version,
+        build_version: VersionString,
+        user_agent: String,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
@@ -93,7 +105,7 @@ impl RpcServer {
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
     where
-        Version: ToString + Clone + Send + 'static,
+        VersionString: ToString + Clone + Send + 'static,
         Mempool: tower::Service<
                 mempool::Request,
                 Response = mempool::Response,
@@ -159,7 +171,8 @@ impl RpcServer {
 
             // Initialize the rpc methods with the zebra version
             let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
-                app_version.clone(),
+                build_version.clone(),
+                user_agent,
                 network,
                 config.debug_force_finished_sync,
                 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -202,7 +215,7 @@ impl RpcServer {
                     let rpc_server_handle = RpcServer {
                         config,
                         network,
-                        app_version: app_version.to_string(),
+                        build_version: build_version.to_string(),
                         close_handle,
                     };
 

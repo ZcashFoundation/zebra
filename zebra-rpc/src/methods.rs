@@ -251,8 +251,11 @@ where
 {
     // Configuration
     //
-    /// Zebra's application version.
-    app_version: String,
+    /// Zebra's application version, with build metadata.
+    build_version: String,
+
+    /// Zebra's RPC user agent.
+    user_agent: String,
 
     /// The configured network for this RPC service.
     network: Network,
@@ -300,8 +303,13 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
-    pub fn new<Version>(
-        app_version: Version,
+    //
+    // TODO:
+    // - put some of the configs or services in their own struct?
+    #[allow(clippy::too_many_arguments)]
+    pub fn new<VersionString>(
+        build_version: VersionString,
+        user_agent: String,
         network: Network,
         debug_force_finished_sync: bool,
         debug_like_zcashd: bool,
@@ -310,21 +318,22 @@ where
         latest_chain_tip: Tip,
     ) -> (Self, JoinHandle<()>)
     where
-        Version: ToString,
+        VersionString: ToString + Clone + Send + 'static,
         <Mempool as Service<mempool::Request>>::Future: Send,
         <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
         let (runner, queue_sender) = Queue::start();
 
-        let mut app_version = app_version.to_string();
+        let mut build_version = build_version.to_string();
 
         // Match zcashd's version format, if the version string has anything in it
-        if !app_version.is_empty() && !app_version.starts_with('v') {
-            app_version.insert(0, 'v');
+        if !build_version.is_empty() && !build_version.starts_with('v') {
+            build_version.insert(0, 'v');
         }
 
         let rpc_impl = RpcImpl {
-            app_version,
+            build_version,
+            user_agent,
             network,
             debug_force_finished_sync,
             debug_like_zcashd,
@@ -364,25 +373,10 @@ where
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    #[allow(clippy::unwrap_in_result)]
     fn get_info(&self) -> Result<GetInfo> {
-        // Build a [BIP 14] valid user agent with release info.
-        //
-        // [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
-        let release_version = self
-            .app_version
-            // remove everything after the `+` character if any
-            .split('+')
-            .next()
-            .expect("always at least 1 slice");
-        // Remove the previously added `v` character at the start since it's not a part of the user agent.
-        let release_version = release_version.strip_prefix('v').unwrap_or(release_version);
-
-        let user_agent = format!("/Zebra:{release_version}/");
-
         let response = GetInfo {
-            build: self.app_version.clone(),
-            subversion: user_agent,
+            build: self.build_version.clone(),
+            subversion: self.user_agent.clone(),
         };
 
         Ok(response)

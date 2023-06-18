@@ -16,7 +16,7 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-use crate::{application::app_version, components::tracing::Config};
+use crate::{application::build_version, components::tracing::Config};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -341,7 +341,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        app_version()
+        build_version()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
