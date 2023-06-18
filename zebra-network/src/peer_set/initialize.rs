@@ -614,7 +614,7 @@ where
                 peerset_tx.clone(),
             )
             .await?
-            .map(move |res| match res {
+            .map(|res| match res {
                 Ok(()) => (),
                 Err(e @ JoinError { .. }) => {
                     if e.is_panic() {
@@ -632,7 +632,7 @@ where
                 HANDSHAKE_TIMEOUT + Duration::from_millis(500),
                 handshake_task,
             )
-            .map(move |res| match res {
+            .map(|res| match res {
                 Ok(()) => (),
                 Err(_e @ Elapsed { .. }) => {
                     info!(
@@ -925,7 +925,7 @@ where
                         Ok(DemandCrawlFinished)
                     }
                 })
-                .map(move |res| match res {
+                .map(|res| match res {
                     Ok(crawler_action) => crawler_action,
                     Err(e @ JoinError {..}) => {
                         if e.is_panic() {
