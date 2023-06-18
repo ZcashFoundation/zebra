@@ -876,6 +876,10 @@ where
         let relay = self.relay;
         let minimum_peer_version = self.minimum_peer_version.clone();
 
+        // # Security
+        //
+        // `zebra_network::init()` implements a connection timeout on this future.
+        // Any code outside this future does not have a timeout.
         let fut = async move {
             debug!(
                 addr = ?connected_addr,
