@@ -67,6 +67,10 @@ pub const INBOUND_PEER_LIMIT_MULTIPLIER: usize = 5;
 /// See [`INBOUND_PEER_LIMIT_MULTIPLIER`] for details.
 pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 
+/// The maximum number of peer connections Zebra will keep for a given IP address
+/// before it drops any additional peer connections with that IP.
+pub const MAX_CONNS_PER_IP: usize = 3;
+
 /// The buffer size for the peer set.
 ///
 /// This should be greater than 1 to avoid sender contention, but also reasonably

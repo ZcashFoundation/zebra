@@ -117,6 +117,7 @@ struct PeerSetBuilder<D, C> {
     inv_stream: Option<broadcast::Receiver<InventoryChange>>,
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
     minimum_peer_version: Option<MinimumPeerVersion<C>>,
+    max_conns_per_ip: Option<usize>,
 }
 
 impl PeerSetBuilder<(), ()> {
@@ -137,6 +138,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             inv_stream: self.inv_stream,
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
+            max_conns_per_ip: self.max_conns_per_ip,
         }
     }
 
@@ -146,13 +148,33 @@ impl<D, C> PeerSetBuilder<D, C> {
         minimum_peer_version: MinimumPeerVersion<NewC>,
     ) -> PeerSetBuilder<D, NewC> {
         PeerSetBuilder {
-            minimum_peer_version: Some(minimum_peer_version),
             config: self.config,
             discover: self.discover,
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
             address_book: self.address_book,
+            minimum_peer_version: Some(minimum_peer_version),
+            max_conns_per_ip: self.max_conns_per_ip,
+        }
+    }
+
+    /// Use the provided [`MinimumPeerVersion`] instance when constructing the [`PeerSet`] instance.
+    pub fn max_conns_per_ip(self, max_conns_per_ip: usize) -> PeerSetBuilder<D, C> {
+        assert!(
+            max_conns_per_ip > 0,
+            "max_conns_per_ip must be greater than zero"
+        );
+
+        PeerSetBuilder {
+            config: self.config,
+            discover: self.discover,
+            demand_signal: self.demand_signal,
+            handle_rx: self.handle_rx,
+            inv_stream: self.inv_stream,
+            address_book: self.address_book,
+            minimum_peer_version: self.minimum_peer_version,
+            max_conns_per_ip: Some(max_conns_per_ip),
         }
     }
 }
@@ -175,6 +197,7 @@ where
         let minimum_peer_version = self
             .minimum_peer_version
             .expect("`minimum_peer_version` must be set");
+        let max_conns_per_ip = self.max_conns_per_ip;
 
         let demand_signal = self
             .demand_signal
@@ -196,6 +219,7 @@ where
             inv_stream,
             address_metrics,
             minimum_peer_version,
+            max_conns_per_ip,
         );
 
         (peer_set, guard)

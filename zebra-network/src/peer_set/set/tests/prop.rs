@@ -42,6 +42,7 @@ proptest! {
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version)
+                .max_conns_per_ip(usize::MAX)
                 .build();
 
             check_if_only_up_to_date_peers_are_live(
@@ -72,6 +73,7 @@ proptest! {
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
+                .max_conns_per_ip(usize::MAX)
                 .build();
 
             check_if_only_up_to_date_peers_are_live(
@@ -122,6 +124,7 @@ proptest! {
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
+                .max_conns_per_ip(usize::MAX)
                 .build();
 
             // Get the total number of active peers
@@ -197,6 +200,7 @@ proptest! {
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
+                .max_conns_per_ip(usize::MAX)
                 .build();
 
             // Remove peers, test broadcast until there is only 1 peer left in the peerset
@@ -267,6 +271,7 @@ proptest! {
             let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
                 .with_discover(discovered_peers)
                 .with_minimum_peer_version(minimum_peer_version.clone())
+                .max_conns_per_ip(usize::MAX)
                 .build();
 
             // Remove peers
