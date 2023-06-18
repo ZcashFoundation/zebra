@@ -84,7 +84,16 @@ impl RpcServer {
     // - put some of the configs or services in their own struct?
     // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<VersionString, Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+    pub fn spawn<
+        VersionString,
+        UserAgentString,
+        Mempool,
+        State,
+        Tip,
+        BlockVerifierRouter,
+        SyncStatus,
+        AddressBook,
+    >(
         config: Config,
         #[cfg(feature = "getblocktemplate-rpcs")]
         mining_config: get_block_template_rpcs::config::Config,
@@ -92,7 +101,7 @@ impl RpcServer {
         #[allow(unused_variables)]
         mining_config: (),
         build_version: VersionString,
-        user_agent: String,
+        user_agent: UserAgentString,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
@@ -106,6 +115,7 @@ impl RpcServer {
     ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
     where
         VersionString: ToString + Clone + Send + 'static,
+        UserAgentString: ToString + Clone + Send + 'static,
         Mempool: tower::Service<
                 mempool::Request,
                 Response = mempool::Response,

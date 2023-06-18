@@ -72,6 +72,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "/Zebra:RPC test/",
         network,
         false,
         true,

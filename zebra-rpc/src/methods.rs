@@ -307,9 +307,9 @@ where
     // TODO:
     // - put some of the configs or services in their own struct?
     #[allow(clippy::too_many_arguments)]
-    pub fn new<VersionString>(
+    pub fn new<VersionString, UserAgentString>(
         build_version: VersionString,
-        user_agent: String,
+        user_agent: UserAgentString,
         network: Network,
         debug_force_finished_sync: bool,
         debug_like_zcashd: bool,
@@ -319,12 +319,14 @@ where
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
+        UserAgentString: ToString + Clone + Send + 'static,
         <Mempool as Service<mempool::Request>>::Future: Send,
         <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
         let (runner, queue_sender) = Queue::start();
 
         let mut build_version = build_version.to_string();
+        let user_agent = user_agent.to_string();
 
         // Match zcashd's version format, if the version string has anything in it
         if !build_version.is_empty() && !build_version.starts_with('v') {
