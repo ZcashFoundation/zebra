@@ -251,6 +251,10 @@ where
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
+
+    /// The configured maximum number of peers that can be in the
+    /// peer set per IP, defaults to [`crate::constants::MAX_CONNS_PER_IP`]
+    max_conns_per_ip: usize,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -270,6 +274,7 @@ where
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
+    #[allow(clippy::too_many_arguments)]
     /// Construct a peerset which uses `discover` to manage peer connections.
     ///
     /// Arguments:
@@ -282,6 +287,9 @@ where
     /// - `inv_stream`: receives inventory changes from peers,
     ///                 allowing the peer set to direct inventory requests;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
+    /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
+    /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
+    ///                       peer set per IP, defaults to [`crate::constants::MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
         discover: D,
@@ -290,6 +298,7 @@ where
         inv_stream: broadcast::Receiver<InventoryChange>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
+        max_conns_per_ip: Option<usize>,
     ) -> Self {
         Self {
             // New peers
@@ -317,6 +326,8 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
+
+            max_conns_per_ip: max_conns_per_ip.unwrap_or(crate::constants::MAX_CONNS_PER_IP),
         }
     }
 
@@ -476,6 +487,26 @@ where
         }
     }
 
+    /// Returns the number of peer connections Zebra already has with
+    /// the provided IP address
+    ///
+    /// # Performance
+    ///
+    /// This method is `O(connected peers)`, so it should not be called from a loop
+    /// that is already iterating through the peer set.
+    fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .filter(|addr| addr.ip() == ip)
+            .count()
+    }
+
+    /// Returns `true` if Zebra is already connected to the IP and port in `addr`.
+    fn has_peer_with_addr(&self, addr: PeerSocketAddr) -> bool {
+        self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
+    }
+
     /// Checks for newly inserted or removed services.
     ///
     /// Puts inserted services in the unready list.
@@ -496,7 +527,25 @@ where
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
-                    self.remove(&key);
+
+                    // # Security
+                    //
+                    // Drop the new peer if we are already connected to it.
+                    // Preferring old connections avoids connection thrashing.
+                    if self.has_peer_with_addr(key) {
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
+                    // # Security
+                    //
+                    // drop the new peer if there are already `MAX_CONNS_PER_IP` peers with
+                    // the same IP address in the peer set.
+                    if self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
