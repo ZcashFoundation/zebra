@@ -182,6 +182,7 @@ where
         inv_receiver,
         address_metrics,
         MinimumPeerVersion::new(latest_chain_tip, config.network),
+        None,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
