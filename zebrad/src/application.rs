@@ -30,7 +30,7 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
-/// Returns the zebrad version for this build, in SemVer 2.0 format.
+/// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
 /// Includes `git describe` build metatata if available:
 /// - the number of commits since the last version tag, and
@@ -41,6 +41,19 @@ pub fn build_version() -> Version {
     // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+    // We're using the same library as cargo uses internally, so this is guaranteed.
+    let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
+        panic!(
+            "unexpected invalid CARGO_PKG_VERSION: {error:?} in {CARGO_PKG_VERSION:?}, \
+             should have been checked by cargo"
+        )
+    });
+
+    vergen_build_version().unwrap_or(fallback_version)
+}
+
+/// Returns the `zebrad` version from this build, if available from `vergen`.
+fn vergen_build_version() -> Option<Version> {
     // VERGEN_GIT_DESCRIBE should be in the format:
     // - v1.0.0-rc.9-6-g319b01bb84
     // - v1.0.0-6-g319b01bb84
@@ -49,14 +62,6 @@ pub fn build_version() -> Version {
     // Currently it is the output of `git describe --tags --dirty --match='v*.*.*'`,
     // or whatever is specified in zebrad/build.rs.
     const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
-
-    // We're using the same library as cargo uses internally, so this is guaranteed.
-    let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
-        panic!(
-            "unexpected invalid CARGO_PKG_VERSION: {error:?} in {CARGO_PKG_VERSION:?}, \
-             should have been checked by cargo"
-        )
-    });
 
     // The SemVer 2.0 format is:
     // - 1.0.0-rc.9+6.g319b01bb84
@@ -68,7 +73,7 @@ pub fn build_version() -> Version {
     // - optional build: `+`tag[`.`tag ...]
     // change the git describe format to the semver 2.0 format
     let Some(vergen_git_describe) = VERGEN_GIT_DESCRIBE else {
-        return fallback_version;
+        return None;
     };
 
     // `git describe` uses "dirty" for uncommitted changes,
@@ -81,7 +86,7 @@ pub fn build_version() -> Version {
     // Check the "version core" part.
     let version = vergen_git_describe.next();
     let Some(mut version) = version else {
-        return fallback_version;
+        return None;
     };
 
     // strip the leading "v", if present.
@@ -89,7 +94,7 @@ pub fn build_version() -> Version {
 
     // If the initial version is empty, just a commit hash, or otherwise invalid.
     if Version::parse(version).is_err() {
-        return fallback_version;
+        return None;
     }
 
     let mut semver = version.to_string();
@@ -98,7 +103,7 @@ pub fn build_version() -> Version {
     // but only consume it if it is a pre-release tag.
     let Some(part) = vergen_git_describe.peek() else {
         // No pre-release or build.
-        return semver.parse().expect("just checked semver is valid");
+        return semver.parse().ok();
     };
 
     if part.starts_with(char::is_alphabetic) {
@@ -113,12 +118,12 @@ pub fn build_version() -> Version {
     // Check if the next part is a build part.
     let Some(build) = vergen_git_describe.peek() else {
         // No build tags.
-        return semver.parse().unwrap_or(fallback_version);
+        return semver.parse().ok();
     };
 
     if !build.starts_with(char::is_numeric) {
         // It's not a valid "commit count" build tag from "git describe".
-        return fallback_version;
+        return None;
     }
 
     // Append the rest of the build parts with the correct `+` and `.` separators.
@@ -128,7 +133,7 @@ pub fn build_version() -> Version {
     semver.push('+');
     semver.push_str(&build_parts);
 
-    semver.parse().unwrap_or(fallback_version)
+    semver.parse().ok()
 }
 
 /// The Zebra current release version, without any build metadata.
