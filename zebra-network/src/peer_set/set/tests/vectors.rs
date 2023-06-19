@@ -1,6 +1,6 @@
 //! Fixed test vectors for the peer set.
 
-use std::{iter, time::Duration};
+use std::{cmp::max, iter, time::Duration};
 
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
@@ -12,6 +12,7 @@ use zebra_chain::{
 
 use super::{PeerSetBuilder, PeerVersions};
 use crate::{
+    constants::MAX_CONNS_PER_IP,
     peer::{ClientRequest, MinimumPeerVersion},
     peer_set::inventory_registry::InventoryStatus,
     protocol::external::{types::Version, InventoryHash},
@@ -144,6 +145,7 @@ fn peer_set_ready_multiple_connections() {
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(3, MAX_CONNS_PER_IP))
             .build();
 
         // Get peerset ready
@@ -257,6 +259,7 @@ fn peer_set_route_inv_empty_registry() {
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, MAX_CONNS_PER_IP))
             .build();
 
         // Get peerset ready
@@ -339,6 +342,7 @@ fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
         let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, MAX_CONNS_PER_IP))
             .build();
 
         // Advertise some inventory
@@ -446,6 +450,7 @@ fn peer_set_route_inv_missing_registry_order(missing_first: bool) {
         let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, MAX_CONNS_PER_IP))
             .build();
 
         // Mark some inventory as missing
