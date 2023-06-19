@@ -419,7 +419,7 @@ proptest! {
             // the genesis block has a zero-valued transparent output,
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
-                let utxos = &block.new_outputs;
+                let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
                 let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
                 expected_finalized_value_pool += *block_value_pool;
             }
