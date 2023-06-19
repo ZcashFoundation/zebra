@@ -6,17 +6,10 @@ Follow the [Docker or compilation instructions](https://zebra.zfnd.org/index.htm
 
 To compile Zebra from source, you will need to [install some dependencies.](https://zebra.zfnd.org/index.html#building-zebra).
 
-During compilation, `cargo` downloads all the other required dependencies.
-Zebra primarily depends on pure Rust crates, and some Rust/C++ crates:
-
-- [rocksdb](https://crates.io/crates/rocksdb)
-- [zcash_script](https://crates.io/crates/zcash_script)
-
-They will be automatically built along with `zebrad`.
 
 ## Alternative Compilation Methods
 
-### Compiling from git
+### Compiling Manually from git
 
 To compile Zebra directly from GitHub, or from a GitHub release source archive:
 
@@ -30,14 +23,14 @@ cd zebra
 git checkout v1.0.0
 ```
 
-3. Build `zebrad`
+3. Build and Run `zebrad`
 
 ```sh
 cargo build --release --bin zebrad
 target/release/zebrad start
 ```
 
-#### Compiling from git using cargo install
+### Compiling from git using cargo install
 
 ```sh
 cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0 zebrad
