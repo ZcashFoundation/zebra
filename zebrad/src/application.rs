@@ -160,11 +160,6 @@ pub struct ZebradApp {
 }
 
 impl ZebradApp {
-    /// Are standard output and standard error both connected to ttys?
-    fn outputs_are_ttys() -> bool {
-        atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
-    }
-
     /// Returns the git commit for this build, if available.
     ///
     ///
@@ -209,8 +204,7 @@ impl Application for ZebradApp {
         //       of the `color_eyre::install` part of `Terminal::new` without
         //       ColorChoice::Never?
 
-        // The Tracing component uses stdout directly and will apply colors
-        // `if Self::outputs_are_ttys() && config.tracing.use_colors`
+        // The Tracing component uses stdout directly and will apply colors automatically.
         //
         // Note: It's important to use `ColorChoice::Never` here to avoid panicking in
         //       `register_components()` below if `color_eyre::install()` is called
@@ -249,7 +243,7 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
-        let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
+        let theme = if config.tracing.use_color_stdout_and_stderr() {
             color_eyre::config::Theme::dark()
         } else {
             color_eyre::config::Theme::new()

@@ -131,6 +131,21 @@ pub struct Config {
     pub use_journald: bool,
 }
 
+impl Config {
+    /// Returns `true` if standard output should use color escapes.
+    /// Automatically checks if Zebra is running in a terminal.
+    pub fn use_color_stdout(&self) -> bool {
+        self.force_use_color || (self.use_color && atty::is(atty::Stream::Stdout))
+    }
+
+    /// Returns `true` if output that could go to standard output or standard error
+    /// should use color escapes. Automatically checks if Zebra is running in a terminal.
+    pub fn use_color_stdout_and_stderr(&self) -> bool {
+        self.force_use_color
+            || (self.use_color && atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr))
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         #[cfg(feature = "progress-bar")]
