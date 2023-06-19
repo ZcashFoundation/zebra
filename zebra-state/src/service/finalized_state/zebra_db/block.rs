@@ -305,10 +305,10 @@ impl ZebraDb {
         let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
+            .map(|(outpoint, ordered_utxo)| {
                 (
                     lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
-                    utxo.clone(),
+                    ordered_utxo.utxo.clone(),
                 )
             })
             .collect();
@@ -331,7 +331,12 @@ impl ZebraDb {
                         }),
                         self.utxo(&outpoint)
                             .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                            .or_else(|| {
+                                finalized
+                                    .new_outputs
+                                    .get(&outpoint)
+                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                            })
                             .expect("already checked UTXO was in state or block"),
                     )
                 })
@@ -350,7 +355,12 @@ impl ZebraDb {
         // Get the transparent addresses with changed balances/UTXOs
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
-            .chain(finalized.new_outputs.values())
+            .chain(
+                finalized
+                    .new_outputs
+                    .values()
+                    .map(|ordered_utxo| &ordered_utxo.utxo),
+            )
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
             .collect();

@@ -60,14 +60,6 @@ impl PendingUtxos {
         }
     }
 
-    /// Check the list of pending UTXO requests against the supplied [`transparent::Utxo`] index.
-    #[inline]
-    pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, transparent::Utxo>) {
-        for (outpoint, utxo) in utxos.iter() {
-            self.respond(outpoint, utxo.clone())
-        }
-    }
-
     /// Scan the set of waiting utxo requests for channels where all receivers
     /// have been dropped and remove the corresponding sender.
     pub fn prune(&mut self) {
