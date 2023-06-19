@@ -13,6 +13,7 @@ use indexmap::IndexSet;
 use serde::{de, Deserialize, Deserializer};
 use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
+use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
@@ -493,12 +494,15 @@ impl Config {
 
         // Create the temporary file.
         // Do blocking filesystem operations on a dedicated thread.
+        let span = Span::current();
         let tmp_peer_cache_file = tokio::task::spawn_blocking(move || {
-            // Put the temporary file in the same directory as the permanent file,
-            // so atomic filesystem operations are possible.
-            tempfile::Builder::new()
-                .prefix(&tmp_peer_cache_prefix)
-                .tempfile_in(peer_cache_dir)
+            span.in_scope(move || {
+                // Put the temporary file in the same directory as the permanent file,
+                // so atomic filesystem operations are possible.
+                tempfile::Builder::new()
+                    .prefix(&tmp_peer_cache_prefix)
+                    .tempfile_in(peer_cache_dir)
+            })
         })
         .await
         .expect("unexpected panic creating temporary peer cache file")?;
@@ -514,31 +518,34 @@ impl Config {
 
         // Atomically replace the current cache with the temporary cache.
         // Do blocking filesystem operations on a dedicated thread.
+        let span = Span::current();
         tokio::task::spawn_blocking(move || {
-            let result = tmp_peer_cache_file.persist(&peer_cache_file);
+            span.in_scope(move || {
+                let result = tmp_peer_cache_file.persist(&peer_cache_file);
 
-            // Drops the temp file if needed
-            match result {
-                Ok(_temp_file) => {
-                    info!(
-                        cached_ip_count = ?peer_list.len(),
-                        ?peer_cache_file,
-                        "updated cached peer IP addresses"
-                    );
-
-                    for ip in &peer_list {
-                        metrics::counter!(
-                            "zcash.net.peers.cache",
-                            1,
-                            "cache" => peer_cache_file.display().to_string(),
-                            "remote_ip" => ip.to_string()
+                // Drops the temp file if needed
+                match result {
+                    Ok(_temp_file) => {
+                        info!(
+                            cached_ip_count = ?peer_list.len(),
+                            ?peer_cache_file,
+                            "updated cached peer IP addresses"
                         );
-                    }
 
-                    Ok(())
+                        for ip in &peer_list {
+                            metrics::counter!(
+                                "zcash.net.peers.cache",
+                                1,
+                                "cache" => peer_cache_file.display().to_string(),
+                                "remote_ip" => ip.to_string()
+                            );
+                        }
+
+                        Ok(())
+                    }
+                    Err(error) => Err(error.error),
                 }
-                Err(error) => Err(error.error),
-            }
+            })
         })
         .await
         .expect("unexpected panic making temporary peer cache file permanent")
