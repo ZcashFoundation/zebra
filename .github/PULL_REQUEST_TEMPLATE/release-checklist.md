@@ -40,7 +40,7 @@ These release steps can be done a few days before the release, in the same PR:
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
 Choose a release level for `zebrad` based on the changes in the release that users will see:
-- mainnet network upgrades are `major` releases
+- Mainnet Network Upgrades are `major` releases
 - new features, large changes, deprecations, and removals are `minor` releases
 - otherwise, it is a `patch` release
 
