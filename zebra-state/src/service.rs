@@ -976,7 +976,8 @@ impl Service<Request> for StateService {
                 // even though it is redundant for most finalized blocks.
                 // (Finalized blocks are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
-                self.pending_utxos.check_against(&finalized.new_outputs);
+                self.pending_utxos
+                    .check_against_ordered(&finalized.new_outputs);
 
                 // # Performance
                 //
