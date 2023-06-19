@@ -82,7 +82,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="sentry"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.test.sh,
 # separately from the test and production image builds.
 ENV ENTRYPOINT_FEATURES "$TEST_FEATURES $FEATURES"
 
@@ -95,7 +95,7 @@ ENV CARGO_HOME /opt/zebrad/.cargo/
 # In this stage we build tests (without running then)
 #
 # We also download needed dependencies for tests to work, from other images.
-# An entrypoint.sh is only available in this step for easier test handling with variables.
+# An entrypoint.test.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 # Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
@@ -116,11 +116,11 @@ RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --wo
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
-COPY ./docker/entrypoint.sh /
-RUN chmod u+x /entrypoint.sh
+COPY ./docker/entrypoint.test.sh /
+RUN chmod u+x /entrypoint.test.sh
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT [ "/entrypoint.sh" ]
+ENTRYPOINT [ "/entrypoint.test.sh" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -136,8 +136,8 @@ COPY . .
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-COPY ./docker/runtime-entrypoint.sh /
-RUN chmod u+x /runtime-entrypoint.sh
+COPY ./docker/entrypoint.sh /
+RUN chmod u+x /entrypoint.sh
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
@@ -145,7 +145,7 @@ RUN chmod u+x /runtime-entrypoint.sh
 # binary from the `release` stage, and the Zcash Sprout & Sapling parameters from ZCash
 FROM debian:bullseye-slim AS runtime
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
-COPY --from=release /runtime-entrypoint.sh /
+COPY --from=release /entrypoint.sh /
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
@@ -203,8 +203,8 @@ ENV SENTRY_DSN ${SENTRY_DSN}
 # Create a default config file based on the Docker build arguments,
 # and report the available zebrad arguments.
 # (--help is used as a dummy command.)
-RUN /runtime-entrypoint.sh --help
+RUN /entrypoint.sh --help
 
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
-ENTRYPOINT [ "/runtime-entrypoint.sh" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
