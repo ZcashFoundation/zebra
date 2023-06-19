@@ -235,10 +235,11 @@ impl Application for ZebradApp {
         let mut components = self.framework_components(command)?;
 
         // Load config *after* framework components so that we can
-        // report an error to the terminal if it occurs.
+        // report an error to the terminal if it occurs (unless used with the 'generate' cmd).
         let config = match command.config_path() {
             Some(path) => match (&command.cmd, self.load_config(&path)) {
                 (_, Ok(config)) => config,
+                // Ignore errors loading the config when generating a default config.
                 (&Some(ZebradCmd::Generate(_)), Err(_e)) => Default::default(),
                 (_, Err(e)) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
