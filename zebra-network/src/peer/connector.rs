@@ -7,14 +7,13 @@ use std::{
 };
 
 use futures::prelude::*;
-use tokio::{net::TcpStream, time::timeout};
+use tokio::net::TcpStream;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 
 use crate::{
-    constants::HANDSHAKE_TIMEOUT,
     peer::{Client, ConnectedAddr, Handshake, HandshakeRequest},
     peer_set::ConnectionTracker,
     BoxError, PeerSocketAddr, Request, Response,
@@ -93,8 +92,12 @@ where
         let connected_addr = ConnectedAddr::new_outbound_direct(addr);
         let connector_span = info_span!("connector", peer = ?connected_addr);
 
+        // # Security
+        //
+        // `zebra_network::init()` implements a connection timeout on this future.
+        // Any code outside this future does not have a timeout.
         async move {
-            let tcp_stream = timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(*addr)).await??;
+            let tcp_stream = TcpStream::connect(*addr).await?;
             let client = hs
                 .oneshot(HandshakeRequest::<TcpStream> {
                     data_stream: tcp_stream,
