@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// An ongoing task that regularly caches the current `address_book` to disk, based on `config`.
+#[instrument(skip(config, address_book))]
 pub async fn peer_cache_updater(
     config: Config,
     address_book: Arc<Mutex<AddressBook>>,
