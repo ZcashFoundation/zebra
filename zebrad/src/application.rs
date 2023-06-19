@@ -71,6 +71,10 @@ pub fn build_version() -> Version {
         return fallback_version;
     };
 
+    // `git describe` uses "dirty" for uncommitted changes,
+    // but users won't understand what that means.
+    let vergen_git_describe = vergen_git_describe.replace("dirty", "modified");
+
     // Split using "git describe" separators.
     let mut vergen_git_describe = vergen_git_describe.split('-').peekable();
 
