@@ -105,10 +105,7 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 
 # cargo uses timestamps for its cache, so they need to be in this order:
 # unmodified source files < previous build cache < modified source files
-# Check the source timestamps:
-RUN ls -l
 COPY . .
-RUN ls -l zebrad/src/bin zebra-network/src
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -127,17 +124,10 @@ COPY --from=planner /opt/zebrad zebra-original
 RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
-# Check the source and cache timestamps:
-RUN ls -l zebrad/src/bin zebra-network/src
-RUN ls -l target/release target/release/deps/libvergen*
-
 # Build Zebra test binaries, but don't run them
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
-
-# Check the binary and cached dependency timestamps:
-RUN ls -l target/release target/release/deps/libvergen*
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
@@ -152,10 +142,7 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # zebrad binary from this step.
 FROM deps AS release
 
-# Check the source timestamps:
-RUN ls -l
 COPY . .
-RUN ls -l zebrad/src/bin zebra-network/src
 
 # This is the caching layer for Rust zebrad builds.
 # It creates a fake empty zebrad binary, see above for details.
@@ -168,15 +155,8 @@ COPY --from=planner /opt/zebrad zebra-original
 RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
-# Check the source and cache timestamps:
-RUN ls -l zebrad/src/bin zebra-network/src
-RUN ls -l target/release target/release/deps/libvergen*
-
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
-
-# Check the binary and cached dependency timestamps:
-RUN ls -l target/release target/release/deps/libvergen*
 
 COPY ./docker/runtime-entrypoint.sh /
 RUN chmod u+x /runtime-entrypoint.sh
