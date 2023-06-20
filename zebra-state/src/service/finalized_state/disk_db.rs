@@ -10,14 +10,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-    ops::RangeBounds,
-    path::Path,
-    sync::Arc,
-};
+use std::{fmt::Debug, path::Path, sync::Arc};
 
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
@@ -25,11 +18,8 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    config::{
-        database_format_version_in_code, database_format_version_on_disk,
-        write_database_format_version_to_disk,
-    },
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
+    config::{database_format_version_in_code, database_format_version_on_disk},
+    service::finalized_state::disk_format::{upgrade::DbFormatChange, FromDisk, IntoDisk},
     Config,
 };
 
@@ -532,30 +522,8 @@ impl DiskDb {
         let disk_version = database_format_version_on_disk(config, network)
             .expect("unable to read database format version file");
 
-        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
-            // TODO: if the on-disk format is older, actually run the upgrade task after the
-            //       database has been opened (#6642)
-            Some(Ordering::Less) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open older database format: launching upgrade task"
-            ),
-            // TODO: if the on-disk format is newer, downgrade the version after the
-            //       database has been opened (#6642)
-            Some(Ordering::Greater) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open newer database format: data should be compatible"
-            ),
-            Some(Ordering::Equal) => info!(
-                ?running_version,
-                "trying to open compatible database format"
-            ),
-            None => info!(
-                ?running_version,
-                "creating new database with the current format"
-            ),
-        }
+        // Log any format changes before opening, in case opening fails.
+        let format_change = DbFormatChange::new(running_version, disk_version);
 
         let db_options = DiskDb::options();
 
@@ -590,26 +558,9 @@ impl DiskDb {
 
                 db.assert_default_cf_is_empty();
 
-                // Now we've checked that the database format is up-to-date,
-                // mark it as updated on disk.
-                //
-                // # Concurrency
-                //
-                // The version must only be updated while RocksDB is holding the database
-                // directory lock. This prevents multiple Zebra instances corrupting the version
-                // file.
-                //
-                // # TODO
-                //
-                // - only update the version at the end of the format upgrade task (#6642)
-                // - add a note to the format upgrade task code to update the version constants
-                //   whenever the format changes
-                // - add a test that the format upgrade runs exactly once when:
-                //   1. if an older cached state format is opened, the format is upgraded,
-                //      then if Zebra is launched again the format is not upgraded
-                //   2. if the current cached state format is opened, the format is not upgraded
-                write_database_format_version_to_disk(config, network)
-                    .expect("unable to write database format version file to disk");
+                if let Some(format_change) = format_change {
+                    format_change.apply_format_change(config, network);
+                }
 
                 db
             }
