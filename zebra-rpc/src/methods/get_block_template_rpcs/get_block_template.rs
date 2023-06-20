@@ -98,7 +98,7 @@ pub fn check_miner_address(
 ///
 /// Returns a `getblocktemplate` [`Response`].
 pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
-    mut router_verifier: BlockVerifierRouter,
+    mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
     network: Network,
     latest_chain_tip: Tip,
@@ -129,7 +129,7 @@ where
         }
     };
 
-    let router_verifier_response = router_verifier
+    let block_verifier_router_response = block_verifier_router
         .ready()
         .await
         .map_err(|error| Error {
@@ -140,12 +140,12 @@ where
         .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
         .await;
 
-    Ok(router_verifier_response
+    Ok(block_verifier_router_response
         .map(|_hash| ProposalResponse::Valid)
         .unwrap_or_else(|verify_chain_error| {
             tracing::info!(
                 ?verify_chain_error,
-                "error response from router_verifier in CheckProposal request"
+                "error response from block_verifier_router in CheckProposal request"
             );
 
             ProposalResponse::rejected("invalid proposal", verify_chain_error)
