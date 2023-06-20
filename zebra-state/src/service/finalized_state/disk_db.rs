@@ -7,7 +7,7 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constants must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{fmt::Debug, path::Path, sync::Arc};
@@ -18,8 +18,7 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    config::{database_format_version_in_code, database_format_version_on_disk},
-    service::finalized_state::disk_format::{upgrade::DbFormatChange, FromDisk, IntoDisk},
+    service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
 
@@ -518,13 +517,6 @@ impl DiskDb {
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
 
-        let running_version = database_format_version_in_code();
-        let disk_version = database_format_version_on_disk(config, network)
-            .expect("unable to read database format version file");
-
-        // Log any format changes before opening, in case opening fails.
-        let format_change = DbFormatChange::new(running_version, disk_version);
-
         let db_options = DiskDb::options();
 
         // When opening the database in read/write mode, all column families must be opened.
@@ -557,10 +549,6 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
-
-                if let Some(format_change) = format_change {
-                    format_change.apply_format_change(config, network);
-                }
 
                 db
             }
@@ -760,6 +748,19 @@ impl DiskDb {
 
     // Cleanup methods
 
+    /// Returns the number of shared instances of this database.
+    ///
+    /// # Concurrency
+    ///
+    /// The actual number of owners can be higher or lower than the returned value,
+    /// because databases can simultaneously be cloned or dropped in other threads.
+    ///
+    /// However, if the number of owners is 1, and the caller has exclusive access,
+    /// the count can't increase unless that caller clones the database.
+    pub(crate) fn shared_database_owners(&self) -> usize {
+        Arc::strong_count(&self.db) + Arc::weak_count(&self.db)
+    }
+
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// If `force` is true, clean up regardless of any shared references.
@@ -780,9 +781,8 @@ impl DiskDb {
         // instance. If they do, they must drop it before:
         // - shutting down database threads, or
         // - deleting database files.
-        let shared_database_owners = Arc::strong_count(&self.db) + Arc::weak_count(&self.db);
 
-        if shared_database_owners > 1 {
+        if self.shared_database_owners() > 1 {
             let path = self.path();
 
             let mut ephemeral_note = "";

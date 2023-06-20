@@ -1,10 +1,16 @@
 //! In-place format upgrades for the Zebra state database.
 
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    sync::{mpsc, Arc},
+    thread::{self, JoinHandle},
+};
 
 use semver::Version;
+use tracing::Span;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{block::Height, parameters::Network};
+
 use DbFormatChange::*;
 
 use crate::{config::write_database_format_version_to_disk, Config};
@@ -29,6 +35,31 @@ pub enum DbFormatChange {
         running_version: Version,
     },
 }
+
+/// A handle to a spawned format change thread.
+///
+/// Cloning this struct creates an additional handle to the same thread.
+///
+/// # Concurrency
+///
+/// Cancelling the thread on drop has a race condition, because two handles can be dropped at
+/// the same time.
+///
+/// If cancelling the thread is important, the owner of the handle must call force_cancel().
+#[derive(Clone, Debug)]
+pub struct DbFormatChangeThreadHandle {
+    /// A handle that can wait for the running format change thread to finish.
+    ///
+    /// Panics from this thread are propagated into Zebra's state service.
+    join_handle: Arc<JoinHandle<()>>,
+
+    /// A channel that tells the running format thread to finish early.
+    cancel_handle: mpsc::SyncSender<CancelFormatChange>,
+}
+
+/// Marker for cancelling a format upgrade.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CancelFormatChange;
 
 impl DbFormatChange {
     /// Check if loading `disk_version` into `running_version` needs a format change,
@@ -88,17 +119,53 @@ impl DbFormatChange {
         matches!(self, Upgrade { .. })
     }
 
+    /// Launch a `std::thread` that applies this format change to the database.
+    pub fn spawn_format_change(
+        self,
+        config: Config,
+        network: Network,
+        initial_tip_height: Option<Height>,
+    ) -> DbFormatChangeThreadHandle {
+        // # Correctness
+        //
+        // Cancel handles must use try_send() to avoid blocking waiting for the format change
+        // thread to shut down.
+        let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
+
+        let span = Span::current();
+        let join_handle = thread::spawn(move || {
+            span.in_scope(move || {
+                self.apply_format_change(config, network, initial_tip_height, cancel_receiver);
+            })
+        });
+
+        DbFormatChangeThreadHandle {
+            join_handle: Arc::new(join_handle),
+            cancel_handle,
+        }
+    }
+
     /// Apply this format change to the database.
     /// Format changes should be launched in an independent `std::thread`.
+    ///
+    /// If `cancel_receiver` gets a message, or its sender is dropped,
+    /// the format change stops running early.
     //
     // New format changes must be added to the *end* of this method.
-    pub fn apply_format_change(&self, config: &Config, network: Network) {
+    fn apply_format_change(
+        self,
+        config: Config,
+        network: Network,
+        initial_tip_height: Option<Height>,
+        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+    ) {
         if !self.is_upgrade() {
             // # Correctness
             //
             // At the start of a format downgrade, the database must be marked as partially or
-            // fully downgraded.
-            Self::mark_as_changed(config, network);
+            // fully downgraded. This lets newer Zebra versions know that some blocks with older
+            // formats have been added to the database.
+            Self::mark_as_changed(&config, network);
 
             // Older supported versions just assume they can read newer formats,
             // because they can't predict all changes a newer Zebra version could make.
@@ -108,19 +175,42 @@ impl DbFormatChange {
             return;
         }
 
-        // # TODO: link to format upgrade instructions doc here
+        // # Correctness
+        //
+        // If the format change is outside RocksDb, put new code above this comment!
+        let Some(initial_tip_height) = initial_tip_height else {
+            // If the database is empty, then the RocksDb format doesn't need any changes.
+            Self::mark_as_changed(&config, network);
+            return;
+        };
+
+        // Example format change.
+        //
+        // TODO: link to format upgrade instructions doc here
+        let mut upgrade_height = Height(0);
+
+        // Keep upgrading until the initial database has been upgraded,
+        // or this task is cancelled by a shutdown.
+        while upgrade_height <= initial_tip_height
+            && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
+        {
+            // TODO: Do one format upgrade step here
+
+            upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
+        }
 
         // # Correctness
         //
         // New code goes above this comment!
         //
         // Run the latest format upgrade code after the other upgrades are complete,
-        // but before marking the format as upgraded.
+        // but before marking the format as upgraded. The code should check `cancel_receiver`
+        // every time it runs its inner update loop.
 
         // At the end of a format upgrade, the database is marked as fully upgraded.
         // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
         // optimisation.
-        Self::mark_as_changed(config, network);
+        Self::mark_as_changed(&config, network);
     }
 
     /// Mark the database as fully upgraded.
@@ -134,5 +224,41 @@ impl DbFormatChange {
     fn mark_as_changed(config: &Config, network: Network) {
         write_database_format_version_to_disk(config, network)
             .expect("unable to write database format version file to disk");
+    }
+}
+
+impl DbFormatChangeThreadHandle {
+    /// Cancel the running format change thread, if this is the last handle.
+    /// Returns true if it was actually cancelled.
+    pub fn cancel_if_needed(&self) -> bool {
+        // # Correctness
+        //
+        // Checking the strong count has a race condition, because two handles can be dropped at
+        // the same time.
+        //
+        // If cancelling the thread is important, the owner of the handle must call force_cancel().
+        if Arc::strong_count(&self.join_handle) <= 1 {
+            self.force_cancel();
+            return true;
+        }
+
+        false
+    }
+
+    /// Force the running format change thread to cancel, even if there are other handles.
+    pub fn force_cancel(&self) {
+        // There's nothing we can do about errors here.
+        // If the channel is disconnected, the task has exited.
+        // If it's full, it's already been cancelled.
+        let _ = self.cancel_handle.try_send(CancelFormatChange);
+    }
+}
+
+impl Drop for DbFormatChangeThreadHandle {
+    fn drop(&mut self) {
+        // Only cancel the format change if the state service is shutting down.
+        self.cancel_if_needed();
+
+        // There's no point waiting for the task to finish here.
     }
 }

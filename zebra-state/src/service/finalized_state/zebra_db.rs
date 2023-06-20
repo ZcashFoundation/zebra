@@ -14,7 +14,14 @@ use std::path::Path;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    service::finalized_state::{disk_db::DiskDb, disk_format::block::MAX_ON_DISK_HEIGHT},
+    config::{database_format_version_in_code, database_format_version_on_disk},
+    service::finalized_state::{
+        disk_db::DiskDb,
+        disk_format::{
+            block::MAX_ON_DISK_HEIGHT,
+            upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
+        },
+    },
     Config,
 };
 
@@ -32,12 +39,20 @@ pub mod arbitrary;
 /// `rocksdb` allows concurrent writes through a shared reference,
 /// so database instances are cloneable. When the final clone is dropped,
 /// the database is closed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ZebraDb {
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
     //
+    /// A handle to a running format change task, which cancels the task when dropped.
+    ///
+    /// # Concurrency
+    ///
+    /// This field should be dropped before the database field, so the format upgrade task is
+    /// cancelled before the database is dropped. This helps avoid some kinds of deadlocks.
+    format_change_handle: Option<DbFormatChangeThreadHandle>,
+
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
 }
@@ -46,11 +61,32 @@ impl ZebraDb {
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared high-level typed database wrapper.
     pub fn new(config: &Config, network: Network) -> ZebraDb {
-        let db = ZebraDb {
+        let running_version = database_format_version_in_code();
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file");
+
+        // Log any format changes before opening the database, in case opening fails.
+        let format_change = DbFormatChange::new(running_version, disk_version);
+
+        // Open the database and do initial checks.
+        let mut db = ZebraDb {
+            format_change_handle: None,
             db: DiskDb::new(config, network),
         };
 
         db.check_max_on_disk_tip_height();
+
+        let initial_tip_height = db.finalized_tip_height();
+
+        // Start any required format changes.
+        if let Some(format_change) = format_change {
+            // Launch the format change and install its handle in the database.
+            db.format_change_handle = Some(format_change.spawn_format_change(
+                config.clone(),
+                network,
+                initial_tip_height,
+            ));
+        }
 
         db
     }
@@ -68,6 +104,18 @@ impl ZebraDb {
     ///
     /// See [`DiskDb::shutdown`] for details.
     pub fn shutdown(&mut self, force: bool) {
+        // # Concurrency
+        //
+        // The format upgrade task should be cancelled before the database is flushed or shut down.
+        // This helps avoid some kinds of deadlocks.
+        //
+        // See also the correctness note in `DiskDb::shutdown()`.
+        if force || self.db.shared_database_owners() <= 1 {
+            if let Some(format_change_handle) = self.format_change_handle.as_ref() {
+                format_change_handle.force_cancel();
+            }
+        }
+
         self.check_max_on_disk_tip_height();
 
         self.db.shutdown(force);
@@ -91,5 +139,11 @@ impl ZebraDb {
                 );
             }
         }
+    }
+}
+
+impl Drop for ZebraDb {
+    fn drop(&mut self) {
+        self.shutdown(false);
     }
 }
