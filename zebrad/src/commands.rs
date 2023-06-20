@@ -87,6 +87,12 @@ impl ZebradCmd {
             "debug"
         }
     }
+
+    /// Returns true if this command should ignore errors when
+    /// attempting to load a config file.
+    pub(crate) fn should_ignore_load_config_error(&self) -> bool {
+        matches!(self, ZebradCmd::Generate(_) | ZebradCmd::Download(_))
+    }
 }
 
 impl Runnable for ZebradCmd {
