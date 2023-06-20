@@ -17,6 +17,8 @@ members = [
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
 resolver = "2"
 
+# Compilation settings
+
 [profile.dev]
 panic = "abort"
 
