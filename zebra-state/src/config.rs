@@ -175,6 +175,7 @@ impl Default for Config {
 }
 
 // Cleaning up old database versions
+// TODO: put this in a different module?
 
 /// Spawns a task that checks if there are old database folders,
 /// and deletes them from the filesystem.
@@ -291,6 +292,8 @@ fn parse_version_number(dir_name: &str) -> Option<u64> {
         .strip_prefix('v')
         .and_then(|version| version.parse().ok())
 }
+
+// TODO: move these to the format upgrade module
 
 /// Returns the full semantic version of the currently running database format code.
 ///

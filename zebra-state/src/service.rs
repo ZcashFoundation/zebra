@@ -263,6 +263,7 @@ impl Drop for ReadStateService {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
 
+        // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
                 // We're the last database user, so we can tell it to shut down (blocking):
@@ -280,6 +281,7 @@ impl Drop for ReadStateService {
                 #[cfg(test)]
                 debug!("waiting for the block write task to finish");
 
+                // TODO: move this into a check_for_panics() method
                 if let Err(thread_panic) = block_write_task_handle.join() {
                     std::panic::resume_unwind(thread_panic);
                 } else {
@@ -343,9 +345,7 @@ impl StateService {
             .tip_block()
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
-        timer.finish(module_path!(), line!(), "fetching database tip");
 
-        let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
@@ -1161,6 +1161,8 @@ impl Service<ReadRequest> for ReadStateService {
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
+        //
+        // TODO: move into a check_for_panics() method
         let block_write_task = self.block_write_task.take();
 
         if let Some(block_write_task) = block_write_task {
