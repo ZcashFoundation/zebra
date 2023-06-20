@@ -54,7 +54,7 @@ debug_force_finished_sync = false
 parallel_cpu_threads = 1
 
 [state]
-cache_dir = "/home/ar/.cache/zebra"
+cache_dir = "cache_dir"
 delete_old_database = true
 ephemeral = false
 
@@ -69,4 +69,3 @@ buffer_limit = 128000
 force_use_color = false
 use_color = true
 use_journald = false
-
