@@ -14,7 +14,7 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{
-    commands::{EntryPoint, ZebradCmd},
+    commands::EntryPoint,
     components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
     config::ZebradConfig,
 };
@@ -237,11 +237,11 @@ impl Application for ZebradApp {
         // Load config *after* framework components so that we can
         // report an error to the terminal if it occurs (unless used with the 'generate' cmd).
         let config = match command.config_path() {
-            Some(path) => match (&command.cmd, self.load_config(&path)) {
-                (_, Ok(config)) => config,
-                // Ignore errors loading the config when generating a default config.
-                (&Some(ZebradCmd::Generate(_)), Err(_e)) => Default::default(),
-                (_, Err(e)) => {
+            Some(path) => match self.load_config(&path) {
+                Ok(config) => config,
+                // Ignore errors loading the config for some commands.
+                Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
+                Err(e) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
                 }
