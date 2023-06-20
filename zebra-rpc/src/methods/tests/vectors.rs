@@ -29,6 +29,7 @@ async fn rpc_getinfo() {
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "/Zebra:RPC test/",
         Mainnet,
         false,
         true,
@@ -72,6 +73,7 @@ async fn rpc_getblock() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -224,6 +226,7 @@ async fn rpc_getblock_parse_error() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -265,6 +268,7 @@ async fn rpc_getblock_missing_error() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -334,6 +338,7 @@ async fn rpc_getbestblockhash() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -378,6 +383,7 @@ async fn rpc_getrawtransaction() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -540,6 +546,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -683,6 +690,7 @@ async fn rpc_getaddresstxids_response_with(
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         network,
         false,
         true,
@@ -734,6 +742,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
 
     let rpc = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -781,6 +790,7 @@ async fn rpc_getaddressutxos_response() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let rpc = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,

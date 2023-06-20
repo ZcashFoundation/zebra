@@ -7,8 +7,9 @@ use abscissa_core::{
     config::CfgCell,
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths,
 };
+use semver::{BuildMetadata, Version};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
@@ -29,24 +30,16 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
-/// Returns the zebrad version for this build, in SemVer 2.0 format.
+/// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
-/// Includes the git commit and the number of commits since the last version
-/// tag, if available.
+/// Includes `git describe` build metatata if available:
+/// - the number of commits since the last version tag, and
+/// - the git commit.
 ///
 /// For details, see <https://semver.org/>
-pub fn app_version() -> Version {
+pub fn build_version() -> Version {
     // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-    // VERGEN_GIT_DESCRIBE should be in the format:
-    // - v1.0.0-rc.9-6-g319b01bb84
-    // - v1.0.0-6-g319b01bb84
-    // but sometimes it is just a short commit hash. See #6879 for details.
-    //
-    // Currently it is the output of `git describe --tags --dirty --match='v*.*.*'`,
-    // or whatever is specified in zebrad/build.rs.
-    const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
     // We're using the same library as cargo uses internally, so this is guaranteed.
     let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
@@ -55,6 +48,20 @@ pub fn app_version() -> Version {
              should have been checked by cargo"
         )
     });
+
+    vergen_build_version().unwrap_or(fallback_version)
+}
+
+/// Returns the `zebrad` version from this build, if available from `vergen`.
+fn vergen_build_version() -> Option<Version> {
+    // VERGEN_GIT_DESCRIBE should be in the format:
+    // - v1.0.0-rc.9-6-g319b01bb84
+    // - v1.0.0-6-g319b01bb84
+    // but sometimes it is just a short commit hash. See #6879 for details.
+    //
+    // Currently it is the output of `git describe --tags --dirty --match='v*.*.*'`,
+    // or whatever is specified in zebrad/build.rs.
+    const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
     // The SemVer 2.0 format is:
     // - 1.0.0-rc.9+6.g319b01bb84
@@ -66,8 +73,12 @@ pub fn app_version() -> Version {
     // - optional build: `+`tag[`.`tag ...]
     // change the git describe format to the semver 2.0 format
     let Some(vergen_git_describe) = VERGEN_GIT_DESCRIBE else {
-        return fallback_version;
+        return None;
     };
+
+    // `git describe` uses "dirty" for uncommitted changes,
+    // but users won't understand what that means.
+    let vergen_git_describe = vergen_git_describe.replace("dirty", "modified");
 
     // Split using "git describe" separators.
     let mut vergen_git_describe = vergen_git_describe.split('-').peekable();
@@ -75,7 +86,7 @@ pub fn app_version() -> Version {
     // Check the "version core" part.
     let version = vergen_git_describe.next();
     let Some(mut version) = version else {
-        return fallback_version;
+        return None;
     };
 
     // strip the leading "v", if present.
@@ -83,7 +94,7 @@ pub fn app_version() -> Version {
 
     // If the initial version is empty, just a commit hash, or otherwise invalid.
     if Version::parse(version).is_err() {
-        return fallback_version;
+        return None;
     }
 
     let mut semver = version.to_string();
@@ -92,7 +103,7 @@ pub fn app_version() -> Version {
     // but only consume it if it is a pre-release tag.
     let Some(part) = vergen_git_describe.peek() else {
         // No pre-release or build.
-        return semver.parse().expect("just checked semver is valid");
+        return semver.parse().ok();
     };
 
     if part.starts_with(char::is_alphabetic) {
@@ -107,12 +118,12 @@ pub fn app_version() -> Version {
     // Check if the next part is a build part.
     let Some(build) = vergen_git_describe.peek() else {
         // No build tags.
-        return semver.parse().unwrap_or(fallback_version);
+        return semver.parse().ok();
     };
 
     if !build.starts_with(char::is_numeric) {
         // It's not a valid "commit count" build tag from "git describe".
-        return fallback_version;
+        return None;
     }
 
     // Append the rest of the build parts with the correct `+` and `.` separators.
@@ -122,19 +133,16 @@ pub fn app_version() -> Version {
     semver.push('+');
     semver.push_str(&build_parts);
 
-    semver.parse().unwrap_or(fallback_version)
+    semver.parse().ok()
 }
 
-/// The Zebra current release version.
-//
-// TODO: deduplicate this code with release_version in zebra_rpc::get_info()
-pub fn release_version() -> String {
-    app_version()
-        .to_string()
-        .split('+')
-        .next()
-        .expect("always at least 1 slice")
-        .to_string()
+/// The Zebra current release version, without any build metadata.
+pub fn release_version() -> Version {
+    let mut release_version = build_version();
+
+    release_version.build = BuildMetadata::EMPTY;
+
+    release_version
 }
 
 /// The User-Agent string provided by the node.
@@ -142,8 +150,6 @@ pub fn release_version() -> String {
 /// This must be a valid [BIP 14] user agent.
 ///
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
-//
-// TODO: deduplicate this code with the user agent in zebra_rpc::get_info()
 pub fn user_agent() -> String {
     let release_version = release_version();
     format!("/Zebra:{release_version}/")
@@ -260,7 +266,7 @@ impl Application for ZebradApp {
 
         let app_metadata = vec![
             // cargo or git tag + short commit
-            ("version", app_version().to_string()),
+            ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
             // constants
@@ -368,7 +374,7 @@ impl Application for ZebradApp {
         #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
-            release: Some(app_version().to_string().into()),
+            release: Some(build_version().to_string().into()),
             ..Default::default()
         });
 

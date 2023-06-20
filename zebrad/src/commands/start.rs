@@ -82,7 +82,7 @@ use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
-    application::{app_version, user_agent},
+    application::{build_version, user_agent},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -215,7 +215,8 @@ impl StartCmd {
             config.mining.clone(),
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
-            app_version(),
+            build_version(),
+            user_agent(),
             mempool.clone(),
             read_only_state_service,
             router_verifier,
