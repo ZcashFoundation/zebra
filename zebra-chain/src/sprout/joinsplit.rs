@@ -1,6 +1,6 @@
 //! Sprout funds transfers using [`JoinSplit`]s.
 
-use std::io;
+use std::{fmt, io};
 
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +49,7 @@ impl From<&RandomSeed> for [u8; 32] {
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
     /// pool.
@@ -79,6 +79,23 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     pub zkproof: P,
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [note::EncryptedNote; 2],
+}
+
+impl<P: ZkSnarkProof> fmt::Debug for JoinSplit<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JoinSplit")
+            .field("vpub_old", &self.vpub_old)
+            .field("vpub_new", &self.vpub_new)
+            .field("anchor", &self.anchor)
+            .field("nullifiers", &self.nullifiers)
+            .field("commitments", &self.commitments)
+            .field("ephemeral_key", &HexDebug(self.ephemeral_key.as_bytes()))
+            .field("random_seed", &self.random_seed)
+            .field("vmacs", &self.vmacs)
+            .field("zkproof", &self.zkproof)
+            .field("enc_ciphertexts", &self.enc_ciphertexts)
+            .finish()
+    }
 }
 
 impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
