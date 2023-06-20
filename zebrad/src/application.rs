@@ -235,7 +235,7 @@ impl Application for ZebradApp {
         let mut components = self.framework_components(command)?;
 
         // Load config *after* framework components so that we can
-        // report an error to the terminal if it occurs (unless used with the 'generate' cmd).
+        // report an error to the terminal if it occurs (unless used with a command that doesn't need the config).
         let config = match command.config_path() {
             Some(path) => match self.load_config(&path) {
                 Ok(config) => config,
