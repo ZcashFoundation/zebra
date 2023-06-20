@@ -16,7 +16,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyVerifiedBlock, ContextuallyVerifiedBlockWithTrees},
+    request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -174,7 +174,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> ContextuallyVerifiedBlockWithTrees {
+    pub fn finalize(&mut self) -> FinalizableBlock {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -226,7 +226,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        ContextuallyVerifiedBlockWithTrees::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:

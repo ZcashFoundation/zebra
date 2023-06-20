@@ -257,41 +257,54 @@ impl Treestate {
 /// database and recompute a new one.
 pub struct ContextuallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub block: SemanticallyVerifiedBlock,
+    pub verified: SemanticallyVerifiedBlock,
     /// The tresstate associated with the block.
-    pub treestate: Option<Treestate>,
+    pub treestate: Treestate,
 }
 
-impl ContextuallyVerifiedBlockWithTrees {
+pub enum FinalizableBlock {
+    Checkpoint {
+        checkpoint_verified: CheckpointVerifiedBlock,
+    },
+    Contextual {
+        contextually_verified: ContextuallyVerifiedBlock,
+        treestate: Treestate,
+    },
+}
+
+impl FinalizableBlock {
     pub fn new(contextually_verified: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
-        Self {
-            block: SemanticallyVerifiedBlock::from(contextually_verified),
-            treestate: Some(treestate),
+        Self::Contextual {
+            contextually_verified,
+            treestate,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn inner_block(&self) -> Arc<Block> {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => checkpoint_verified.block.clone(),
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => contextually_verified.block.clone(),
         }
     }
 }
 
-impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
-    fn from(block: Arc<Block>) -> Self {
-        Self::from(SemanticallyVerifiedBlock::from(block))
-    }
-}
-
-impl From<SemanticallyVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
-    fn from(semantically_verified: SemanticallyVerifiedBlock) -> Self {
-        Self {
-            block: semantically_verified,
-            treestate: None,
-        }
-    }
-}
-
-impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
+impl From<CheckpointVerifiedBlock> for FinalizableBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        Self {
-            block: checkpoint_verified.0,
-            treestate: None,
+        Self::Checkpoint {
+            checkpoint_verified,
         }
+    }
+}
+
+impl From<Arc<Block>> for FinalizableBlock {
+    fn from(block: Arc<Block>) -> Self {
+        Self::from(CheckpointVerifiedBlock::from(block))
     }
 }
 
@@ -410,6 +423,12 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
         }
+    }
+}
+
+impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
+    fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
+        checkpoint_verified.0
     }
 }
 
