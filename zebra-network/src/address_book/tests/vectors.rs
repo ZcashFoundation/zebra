@@ -129,7 +129,8 @@ fn reconnection_peers_skips_live_ip() {
         DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
     );
 
-    // Regardless of the order of insertion, the most recent address should be chosen first
+    // The second address should be skipped because the first address has a
+    // recent `last_response` time and the two addresses have the same IP.
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),

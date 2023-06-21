@@ -73,7 +73,7 @@ pub struct AddressBook {
     /// [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<PeerSocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
-    /// The most recently updated addresses by ip.
+    /// The address with a last_connection_state of [`Responded`] and the most recent `last_response` time by IP.
     most_recent_by_ip: HashMap<IpAddr, MetaAddr>,
 
     /// The local listener address.
@@ -331,15 +331,16 @@ impl AddressBook {
     /// - updated has a more recent last_response time than the existing [`MetaAddr`]
     ///   for that IP in `most_recent_by_ip`.
     fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
-        updated
-            .last_response()
-            .is_some_and(|updated_last_response| {
-                self.most_recent_by_ip
-                    .get(&updated.addr.ip())
-                    .map_or(true, |prev| {
-                        prev.last_response() < Some(updated_last_response)
-                    })
-            })
+        updated.last_connection_state == PeerAddrState::Responded
+            && updated
+                .last_response()
+                .is_some_and(|updated_last_response| {
+                    self.most_recent_by_ip
+                        .get(&updated.addr.ip())
+                        .map_or(true, |prev| {
+                            prev.last_response() < Some(updated_last_response)
+                        })
+                })
     }
 
     /// Returns true if the provided `addr` matches that in `most_recent_by_ip`
