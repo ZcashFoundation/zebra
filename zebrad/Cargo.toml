@@ -28,7 +28,7 @@ rust-version = "1.66"
 default-run = "zebrad"
 
 # `cargo release` settings
-[metadata.release]
+[package.metadata.release]
 pre-release-replacements = [
   {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout {{version}}"},
   {file="../book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag {{version}}"},
