@@ -24,9 +24,8 @@ use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
-        CheckpointVerifiedBlock,
     },
-    BoxError,
+    BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -70,12 +69,12 @@ impl DiskWriteBatch {
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
         history_tree: Arc<HistoryTree>,
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let CheckpointVerifiedBlock { height, .. } = finalized;
+        let SemanticallyVerifiedBlock { height, .. } = finalized;
 
         // Update the tree in state
         let current_tip_height = *height - 1;
@@ -108,13 +107,13 @@ impl DiskWriteBatch {
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let SemanticallyVerifiedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);
