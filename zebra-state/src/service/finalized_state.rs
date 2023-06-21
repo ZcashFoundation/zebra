@@ -329,13 +329,7 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")]
         let finalized_block = finalized.verified.block.clone();
 
-        let result = self.db.write_block(
-            finalized.verified,
-            finalized.treestate.history_tree,
-            finalized.treestate.note_commitment_trees,
-            self.network,
-            source,
-        );
+        let result = self.db.write_block(finalized, self.network, source);
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
