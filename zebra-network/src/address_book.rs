@@ -3,8 +3,9 @@
 
 use std::{
     cmp::Reverse,
+    collections::HashMap,
     iter::Extend,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -71,6 +72,9 @@ pub struct AddressBook {
     /// ([`BTreeMap`](std::collections::BTreeMap)) sorts in ascending order, but
     /// [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<PeerSocketAddr, MetaAddr, Reverse<MetaAddr>>,
+
+    /// The most recently updated addresses by ip.
+    most_recent_by_ip: HashMap<IpAddr, MetaAddr>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -149,6 +153,7 @@ impl AddressBook {
             span,
             address_metrics_tx,
             last_address_log: None,
+            most_recent_by_ip: HashMap::new(),
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -314,6 +319,33 @@ impl AddressBook {
         meta_addr
     }
 
+    /// Returns true if `updated` has a last_connection_state of `Responded`
+    /// and there is either:
+    /// - no previous addr with the updated.addr IP, or
+    /// - updated has a more recent last_response time than the existing [`MetaAddr`]
+    ///   for that IP in `most_recent_by_ip`.
+    fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
+        updated
+            .last_response()
+            .is_some_and(|updated_last_response| {
+                self.most_recent_by_ip
+                    .get(&updated.addr.ip())
+                    .map_or(true, |prev| {
+                        prev.last_response() < Some(updated_last_response)
+                    })
+            })
+    }
+
+    /// Returns true if the provided `addr` matches that in `most_recent_by_ip`
+    /// for the IP of the address.
+    fn is_addr_most_recent_by_ip(&self, addr: PeerSocketAddr) -> bool {
+        self.most_recent_by_ip
+            .get(&addr.ip())
+            .map_or(false, |most_recent_peer_at_ip_addr| {
+                most_recent_peer_at_ip_addr.addr == addr
+            })
+    }
+
     /// Apply `change` to the address book, returning the updated `MetaAddr`,
     /// if the change was valid.
     ///
@@ -373,6 +405,11 @@ impl AddressBook {
 
             self.by_addr.insert(updated.addr, updated);
 
+            // Add the address to `most_recent_by_ip` if it has responded
+            if self.should_update_most_recent_by_ip(updated) {
+                self.most_recent_by_ip.insert(updated.addr.ip(), updated);
+            }
+
             debug!(
                 ?change,
                 ?updated,
@@ -396,6 +433,12 @@ impl AddressBook {
                     .expect("just checked there is at least one peer");
 
                 self.by_addr.remove(&surplus_peer.addr);
+
+                // Check if this surplus peer's addr matches that in `most_recent_by_ip`
+                // for this the surplus peer's ip.
+                if self.is_addr_most_recent_by_ip(surplus_peer.addr) {
+                    self.most_recent_by_ip.remove(&surplus_peer.addr.ip());
+                }
 
                 debug!(
                     surplus = ?surplus_peer,
@@ -463,6 +506,13 @@ impl AddressBook {
         self.by_addr.descending_values().cloned()
     }
 
+    /// Returns true if there is a recently live peer connection with the provided IP address.
+    fn has_active_peer_with_ip(&self, ip: &IpAddr, chrono_now: chrono::DateTime<Utc>) -> bool {
+        self.most_recent_by_ip
+            .get(ip)
+            .map_or(false, |peer| peer.was_recently_live(chrono_now))
+    }
+
     /// Return an iterator over peers that are due for a reconnection attempt,
     /// in reconnection attempt order.
     pub fn reconnection_peers(
@@ -478,6 +528,7 @@ impl AddressBook {
             .descending_values()
             .filter(move |peer| {
                 peer.is_ready_for_connection_attempt(instant_now, chrono_now, self.network)
+                    && !self.has_active_peer_with_ip(&peer.addr.ip(), chrono_now)
             })
             .cloned()
     }
@@ -699,6 +750,7 @@ impl Clone for AddressBook {
             span: self.span.clone(),
             address_metrics_tx,
             last_address_log: None,
+            most_recent_by_ip: self.most_recent_by_ip.clone(),
         }
     }
 }
