@@ -15,6 +15,10 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
+# Zebra is only supported on the latest stable Rust version. See the README for details.
+# Any Zebra release can break compatibility with older Rust versions.
+rust-version = "1.70"
+
 [[bin]]
 name = "zebra-checkpoints"
 # this setting is required for Zebra's Docker build caches
