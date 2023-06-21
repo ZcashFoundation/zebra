@@ -203,6 +203,12 @@ impl AddressBook {
         for (socket_addr, meta_addr) in addrs {
             // overwrite any duplicate addresses
             new_book.by_addr.insert(socket_addr, meta_addr);
+            // Add the address to `most_recent_by_ip` if it has responded
+            if new_book.should_update_most_recent_by_ip(meta_addr) {
+                new_book
+                    .most_recent_by_ip
+                    .insert(socket_addr.ip(), meta_addr);
+            }
             // exit as soon as we get enough addresses
             if new_book.by_addr.len() >= addr_limit {
                 break;
@@ -435,7 +441,7 @@ impl AddressBook {
                 self.by_addr.remove(&surplus_peer.addr);
 
                 // Check if this surplus peer's addr matches that in `most_recent_by_ip`
-                // for this the surplus peer's ip.
+                // for this the surplus peer's ip to remove it there as well.
                 if self.is_addr_most_recent_by_ip(surplus_peer.addr) {
                     self.most_recent_by_ip.remove(&surplus_peer.addr.ip());
                 }

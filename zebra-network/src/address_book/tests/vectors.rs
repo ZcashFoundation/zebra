@@ -110,3 +110,38 @@ fn address_book_peer_order() {
         Some(meta_addr2),
     );
 }
+
+/// Check that `reconnection_peers` skips addresses with IPs for which
+/// Zebra already has recently connected peers.
+#[test]
+fn reconnection_peers_skips_live_ip() {
+    let addr1 = "127.0.0.1:1".parse().unwrap();
+    let addr2 = "127.0.0.1:2".parse().unwrap();
+
+    let meta_addr1 = MetaAddr::new_responded(addr1, &PeerServices::NODE_NETWORK)
+        .into_new_meta_addr(
+            Instant::now(),
+            Utc::now().try_into().expect("will succeed until 2038"),
+        );
+    let meta_addr2 = MetaAddr::new_gossiped_meta_addr(
+        addr2,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
+    );
+
+    // Regardless of the order of insertion, the most recent address should be chosen first
+    let addrs = vec![meta_addr1, meta_addr2];
+    let address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        addrs,
+    );
+    assert_eq!(
+        address_book
+            .reconnection_peers(Instant::now(), Utc::now())
+            .next(),
+        None,
+    );
+}
