@@ -1179,6 +1179,8 @@ impl Service<ReadRequest> for ReadStateService {
             }
         }
 
+        self.db.check_for_panics();
+
         Poll::Ready(Ok(()))
     }
 

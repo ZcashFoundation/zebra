@@ -96,6 +96,19 @@ impl ZebraDb {
         self.db.path()
     }
 
+    /// Check for panics in code running in spawned threads.
+    /// If a thread exited with a panic, resume that panic.
+    ///
+    /// This method should be called regularly, so that panics are detected as soon as possible.
+    pub fn check_for_panics(&mut self) {
+        if let Some(format_change_handle) = self.format_change_handle.as_mut() {
+            format_change_handle.check_for_panics();
+        }
+
+        // This check doesn't panic, but we want to check it regularly anyway.
+        self.check_max_on_disk_tip_height();
+    }
+
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// If `force` is true, clean up regardless of any shared references.
@@ -111,12 +124,12 @@ impl ZebraDb {
         //
         // See also the correctness note in `DiskDb::shutdown()`.
         if force || self.db.shared_database_owners() <= 1 {
-            if let Some(format_change_handle) = self.format_change_handle.as_ref() {
+            if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
             }
         }
 
-        self.check_max_on_disk_tip_height();
+        self.check_for_panics();
 
         self.db.shutdown(force);
     }

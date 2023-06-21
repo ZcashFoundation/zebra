@@ -2,6 +2,7 @@
 
 use std::{
     cmp::Ordering,
+    panic,
     sync::{mpsc, Arc},
     thread::{self, JoinHandle},
 };
@@ -51,7 +52,7 @@ pub struct DbFormatChangeThreadHandle {
     /// A handle that can wait for the running format change thread to finish.
     ///
     /// Panics from this thread are propagated into Zebra's state service.
-    join_handle: Arc<JoinHandle<()>>,
+    update_task: Option<Arc<JoinHandle<()>>>,
 
     /// A channel that tells the running format thread to finish early.
     cancel_handle: mpsc::SyncSender<CancelFormatChange>,
@@ -133,16 +134,20 @@ impl DbFormatChange {
         let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
 
         let span = Span::current();
-        let join_handle = thread::spawn(move || {
+        let update_task = thread::spawn(move || {
             span.in_scope(move || {
                 self.apply_format_change(config, network, initial_tip_height, cancel_receiver);
             })
         });
 
-        DbFormatChangeThreadHandle {
-            join_handle: Arc::new(join_handle),
+        let mut handle = DbFormatChangeThreadHandle {
+            update_task: Some(Arc::new(update_task)),
             cancel_handle,
-        }
+        };
+
+        handle.check_for_panics();
+
+        handle
     }
 
     /// Apply this format change to the database.
@@ -237,9 +242,11 @@ impl DbFormatChangeThreadHandle {
         // the same time.
         //
         // If cancelling the thread is important, the owner of the handle must call force_cancel().
-        if Arc::strong_count(&self.join_handle) <= 1 {
-            self.force_cancel();
-            return true;
+        if let Some(update_task) = self.update_task.as_ref() {
+            if Arc::strong_count(update_task) <= 1 {
+                self.force_cancel();
+                return true;
+            }
         }
 
         false
@@ -252,13 +259,58 @@ impl DbFormatChangeThreadHandle {
         // If it's full, it's already been cancelled.
         let _ = self.cancel_handle.try_send(CancelFormatChange);
     }
+
+    /// Check for panics in the code running in the spawned thread.
+    /// If the thread exited with a panic, resume that panic.
+    ///
+    /// This method should be called regularly, so that panics are detected as soon as possible.
+    pub fn check_for_panics(&mut self) {
+        let update_task = self.update_task.take();
+
+        if let Some(update_task) = update_task {
+            if update_task.is_finished() {
+                // We use into_inner() because it guarantees that exactly one of the tasks
+                // gets the JoinHandle. try_unwrap() lets us keep the JoinHandle, but it can also
+                // miss panics.
+                if let Some(update_task) = Arc::into_inner(update_task) {
+                    // We are the last handle with a reference to this task,
+                    // so we can propagate any panics
+                    if let Err(thread_panic) = update_task.join() {
+                        panic::resume_unwind(thread_panic);
+                    }
+                }
+            } else {
+                // It hasn't finished, so we need to put it back
+                self.update_task = Some(update_task);
+            }
+        }
+    }
+
+    /// Wait for the spawned thread to finish. If it exited with a panic, resume that panic.
+    ///
+    /// This method should be called during shutdown.
+    pub fn wait_for_panics(&mut self) {
+        if let Some(update_task) = self.update_task.take() {
+            // We use into_inner() because it guarantees that exactly one of the tasks
+            // gets the JoinHandle. See the comments in check_for_panics().
+            if let Some(update_task) = Arc::into_inner(update_task) {
+                // We are the last handle with a reference to this task,
+                // so we can propagate any panics
+                if let Err(thread_panic) = update_task.join() {
+                    panic::resume_unwind(thread_panic);
+                }
+            }
+        }
+    }
 }
 
 impl Drop for DbFormatChangeThreadHandle {
     fn drop(&mut self) {
         // Only cancel the format change if the state service is shutting down.
-        self.cancel_if_needed();
-
-        // There's no point waiting for the task to finish here.
+        if self.cancel_if_needed() {
+            self.wait_for_panics();
+        } else {
+            self.check_for_panics();
+        }
     }
 }
