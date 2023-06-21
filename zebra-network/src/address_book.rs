@@ -73,7 +73,8 @@ pub struct AddressBook {
     /// [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<PeerSocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
-    /// The address with a last_connection_state of [`Responded`] and the most recent `last_response` time by IP.
+    /// The address with a last_connection_state of [`PeerAddrState::Responded`] and
+    /// the most recent `last_response` time by IP.
     most_recent_by_ip: HashMap<IpAddr, MetaAddr>,
 
     /// The local listener address.
