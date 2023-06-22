@@ -30,7 +30,7 @@ highlight = "all"
 
 # List of crates that can never become Zebra dependencies.
 deny = [
-    # Often has memory safety vulerabilities.
+    # Often has memory safety vulnerabilities.
     # Enabled by --all-features, use the `cargo hack` script in the deny.toml CI job instead.
     { name = "openssl" },
     { name = "openssl-sys" },
