@@ -7,7 +7,7 @@ set -e
 # Exit if any command in a pipeline fails
 set -o pipefail
 
-# Set default values if not provided by the user or the Dockerfile
+# Set this to change the default cached state directory
 # Path and name of the config file
 : "${ZEBRA_CONF_DIR:='/etc/zebrad'}"
 : "${ZEBRA_CONF_FILE:='zebrad.toml'}"
@@ -57,6 +57,7 @@ endpoint_addr = ${METRICS_ENDPOINT_ADDR}:9999
 EOF
 fi
 
+# Set this to enable the RPC port
 if [[ -n "$RPC_PORT" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [rpc]
@@ -71,6 +72,7 @@ endpoint_addr = "${TRACING_ENDPOINT_ADDR}:3000"
 EOF
 fi
 
+# Set this to log to a file, if not set, logs to standard output
 if [[ -n "$LOG_FILE" ]]; then
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -79,6 +81,9 @@ log_file = "${LOG_FILE}"
 EOF
 fi
 
+# Zebra automatically detects if it is attached to a terminal, and uses colored output.
+# Set this to 'true' to force using color even if the output is not a terminal.
+# Set this to 'false' to disable using color even if the output is a terminal.
 if [[ "$LOG_COLOR" = "true" ]] || [[ "$LOG_COLOR" = "false" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 force_use_color = $LOG_COLOR
