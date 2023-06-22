@@ -261,7 +261,7 @@ jobs:
         # We don't need to check `--no-default-features` here, because (except in very rare cases):
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
-        features: ['', '--all-features']
+        features: ['', '--features default-docker', '--all-features']
       # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 
@@ -278,8 +278,8 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
           # --all-features spuriously activates openssl, but we want to ban that dependency in
-          # all of zebrad's real features for security reasons. But the --all-features job is the
-          # only job that gives accurate "skip tree root was not found" warnings.
+          # all of zebrad's production features for security reasons. But the --all-features job is
+          # the only job that gives accurate "skip tree root was not found" warnings.
           # In other jobs, we expect some of these warnings, due to disabled features.
           command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
