@@ -38,7 +38,7 @@ on:
       # https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile#L83
       features:
         required: false
-        default: "sentry"
+        default: "default-docker"
         type: string
       test_features:
         required: false

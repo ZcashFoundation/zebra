@@ -81,7 +81,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
 # Build zebrad with these features
 # Keep these in sync with:
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
-ARG FEATURES="sentry"
+ARG FEATURES="default-docker"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 # Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.

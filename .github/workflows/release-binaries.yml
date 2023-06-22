@@ -44,7 +44,7 @@ jobs:
       tag_suffix: .experimental
       network: Testnet
       rpc_port: '18232'
-      features: "sentry getblocktemplate-rpcs"
+      features: "default-docker getblocktemplate-rpcs"
       test_features: ""
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
