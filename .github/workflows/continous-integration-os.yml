@@ -277,11 +277,11 @@ jobs:
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           # --all-features spuriously activates openssl, but we want to ban that dependency in
           # all of zebrad's real features for security reasons. But the --all-features job is the
           # only job that gives accurate "skip tree root was not found" warnings.
           # In other jobs, we expect some of these warnings, due to disabled features.
+          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
 
   unused-deps:
