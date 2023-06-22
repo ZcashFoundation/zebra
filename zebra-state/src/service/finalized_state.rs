@@ -339,8 +339,8 @@ impl FinalizedState {
             // TODO: move the stop height check to the syncer (#3442)
             if self.is_at_stop_height(height) {
                 tracing::info!(
-                    height = ?height,
-                    hash = ?hash,
+                    ?height,
+                    ?hash,
                     block_source = ?source,
                     "stopping at configured height, flushing database to disk"
                 );
