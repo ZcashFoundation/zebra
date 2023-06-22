@@ -262,7 +262,7 @@ jobs:
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
         features: ['', '--all-features']
-      # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
+      # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 
     # Prevent sudden announcement of a new advisory from failing ci:
@@ -274,13 +274,15 @@ jobs:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
-      # The --all-features job is the only job that gives accurate "skip tree root was not found" warnings.
-      # In other jobs, we expect some of these warnings, due to disabled features.
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check ${{ matrix.checks }}
-          arguments: --workspace ${{ matrix.features }}
+          # --all-features spuriously activates openssl, but we want to ban that dependency in
+          # all of zebrad's real features for security reasons. But the --all-features job is the
+          # only job that gives accurate "skip tree root was not found" warnings.
+          # In other jobs, we expect some of these warnings, due to disabled features.
+          arguments: --workspace ${{ matrix.features == '--all-features' && '--all-features --allow banned' || format('{0} --allow unmatched-skip-root', matrix.features) }}
 
   unused-deps:
     name: Check for unused dependencies
