@@ -1,81 +1,89 @@
 #!/usr/bin/env bash
 
-# show the commands we are executing
+# Show the commands we are executing
 set -x
-# exit if a command fails
+# Exit if a command fails
 set -e
-# exit if any command in a pipeline fails
+# Exit if any command in a pipeline fails
 set -o pipefail
 
-echo "Config variables:"
-echo "NETWORK=$NETWORK"
-echo "RPC_PORT=$RPC_PORT"
-echo "LOG_FILE=$LOG_FILE"
+# Set default values if not provided by the user or the Dockerfile
+# Path and name of the config file
+: "${ZEBRA_CONF_DIR:='/etc/zebrad'}"
+: "${ZEBRA_CONF_FILE:='zebrad.toml'}"
+if [[ -n "$ZEBRA_CONF_DIR" ]] && [[ -n "$ZEBRA_CONF_FILE" ]]; then
+    ZEBRA_CONF_PATH="$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE"
+fi
 
-echo "Config location:"
-echo "ZEBRA_CONF_DIR=$ZEBRA_CONF_DIR"
-echo "ZEBRA_CONF_FILE=$ZEBRA_CONF_FILE"
-echo "ZEBRA_CONF_PATH=$ZEBRA_CONF_PATH"
-
-echo "Other variables:"
-echo "SHORT_SHA=$SHORT_SHA"
-echo "SENTRY_DSN=$SENTRY_DSN"
+# [network]
+: "${NETWORK:='Mainnet'}"
+: "${ZEBRA_LISTEN_ADDR:='127.0.0.1'}"
+# [consensus]
+: "${ZEBRA_CHECKPOINT_SYNC:='true'}"
+# [state]
+: "${ZEBRA_CACHED_STATE_DIR:='/var/cache/zebrad-cache'}"
+: "${LOG_COLOR:='false'}"
+# [rpc]
+: "${RPC_LISTEN_ADDR:='127.0.0.1'}"
 
 # Create the conf path and file if it does not exist.
-mkdir -p "$ZEBRA_CONF_DIR"
-touch "$ZEBRA_CONF_PATH"
+if [[ -n "$ZEBRA_CONF_PATH" ]]; then
+    mkdir -p "$ZEBRA_CONF_DIR"
+    touch "$ZEBRA_CONF_FILE"
+fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
-# variables set by the Dockerfile.
+# variables set by the Dockerfile or the user.
 #
 # We disable most ports by default, so the default config is secure.
 # Users have to opt-in to additional functionality by setting environmental variables.
-#
-# TODO:
-#  - make `cache_dir`, `metrics.endpoint_addr`, and `tracing.endpoint_addr` into Docker arguments
-#  - add an $EXTRA_CONFIG or $REPLACEMENT_CONFIG environmental variable
+if [[ ! -f "$ZEBRA_CONF_PATH" ]]; then
 cat <<EOF > "$ZEBRA_CONF_PATH"
 [network]
 network = "$NETWORK"
-listen_addr = "0.0.0.0"
+listen_addr = $ZEBRA_LISTEN_ADDR:8233
+
+[consensus]
+checkpoint_sync = $ZEBRA_CHECKPOINT_SYNC
 
 [state]
-cache_dir = "$ZEBRA_CACHED_STATE_DIR"
-
-[metrics]
-#endpoint_addr = "0.0.0.0:9999"
+cache_dir = $ZEBRA_CACHED_STATE_DIR
 EOF
+
+if [[ -n "$METRICS_ENDPOINT_ADDR" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+[metrics]
+endpoint_addr = ${METRICS_ENDPOINT_ADDR}:9999
+EOF
+fi
 
 if [[ -n "$RPC_PORT" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [rpc]
-listen_addr = "0.0.0.0:${RPC_PORT}"
+listen_addr = ${RPC_LISTEN_ADDR}:${RPC_PORT}
 EOF
 fi
 
-if [[ -n "$LOG_FILE" ]] || [[ -n "$LOG_COLOR" ]]; then
+if [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [tracing]
-#endpoint_addr = "0.0.0.0:3000"
+endpoint_addr = "${TRACING_ENDPOINT_ADDR}:3000"
 EOF
 fi
 
 if [[ -n "$LOG_FILE" ]]; then
-mkdir -p $(dirname "$LOG_FILE")
+mkdir -p "$(dirname "$LOG_FILE")"
 
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 log_file = "${LOG_FILE}"
 EOF
 fi
 
-if [[ "$LOG_COLOR" = "true" ]]; then
+if [[ "$LOG_COLOR" = "true" ]] || [[ "$LOG_COLOR" = "false" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
-force_use_color = true
+force_use_color = $LOG_COLOR
 EOF
-elif [[ "$LOG_COLOR" = "false" ]]; then
-cat <<EOF >> "$ZEBRA_CONF_PATH"
-use_color = false
-EOF
+fi
 fi
 
 echo "Using zebrad.toml:"
