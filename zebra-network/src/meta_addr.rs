@@ -483,6 +483,46 @@ impl MetaAddr {
         self.last_failure
     }
 
+    /// Returns the shortest duration that's passed since last_response,
+    /// last_attempt, or last_failure.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn most_recent_update(
+        &self,
+        now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> Option<zebra_chain::serialization::Duration32> {
+        let last_response = self
+            .last_response
+            .map(|last_response| last_response.saturating_elapsed(chrono_now));
+
+        // Use the later instant and ignore any `None` fields.
+        let Some(last_attempt_or_failure) = self.last_attempt.max(self.last_failure) else {
+            return last_response
+        };
+
+        let last_attempt_or_failure: zebra_chain::serialization::Duration32 = now
+            .saturating_duration_since(last_attempt_or_failure)
+            .try_into()
+            .expect("will succeed until 2038");
+
+        let Some(last_response) = last_response else {
+            return Some(last_attempt_or_failure)
+        };
+
+        // Use the shorter duration
+        Some(last_attempt_or_failure.min(last_response))
+    }
+
+    /// Returns true if `self` has a greater `most_recent_update`.
+    pub fn gt_most_recent_update(
+        &self,
+        previous: &MetaAddr,
+        now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
+        self.most_recent_update(now, chrono_now) > previous.most_recent_update(now, chrono_now)
+    }
+
     /// Have we had any recently messages from this peer?
     ///
     /// Returns `true` if the peer is likely connected and responsive in the peer
@@ -561,6 +601,17 @@ impl MetaAddr {
         }
     }
 
+    /// Returns true if any messages were recently sent to or received from this address.
+    pub fn was_recently_updated(
+        &self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
+        self.has_connection_recently_responded(chrono_now)
+            || self.was_connection_recently_attempted(instant_now)
+            || self.has_connection_recently_failed(instant_now)
+    }
+
     /// Is this address ready for a new outbound connection attempt?
     pub fn is_ready_for_connection_attempt(
         &self,
@@ -569,9 +620,7 @@ impl MetaAddr {
         network: Network,
     ) -> bool {
         self.last_known_info_is_valid_for_outbound(network)
-            && !self.has_connection_recently_responded(chrono_now)
-            && !self.was_connection_recently_attempted(instant_now)
-            && !self.has_connection_recently_failed(instant_now)
+            && !self.was_recently_updated(instant_now, chrono_now)
             && self.is_probably_reachable(chrono_now)
     }
 

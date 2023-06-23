@@ -205,7 +205,7 @@ impl AddressBook {
             // overwrite any duplicate addresses
             new_book.by_addr.insert(socket_addr, meta_addr);
             // Add the address to `most_recent_by_ip` if it has responded
-            if new_book.should_update_most_recent_by_ip(meta_addr) {
+            if new_book.should_update_most_recent_by_ip(meta_addr, instant_now, chrono_now) {
                 new_book
                     .most_recent_by_ip
                     .insert(socket_addr.ip(), meta_addr);
@@ -326,22 +326,22 @@ impl AddressBook {
         meta_addr
     }
 
-    /// Returns true if `updated` has a last_connection_state of `Responded`
-    /// and there is either:
-    /// - no previous addr with the updated.addr IP, or
-    /// - updated has a more recent last_response time than the existing [`MetaAddr`]
-    ///   for that IP in `most_recent_by_ip`.
-    fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
-        updated.last_connection_state == PeerAddrState::Responded
-            && updated
-                .last_response()
-                .is_some_and(|updated_last_response| {
-                    self.most_recent_by_ip
-                        .get(&updated.addr.ip())
-                        .map_or(true, |prev| {
-                            prev.last_response() < Some(updated_last_response)
-                        })
-                })
+    /// Returns true if there are no existing entries in the address book with this IP,
+    /// or if `updated` has a more recent update requiring the outbound connector to wait
+    /// longer before initiating handshakes with peers at this IP.
+    ///
+    /// See [`MetaAddr::is_ready_for_connection_attempt`] for more details.
+    fn should_update_most_recent_by_ip(
+        &self,
+        updated: MetaAddr,
+        now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
+        if let Some(previous) = self.most_recent_by_ip.get(&updated.addr.ip()) {
+            updated.gt_most_recent_update(previous, now, chrono_now)
+        } else {
+            true
+        }
     }
 
     /// Returns true if the provided `addr` matches that in `most_recent_by_ip`
@@ -413,8 +413,9 @@ impl AddressBook {
 
             self.by_addr.insert(updated.addr, updated);
 
-            // Add the address to `most_recent_by_ip` if it has responded
-            if self.should_update_most_recent_by_ip(updated) {
+            // Add the address to `most_recent_by_ip` if it sent the most recent
+            // response Zebra has received from this IP.
+            if self.should_update_most_recent_by_ip(updated, instant_now, chrono_now) {
                 self.most_recent_by_ip.insert(updated.addr.ip(), updated);
             }
 
@@ -486,6 +487,12 @@ impl AddressBook {
         );
 
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
+            // Check if this surplus peer's addr matches that in `most_recent_by_ip`
+            // for this the surplus peer's ip to remove it there as well.
+            if self.is_addr_most_recent_by_ip(entry.addr) {
+                self.most_recent_by_ip.remove(&entry.addr.ip());
+            }
+
             std::mem::drop(_guard);
             self.update_metrics(instant_now, chrono_now);
             Some(entry)
@@ -514,11 +521,16 @@ impl AddressBook {
         self.by_addr.descending_values().cloned()
     }
 
-    /// Returns true if there is a recently live peer connection with the provided IP address.
-    fn has_active_peer_with_ip(&self, ip: &IpAddr, chrono_now: chrono::DateTime<Utc>) -> bool {
-        self.most_recent_by_ip
-            .get(ip)
-            .map_or(false, |peer| peer.was_recently_live(chrono_now))
+    /// Is this IP ready for a new outbound connection attempt?
+    fn is_ready_for_connection_attempt_with_ip(
+        &self,
+        ip: &IpAddr,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
+        self.most_recent_by_ip.get(ip).map_or(false, |peer| {
+            !peer.was_recently_updated(instant_now, chrono_now)
+        })
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,
@@ -536,7 +548,11 @@ impl AddressBook {
             .descending_values()
             .filter(move |peer| {
                 peer.is_ready_for_connection_attempt(instant_now, chrono_now, self.network)
-                    && !self.has_active_peer_with_ip(&peer.addr.ip(), chrono_now)
+                    && self.is_ready_for_connection_attempt_with_ip(
+                        &peer.addr.ip(),
+                        instant_now,
+                        chrono_now,
+                    )
             })
             .cloned()
     }
