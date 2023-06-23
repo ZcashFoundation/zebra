@@ -17,14 +17,14 @@ fi
 
 # [network]
 : "${NETWORK:='Mainnet'}"
-: "${ZEBRA_LISTEN_ADDR:='127.0.0.1'}"
+: "${ZEBRA_LISTEN_ADDR:='0.0.0.0'}"
 # [consensus]
 : "${ZEBRA_CHECKPOINT_SYNC:='true'}"
 # [state]
 : "${ZEBRA_CACHED_STATE_DIR:='/var/cache/zebrad-cache'}"
 : "${LOG_COLOR:='false'}"
 # [rpc]
-: "${RPC_LISTEN_ADDR:='127.0.0.1'}"
+: "${RPC_LISTEN_ADDR:='0.0.0.0'}"
 
 # Create the conf path and file if it does not exist.
 if [[ -n "$ZEBRA_CONF_PATH" ]]; then
@@ -33,7 +33,7 @@ if [[ -n "$ZEBRA_CONF_PATH" ]]; then
 fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
-# variables set by the Dockerfile or the user.
+# variables set by the Dockerfile or the user. If the user has already created a config, don't replace it.
 #
 # We disable most ports by default, so the default config is secure.
 # Users have to opt-in to additional functionality by setting environmental variables.
@@ -41,10 +41,7 @@ if [[ ! -f "$ZEBRA_CONF_PATH" ]]; then
 cat <<EOF > "$ZEBRA_CONF_PATH"
 [network]
 network = "$NETWORK"
-listen_addr = $ZEBRA_LISTEN_ADDR:8233
-
-[consensus]
-checkpoint_sync = $ZEBRA_CHECKPOINT_SYNC
+listen_addr = $ZEBRA_LISTEN_ADDR
 
 [state]
 cache_dir = $ZEBRA_CACHED_STATE_DIR
