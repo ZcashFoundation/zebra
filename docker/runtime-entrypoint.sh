@@ -22,6 +22,7 @@ fi
 : "${ZEBRA_CHECKPOINT_SYNC:='true'}"
 # [state]
 : "${ZEBRA_CACHED_STATE_DIR:='/var/cache/zebrad-cache'}"
+# [tracing]
 : "${LOG_COLOR:='false'}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:='0.0.0.0'}"
@@ -29,7 +30,7 @@ fi
 # Create the conf path and file if it does not exist.
 if [[ -n "$ZEBRA_CONF_PATH" ]]; then
     mkdir -p "$ZEBRA_CONF_DIR"
-    touch "$ZEBRA_CONF_FILE"
+    touch "$ZEBRA_CONF_PATH"
 fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
@@ -62,17 +63,18 @@ listen_addr = ${RPC_LISTEN_ADDR}:${RPC_PORT}
 EOF
 fi
 
-if [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
+if [[ -n "$LOG_FILE" ]] || [[ -n "$LOG_COLOR" ]] || [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [tracing]
+EOF
+if [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
 endpoint_addr = "${TRACING_ENDPOINT_ADDR}:3000"
 EOF
 fi
-
 # Set this to log to a file, if not set, logs to standard output
 if [[ -n "$LOG_FILE" ]]; then
 mkdir -p "$(dirname "$LOG_FILE")"
-
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 log_file = "${LOG_FILE}"
 EOF
@@ -81,10 +83,15 @@ fi
 # Zebra automatically detects if it is attached to a terminal, and uses colored output.
 # Set this to 'true' to force using color even if the output is not a terminal.
 # Set this to 'false' to disable using color even if the output is a terminal.
-if [[ "$LOG_COLOR" = "true" ]] || [[ "$LOG_COLOR" = "false" ]]; then
+if [[ "$LOG_COLOR" = "true" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
-force_use_color = $LOG_COLOR
+force_use_color = true
 EOF
+elif [[ "$LOG_COLOR" = "false" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+use_color = false
+EOF
+fi
 fi
 fi
 
