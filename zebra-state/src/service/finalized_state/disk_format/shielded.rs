@@ -5,9 +5,9 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use bincode::Options;
-
 use zebra_chain::{orchard, sapling, sprout};
+
+use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
@@ -71,16 +71,15 @@ impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
+        self.zcash_serialize_to_vec()
             .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sprout::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
+        let cursor = std::io::Cursor::new(bytes);
+        sprout::tree::NoteCommitmentTree::zcash_deserialize(cursor)
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -88,16 +87,15 @@ impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
+        self.zcash_serialize_to_vec()
             .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sapling::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
+        let cursor = std::io::Cursor::new(bytes);
+        sapling::tree::NoteCommitmentTree::zcash_deserialize(cursor)
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -106,16 +104,15 @@ impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
+        self.zcash_serialize_to_vec()
             .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
+        let cursor = std::io::Cursor::new(bytes);
+        orchard::tree::NoteCommitmentTree::zcash_deserialize(cursor)
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }

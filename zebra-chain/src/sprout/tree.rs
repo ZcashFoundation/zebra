@@ -10,15 +10,18 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-use std::{fmt, ops::Deref};
+use std::{fmt, io, ops::Deref};
 
+use bridgetree::{self};
 use byteorder::{BigEndian, ByteOrder};
-use incrementalmerkletree::{bridgetree, Frontier};
+use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
 use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
 
 use super::commitment::NoteCommitment;
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -147,12 +150,12 @@ impl incrementalmerkletree::Hashable for Node {
     /// Note that Sprout does not use the `level` argument.
     ///
     /// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh
-    fn combine(_level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+    fn combine(_level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
         Self(merkle_crh_sprout(a.0, b.0))
     }
 
     /// Returns the node for the level below the given level. (A quirk of the API)
-    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+    fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
@@ -205,7 +208,7 @@ pub enum NoteCommitmentTreeError {
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
     ///
@@ -242,13 +245,47 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
+impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // TODO: Add correct serialization.
+        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
+        writer.write_all(buf)?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        // TODO: Add deserialization
+        Ok(Frontier::empty())
+    }
+}
+
+impl ZcashSerialize for NoteCommitmentTree {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // TODO: Add correct serialization.
+        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
+        writer.write_all(buf)?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NoteCommitmentTree {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        // TODO: Add deserialization
+        Ok(NoteCommitmentTree::default())
+    }
+}
+
 impl NoteCommitmentTree {
     /// Appends a note commitment to the leafmost layer of the tree.
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(&cm.into()) {
+        if self.inner.append(cm.into()) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -314,7 +351,10 @@ impl NoteCommitmentTree {
     ///
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
-        self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+        match self.inner.value() {
+            Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
+            None => 0,
+        }
     }
 }
 

@@ -19,14 +19,12 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use incrementalmerkletree::{
-    bridgetree::{self, Leaf},
-    Frontier,
-};
+use bridgetree::{self};
+use incrementalmerkletree::{frontier::Frontier, Hashable};
+
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_encoding::{Optional, Vector};
-use zcash_primitives::merkle_tree::{self, Hashable};
+use zcash_primitives::merkle_tree::{self};
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
@@ -185,7 +183,7 @@ impl fmt::Debug for Node {
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
 /// [3]: merkle_tree::CommitmentTree
-impl merkle_tree::Hashable for Node {
+impl merkle_tree::HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
         reader.read_exact(&mut node)?;
@@ -195,24 +193,9 @@ impl merkle_tree::Hashable for Node {
     fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.0.as_ref())
     }
-
-    fn combine(level: usize, a: &Self, b: &Self) -> Self {
-        let level = u8::try_from(level).expect("level must fit into u8");
-        let layer = MERKLE_DEPTH - 1 - level;
-        Self(merkle_crh_sapling(layer, a.0, b.0))
-    }
-
-    fn blank() -> Self {
-        Self(NoteCommitmentTree::uncommitted())
-    }
-
-    fn empty_root(level: usize) -> Self {
-        let layer_below = usize::from(MERKLE_DEPTH) - level;
-        Self(EMPTY_ROOTS[layer_below])
-    }
 }
 
-impl incrementalmerkletree::Hashable for Node {
+impl Hashable for Node {
     fn empty_leaf() -> Self {
         Self(NoteCommitmentTree::uncommitted())
     }
@@ -220,13 +203,13 @@ impl incrementalmerkletree::Hashable for Node {
     /// Combine two nodes to generate a new node in the given level.
     /// Level 0 is the layer above the leaves (layer 31).
     /// Level 31 is the root (layer 0).
-    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+    fn combine(level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
         let layer = MERKLE_DEPTH - 1 - u8::from(level);
         Self(merkle_crh_sapling(layer, a.0, b.0))
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
-    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+    fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
@@ -267,7 +250,7 @@ pub enum NoteCommitmentTreeError {
 }
 
 /// Sapling Incremental Note Commitment Tree.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`Frontier`](bridgetree::Frontier).
     ///
@@ -285,7 +268,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sapling = MERKLE_DEPTH = 32.
-    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
+    inner: Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -305,6 +288,40 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
+impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // TODO: Add correct serialization.
+        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
+        writer.write_all(buf)?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        // TODO: Add deserialization
+        Ok(Frontier::empty())
+    }
+}
+
+impl ZcashSerialize for NoteCommitmentTree {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // TODO: Add correct serialization.
+        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
+        writer.write_all(buf)?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NoteCommitmentTree {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        // TODO: Add deserialization
+        Ok(NoteCommitmentTree::default())
+    }
+}
+
 impl NoteCommitmentTree {
     /// Adds a note commitment u-coordinate to the tree.
     ///
@@ -315,7 +332,7 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm_u: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(&cm_u.into()) {
+        if self.inner.append(cm_u.into()) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -380,7 +397,10 @@ impl NoteCommitmentTree {
     ///
     /// For Sapling, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
-        self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+        match self.inner.value() {
+            Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
+            None => 0,
+        }
     }
 }
 
@@ -477,10 +497,11 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         //
         // [1]: <https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125>
         if let Some(frontier) = tree.inner.value() {
-            let (left_leaf, right_leaf) = match frontier.leaf() {
-                Leaf::Left(left_value) => (Some(left_value), None),
-                Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
-            };
+            // TODO: `Leaf` types do not exist anymore, see what to do here.
+            //let (left_leaf, right_leaf) = match frontier.leaf() {
+            //    Leaf::Left(left_value) => (Some(left_value), None),
+            //    Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
+            //};
 
             // Ommers are siblings of parent nodes along the branch from the
             // most recent leaf to the root of the tree.
@@ -489,7 +510,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             // Set bits in the binary representation of the position indicate
             // the presence of ommers along the branch from the most recent leaf
             // node to the root of the tree, except for the lowest bit.
-            let mut position: usize = frontier.position().into();
+            let mut position: u64 = frontier.position().into();
 
             // The lowest bit does not indicate the presence of any ommers. We
             // clear it so that we can test if there are no set bits left in
@@ -526,7 +547,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             }
 
             // Serialize the converted note commitment tree.
-
+            /*
             Optional::write(&mut serialized_tree, left_leaf, |tree, leaf| {
                 leaf.write(tree)
             })
@@ -541,6 +562,11 @@ impl From<&NoteCommitmentTree> for SerializedTree {
                 Optional::write(tree, *parent, |tree, parent| parent.write(tree))
             })
             .expect("Parent nodes in a note commitment tree should be serializable");
+            */
+            serialized_tree = tree
+                .inner
+                .zcash_serialize_to_vec()
+                .expect("... should not fail");
         }
 
         Self(serialized_tree)
