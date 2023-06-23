@@ -21,7 +21,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlockWithTrees,
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
@@ -70,7 +70,7 @@ impl DiskWriteBatch {
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &ContextuallyVerifiedBlockWithTrees,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 

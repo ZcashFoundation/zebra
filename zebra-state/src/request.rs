@@ -255,7 +255,7 @@ impl Treestate {
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
 /// database and recompute a new one.
-pub struct ContextuallyVerifiedBlockWithTrees {
+pub struct SemanticallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
     pub verified: SemanticallyVerifiedBlock,
     /// The tresstate associated with the block.

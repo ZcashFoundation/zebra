@@ -23,7 +23,7 @@ use std::{
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
-    request::{ContextuallyVerifiedBlockWithTrees, FinalizableBlock, Treestate},
+    request::{FinalizableBlock, SemanticallyVerifiedBlockWithTrees, Treestate},
     service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
@@ -278,7 +278,7 @@ impl FinalizedState {
                 (
                     checkpoint_verified.height,
                     checkpoint_verified.hash,
-                    ContextuallyVerifiedBlockWithTrees {
+                    SemanticallyVerifiedBlockWithTrees {
                         verified: checkpoint_verified.0,
                         treestate: Treestate {
                             note_commitment_trees,
@@ -293,7 +293,7 @@ impl FinalizedState {
             } => (
                 contextually_verified.height,
                 contextually_verified.hash,
-                ContextuallyVerifiedBlockWithTrees {
+                SemanticallyVerifiedBlockWithTrees {
                     verified: contextually_verified.into(),
                     treestate,
                 },

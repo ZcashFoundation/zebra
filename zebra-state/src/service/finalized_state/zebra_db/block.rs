@@ -29,7 +29,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlockWithTrees,
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -280,7 +280,7 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: ContextuallyVerifiedBlockWithTrees,
+        finalized: SemanticallyVerifiedBlockWithTrees,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -427,7 +427,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &ContextuallyVerifiedBlockWithTrees,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,

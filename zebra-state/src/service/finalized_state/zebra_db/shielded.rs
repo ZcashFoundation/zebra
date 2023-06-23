@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlockWithTrees,
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
@@ -265,7 +265,7 @@ impl DiskWriteBatch {
     pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &ContextuallyVerifiedBlockWithTrees,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
