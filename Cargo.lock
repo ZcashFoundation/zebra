@@ -12,7 +12,7 @@ dependencies = [
  "arc-swap",
  "backtrace",
  "canonical-path",
- "clap 4.3.5",
+ "clap 4.3.6",
  "color-eyre",
  "fs-err",
  "once_cell",
@@ -773,9 +773,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.5"
+version = "4.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2686c4115cb0810d9a984776e197823d08ec94f176549a89a9efded477c456dc"
+checksum = "6320c6d1c98b6981da7bb2dcecbd0be9dc98d42165fa8326b21000f7dbfde6d0"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -956,7 +956,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.5",
+ "clap 4.3.6",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -5954,7 +5954,7 @@ dependencies = [
  "abscissa_core",
  "atty",
  "chrono",
- "clap 4.3.5",
+ "clap 4.3.6",
  "color-eyre",
  "console-subscriber",
  "dirs",
