@@ -6,9 +6,12 @@ name: CD
 #
 # Since the different event types each use a different Managed Instance Group or instance,
 # we can run different event types concurrently.
+#
+# For pull requests, we only run the tests from this workflow, and don't do any deployments.
+# So an in-progress pull request gets cancelled, just like other tests.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: {{ github.event_name == "pull_request" }}
 
 on:
   workflow_dispatch:
@@ -25,13 +28,51 @@ on:
         required: false
         type: boolean
         default: false
+
   # Temporarily disabled to reduce network load, see #6894.
   #push:
   #  branches:
   #    - main
+  #  paths:
+  #    # code and tests
+  #    - '**/*.rs'
+  #    # hard-coded checkpoints and proptest regressions
+  #    - '**/*.txt'
+  #    # dependencies
+  #    - '**/Cargo.toml'
+  #    - '**/Cargo.lock'
+  #    # configuration files
+  #    - '.cargo/config.toml'
+  #    - '**/clippy.toml'
+  #    # workflow definitions
+  #    - 'docker/**'
+  #    - '.dockerignore'
+  #    - '.github/workflows/continous-delivery.yml'
+  #    - '.github/workflows/build-docker-image.yml'
+
+  # Only runs the Docker image tests, doesn't deploy any instances
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/continous-delivery.yml'
+      - '.github/workflows/find-cached-disks.yml'
+
   release:
     types:
       - published
+
 
 jobs:
   # If a release was made we want to extract the first part of the semver from the
