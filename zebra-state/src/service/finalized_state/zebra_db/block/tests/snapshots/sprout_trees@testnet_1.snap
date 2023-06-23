@@ -1,0 +1,12 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_sprout_trees
+---
+{
+  Root((215, 198, 18, 200, 23, 121, 49, 145, 161, 230, 134, 82, 18, 24, 118, 214, 179, 189, 228, 15, 79, 165, 43, 195, 20, 20, 92, 230, 229, 205, 210, 89)): NoteCommitmentTree(
+    inner: Frontier(
+      frontier: None,
+    ),
+    cached_root: Some(Root((215, 198, 18, 200, 23, 121, 49, 145, 161, 230, 134, 82, 18, 24, 118, 214, 179, 189, 228, 15, 79, 165, 43, 195, 20, 20, 92, 230, 229, 205, 210, 89))),
+  ),
+}
