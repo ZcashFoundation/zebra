@@ -1,7 +1,5 @@
 //! Zebrad EntryPoint
 
-use std::cmp::min;
-
 use abscissa_core::{Command, Configurable, FrameworkError, Runnable};
 use clap::Parser;
 use std::{ffi::OsString, path::PathBuf};
@@ -42,7 +40,7 @@ pub struct EntryPoint {
 
     /// Filter strings which override the config file and defaults
     // This can be applied to the default start command if no subcommand is provided.
-    #[clap(help = "tracing filters which override the zebrad.toml config")]
+    #[clap(long, help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
@@ -63,28 +61,22 @@ impl EntryPoint {
         "start"
     }
 
+    /// Checks if the provided arguments include a subcommand
+    fn should_add_default_subcommand(&self) -> bool {
+        self.cmd.is_none()
+    }
+
     /// Process command arguments and insert the default subcommand
     /// if no subcommand is provided.
     pub fn process_cli_args(mut args: Vec<OsString>) -> clap::error::Result<Vec<OsString>> {
-        // Check if the provided arguments include a subcommand
-        let should_add_default_subcommand = EntryPoint::try_parse_from(&args)?.cmd.is_none();
+        let entry_point = EntryPoint::try_parse_from(&args)?;
 
         // Add the default subcommand to args after the top-level args if cmd is None
-        if should_add_default_subcommand {
-            // try_parse_from currently produces an error if the first argument is not the binary name,
-            let mut num_top_level_args = 1;
-
-            // update last_top_level_arg_idx to the number of top-level args
-            for (idx, arg) in args.iter().enumerate() {
-                num_top_level_args = match arg.to_str() {
-                    Some("--verbose" | "-v" | "--version" | "-V" | "--help") => idx + 1,
-                    Some("--config" | "-c") => idx + 2,
-                    _ => num_top_level_args,
-                }
+        if entry_point.should_add_default_subcommand() {
+            args.push(EntryPoint::default_cmd_as_str().into());
+            for filter in entry_point.filters {
+                args.push(filter.into())
             }
-
-            num_top_level_args = min(num_top_level_args, args.len());
-            args.insert(num_top_level_args, EntryPoint::default_cmd_as_str().into());
         }
 
         Ok(args)
