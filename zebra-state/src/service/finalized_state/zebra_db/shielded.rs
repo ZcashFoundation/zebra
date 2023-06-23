@@ -12,7 +12,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
@@ -96,6 +96,19 @@ impl ZebraDb {
         self.db
             .zs_get(&sprout_anchors_handle, sprout_anchor)
             .map(Arc::new)
+    }
+
+    /// Returns all the Sprout note commitment trees in the database.
+    ///
+    /// Calling this method can load a lot of data into RAM, and delay block commit transactions.
+    #[allow(dead_code, clippy::unwrap_in_result)]
+    pub fn sprout_note_commitments_full_map(
+        &self,
+    ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
+        let sprout_anchors_handle = self.db.cf_handle("sprout_anchors").unwrap();
+
+        self.db
+            .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
