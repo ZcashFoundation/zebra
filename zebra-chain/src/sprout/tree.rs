@@ -256,7 +256,7 @@ impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
 }
 
 impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         // TODO: Add deserialization
         Ok(Frontier::empty())
     }
@@ -273,7 +273,7 @@ impl ZcashSerialize for NoteCommitmentTree {
 }
 
 impl ZcashDeserialize for NoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         // TODO: Add deserialization
         Ok(NoteCommitmentTree::default())
     }

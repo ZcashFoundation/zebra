@@ -24,7 +24,7 @@ use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_primitives::merkle_tree::{self};
+use zcash_primitives::merkle_tree;
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
@@ -289,36 +289,37 @@ pub struct NoteCommitmentTree {
 }
 
 impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // TODO: Add correct serialization.
-        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
-        writer.write_all(buf)?;
-
-        Ok(())
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        //
+        merkle_tree::write_frontier_v1(writer, self)
     }
 }
 
 impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
-        // TODO: Add deserialization
-        Ok(Frontier::empty())
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        //
+        Ok(merkle_tree::read_frontier_v1(reader)?)
     }
 }
 
 impl ZcashSerialize for NoteCommitmentTree {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // TODO: Add correct serialization.
-        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
-        writer.write_all(buf)?;
+        //
+        let frontier_buf = &self.inner.zcash_serialize_to_vec()?;
+        writer.write_all(frontier_buf)?;
 
-        Ok(())
+        //
+        writer.write_all(self.root().zcash_serialize_to_vec()?.as_slice())
     }
 }
 
 impl ZcashDeserialize for NoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
-        // TODO: Add deserialization
-        Ok(NoteCommitmentTree::default())
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        //
+        Ok(NoteCommitmentTree {
+            inner: merkle_tree::read_frontier_v1(reader)?,
+            cached_root: std::sync::RwLock::new(None),
+        })
     }
 }
 
