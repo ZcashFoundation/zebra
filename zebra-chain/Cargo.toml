@@ -97,7 +97,7 @@ serde-big-array = "0.5.1"
 
 # Processing
 futures = "0.3.28"
-itertools = "0.10.5"
+itertools = "0.11.0"
 rayon = "1.7.0"
 
 # ZF deps

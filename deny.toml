@@ -44,6 +44,9 @@ skip-tree = [
     # wait for prost-build to upgrade
     { name = "prettyplease", version = "=0.1.25" },
 
+    # wait for criterion to upgrade
+    { name = "itertools", version = "=0.10.5" },
+
     # ZF crates
 
     # wait for zcashd and zcash_script to upgrade
