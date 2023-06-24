@@ -304,9 +304,11 @@ impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
 }
 
 impl ZcashSerialize for NoteCommitmentTree {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        //
         let frontier_buf = &self.inner.zcash_serialize_to_vec()?;
-        writer.write(frontier_buf)?;
+        writer.write_all(frontier_buf)?;
 
         //
         let root_bytes: &[u8; 32] = &self
@@ -320,6 +322,7 @@ impl ZcashSerialize for NoteCommitmentTree {
 }
 
 impl ZcashDeserialize for NoteCommitmentTree {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         //
         Ok(NoteCommitmentTree {
