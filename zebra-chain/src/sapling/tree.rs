@@ -29,7 +29,8 @@ use zcash_primitives::merkle_tree;
 use super::commitment::pedersen_hashes::pedersen_hash;
 
 use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
 
 /// The type that is used to update the note commitment tree.
@@ -289,36 +290,43 @@ pub struct NoteCommitmentTree {
 }
 
 impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         //
-        merkle_tree::write_frontier_v1(writer, self)
+        merkle_tree::write_frontier_v1(&mut writer, self)
     }
 }
 
 impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         //
-        Ok(merkle_tree::read_frontier_v1(reader)?)
+        Ok(merkle_tree::read_frontier_v0(reader)?)
     }
 }
 
 impl ZcashSerialize for NoteCommitmentTree {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        //
         let frontier_buf = &self.inner.zcash_serialize_to_vec()?;
-        writer.write_all(frontier_buf)?;
+        writer.write(frontier_buf)?;
 
         //
-        writer.write_all(self.root().zcash_serialize_to_vec()?.as_slice())
+        let root_bytes: &[u8; 32] = &self
+            .root()
+            .zcash_serialize_to_vec()?
+            .as_slice()
+            .try_into()
+            .expect("root is 32 bytes");
+        writer.write_32_bytes(root_bytes)
     }
 }
 
 impl ZcashDeserialize for NoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         //
         Ok(NoteCommitmentTree {
-            inner: merkle_tree::read_frontier_v1(reader)?,
-            cached_root: std::sync::RwLock::new(None),
+            inner: merkle_tree::read_frontier_v0(&mut reader)?,
+            cached_root: std::sync::RwLock::new(Some(
+                Root::zcash_deserialize(&mut reader).expect("Root deserialization should not fail"),
+            )),
         })
     }
 }

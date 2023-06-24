@@ -290,9 +290,9 @@ pub struct NoteCommitmentTree {
 }
 
 impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         //
-        merkle_tree::write_frontier_v1(writer, self)
+        merkle_tree::write_frontier_v1(&mut writer, self)
     }
 }
 
@@ -307,7 +307,7 @@ impl ZcashSerialize for NoteCommitmentTree {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         //
         let frontier_buf = &self.inner.zcash_serialize_to_vec()?;
-        writer.write_all(frontier_buf)?;
+        writer.write(frontier_buf)?;
 
         //
         let root_bytes: &[u8; 32] = &self
@@ -321,11 +321,13 @@ impl ZcashSerialize for NoteCommitmentTree {
 }
 
 impl ZcashDeserialize for NoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         //
         Ok(NoteCommitmentTree {
-            inner: merkle_tree::read_frontier_v1(reader)?,
-            cached_root: std::sync::RwLock::new(None),
+            inner: merkle_tree::read_frontier_v1(&mut reader)?,
+            cached_root: std::sync::RwLock::new(Some(
+                Root::zcash_deserialize(&mut reader).expect("Root deserialization should not fail"),
+            )),
         })
     }
 }
