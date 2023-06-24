@@ -158,12 +158,8 @@ RUN apt-get update && \
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
-# Set this to enable the RPC port
-ARG RPC_PORT
-ENV RPC_PORT ${RPC_PORT}
-
 # Expose configured ports
-EXPOSE 8233 18233 $RPC_PORT
+EXPOSE 8233 18233
 
 # Create a default config file based on the Docker build arguments,
 # and report the available zebrad arguments.
