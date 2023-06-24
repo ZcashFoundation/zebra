@@ -22,8 +22,13 @@ fi
 : "${ZEBRA_CHECKPOINT_SYNC:='true'}"
 # [state]
 : "${ZEBRA_CACHED_STATE_DIR:='/var/cache/zebrad-cache'}"
+# [metrics]
+: "${METRICS_ENDPOINT_ADDR:='0.0.0.0'}"
+: "${METRICS_ENDPOINT_PORT:='9999'}"
 # [tracing]
 : "${LOG_COLOR:='false'}"
+: "${TRACING_ENDPOINT_ADDR:='0.0.0.0'}"
+: "${TRACING_ENDPOINT_PORT:='3000'}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:='0.0.0.0'}"
 
@@ -48,15 +53,15 @@ listen_addr = $ZEBRA_LISTEN_ADDR
 cache_dir = $ZEBRA_CACHED_STATE_DIR
 EOF
 
-if [[ -n "$METRICS_ENDPOINT_ADDR" ]]; then
+if [[ " $FEATURES " =~ " prometheus " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [metrics]
-endpoint_addr = ${METRICS_ENDPOINT_ADDR}:9999
+endpoint_addr = ${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}
 EOF
 fi
 
 # Set this to enable the RPC port
-if [[ -n "$RPC_PORT" ]]; then
+if [[ " $FEATURES " =~ " getblocktemplate-rpcs " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [rpc]
 listen_addr = ${RPC_LISTEN_ADDR}:${RPC_PORT}
@@ -67,9 +72,9 @@ if [[ -n "$LOG_FILE" ]] || [[ -n "$LOG_COLOR" ]] || [[ -n "$TRACING_ENDPOINT_ADD
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [tracing]
 EOF
-if [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
+if [[ " $FEATURES " =~ " filter-reload " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
-endpoint_addr = "${TRACING_ENDPOINT_ADDR}:3000"
+endpoint_addr = "${TRACING_ENDPOINT_ADDR}:${TRACING_ENDPOINT_PORT}"
 EOF
 fi
 # Set this to log to a file, if not set, logs to standard output

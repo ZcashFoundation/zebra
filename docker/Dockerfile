@@ -57,7 +57,7 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# TODO: this ENV variables are not required at build time, so they're not needed as ARGs either
+# TODO: just keep the backtrace, colorbt, rust_log, and cargo_home variables as those are the only needed at build time.
 # Build arguments and variables set to change how tests are run, tracelog levels,
 # and Network to be used (Mainnet or Testnet)
 #
