@@ -455,7 +455,7 @@ impl StateService {
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
 
-    /// Queue a finalized block for verification and storage in the finalized state.
+    /// Queue a checkpoint verified block for verification and storage in the finalized state.
     ///
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_to_finalized_state(
@@ -481,32 +481,32 @@ impl StateService {
         let queued = (checkpoint_verified, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
-            // We're still committing finalized blocks
+            // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
                 .insert(queued_prev_hash, queued)
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    "dropping older finalized block: got newer duplicate block",
+                    "dropping older checkpoint verified block: got newer duplicate block",
                 );
             }
 
             self.drain_finalized_queue_and_commit();
         } else {
-            // We've finished committing finalized blocks, so drop any repeated queued blocks,
-            // and return an error.
+            // We've finished committing checkpoint verified blocks to finalized queue,
+            // so drop any repeated queued blocks, and return an error.
             //
             // TODO: track the latest sent height, and drop any blocks under that height
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks to finalized queue: dropped duplicate block, \
                  block is already committed to the state",
             );
 
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpont verified blocks to finalized queue: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -694,8 +694,8 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending finalized blocks when:
-        // - we've sent the finalized block for the last checkpoint, and
+        // We've finished sending semantically verrified blocks when:
+        // - we've sent the semantically verrified block for the last checkpoint, and
         // - it has been successfully written to disk.
         //
         // We detect the last checkpoint by looking for non-finalized blocks
@@ -709,13 +709,13 @@ impl StateService {
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing finalized blocks,
-            // and move on to committing non-finalized blocks.
+            // Tell the block write task to stop committing semantically verified blocks to the finalized queue,
+            // and move on to committing to non-finalized blocks.
             std::mem::drop(self.finalized_block_write_sender.take());
 
-            // We've finished committing finalized blocks, so drop any repeated queued blocks.
+            // We've finished committing semantically verified blocks to finalized queue, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing semantically verified blocks to finalized queue: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
