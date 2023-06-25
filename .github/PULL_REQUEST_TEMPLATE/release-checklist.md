@@ -158,10 +158,7 @@ The end of support height is calculated from the current blockchain height:
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
-- [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
-- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:v1.0.0`,
-      and put the output in a comment on the PR.
-      (You can use [gcloud cloud shell](https://console.cloud.google.com/home/dashboard?cloudshell=true))
+- [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 
 ## Release Failures
