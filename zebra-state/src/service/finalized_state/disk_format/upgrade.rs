@@ -19,21 +19,21 @@ use crate::{config::write_database_format_version_to_disk, Config};
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
-    /// Upgrading the format from `disk_version` to `running_version`.
+    /// Upgrading the format from `older_disk_version` to `newer_running_version`.
     ///
     /// Until this upgrade is complete, the format is a mixture of both versions.
     Upgrade {
-        disk_version: Version,
-        running_version: Version,
+        older_disk_version: Version,
+        newer_running_version: Version,
     },
 
-    /// Marking the format as downgraded from `disk_version` to `running_version`.
+    /// Marking the format as downgraded from `newer_disk_version` to `older_running_version`.
     ///
-    /// Until the state is upgraded to `disk_version` by a later Zebra version,
-    /// the format will be a mixture of both versions.
+    /// Until the state is upgraded to `newer_disk_version` by a Zebra version with that state
+    /// version (or greater), the format will be a mixture of both versions.
     Downgrade {
-        disk_version: Version,
-        running_version: Version,
+        newer_disk_version: Version,
+        older_running_version: Version,
     },
 }
 
@@ -88,8 +88,8 @@ impl DbFormatChange {
                 );
 
                 Some(Upgrade {
-                    disk_version,
-                    running_version,
+                    older_disk_version: disk_version,
+                    newer_running_version: running_version,
                 })
             }
             Ordering::Greater => {
@@ -100,15 +100,12 @@ impl DbFormatChange {
                 );
 
                 Some(Downgrade {
-                    disk_version,
-                    running_version,
+                    newer_disk_version: disk_version,
+                    older_running_version: running_version,
                 })
             }
             Ordering::Equal => {
-                info!(
-                    ?running_version,
-                    "trying to open compatible database format"
-                );
+                info!(?running_version, "trying to open matching database format");
 
                 None
             }
@@ -116,6 +113,7 @@ impl DbFormatChange {
     }
 
     /// Returns true if this change is an upgrade.
+    #[allow(dead_code)]
     pub fn is_upgrade(&self) -> bool {
         matches!(self, Upgrade { .. })
     }
@@ -164,7 +162,9 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) {
-        if !self.is_upgrade() {
+        let Upgrade { newer_running_version: _, older_disk_version } = self else {
+            // If it's not an upgrade, it's a downgrade.
+
             // # Correctness
             //
             // At the start of a format downgrade, the database must be marked as partially or
@@ -178,9 +178,9 @@ impl DbFormatChange {
             // The resposibility of staying backwards-compatible is on the newer version.
             // We do this on a best-effort basis for versions that are still supported.
             return;
-        }
+        };
 
-        // # Correctness
+        // # New Upgrades Sometimes Go Here
         //
         // If the format change is outside RocksDb, put new code above this comment!
         let Some(initial_tip_height) = initial_tip_height else {
@@ -192,19 +192,31 @@ impl DbFormatChange {
         // Example format change.
         //
         // TODO: link to format upgrade instructions doc here
-        let mut upgrade_height = Height(0);
 
-        // Keep upgrading until the initial database has been upgraded,
-        // or this task is cancelled by a shutdown.
-        while upgrade_height <= initial_tip_height
-            && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
-        {
-            // TODO: Do one format upgrade step here
+        // Check if we need to do this upgrade.
+        let database_format_add_format_change_task =
+            Version::parse("25.0.2").expect("version constant is valid");
 
-            upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
+        if older_disk_version < database_format_add_format_change_task {
+            let mut upgrade_height = Height(0);
+
+            // Go through every height from genesis to the tip of the old version.
+            // If the state was downgraded, some heights might already be upgraded.
+            // (Since the upgraded format is added to the tip, the database can switch between
+            // lower and higher versions at any block.)
+            //
+            // Keep upgrading until the initial database has been upgraded,
+            // or this task is cancelled by a shutdown.
+            while upgrade_height <= initial_tip_height
+                && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
+            {
+                // TODO: Do one format upgrade step here
+
+                upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
+            }
         }
 
-        // # Correctness
+        // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
         //
