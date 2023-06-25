@@ -273,7 +273,7 @@ pub enum FinalizableBlock {
 }
 
 impl FinalizableBlock {
-    /// Create a new `FinalizedBlock` given a `ContextuallyVerifiedBlock`.
+    /// Create a new [`FinalizableBlock`] given a [`ContextuallyVerifiedBlock`].
     pub fn new(contextually_verified: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
         Self::Contextual {
             contextually_verified,
@@ -282,7 +282,7 @@ impl FinalizableBlock {
     }
 
     #[cfg(test)]
-    /// Extract a `Block` from a `FinalizedBlock` variant.
+    /// Extract a [`Block`] from a [`FinalizableBlock`] variant.
     pub fn inner_block(&self) -> Arc<Block> {
         match self {
             FinalizableBlock::Checkpoint {
