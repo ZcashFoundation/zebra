@@ -163,7 +163,7 @@ pub struct SemanticallyVerifiedBlock {
 }
 
 /// A block ready to be committed directly to the finalized state with
-/// no checks.
+/// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
 ///
 /// This is exposed for use in checkpointing.
 ///

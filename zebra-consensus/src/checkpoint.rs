@@ -4,11 +4,11 @@
 //! speed up the initial chain sync for Zebra. This list is distributed
 //! with Zebra.
 //!
-//! The checkpoint verifier queues pending blocks.  Once there is a
+//! The checkpoint verifier queues pending blocks. Once there is a
 //! chain from the previous checkpoint to a target checkpoint, it
 //! verifies all the blocks in that chain, and sends accepted blocks to
-//! the state service as finalized chain state, skipping contextual
-//! verification checks.
+//! the state service as finalized chain state, skipping the majority of
+//! contextual verification checks.
 //!
 //! Verification starts at the first checkpoint, which is the genesis
 //! block for the configured network.
