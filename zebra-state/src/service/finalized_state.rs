@@ -232,9 +232,11 @@ impl FinalizedState {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
-                // Checkpoint-verified blocks don't have an associated treestate, so we get the parent
-                // block treestate from the database and update it for the block being committed.
-                // We check that the treestate is the parent block in an assert later in this function.
+                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
+                // treestate of the finalized tip from the database and update it for the block
+                // being committed, assuming the retrieved treestate is the parent block's
+                // treestate. Later on, this function proves this assumption by asserting that the
+                // finalized tip is the parent block of the block being commited.
 
                 let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
