@@ -141,7 +141,7 @@ pub(crate) struct StateService {
     /// so they can be written to the [`FinalizedState`].
     ///
     /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest non-finalized block arrives.
+    /// and the lowest semantically verified block arrives.
     finalized_block_write_sender:
         Option<tokio::sync::mpsc::UnboundedSender<QueuedCheckpointVerified>>,
 
@@ -156,7 +156,7 @@ pub(crate) struct StateService {
     /// - the hash of the last valid committed block (the parent of the invalid block).
     //
     // TODO:
-    // - turn this into an IndexMap containing recent non-finalized block hashes and heights
+    // - turn this into an IndexMap containing recent semantically verified block hashes and heights
     //   (they are all potential tips)
     // - remove block hashes once their heights are strictly less than the finalized tip
     finalized_block_write_last_sent_hash: block::Hash,
@@ -471,7 +471,7 @@ impl StateService {
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
-        // full verification of non-finalized blocks, even when it is in the channel.
+        // full verification of checkpoint blocks, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.non_finalized_block_write_sent_hashes
                 .add_finalized(&checkpoint_verified)
@@ -636,7 +636,7 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
-    /// Queue a non finalized block for verification and check if any queued
+    /// Queue a semantically verified block for contextual verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
     /// This function encodes the logic for [committing non-finalized blocks][1]
@@ -754,7 +754,7 @@ impl StateService {
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
     ///
-    /// The non-finalized block verifier needs access to UTXOs from finalized blocks
+    /// The checkpoint block verifier needs access to UTXOs from finalized blocks
     /// near the final checkpoint, so that it can verify blocks that spend those UTXOs.
     ///
     /// If it doesn't have the required UTXOs, some blocks will time out,
@@ -818,7 +818,7 @@ impl StateService {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
-            "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
+            "invalid semantically verified block height: the canopy checkpoint is mandatory, pre-canopy \
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
@@ -970,7 +970,7 @@ impl Service<Request> for StateService {
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
-                // A non-finalized block verification could have called AwaitUtxo
+                // A checkpoint block verification could have called AwaitUtxo
                 // before this finalized block arrived in the state.
                 // So we need to check for pending UTXOs here for non-finalized blocks,
                 // even though it is redundant for most finalized blocks.
