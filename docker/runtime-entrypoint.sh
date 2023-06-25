@@ -9,54 +9,54 @@ set -o pipefail
 
 # Set this to change the default cached state directory
 # Path and name of the config file
-: "${ZEBRA_CONF_DIR:='/etc/zebrad'}"
-: "${ZEBRA_CONF_FILE:='zebrad.toml'}"
+: "${ZEBRA_CONF_DIR:=/etc/zebrad}"
+: "${ZEBRA_CONF_FILE:=zebrad.toml}"
 if [[ -n "$ZEBRA_CONF_DIR" ]] && [[ -n "$ZEBRA_CONF_FILE" ]]; then
     ZEBRA_CONF_PATH="$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE"
 fi
 
 # [network]
-: "${NETWORK:='Mainnet'}"
-: "${ZEBRA_LISTEN_ADDR:='0.0.0.0'}"
+: "${NETWORK:=Mainnet}"
+: "${ZEBRA_LISTEN_ADDR:=0.0.0.0}"
 # [consensus]
-: "${ZEBRA_CHECKPOINT_SYNC:='true'}"
+: "${ZEBRA_CHECKPOINT_SYNC:=true}"
 # [state]
-: "${ZEBRA_CACHED_STATE_DIR:='/var/cache/zebrad-cache'}"
+: "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad-cache}"
 # [metrics]
-: "${METRICS_ENDPOINT_ADDR:='0.0.0.0'}"
-: "${METRICS_ENDPOINT_PORT:='9999'}"
+: "${METRICS_ENDPOINT_ADDR:=0.0.0.0}"
+: "${METRICS_ENDPOINT_PORT:=9999}"
 # [tracing]
-: "${LOG_COLOR:='false'}"
-: "${TRACING_ENDPOINT_ADDR:='0.0.0.0'}"
-: "${TRACING_ENDPOINT_PORT:='3000'}"
+: "${LOG_COLOR:=false}"
+: "${TRACING_ENDPOINT_ADDR:=0.0.0.0}"
+: "${TRACING_ENDPOINT_PORT:=3000}"
 # [rpc]
-: "${RPC_LISTEN_ADDR:='0.0.0.0'}"
+: "${RPC_LISTEN_ADDR:=0.0.0.0}"
 
-# Create the conf path and file if it does not exist.
-if [[ -n "$ZEBRA_CONF_PATH" ]]; then
-    mkdir -p "$ZEBRA_CONF_DIR"
-    touch "$ZEBRA_CONF_PATH"
-fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
 # variables set by the Dockerfile or the user. If the user has already created a config, don't replace it.
 #
 # We disable most ports by default, so the default config is secure.
 # Users have to opt-in to additional functionality by setting environmental variables.
-if [[ ! -f "$ZEBRA_CONF_PATH" ]]; then
+if [[ -n "$ZEBRA_CONF_PATH" ]] && [[ ! -f "$ZEBRA_CONF_PATH" ]]; then
+
+# Create the conf path and file
+mkdir -p "$ZEBRA_CONF_DIR"
+touch "$ZEBRA_CONF_PATH"
+
+# Populate the conf file
 cat <<EOF > "$ZEBRA_CONF_PATH"
 [network]
 network = "$NETWORK"
-listen_addr = $ZEBRA_LISTEN_ADDR
-
+listen_addr = "$ZEBRA_LISTEN_ADDR"
 [state]
-cache_dir = $ZEBRA_CACHED_STATE_DIR
+cache_dir = "$ZEBRA_CACHED_STATE_DIR"
 EOF
 
 if [[ " $FEATURES " =~ " prometheus " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [metrics]
-endpoint_addr = ${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}
+endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
 fi
 
@@ -64,7 +64,7 @@ fi
 if [[ " $FEATURES " =~ " getblocktemplate-rpcs " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [rpc]
-listen_addr = ${RPC_LISTEN_ADDR}:${RPC_PORT}
+listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
 fi
 
