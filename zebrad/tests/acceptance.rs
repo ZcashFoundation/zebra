@@ -2089,7 +2089,7 @@ fn zebra_state_conflict() -> Result<()> {
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
-            zebra_state::constants::DATABASE_FORMAT_VERSION
+            zebra_state::database_format_version_in_code().major,
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(

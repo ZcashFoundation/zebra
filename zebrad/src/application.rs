@@ -12,7 +12,9 @@ use abscissa_core::{
 use semver::{BuildMetadata, Version};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
+use zebra_state::{
+    constants::LOCK_FILE_ERROR, database_format_version_in_code, database_format_version_on_disk,
+};
 
 use crate::{
     commands::EntryPoint,
@@ -260,13 +262,31 @@ impl Application for ZebradApp {
         // collect the common metadata for the issue URL and panic report,
         // skipping any env vars that aren't present
 
+        // reads state disk version file, doesn't open RocksDB database
+        let disk_db_version =
+            match database_format_version_on_disk(&config.state, config.network.network) {
+                Ok(Some(version)) => version.to_string(),
+                Ok(None) => "creating new database".to_string(),
+                Err(error) => {
+                    let mut error = format!("error: {error:?}");
+                    error.truncate(100);
+                    error
+                }
+            };
+
         let app_metadata = vec![
-            // cargo or git tag + short commit
+            // build-time constant: cargo or git tag + short commit
             ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
-            // constants
-            ("state version", DATABASE_FORMAT_VERSION.to_string()),
+            // code constant
+            (
+                "running state version",
+                database_format_version_in_code().to_string(),
+            ),
+            // state disk file, doesn't open database
+            ("initial disk state version", disk_db_version),
+            // build-time constant
             ("features", env!("VERGEN_CARGO_FEATURES").to_string()),
         ];
 
