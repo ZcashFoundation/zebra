@@ -161,11 +161,6 @@ ENV NETWORK ${NETWORK:-Mainnet}
 # Expose configured ports
 EXPOSE 8233 18233
 
-# Create a default config file based on the Docker build arguments,
-# and report the available zebrad arguments.
-# (--help is used as a dummy command.)
-RUN /runtime-entrypoint.sh --help
-
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
 ENTRYPOINT [ "/runtime-entrypoint.sh" ]
