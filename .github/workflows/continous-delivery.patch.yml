@@ -1,0 +1,36 @@
+name: CD
+
+on:
+  # Only patch the Docker image test jobs
+  pull_request:
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/continous-delivery.yml'
+      - '.github/workflows/find-cached-disks.yml'
+
+
+jobs:
+  # Also patched by continous-integration-docker.patch.yml, which has a different paths-ignore
+  build:
+    name: Build CI Docker / Build images
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-configuration-file:
+    name: Test Zebra default Docker config file
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
