@@ -91,7 +91,7 @@ proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
 tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
-toml = "0.7.4"
+toml = "0.7.5"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
