@@ -53,7 +53,7 @@ lazy_static = "1.4.0"
 num-integer = "0.1.45"
 ordered-map = "0.4.2"
 pin-project = "1.1.0"
-rand = { version = "0.8.5", package = "rand" }
+rand = "0.8.5"
 rayon = "1.7.0"
 regex = "1.8.4"
 serde = { version = "1.0.164", features = ["serde_derive"] }

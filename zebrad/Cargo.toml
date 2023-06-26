@@ -169,7 +169,7 @@ dirs = "5.0.1"
 atty = "0.2.14"
 
 num-integer = "0.1.45"
-rand = { version = "0.8.5", package = "rand" }
+rand = "0.8.5"
 
 # prod feature sentry
 sentry = { version = "0.31.5", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
