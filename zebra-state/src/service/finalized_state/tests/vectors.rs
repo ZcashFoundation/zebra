@@ -6,6 +6,7 @@
 
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::FromHex;
+use rand::random;
 
 use zebra_chain::{orchard, sapling, sprout};
 
@@ -30,7 +31,8 @@ fn sprout_note_commitment_tree_serialization() {
 
         let cm = sprout::NoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -66,7 +68,8 @@ fn sprout_note_commitment_tree_serialization_one() {
 
         let cm = sprout::NoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -111,7 +114,8 @@ fn sprout_note_commitment_tree_serialization_pow2() {
 
         let cm = sprout::NoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -151,7 +155,8 @@ fn sapling_note_commitment_tree_serialization() {
 
         let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -187,7 +192,8 @@ fn sapling_note_commitment_tree_serialization_one() {
 
         let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -236,7 +242,8 @@ fn sapling_note_commitment_tree_serialization_pow2() {
 
         let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -286,7 +293,8 @@ fn orchard_note_commitment_tree_serialization() {
     for (idx, cm_x_bytes) in commitments.iter().enumerate() {
         let cm_x = pallas::Base::from_repr(*cm_x_bytes).unwrap();
         incremental_tree.append(cm_x).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -324,7 +332,8 @@ fn orchard_note_commitment_tree_serialization_one() {
     for (idx, cm_x_bytes) in commitments.iter().enumerate() {
         let cm_x = pallas::Base::from_repr(*cm_x_bytes).unwrap();
         incremental_tree.append(cm_x).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }
@@ -373,7 +382,8 @@ fn orchard_note_commitment_tree_serialization_pow2() {
     for (idx, cm_x_bytes) in commitments.iter().enumerate() {
         let cm_x = pallas::Base::from_repr(*cm_x_bytes).unwrap();
         incremental_tree.append(cm_x).unwrap();
-        if idx % 2 == 0 {
+        if random() {
+            info!(?idx, "randomly caching root for note commitment tree index");
             // Cache the root half of the time to make sure it works in both cases
             let _ = incremental_tree.root();
         }

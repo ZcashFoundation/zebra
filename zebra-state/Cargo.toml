@@ -94,6 +94,7 @@ insta = { version = "1.30.0", features = ["ron", "redactions"] }
 
 proptest = "1.2.0"
 proptest-derive = "0.3.0"
+rand = "0.8.5"
 
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"
