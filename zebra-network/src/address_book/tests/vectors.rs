@@ -112,7 +112,7 @@ fn address_book_peer_order() {
 }
 
 /// Check that `reconnection_peers` skips addresses with IPs for which
-/// Zebra already has recently updated peers.
+/// Zebra already has recently updated outbound peers.
 #[test]
 fn reconnection_peers_skips_recently_updated_ip() {
     test_reconnection_peers_skips_recently_updated_ip(MetaAddr::new_reconnect);

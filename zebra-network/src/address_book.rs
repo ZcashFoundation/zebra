@@ -336,7 +336,12 @@ impl AddressBook {
     /// or if `updated` has a more recent update requiring the outbound connector to wait
     /// longer before initiating handshakes with peers at this IP.
     ///
-    /// See [`MetaAddr::is_ready_for_connection_attempt`] for more details.
+    /// This code only needs to check a single cache entry, rather than the entire address book,
+    /// because other code maintains these invariants:
+    /// - `last_attempt`, `last_failure`, and `last_response` times for an entry can only increase.
+    /// - these are the only fields checked by `was_recently_updated()`
+    ///
+    /// See [`AddressBook::is_ready_for_connection_attempt_with_ip`] for more details.
     fn should_update_most_recent_by_ip(
         &self,
         updated: MetaAddr,
@@ -350,8 +355,8 @@ impl AddressBook {
         }
     }
 
-    /// Returns true if the provided `addr` matches that in `most_recent_by_ip`
-    /// for the IP of the address.
+    /// Returns true if `addr` is the latest entry for its IP, which is stored in `most_recent_by_ip`.
+    /// The entry is checked for an exact match to the IP and port of `addr`.
     fn is_addr_most_recent_by_ip(&self, addr: PeerSocketAddr) -> bool {
         self.most_recent_by_ip
             .get(&addr.ip())
@@ -529,6 +534,8 @@ impl AddressBook {
 
     /// Is this IP ready for a new outbound connection attempt?
     /// Checks if the most recently updated address with this IP `was_recently_updated()`.
+    ///
+    /// Note: last_response times may remain live for a long time if the local clock is changed to an earlier time.
     fn is_ready_for_connection_attempt_with_ip(
         &self,
         ip: &IpAddr,
