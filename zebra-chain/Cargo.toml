@@ -96,7 +96,7 @@ serde-big-array = "0.5.1"
 
 # Processing
 futures = "0.3.28"
-itertools = "0.10.5"
+itertools = "0.11.0"
 rayon = "1.7.0"
 
 # ZF deps
@@ -105,7 +105,7 @@ redjubjub = "0.7.0"
 reddsa = "0.5.0"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.95", optional = true }
+serde_json = { version = "1.0.97", optional = true }
 
 # Experimental feature getblocktemplate-rpcs
 zcash_address = { version = "0.2.1", optional = true }

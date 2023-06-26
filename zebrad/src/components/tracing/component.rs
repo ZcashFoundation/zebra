@@ -17,7 +17,7 @@ use tracing_subscriber::{
 };
 use zebra_chain::parameters::Network;
 
-use crate::{application::app_version, components::tracing::Config};
+use crate::{application::build_version, components::tracing::Config};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -68,13 +68,18 @@ impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
     #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
     pub fn new(network: Network, config: Config) -> Result<Self, FrameworkError> {
+        // Only use color if tracing output is being sent to a terminal or if it was explicitly
+        // forced to.
+        let use_color = config.use_color_stdout();
+        let use_color_stderr = config.use_color_stderr();
+
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 
         // If it's a terminal and color escaping is enabled: clear screen and
         // print Zebra logo (here `use_color` is being interpreted as
         // "use escape codes")
-        if atty::is(atty::Stream::Stderr) && (config.use_color || config.force_use_color) {
+        if use_color_stderr {
             // Clear screen
             eprint!("\x1B[2J");
             eprintln!(
@@ -87,7 +92,7 @@ impl Tracing {
         eprintln!(
             "Thank you for running a {} zebrad {} node!",
             network.lowercase_name(),
-            app_version()
+            build_version()
         );
         eprintln!("You're helping to strengthen the network and contributing to a social good :)");
 
@@ -131,11 +136,6 @@ impl Tracing {
         let (non_blocking, worker_guard) = NonBlockingBuilder::default()
             .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(writer);
-
-        // Only use color if tracing output is being sent to a terminal or if it was explicitly
-        // forced to.
-        let use_color =
-            config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
         // Construct a format subscriber with the supplied global logging filter,
         // and optionally enable reloading.
@@ -371,7 +371,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        app_version()
+        build_version()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {

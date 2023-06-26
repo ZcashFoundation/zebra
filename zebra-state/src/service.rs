@@ -269,7 +269,7 @@ impl Drop for ReadStateService {
         // so dropping it should check if we can shut down.
 
         if let Some(block_write_task) = self.block_write_task.take() {
-            if let Ok(block_write_task_handle) = Arc::try_unwrap(block_write_task) {
+            if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
                 // We're the last database user, so we can tell it to shut down (blocking):
                 // - flushes the database to disk, and
                 // - drops the database, which cleans up any database tasks correctly.
@@ -976,7 +976,8 @@ impl Service<Request> for StateService {
                 // even though it is redundant for most finalized blocks.
                 // (Finalized blocks are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
-                self.pending_utxos.check_against(&finalized.new_outputs);
+                self.pending_utxos
+                    .check_against_ordered(&finalized.new_outputs);
 
                 // # Performance
                 //
@@ -1164,15 +1165,11 @@ impl Service<ReadRequest> for ReadStateService {
 
         if let Some(block_write_task) = block_write_task {
             if block_write_task.is_finished() {
-                match Arc::try_unwrap(block_write_task) {
+                if let Some(block_write_task) = Arc::into_inner(block_write_task) {
                     // We are the last state with a reference to this task, so we can propagate any panics
-                    Ok(block_write_task_handle) => {
-                        if let Err(thread_panic) = block_write_task_handle.join() {
-                            std::panic::resume_unwind(thread_panic);
-                        }
+                    if let Err(thread_panic) = block_write_task.join() {
+                        std::panic::resume_unwind(thread_panic);
                     }
-                    // We're not the last state, so we need to put it back
-                    Err(arc_block_write_task) => self.block_write_task = Some(arc_block_write_task),
                 }
             } else {
                 // It hasn't finished, so we need to put it back

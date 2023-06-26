@@ -7,19 +7,6 @@ description = "The Zcash Foundation's independent, consensus-compatible implemen
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 
-# Settings that impact compilation
-edition = "2021"
-
-# Zebra is only supported on the latest stable Rust version. See the README for details.
-# Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.66"
-
-# Settings that impact runtime behaviour
-
-# make `cargo run` use `zebrad` by default
-# when run in the workspace directory
-default-run = "zebrad"
-
 readme = "../README.md"
 homepage = "https://zfnd.org/zebra/"
 # crates.io is limited to 5 keywords and categories
@@ -27,9 +14,33 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
+# Settings that impact compilation
+edition = "2021"
+
+# Zebra is only supported on the latest stable Rust version. See the README for details.
+# Any Zebra release can break compatibility with older Rust versions.
+rust-version = "1.70"
+
+# Settings that impact runtime behaviour
+
+# make `cargo run` use `zebrad` by default
+# when run in the workspace directory
+default-run = "zebrad"
+
+# `cargo release` settings
+[package.metadata.release]
+pre-release-replacements = [
+  {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout {{version}}"},
+  {file="../book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag {{version}}"},
+  {file="../book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch {{version}}"},
+]
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
+
+# Default features for official ZF binary release builds
+default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -127,11 +138,12 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.26", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.3.4", features = ["cargo"] }
+clap = { version = "4.3.8", features = ["cargo"] }
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "1.9.3"
 lazy_static = "1.4.0"
+semver = "1.0.17"
 serde = { version = "1.0.164", features = ["serde_derive"] }
 toml = "0.7.4"
 
@@ -207,10 +219,9 @@ hex = "0.4.3"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
 regex = "1.8.4"
-semver = "1.0.17"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.96", features = ["preserve_order"] }
+serde_json = { version = "1.0.97", features = ["preserve_order"] }
 tempfile = "3.5.0"
 
 hyper = { version = "0.14.26", features = ["http1", "http2", "server"]}

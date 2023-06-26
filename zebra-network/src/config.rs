@@ -13,13 +13,14 @@ use indexmap::IndexSet;
 use serde::{de, Deserialize, Deserializer};
 use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
+use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
 use crate::{
     constants::{
-        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
-        MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
+        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP, DNS_LOOKUP_TIMEOUT,
+        INBOUND_PEER_LIMIT_MULTIPLIER, MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
@@ -152,6 +153,12 @@ pub struct Config {
     ///   next connection attempt.
     #[serde(with = "humantime_serde")]
     pub crawl_new_peer_interval: Duration,
+
+    /// The maximum number of peer connections Zebra will keep for a given IP address
+    /// before it drops any additional peer connections with that IP.
+    ///
+    /// The default and minimum value are 1.
+    pub max_connections_per_ip: usize,
 }
 
 impl Config {
@@ -493,12 +500,15 @@ impl Config {
 
         // Create the temporary file.
         // Do blocking filesystem operations on a dedicated thread.
+        let span = Span::current();
         let tmp_peer_cache_file = tokio::task::spawn_blocking(move || {
-            // Put the temporary file in the same directory as the permanent file,
-            // so atomic filesystem operations are possible.
-            tempfile::Builder::new()
-                .prefix(&tmp_peer_cache_prefix)
-                .tempfile_in(peer_cache_dir)
+            span.in_scope(move || {
+                // Put the temporary file in the same directory as the permanent file,
+                // so atomic filesystem operations are possible.
+                tempfile::Builder::new()
+                    .prefix(&tmp_peer_cache_prefix)
+                    .tempfile_in(peer_cache_dir)
+            })
         })
         .await
         .expect("unexpected panic creating temporary peer cache file")?;
@@ -514,31 +524,34 @@ impl Config {
 
         // Atomically replace the current cache with the temporary cache.
         // Do blocking filesystem operations on a dedicated thread.
+        let span = Span::current();
         tokio::task::spawn_blocking(move || {
-            let result = tmp_peer_cache_file.persist(&peer_cache_file);
+            span.in_scope(move || {
+                let result = tmp_peer_cache_file.persist(&peer_cache_file);
 
-            // Drops the temp file if needed
-            match result {
-                Ok(_temp_file) => {
-                    info!(
-                        cached_ip_count = ?peer_list.len(),
-                        ?peer_cache_file,
-                        "updated cached peer IP addresses"
-                    );
-
-                    for ip in &peer_list {
-                        metrics::counter!(
-                            "zcash.net.peers.cache",
-                            1,
-                            "cache" => peer_cache_file.display().to_string(),
-                            "remote_ip" => ip.to_string()
+                // Drops the temp file if needed
+                match result {
+                    Ok(_temp_file) => {
+                        info!(
+                            cached_ip_count = ?peer_list.len(),
+                            ?peer_cache_file,
+                            "updated cached peer IP addresses"
                         );
-                    }
 
-                    Ok(())
+                        for ip in &peer_list {
+                            metrics::counter!(
+                                "zcash.net.peers.cache",
+                                1,
+                                "cache" => peer_cache_file.display().to_string(),
+                                "remote_ip" => ip.to_string()
+                            );
+                        }
+
+                        Ok(())
+                    }
+                    Err(error) => Err(error.error),
                 }
-                Err(error) => Err(error.error),
-            }
+            })
         })
         .await
         .expect("unexpected panic making temporary peer cache file permanent")
@@ -584,6 +597,7 @@ impl Default for Config {
             // But Zebra should only make a small number of initial outbound connections,
             // so that idle peers don't use too many connection slots.
             peerset_initial_target_size: 25,
+            max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
         }
     }
 }
@@ -604,6 +618,7 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size: usize,
             #[serde(alias = "new_peer_interval", with = "humantime_serde")]
             crawl_new_peer_interval: Duration,
+            max_connections_per_ip: Option<usize>,
         }
 
         impl Default for DConfig {
@@ -617,16 +632,26 @@ impl<'de> Deserialize<'de> for Config {
                     cache_dir: config.cache_dir,
                     peerset_initial_target_size: config.peerset_initial_target_size,
                     crawl_new_peer_interval: config.crawl_new_peer_interval,
+                    max_connections_per_ip: Some(DEFAULT_MAX_CONNS_PER_IP),
                 }
             }
         }
 
-        let config = DConfig::deserialize(deserializer)?;
+        let DConfig {
+            listen_addr,
+            network,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip,
+        } = DConfig::deserialize(deserializer)?;
 
-        let listen_addr = match config.listen_addr.parse::<SocketAddr>() {
+        let listen_addr = match listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
-            Err(_) => match config.listen_addr.parse::<IpAddr>() {
-                Ok(ip) => Ok(SocketAddr::new(ip, config.network.default_port())),
+            Err(_) => match listen_addr.parse::<IpAddr>() {
+                Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
                 Err(err) => Err(de::Error::custom(format!(
                     "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
                 ))),
@@ -635,12 +660,13 @@ impl<'de> Deserialize<'de> for Config {
 
         Ok(Config {
             listen_addr: canonical_socket_addr(listen_addr),
-            network: config.network,
-            initial_mainnet_peers: config.initial_mainnet_peers,
-            initial_testnet_peers: config.initial_testnet_peers,
-            cache_dir: config.cache_dir,
-            peerset_initial_target_size: config.peerset_initial_target_size,
-            crawl_new_peer_interval: config.crawl_new_peer_interval,
+            network,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip: max_connections_per_ip.unwrap_or(DEFAULT_MAX_CONNS_PER_IP),
         })
     }
 }

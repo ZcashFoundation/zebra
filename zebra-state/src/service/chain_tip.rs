@@ -21,7 +21,7 @@ use zebra_chain::{
 
 use crate::{
     request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver,
-    CheckpointVerifiedBlock,
+    CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
 };
 
 use TipAction::*;
@@ -109,13 +109,13 @@ impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
 
 impl From<CheckpointVerifiedBlock> for ChainTipBlock {
     fn from(finalized: CheckpointVerifiedBlock) -> Self {
-        let CheckpointVerifiedBlock {
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             transaction_hashes,
             ..
-        } = finalized;
+        }) = finalized;
 
         Self {
             hash,

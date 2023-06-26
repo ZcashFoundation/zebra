@@ -279,8 +279,9 @@ impl SentHashes {
         let outpoints = block
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
-                self.known_utxos.insert(*outpoint, utxo.clone());
+            .map(|(outpoint, ordered_utxo)| {
+                self.known_utxos
+                    .insert(*outpoint, ordered_utxo.utxo.clone());
                 outpoint
             })
             .cloned()
