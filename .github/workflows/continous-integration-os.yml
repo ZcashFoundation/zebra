@@ -261,7 +261,7 @@ jobs:
         # We don't need to check `--no-default-features` here, because (except in very rare cases):
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
-        features: ['', '--features default-docker', '--all-features']
+        features: ['', '--features default-release-binaries', '--all-features']
       # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 

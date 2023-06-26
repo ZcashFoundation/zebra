@@ -39,8 +39,8 @@ pre-release-replacements = [
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
 
-# Default features for Docker release builds
-default-docker = ["default", "sentry"]
+# Default features for official ZF binary release builds
+default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
