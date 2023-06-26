@@ -22,7 +22,17 @@ use crate::{application::app_version, components::tracing::Config};
 #[cfg(feature = "flamegraph")]
 use super::flame;
 
-#[cfg(feature = "progress-bar")]
+// Art generated with these two images.
+// Zebra logo: book/theme/favicon.png
+// Heart image: https://commons.wikimedia.org/wiki/File:Heart_coraz%C3%B3n.svg
+// (License: CC BY-SA 3.0)
+//
+// How to render
+//
+// Convert heart image to PNG (2000px) and run:
+// img2txt -W 40 -H 20 -f utf8 -d none Heart_corazón.svg.png > heart.utf8
+// img2txt -W 40 -H 20 -f utf8 -d none favicon.png > logo.utf8
+// paste favicon.utf8 heart.utf8 > zebra.utf8
 static ZEBRA_ART: [u8; include_bytes!("zebra.utf8").len()] = *include_bytes!("zebra.utf8");
 
 /// A type-erased boxed writer that can be sent between threads safely.
@@ -60,6 +70,26 @@ impl Tracing {
     pub fn new(network: Network, config: Config) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
+
+        // If it's a terminal and color escaping is enabled: clear screen and
+        // print Zebra logo (here `use_color` is being interpreted as
+        // "use escape codes")
+        if atty::is(atty::Stream::Stderr) && (config.use_color || config.force_use_color) {
+            // Clear screen
+            eprint!("\x1B[2J");
+            eprintln!(
+                "{}",
+                std::str::from_utf8(&ZEBRA_ART)
+                    .expect("should always work on a UTF-8 encoded constant")
+            );
+        }
+
+        eprintln!(
+            "Thank you for running a {} zebrad {} node!",
+            network.lowercase_name(),
+            app_version()
+        );
+        eprintln!("You're helping to strengthen the network and contributing to a social good :)");
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
             println!("running zebra");
@@ -268,26 +298,6 @@ impl Tracing {
             howudoin::init(terminal_consumer);
 
             info!("activated progress bar");
-
-            if config.log_file.is_some() {
-                // Clear screen
-                eprint!("\x1B[2J");
-                {
-                    eprintln!(
-                        "{}",
-                        std::str::from_utf8(&ZEBRA_ART)
-                            .expect("should always work on a UTF-8 encoded constant")
-                    );
-                }
-                eprintln!(
-                    "Thank you for running a {} zebrad {} node!",
-                    network.lowercase_name(),
-                    app_version()
-                );
-                eprintln!(
-                    "You're helping to strengthen the network and contributing to a social good :)"
-                );
-            }
         }
 
         Ok(Self {
