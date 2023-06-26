@@ -183,7 +183,7 @@ impl fmt::Debug for Node {
 ///
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [3]: merkle_tree::CommitmentTree
+/// [3]: incrementalmerkletree::frontier::CommitmentTree
 impl merkle_tree::HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
@@ -469,7 +469,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 /// A serialized Sapling note commitment tree.
 ///
 /// The format of the serialized data is compatible with
-/// [`CommitmentTree`](merkle_tree::CommitmentTree) from `librustzcash` and not
+/// [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree) from `librustzcash` and not
 /// with [`Frontier`](bridgetree::Frontier) from the crate
 /// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
 /// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
@@ -478,7 +478,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 /// The formats are semantically equivalent. The primary difference between them
 /// is that in [`Frontier`](bridgetree::Frontier), the vector of parents is
 /// dense (we know where the gaps are from the position of the leaf in the
-/// overall tree); whereas in [`CommitmentTree`](merkle_tree::CommitmentTree),
+/// overall tree); whereas in [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree),
 /// the vector of parent hashes is sparse with [`None`] values in the gaps.
 ///
 /// The sparse format, used in this implementation, allows representing invalid

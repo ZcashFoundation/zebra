@@ -203,16 +203,16 @@ pub enum NoteCommitmentTreeError {
 /// job of this tree to protect against double-spending, as it is append-only; double-spending
 /// is prevented by maintaining the [nullifier set] for each shielded pool.
 ///
-/// Internally this wraps [`incrementalmerkletree::bridgetree::Frontier`], so that we can maintain and increment
+/// Internally this wraps [`bridgetree::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[derive(Debug)]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
+    /// The tree represented as a [`bridgetree::Frontier`].
     ///
-    /// A [`incrementalmerkletree::Frontier`] is a subset of the tree that allows to fully specify it. It
+    /// A [`bridgetree::Frontier`] is a subset of the tree that allows to fully specify it. It
     /// consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
