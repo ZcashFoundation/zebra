@@ -41,6 +41,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -94,6 +95,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -153,6 +155,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -221,6 +224,7 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -277,6 +281,7 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -330,6 +335,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -431,6 +437,7 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -489,6 +496,7 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -535,6 +543,7 @@ proptest! {
 
         // look for an error with a `NoChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+            "RPC test",
             "RPC test",
             network,
             false,
@@ -585,6 +594,7 @@ proptest! {
 
         // Start RPC with the mocked `ChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+            "RPC test",
             "RPC test",
             network,
             false,
@@ -672,6 +682,7 @@ proptest! {
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 network,
                 false,
                 true,
@@ -735,6 +746,7 @@ proptest! {
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 network,
                 false,
                 true,
@@ -785,6 +797,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -874,6 +887,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,

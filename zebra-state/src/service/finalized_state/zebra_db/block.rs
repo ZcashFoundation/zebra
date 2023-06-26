@@ -38,9 +38,8 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        CheckpointVerifiedBlock,
     },
-    BoxError, HashOrHeight,
+    BoxError, HashOrHeight, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -282,7 +281,7 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: CheckpointVerifiedBlock,
+        finalized: SemanticallyVerifiedBlock,
         history_tree: Arc<HistoryTree>,
         note_commitment_trees: NoteCommitmentTrees,
         network: Network,
@@ -305,10 +304,10 @@ impl ZebraDb {
         let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
+            .map(|(outpoint, ordered_utxo)| {
                 (
                     lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
-                    utxo.clone(),
+                    ordered_utxo.utxo.clone(),
                 )
             })
             .collect();
@@ -331,7 +330,12 @@ impl ZebraDb {
                         }),
                         self.utxo(&outpoint)
                             .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                            .or_else(|| {
+                                finalized
+                                    .new_outputs
+                                    .get(&outpoint)
+                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                            })
                             .expect("already checked UTXO was in state or block"),
                     )
                 })
@@ -350,7 +354,12 @@ impl ZebraDb {
         // Get the transparent addresses with changed balances/UTXOs
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
-            .chain(finalized.new_outputs.values())
+            .chain(
+                finalized
+                    .new_outputs
+                    .values()
+                    .map(|ordered_utxo| &ordered_utxo.utxo),
+            )
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
             .collect();
@@ -420,7 +429,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
-        finalized: CheckpointVerifiedBlock,
+        finalized: SemanticallyVerifiedBlock,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
@@ -429,7 +438,7 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -485,7 +494,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
@@ -497,7 +506,7 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let CheckpointVerifiedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -544,9 +553,9 @@ impl DiskWriteBatch {
     pub fn prepare_genesis_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> bool {
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let SemanticallyVerifiedBlock { block, .. } = finalized;
 
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             self.prepare_genesis_note_commitment_tree_batch(db, finalized);

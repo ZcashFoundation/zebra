@@ -228,7 +228,7 @@ impl FinalizedState {
         contextually_verified_with_trees: ContextuallyVerifiedBlockWithTrees,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized = contextually_verified_with_trees.checkpoint_verified;
+        let finalized = contextually_verified_with_trees.block;
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 

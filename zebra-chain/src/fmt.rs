@@ -162,7 +162,7 @@ where
 }
 
 /// Wrapper to override `Debug`, redirecting it to hex-encode the type.
-/// The type must be hex-encodable.
+/// The type must implement `AsRef<[u8]>`.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(transparent)]

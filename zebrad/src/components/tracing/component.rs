@@ -16,7 +16,7 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-use crate::{application::app_version, components::tracing::Config};
+use crate::{application::build_version, components::tracing::Config};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -54,6 +54,10 @@ impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
     #[allow(clippy::print_stdout, clippy::print_stderr)]
     pub fn new(config: Config) -> Result<Self, FrameworkError> {
+        // Only use color if tracing output is being sent to a terminal or if it was explicitly
+        // forced to.
+        let use_color = config.use_color_stdout();
+
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 
@@ -97,11 +101,6 @@ impl Tracing {
         let (non_blocking, worker_guard) = NonBlockingBuilder::default()
             .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(writer);
-
-        // Only use color if tracing output is being sent to a terminal or if it was explicitly
-        // forced to.
-        let use_color =
-            config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
         // Construct a format subscriber with the supplied global logging filter,
         // and optionally enable reloading.
@@ -341,7 +340,7 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn version(&self) -> abscissa_core::Version {
-        app_version()
+        build_version()
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {

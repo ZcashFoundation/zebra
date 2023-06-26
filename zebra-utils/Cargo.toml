@@ -15,6 +15,10 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
+# Zebra is only supported on the latest stable Rust version. See the README for details.
+# Any Zebra release can break compatibility with older Rust versions.
+rust-version = "1.70"
+
 [[bin]]
 name = "zebra-checkpoints"
 # this setting is required for Zebra's Docker build caches
@@ -77,7 +81,7 @@ zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.26", optional = true }
 
 # These crates are needed for the zebra-checkpoints binary
-itertools = { version = "0.10.5", optional = true }
+itertools = { version = "0.11.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { version = "1.8.4", optional = true }

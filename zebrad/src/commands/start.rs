@@ -82,7 +82,7 @@ use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
-    application::{app_version, user_agent},
+    application::{build_version, user_agent},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -158,7 +158,7 @@ impl StartCmd {
         .await;
 
         info!("initializing verifiers");
-        let (router_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
+        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -172,7 +172,7 @@ impl StartCmd {
             &config,
             max_checkpoint_height,
             peer_set.clone(),
-            router_verifier.clone(),
+            block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
         );
@@ -197,7 +197,7 @@ impl StartCmd {
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
             block_download_peer_set: peer_set.clone(),
-            block_verifier: router_verifier.clone(),
+            block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state,
             latest_chain_tip: latest_chain_tip.clone(),
@@ -215,10 +215,11 @@ impl StartCmd {
             config.mining.clone(),
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
-            app_version(),
+            build_version(),
+            user_agent(),
             mempool.clone(),
             read_only_state_service,
-            router_verifier,
+            block_verifier_router,
             sync_status.clone(),
             address_book,
             latest_chain_tip.clone(),

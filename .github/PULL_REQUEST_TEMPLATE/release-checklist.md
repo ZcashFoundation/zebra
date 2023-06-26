@@ -23,7 +23,8 @@ Sometimes `dependabot` misses some dependency updates, or we accidentally turned
 
 Here's how we make sure we got everything:
 - [ ] Run `cargo update` on the latest `main` branch, and keep the output
-- [ ] If needed, update [deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+- [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+- [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
 - [ ] Open a separate PR with the changes
 - [ ] Add the output of `cargo update` to that PR as a comment
 
@@ -40,7 +41,7 @@ These release steps can be done a few days before the release, in the same PR:
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
 Choose a release level for `zebrad` based on the changes in the release that users will see:
-- mainnet network upgrades are `major` releases
+- Mainnet Network Upgrades are `major` releases
 - new features, large changes, deprecations, and removals are `minor` releases
 - otherwise, it is a `patch` release
 
@@ -157,10 +158,7 @@ The end of support height is calculated from the current blockchain height:
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
-- [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
-- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:v1.0.0`,
-      and put the output in a comment on the PR.
-      (You can use [gcloud cloud shell](https://console.cloud.google.com/home/dashboard?cloudshell=true))
+- [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 
 ## Release Failures
