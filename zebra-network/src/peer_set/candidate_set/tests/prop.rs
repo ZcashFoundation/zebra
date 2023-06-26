@@ -8,15 +8,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use proptest::{collection::vec, prelude::*};
+use proptest::{
+    collection::{hash_map, vec},
+    prelude::*,
+};
 use tokio::time::{sleep, timeout};
 use tracing::Span;
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
+    canonical_peer_addr,
     constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
     meta_addr::{MetaAddr, MetaAddrChange},
+    protocol::types::PeerServices,
     AddressBook, BoxError, Request, Response,
 };
 
@@ -94,12 +99,16 @@ proptest! {
     /// Test that new outbound peer connections are rate-limited.
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
-        peers in vec(MetaAddrChange::ready_outbound_strategy(), TEST_ADDRESSES),
+        peers in hash_map(MetaAddrChange::ready_outbound_strategy_ip(), MetaAddrChange::ready_outbound_strategy_port(), TEST_ADDRESSES),
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+
+        let peers = peers.into_iter().map(|(ip, port)| {
+            MetaAddr::new_alternate(canonical_peer_addr(SocketAddr::new(ip, port)), &PeerServices::NODE_NETWORK)
+        }).collect::<Vec<_>>();
 
         let peer_service = tower::service_fn(|_| async {
             unreachable!("Mock peer service is never used");

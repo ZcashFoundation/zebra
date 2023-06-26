@@ -112,17 +112,30 @@ fn address_book_peer_order() {
 }
 
 /// Check that `reconnection_peers` skips addresses with IPs for which
-/// Zebra already has recently connected peers.
+/// Zebra already has recently updated peers.
 #[test]
-fn reconnection_peers_skips_live_ip() {
+fn reconnection_peers_skips_recently_updated_ip() {
+    test_reconnection_peers_skips_recently_updated_ip(MetaAddr::new_reconnect);
+    test_reconnection_peers_skips_recently_updated_ip(|addr| {
+        MetaAddr::new_responded(addr, &PeerServices::NODE_NETWORK)
+    });
+    test_reconnection_peers_skips_recently_updated_ip(|addr| {
+        MetaAddr::new_errored(addr, PeerServices::NODE_NETWORK)
+    });
+}
+
+fn test_reconnection_peers_skips_recently_updated_ip<
+    M: Fn(crate::PeerSocketAddr) -> crate::meta_addr::MetaAddrChange,
+>(
+    make_meta_addr_change: M,
+) {
     let addr1 = "127.0.0.1:1".parse().unwrap();
     let addr2 = "127.0.0.1:2".parse().unwrap();
 
-    let meta_addr1 = MetaAddr::new_responded(addr1, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(
-            Instant::now(),
-            Utc::now().try_into().expect("will succeed until 2038"),
-        );
+    let meta_addr1 = make_meta_addr_change(addr1).into_new_meta_addr(
+        Instant::now(),
+        Utc::now().try_into().expect("will succeed until 2038"),
+    );
     let meta_addr2 = MetaAddr::new_gossiped_meta_addr(
         addr2,
         PeerServices::NODE_NETWORK,

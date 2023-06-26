@@ -330,7 +330,9 @@ impl AddressBook {
         meta_addr
     }
 
-    /// Returns true if there are no existing entries in the address book with this IP,
+    /// Returns true if `updated` needs to be applied to the recent outbound peer connection IP cache.
+    ///
+    /// Checks if there are no existing entries in the address book with this IP,
     /// or if `updated` has a more recent update requiring the outbound connector to wait
     /// longer before initiating handshakes with peers at this IP.
     ///
@@ -526,13 +528,14 @@ impl AddressBook {
     }
 
     /// Is this IP ready for a new outbound connection attempt?
+    /// Checks if the most recently updated address with this IP `was_recently_updated()`.
     fn is_ready_for_connection_attempt_with_ip(
         &self,
         ip: &IpAddr,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
-        self.most_recent_by_ip.get(ip).map_or(false, |peer| {
+        self.most_recent_by_ip.get(ip).map_or(true, |peer| {
             !peer.was_recently_updated(instant_now, chrono_now)
         })
     }
