@@ -74,6 +74,7 @@ impl EntryPoint {
         // Add the default subcommand to args after the top-level args if cmd is None
         if entry_point.should_add_default_subcommand() {
             args.push(EntryPoint::default_cmd_as_str().into());
+            // This duplicates the top-level filters args, but the tracing component only checks `StartCmd.filters`.
             for filter in entry_point.filters {
                 args.push(filter.into())
             }
