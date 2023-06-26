@@ -75,6 +75,10 @@ pub struct AddressBook {
 
     /// The address with a last_connection_state of [`PeerAddrState::Responded`] and
     /// the most recent `last_response` time by IP.
+    ///
+    /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config),
+    /// and currently only supports a `max_connections_per_ip` of 1.
+    // TODO: Replace with `by_ip` to support configured `max_connections_per_ip`
     most_recent_by_ip: HashMap<IpAddr, MetaAddr>,
 
     /// The local listener address.

@@ -158,6 +158,12 @@ pub struct Config {
     /// before it drops any additional peer connections with that IP.
     ///
     /// The default and minimum value are 1.
+    ///
+    /// Note: Zebra will currently avoid initiating outbound connections where it
+    ///       has already recently sent or received a message to or from an address
+    ///       with that IP. Zebra will not initiate more than 1 outbound connection
+    ///       to an IP based on this configuration, but it will accept more inbound
+    ///       connections to an IP.
     pub max_connections_per_ip: usize,
 }
 
