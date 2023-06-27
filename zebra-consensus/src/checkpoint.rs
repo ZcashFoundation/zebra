@@ -268,7 +268,8 @@ where
         let queued_blocks_bar = howudoin::new().label("Queued Checkpoint Blocks");
 
         #[cfg(feature = "progress-bar")]
-        let verified_checkpoint_bar = howudoin::new().label("Verified Checkpoints");
+        let verified_checkpoint_bar =
+            howudoin::new_with_parent(queued_blocks_bar.id()).label("Verified Checkpoints");
 
         let verifier = CheckpointVerifier {
             checkpoint_list,

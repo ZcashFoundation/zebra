@@ -677,7 +677,9 @@ impl NonFinalizedState {
             match self.chain_count().cmp(&prev_length_bars) {
                 Greater => self
                     .chain_fork_length_bars
-                    .resize_with(self.chain_count(), howudoin::new),
+                    .resize_with(self.chain_count(), || {
+                        howudoin::new_with_parent(chain_count_bar.id())
+                    }),
                 Less => {
                     let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
                     for bar in redundant_bars {
