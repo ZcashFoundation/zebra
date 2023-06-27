@@ -105,7 +105,9 @@ impl Tracing {
         }
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            println!("running zebra");
+            if uses_intro {
+                println!("running zebra");
+            }
 
             // Make sure the directory for the log file exists.
             // If the log is configured in the current directory, it won't have a parent directory.
@@ -130,7 +132,9 @@ impl Tracing {
                 }
             }
 
-            println!("sending logs to {log_file:?}...");
+            if uses_intro {
+                println!("sending logs to {log_file:?}...");
+            }
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
         } else {
