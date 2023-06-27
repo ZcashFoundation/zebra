@@ -265,7 +265,7 @@ pub struct SemanticallyVerifiedBlockWithTrees {
 /// Contains a block ready to be committed.
 ///
 /// Zebra's state service passes this `enum` over to the finalized state
- /// when committing a block.
+/// when committing a block.
 pub enum FinalizableBlock {
     Checkpoint {
         checkpoint_verified: CheckpointVerifiedBlock,
