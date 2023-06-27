@@ -58,7 +58,7 @@ impl AddressBookUpdater {
 
         #[cfg(feature = "progress-bar")]
         let (mut address_info, address_bar, never_bar, failed_bar) = {
-            let address_bar = howudoin::new().label("Known Peers");
+            let address_bar = howudoin::new_root().label("Known Peers");
             let never_bar =
                 howudoin::new_with_parent(address_bar.id()).label("Never Attempted Peers");
             let failed_bar = howudoin::new_with_parent(never_bar.id()).label("Failed Peers");
