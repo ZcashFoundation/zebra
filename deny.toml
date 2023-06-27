@@ -10,6 +10,13 @@
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "deny"
+
+# Don't allow wildcard ("any version") dependencies
+wildcards = "deny"
+# Allow private and dev wildcard dependencies.
+# Switch this to `false` when #6924 is implemented.
+allow-wildcard-paths = true
+
 # The graph highlighting used when creating dotgraphs for crates
 # with multiple versions
 # * lowest-version - The path to the lowest versioned duplicate is highlighted
@@ -17,11 +24,17 @@ multiple-versions = "deny"
 # * all - Both lowest-version and simplest-path are used
 highlight = "all"
 
-# We don't use this for Zebra.
-#
 # List of crates that are allowed. Use with care!
 #allow = [
 #]
+
+# List of crates that can never become Zebra dependencies.
+deny = [
+    # Often has memory safety vulnerabilities.
+    # Enabled by --all-features, use the `cargo hack` script in the deny.toml CI job instead.
+    { name = "openssl" },
+    { name = "openssl-sys" },
+]
 
 # We only use this for some `librustzcash` and `orchard` crates.
 # If we add a crate here, duplicate dependencies of that crate are still shown.
@@ -43,6 +56,12 @@ skip-tree = [
 
     # wait for prost-build to upgrade
     { name = "prettyplease", version = "=0.1.25" },
+
+    # wait for criterion to upgrade
+    { name = "itertools", version = "=0.10.5" },
+
+    # wait for backtrace and multiple dependents to upgrade
+    { name = "miniz_oxide", version = "=0.6.2" },
 
     # ZF crates
 
@@ -67,6 +86,9 @@ skip-tree = [
 
     # wait for zcash_address to upgrade
     { name = "bs58", version = "=0.4.0" },
+
+    # wait for minreq and zcash_proofs to upgrade
+    { name = "rustls", version = "=0.20.8" },
 
     # zebra-utils dependencies
 

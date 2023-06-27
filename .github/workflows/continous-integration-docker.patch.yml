@@ -19,8 +19,10 @@ on:
       - '**/clippy.toml'
       # workflow definitions
       - 'docker/**'
+      - '.dockerignore'
       - '.github/workflows/continous-integration-docker.yml'
       - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/find-cached-disks.yml'
       - '.github/workflows/build-docker-image.yml'
 
 jobs:

@@ -18,7 +18,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 hex = "0.4.3"
 indexmap = "1.9.3"
 lazy_static = "1.4.0"
-insta = "1.29.0"
+insta = "1.30.0"
 proptest = "1.2.0"
 once_cell = "1.18.0"
 rand = { version = "0.8.5", package = "rand" }
