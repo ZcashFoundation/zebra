@@ -65,9 +65,12 @@ pub struct Tracing {
 }
 
 impl Tracing {
-    /// Try to create a new [`Tracing`] component with the given `filter`.
+    /// Try to create a new [`Tracing`] component with the given `config`.
+    ///
+    /// If `uses_intro` is true, show a welcome message, the `network`,
+    /// and the Zebra logo on startup. (If the terminal supports it.)
     #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
-    pub fn new(network: Network, config: Config) -> Result<Self, FrameworkError> {
+    pub fn new(network: Network, config: Config, uses_intro: bool) -> Result<Self, FrameworkError> {
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
         let use_color = config.use_color_stdout();
@@ -76,28 +79,35 @@ impl Tracing {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 
-        // If it's a terminal and color escaping is enabled: clear screen and
-        // print Zebra logo (here `use_color` is being interpreted as
-        // "use escape codes")
-        if use_color_stderr {
-            // Clear screen
-            eprint!("\x1B[2J");
+        // Only show the intro for user-focused node server commands like `start`
+        if uses_intro {
+            // If it's a terminal and color escaping is enabled: clear screen and
+            // print Zebra logo (here `use_color` is being interpreted as
+            // "use escape codes")
+            if use_color_stderr {
+                // Clear screen
+                eprint!("\x1B[2J");
+                eprintln!(
+                    "{}",
+                    std::str::from_utf8(&ZEBRA_ART)
+                        .expect("should always work on a UTF-8 encoded constant")
+                );
+            }
+
             eprintln!(
-                "{}",
-                std::str::from_utf8(&ZEBRA_ART)
-                    .expect("should always work on a UTF-8 encoded constant")
+                "Thank you for running a {} zebrad {} node!",
+                network.lowercase_name(),
+                build_version()
+            );
+            eprintln!(
+                "You're helping to strengthen the network and contributing to a social good :)"
             );
         }
 
-        eprintln!(
-            "Thank you for running a {} zebrad {} node!",
-            network.lowercase_name(),
-            build_version()
-        );
-        eprintln!("You're helping to strengthen the network and contributing to a social good :)");
-
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            println!("running zebra");
+            if uses_intro {
+                println!("running zebra");
+            }
 
             // Make sure the directory for the log file exists.
             // If the log is configured in the current directory, it won't have a parent directory.
@@ -122,7 +132,9 @@ impl Tracing {
                 }
             }
 
-            println!("sending logs to {log_file:?}...");
+            if uses_intro {
+                println!("sending logs to {log_file:?}...");
+            }
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
         } else {
