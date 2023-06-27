@@ -77,7 +77,9 @@ impl Tracing {
     ///
     /// If `uses_intro` is true, show a welcome message, the `network`,
     /// and the Zebra logo on startup. (If the terminal supports it.)
-    #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
+    //
+    // This method should only print to stderr, because stdout is for tracing logs.
+    #[allow(clippy::print_stderr, clippy::unwrap_in_result)]
     pub fn new(network: Network, config: Config, uses_intro: bool) -> Result<Self, FrameworkError> {
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
@@ -113,10 +115,6 @@ impl Tracing {
         }
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            if uses_intro {
-                println!("running zebra");
-            }
-
             // Make sure the directory for the log file exists.
             // If the log is configured in the current directory, it won't have a parent directory.
             //
@@ -131,17 +129,17 @@ impl Tracing {
             let log_file_dir = log_file.parent();
             if let Some(log_file_dir) = log_file_dir {
                 if !log_file_dir.exists() {
-                    println!("directory for log file {log_file:?} does not exist, trying to create it...");
+                    eprintln!("Directory for log file {log_file:?} does not exist, trying to create it...");
 
                     if let Err(create_dir_error) = fs::create_dir_all(log_file_dir) {
-                        println!("failed to create directory for log file: {create_dir_error}");
-                        println!("trying log file anyway...");
+                        eprintln!("Failed to create directory for log file: {create_dir_error}");
+                        eprintln!("Trying log file anyway...");
                     }
                 }
             }
 
             if uses_intro {
-                println!("sending logs to {log_file:?}...");
+                eprintln!("Sending logs to {log_file:?}...");
             }
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
