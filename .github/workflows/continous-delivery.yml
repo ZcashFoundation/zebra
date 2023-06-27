@@ -171,7 +171,8 @@ jobs:
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Test.*estimated progress to chain tip.*Genesis'
+          -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
+          -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop testnet-conf-tests
           # get the exit status from docker
           EXIT_STATUS=$( \
