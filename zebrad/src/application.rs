@@ -422,6 +422,7 @@ impl Application for ZebradApp {
         components.push(Box::new(Tracing::new(
             config.network.network,
             tracing_config,
+            command.cmd().uses_intro(),
         )?));
 
         // Log git metadata and platform info when zebrad starts up
