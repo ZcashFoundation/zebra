@@ -1138,12 +1138,29 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
 
     // # Correctness
     //
-    // Spawn address book accesses on a blocking thread,
-    // to avoid deadlocks (see #1976).
+    // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
     let span = Span::current();
-    tokio::task::spawn_blocking(move || {
+    let task_result = tokio::task::spawn_blocking(move || {
         span.in_scope(|| address_book.lock().unwrap().update(addr))
     })
-    .await
-    .expect("panic in peer failure address book update task");
+    .await;
+
+    match task_result {
+        Ok(updated_addr) => assert_eq!(
+            updated_addr.map(|addr| addr.addr()),
+            Some(addr.addr()),
+            "incorrect address updated by address book: \
+             original: {addr:?}, updated: {updated_addr:?}"
+        ),
+        Err(e @ JoinError { .. }) => {
+            if e.is_panic() {
+                panic!("panic in peer failure address book update task: {e:?}");
+            } else {
+                info!(
+                    "task error during peer failure address book update task: {e:?},\
+                     is Zebra shutting down?"
+                )
+            }
+        }
+    }
 }
