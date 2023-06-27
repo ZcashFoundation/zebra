@@ -66,7 +66,7 @@ impl ActiveConnectionCounter {
         let label = label.to_string();
 
         #[cfg(feature = "progress-bar")]
-        let connection_bar = howudoin::new().label(label.clone());
+        let connection_bar = howudoin::new_root().label(label.clone());
 
         Self {
             count: 0,

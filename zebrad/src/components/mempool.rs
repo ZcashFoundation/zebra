@@ -414,8 +414,9 @@ impl Mempool {
             let _max_transaction_count = self.config.tx_cost_limit
                 / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
-            let transaction_count_bar =
-                *howudoin::new().label("Mempool Transactions").set_pos(0u64);
+            let transaction_count_bar = *howudoin::new_root()
+                .label("Mempool Transactions")
+                .set_pos(0u64);
             // .set_len(max_transaction_count);
 
             let transaction_cost_bar = howudoin::new_with_parent(transaction_count_bar.id())

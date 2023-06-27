@@ -653,7 +653,7 @@ impl NonFinalizedState {
 
             // Update the chain count bar
             if self.chain_count_bar.is_none() {
-                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+                self.chain_count_bar = Some(howudoin::new_root().label("Chain Forks"));
             }
 
             let chain_count_bar = self

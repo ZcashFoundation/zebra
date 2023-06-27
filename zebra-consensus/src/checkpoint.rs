@@ -265,7 +265,7 @@ where
         let (sender, receiver) = mpsc::channel();
 
         #[cfg(feature = "progress-bar")]
-        let queued_blocks_bar = howudoin::new().label("Queued Checkpoint Blocks");
+        let queued_blocks_bar = howudoin::new_root().label("Checkpoint Queue Height");
 
         #[cfg(feature = "progress-bar")]
         let verified_checkpoint_bar =
