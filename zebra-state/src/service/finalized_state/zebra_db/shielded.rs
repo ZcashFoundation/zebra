@@ -15,11 +15,12 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
-    sapling, sprout, transaction::Transaction,
+    block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
+    transaction::Transaction,
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
@@ -264,9 +265,7 @@ impl DiskWriteBatch {
     pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
-        note_commitment_trees: NoteCommitmentTrees,
-        history_tree: Arc<HistoryTree>,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -276,7 +275,8 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let SemanticallyVerifiedBlock { height, .. } = finalized;
+        let height = finalized.verified.height;
+        let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
         // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
@@ -290,7 +290,7 @@ impl DiskWriteBatch {
         self.zs_insert(&orchard_anchors, orchard_root, ());
 
         // Delete the previously stored Sprout note commitment tree.
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&sprout_note_commitment_tree_cf, h);
         }
@@ -317,7 +317,7 @@ impl DiskWriteBatch {
             note_commitment_trees.orchard,
         );
 
-        self.prepare_history_batch(db, finalized, history_tree)
+        self.prepare_history_batch(db, finalized)
     }
 
     /// Prepare a database batch containing the initial note commitment trees,
