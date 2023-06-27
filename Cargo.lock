@@ -470,9 +470,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.3.2"
+version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dbe3c979c178231552ecba20214a8272df4e09f232a87aef4320cf06539aded"
+checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
 name = "bitflags-serde-legacy"
@@ -480,7 +480,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b64e60c28b6d25ad92e8b367801ff9aa12b41d05fc8798055d296bace4a60cc"
 dependencies = [
- "bitflags 2.3.2",
+ "bitflags 2.3.3",
  "serde",
 ]
 
@@ -5659,7 +5659,7 @@ dependencies = [
 name = "zebra-chain"
 version = "1.0.0-beta.26"
 dependencies = [
- "bitflags 2.3.2",
+ "bitflags 2.3.3",
  "bitflags-serde-legacy",
  "bitvec",
  "blake2b_simd",
@@ -5764,7 +5764,7 @@ dependencies = [
 name = "zebra-network"
 version = "1.0.0-beta.26"
 dependencies = [
- "bitflags 2.3.2",
+ "bitflags 2.3.3",
  "byteorder",
  "bytes",
  "chrono",
