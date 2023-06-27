@@ -419,7 +419,11 @@ impl Application for ZebradApp {
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
         }
-        components.push(Box::new(Tracing::new(tracing_config)?));
+        components.push(Box::new(Tracing::new(
+            config.network.network,
+            tracing_config,
+            command.cmd().uses_intro(),
+        )?));
 
         // Log git metadata and platform info when zebrad starts up
         if is_server {

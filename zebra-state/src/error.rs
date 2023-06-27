@@ -51,7 +51,7 @@ pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
-    #[error("block parent not found in any chain")]
+    #[error("block parent not found in any chain, or not enough blocks in chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,
 

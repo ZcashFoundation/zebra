@@ -138,6 +138,12 @@ impl Config {
         self.force_use_color || (self.use_color && atty::is(atty::Stream::Stdout))
     }
 
+    /// Returns `true` if standard error should use color escapes.
+    /// Automatically checks if Zebra is running in a terminal.
+    pub fn use_color_stderr(&self) -> bool {
+        self.force_use_color || (self.use_color && atty::is(atty::Stream::Stderr))
+    }
+
     /// Returns `true` if output that could go to standard output or standard error
     /// should use color escapes. Automatically checks if Zebra is running in a terminal.
     pub fn use_color_stdout_and_stderr(&self) -> bool {

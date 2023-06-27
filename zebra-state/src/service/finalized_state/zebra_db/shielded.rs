@@ -12,14 +12,15 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
-    sapling, sprout, transaction::Transaction,
+    block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
+    transaction::Transaction,
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
@@ -96,6 +97,19 @@ impl ZebraDb {
         self.db
             .zs_get(&sprout_anchors_handle, sprout_anchor)
             .map(Arc::new)
+    }
+
+    /// Returns all the Sprout note commitment trees in the database.
+    ///
+    /// Calling this method can load a lot of data into RAM, and delay block commit transactions.
+    #[allow(dead_code, clippy::unwrap_in_result)]
+    pub fn sprout_note_commitments_full_map(
+        &self,
+    ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
+        let sprout_anchors_handle = self.db.cf_handle("sprout_anchors").unwrap();
+
+        self.db
+            .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
@@ -264,9 +278,7 @@ impl DiskWriteBatch {
     pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
-        note_commitment_trees: NoteCommitmentTrees,
-        history_tree: Arc<HistoryTree>,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -276,7 +288,8 @@ impl DiskWriteBatch {
         let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let SemanticallyVerifiedBlock { height, .. } = finalized;
+        let height = finalized.verified.height;
+        let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
         // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
@@ -290,7 +303,7 @@ impl DiskWriteBatch {
         self.zs_insert(&orchard_anchors, orchard_root, ());
 
         // Delete the previously stored Sprout note commitment tree.
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&sprout_note_commitment_tree_cf, h);
         }
@@ -317,7 +330,7 @@ impl DiskWriteBatch {
             note_commitment_trees.orchard,
         );
 
-        self.prepare_history_batch(db, finalized, history_tree)
+        self.prepare_history_batch(db, finalized)
     }
 
     /// Prepare a database batch containing the initial note commitment trees,
