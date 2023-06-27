@@ -80,19 +80,25 @@ where
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, prepared.height)?;
 
-    // skip this check during tests if we don't have enough blocks in the chain
-    #[cfg(test)]
     if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
+        // skip this check during tests if we don't have enough blocks in the chain
+        // process_queued also checks the chain length, so we can skip this assertion during testing
+        // (tests that want to check this code should use the correct number of blocks)
+        //
+        // TODO: accept a NotReadyToBeCommitted error in those tests instead
+        #[cfg(test)]
         return Ok(());
+
+        // In production, blocks without enough context are invalid.
+        //
+        // The BlockVerifierRouter makes sure that the first 1 million blocks (or more) are
+        // checkpoint verified. The state queues and block write task make sure that blocks are
+        // committed in strict height order. But this function is only called on semantically
+        // verified blocks, so there will be at least 1 million blocks in the state when it is
+        // called. So this error should never happen.
+        #[cfg(not(test))]
+        return Err(ValidateContextError::NotReadyToBeCommitted);
     }
-    // process_queued also checks the chain length, so we can skip this assertion during testing
-    // (tests that want to check this code should use the correct number of blocks)
-    assert_eq!(
-        relevant_chain.len(),
-        POW_ADJUSTMENT_BLOCK_SPAN,
-        "state must contain enough blocks to do proof of work contextual validation, \
-         and validation must receive the exact number of required blocks"
-    );
 
     let relevant_data = relevant_chain.iter().map(|block| {
         (
