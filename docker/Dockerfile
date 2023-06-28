@@ -58,6 +58,7 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
+# TODO: just keep the backtrace, colorbt, rust_log, and cargo_home variables as those are the only needed at build time.
 # Build arguments and variables set to change how tests are run, tracelog levels,
 # and Network to be used (Mainnet or Testnet)
 #
@@ -179,53 +180,8 @@ RUN apt-get update && \
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
-# Set this to enable the RPC port
-ARG RPC_PORT
-ENV RPC_PORT ${RPC_PORT}
-
-# Set this to log to a file, if not set, logs to standard output
-ARG LOG_FILE
-ENV LOG_FILE ${LOG_FILE}
-
-# Set this to change the default cached state directory
-ARG ZEBRA_CACHED_STATE_DIR
-ENV ZEBRA_CACHED_STATE_DIR ${ZEBRA_CACHED_STATE_DIR:-/var/cache/zebrad-cache}
-
-# Zebra automatically detects if it is attached to a terminal, and uses colored output.
-# Set this to 'true' to force using color even if the output is not a terminal.
-# Set this to 'false' to disable using color even if the output is a terminal.
-ARG LOG_COLOR
-ENV LOG_COLOR ${LOG_COLOR}
-
 # Expose configured ports
-
-EXPOSE 8233 18233 $RPC_PORT
-
-# Config location
-
-# Use a configurable dir and file for the zebrad configuration file
-ARG ZEBRA_CONF_DIR
-ENV ZEBRA_CONF_DIR ${ZEBRA_CONF_DIR:-/etc/zebra}
-
-ARG ZEBRA_CONF_FILE
-ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE:-zebrad.toml}
-
-ARG ZEBRA_CONF_PATH
-ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH:-$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE}
-
-# Other settings
-
-ARG SHORT_SHA
-ENV SHORT_SHA ${SHORT_SHA}
-
-# Set this to send sentry reports when Zebra crashes
-ARG SENTRY_DSN
-ENV SENTRY_DSN ${SENTRY_DSN}
-
-# Create a default config file based on the Docker build arguments,
-# and report the available zebrad arguments.
-# (--help is used as a dummy command.)
-RUN /runtime-entrypoint.sh --help
+EXPOSE 8233 18233
 
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
