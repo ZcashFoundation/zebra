@@ -6,6 +6,160 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
+## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-06-29
+
+Zebra's first patch release fixes multiple network peer connection security issues and panics. We recommend that all users upgrade to Zebra 1.0.1 or later.
+
+As of this release, Zebra requires Rust 1.70 to build. macOS builds are no longer officially supported by the Zebra team.
+
+If you're running `zebrad` in a terminal, you'll see a new Zebra welcome message.
+
+Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Zebra limits each IP address to 1 peer connection, to prevent denial of service attacks. This can be changed using the `network.max_connections_per_ip` config. ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980), [#6993](https://github.com/ZcashFoundation/zebra/pull/6993), [#7013](https://github.com/ZcashFoundation/zebra/pull/7013)).
+  Thank you to @dimxy from komodo for reporting this bug, and the Ziggurat team for demonstrating
+  its impact on testnet.
+- Zebra uses new APIs in Rust 1.70 to prevent concurrency bugs that could cause hangs or panics
+  ([#7032](https://github.com/ZcashFoundation/zebra/pull/7032)).
+
+### Support Changes
+
+These platforms are no longer supported by the Zebra team:
+- macOS has been moved from tier 2 to [tier 3 support](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/supported-platforms.md#tier-3) ([#6965](https://github.com/ZcashFoundation/zebra/pull/6965)). We disabled our regular macOS builds because Rust 1.70 [causes crashes during shutdown on macOS x86_64 (#6812)](https://github.com/ZcashFoundation/zebra/issues/6812). Zebra's state uses database transactions, so it should not be corrupted by the crash.
+
+### Security
+
+- Use Arc::into\_inner() to avoid potential hangs or panics ([#7032](https://github.com/ZcashFoundation/zebra/pull/7032))
+- Replace openssl with rustls in tests and experimental features ([#7047](https://github.com/ZcashFoundation/zebra/pull/7047))
+
+#### Network Security
+
+- Limit each IP address to 1 peer connection, to prevent denial of service attacks. ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980), [#6993](https://github.com/ZcashFoundation/zebra/pull/6993))
+- Close new peer connections from the same IP and port, rather than replacing the older connection ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980))
+- Reduce inbound service overloads and add a timeout ([#6950](https://github.com/ZcashFoundation/zebra/pull/6950))
+- Stop panicking when handling inbound connection handshakes ([#6984](https://github.com/ZcashFoundation/zebra/pull/6984))
+
+### Added
+
+- Make the maximum number of connections per IP configurable ([#7013](https://github.com/ZcashFoundation/zebra/pull/7013))
+- Print a Zebra logo and welcome text if stderr is terminal ([#6945](https://github.com/ZcashFoundation/zebra/pull/6945), [#7075](https://github.com/ZcashFoundation/zebra/pull/7075))
+
+### Changed
+
+- Move macOS to tier 3 support ([#6965](https://github.com/ZcashFoundation/zebra/pull/6965))
+- Install from crates.io in the README, rather than a git release tag ([#6977](https://github.com/ZcashFoundation/zebra/pull/6977))
+- Add extra timeout logging to peer TCP connections ([#6969](https://github.com/ZcashFoundation/zebra/pull/6969))
+
+### Fixed
+
+- Replace or add RPC content type header to support `zcashd` RPC examples ([#6885](https://github.com/ZcashFoundation/zebra/pull/6885))
+- Make `zebra-network` licensing clearer ([#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
+
+#### Configuration
+
+- Ignore error from loading config if running the 'generate' or 'download' commands ([#7014](https://github.com/ZcashFoundation/zebra/pull/7014))
+- Apply force\_color to panic logs ([#6997](https://github.com/ZcashFoundation/zebra/pull/6997))
+
+#### Logging & Error Handling
+
+- Log a zebra-network task cancel on shutdown, rather than panicking ([#7078](https://github.com/ZcashFoundation/zebra/pull/7078))
+- Fix incorrect function spans in some logs ([#6923](https://github.com/ZcashFoundation/zebra/pull/6923), [#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
+- Replace a state validation chain length assertion with a NotReadyToBeCommitted error ([#7072](https://github.com/ZcashFoundation/zebra/pull/7072))
+
+#### Experimental Feature Fixes
+
+- Add an elasticsearch feature to block serialize to fix experimental build failures ([#6709](https://github.com/ZcashFoundation/zebra/pull/6709))
+- Prevent progress bar from panicking by disabling limits that are never reached ([#6940](https://github.com/ZcashFoundation/zebra/pull/6940))
+
+### Trivial *TODO:* put this in a PR comment, not the CHANGELOG
+
+- Refactor the structure of finalizable blocks, to make validation clearer ([#7035](https://github.com/ZcashFoundation/zebra/pull/7035), [#7025](https://github.com/ZcashFoundation/zebra/pull/7025))
+- refactor(app): De-duplicate and fix version handling code ([#6996](https://github.com/ZcashFoundation/zebra/pull/6996))
+- fix(release): Use correct cargo release manifest key name ([#7028](https://github.com/ZcashFoundation/zebra/pull/7028))
+- fix(build): Suppress warnings about doc links pointing to private items ([#6944](https://github.com/ZcashFoundation/zebra/pull/6944))
+- fix(docker): Stop resetting the `cargo-chef` cache in the Dockerfile ([#6934](https://github.com/ZcashFoundation/zebra/pull/6934))
+- fix(docker): Improve Dockerfile cache use by making build commands match exactly ([#6933](https://github.com/ZcashFoundation/zebra/pull/6933))
+- fix(cd): Rename a CD job with the same name as a CI job ([#7063](https://github.com/ZcashFoundation/zebra/pull/7063))
+- cleanup(test): Make test debugging output more readable ([#7027](https://github.com/ZcashFoundation/zebra/pull/7027))
+- fix(changelog): Fix a broken link in CHANGELOG.md ([#6979](https://github.com/ZcashFoundation/zebra/pull/6979))
+- change(release): Add deny.toml update details to release-checklist.md ([#7042](https://github.com/ZcashFoundation/zebra/pull/7042))
+- change(release): Add more cargo clean to the release checklist ([#6964](https://github.com/ZcashFoundation/zebra/pull/6964))
+- change(release): Change network upgrade wording in release-checklist.md ([#7010](https://github.com/ZcashFoundation/zebra/pull/7010))
+- change(rename): Update missed tower-batch-control renames ([#7011](https://github.com/ZcashFoundation/zebra/pull/7011))
+- change(docs): Add `cargo clean` step to crate publishing steps ([#6959](https://github.com/ZcashFoundation/zebra/pull/6959))
+- change(docs): Explicitly invoke --execute when bumping crate versions ([#6949](https://github.com/ZcashFoundation/zebra/pull/6949))
+- build(deps): bump tj-actions/changed-files from 36.1.0 to 36.2.1 ([#6973](https://github.com/ZcashFoundation/zebra/pull/6973))
+- build(deps): bump tj-actions/changed-files from 36.2.1 to 36.3.0 ([#6986](https://github.com/ZcashFoundation/zebra/pull/6986))
+- build(deps): bump tj-actions/changed-files from 36.3.0 to 36.4.0 ([#7004](https://github.com/ZcashFoundation/zebra/pull/7004))
+- build(deps): bump tj-actions/changed-files from 36.4.0 to 36.4.1 ([#7024](https://github.com/ZcashFoundation/zebra/pull/7024))
+- build(deps): bump tj-actions/changed-files from 36.4.1 to 37.0.3 ([#7065](https://github.com/ZcashFoundation/zebra/pull/7065))
+- fix(doc): Add `fastmod --hidden` to mass-renames.md ([#6913](https://github.com/ZcashFoundation/zebra/pull/6913))
+- change(release): Add deny.toml update details to release-checklist.md ([#7042](https://github.com/ZcashFoundation/zebra/pull/7042))
+- change(release): Add more cargo clean to the release checklist ([#6964](https://github.com/ZcashFoundation/zebra/pull/6964))
+- add(tests): Add snapshot tests for sprout database formats ([#7057](https://github.com/ZcashFoundation/zebra/pull/7057))
+- change(docs): Add `cargo clean` step to crate publishing steps ([#6959](https://github.com/ZcashFoundation/zebra/pull/6959))
+- add(ci): Run release builds and production Docker image tests on pull requests ([#7055](https://github.com/ZcashFoundation/zebra/pull/7055))
+- add(ci): Run release builds and production Docker image tests on pull requests ([#7055](https://github.com/ZcashFoundation/zebra/pull/7055))
+- add(tests): Add snapshot tests for sprout database formats ([#7057](https://github.com/ZcashFoundation/zebra/pull/7057))
+- build(deps): bump Swatinem/rust-cache from 2.4.0 to 2.5.0 ([#7002](https://github.com/ZcashFoundation/zebra/pull/7002))
+- build(deps): bump baptiste0928/cargo-install from 2.0.0 to 2.1.0 ([#6903](https://github.com/ZcashFoundation/zebra/pull/6903))
+- build(deps): bump bitflags from 2.3.1 to 2.3.2 ([#6943](https://github.com/ZcashFoundation/zebra/pull/6943))
+- build(deps): bump clap from 4.3.3 to 4.3.4 ([#6957](https://github.com/ZcashFoundation/zebra/pull/6957))
+- build(deps): bump clap from 4.3.4 to 4.3.5 ([#7038](https://github.com/ZcashFoundation/zebra/pull/7038))
+- build(deps): bump clap from 4.3.5 to 4.3.6 ([#7059](https://github.com/ZcashFoundation/zebra/pull/7059))
+- build(deps): bump clap from 4.3.6 to 4.3.8 ([#7066](https://github.com/ZcashFoundation/zebra/pull/7066))
+- build(deps): bump docker/build-push-action from 4.1.0 to 4.1.1 ([#6942](https://github.com/ZcashFoundation/zebra/pull/6942))
+- build(deps): bump docker/metadata-action from 4.5.0 to 4.6.0 ([#6941](https://github.com/ZcashFoundation/zebra/pull/6941))
+- build(deps): bump hyper from 0.14.26 to 0.14.27 ([#7082](https://github.com/ZcashFoundation/zebra/pull/7082))
+- build(deps): bump insta from 1.29.0 to 1.30.0 ([#7051](https://github.com/ZcashFoundation/zebra/pull/7051))
+- build(deps): bump itertools from 0.10.5 to 0.11.0 ([#7050](https://github.com/ZcashFoundation/zebra/pull/7050))
+- build(deps): bump log from 0.4.18 to 0.4.19 ([#6919](https://github.com/ZcashFoundation/zebra/pull/6919))
+- build(deps): bump peter-evans/dockerhub-description from 3.4.1 to 3.4.2 ([#7023](https://github.com/ZcashFoundation/zebra/pull/7023))
+- build(deps): bump reviewdog/action-actionlint from 1.37.0 to 1.37.1 ([#7003](https://github.com/ZcashFoundation/zebra/pull/7003))
+- build(deps): bump sentry from 0.31.3 to 0.31.4 ([#6958](https://github.com/ZcashFoundation/zebra/pull/6958))
+- build(deps): bump sentry from 0.31.4 to 0.31.5 ([#6988](https://github.com/ZcashFoundation/zebra/pull/6988))
+- build(deps): bump serde\_json from 1.0.96 to 1.0.97 ([#6987](https://github.com/ZcashFoundation/zebra/pull/6987))
+- build(deps): bump tj-actions/changed-files from 36.1.0 to 36.2.1 ([#6973](https://github.com/ZcashFoundation/zebra/pull/6973))
+- build(deps): bump tj-actions/changed-files from 36.2.1 to 36.3.0 ([#6986](https://github.com/ZcashFoundation/zebra/pull/6986))
+- build(deps): bump tj-actions/changed-files from 36.3.0 to 36.4.0 ([#7004](https://github.com/ZcashFoundation/zebra/pull/7004))
+- build(deps): bump tj-actions/changed-files from 36.4.0 to 36.4.1 ([#7024](https://github.com/ZcashFoundation/zebra/pull/7024))
+- build(deps): bump tj-actions/changed-files from 36.4.1 to 37.0.3 ([#7065](https://github.com/ZcashFoundation/zebra/pull/7065))
+- build(deps): bump w9jds/firebase-action from 11.30.1 to 12.4.0 ([#7005](https://github.com/ZcashFoundation/zebra/pull/7005))
+- change(commands): Ignore error from loading config if running the 'generate' or 'download' commands ([#7014](https://github.com/ZcashFoundation/zebra/pull/7014))
+- change(docs): Add `cargo clean` step to crate publishing steps ([#6959](https://github.com/ZcashFoundation/zebra/pull/6959))
+- change(docs): Explicitly invoke --execute when bumping crate versions ([#6949](https://github.com/ZcashFoundation/zebra/pull/6949))
+- change(network): Configurable maximum connections per IP ([#7013](https://github.com/ZcashFoundation/zebra/pull/7013))
+- change(release): Add deny.toml update details to release-checklist.md ([#7042](https://github.com/ZcashFoundation/zebra/pull/7042))
+- change(release): Add more cargo clean to the release checklist ([#6964](https://github.com/ZcashFoundation/zebra/pull/6964))
+- change(release): Change network upgrade wording in release-checklist.md ([#7010](https://github.com/ZcashFoundation/zebra/pull/7010))
+- change(rename): Update missed tower-batch-control renames ([#7011](https://github.com/ZcashFoundation/zebra/pull/7011))
+- change(state): Use `OrderedUtxo` in `CheckpointVerifiedBlock` ([#6971](https://github.com/ZcashFoundation/zebra/pull/6971))
+- cleanup(test): Make test debugging output more readable ([#7027](https://github.com/ZcashFoundation/zebra/pull/7027))
+- cleanup(workflow): Remove an outdated TODO in release-binaries.yml ([#6978](https://github.com/ZcashFoundation/zebra/pull/6978))
+- fix(build): Suppress warnings about doc links pointing to private items ([#6944](https://github.com/ZcashFoundation/zebra/pull/6944))
+- fix(cd): Rename a CD job with the same name as a CI job ([#7063](https://github.com/ZcashFoundation/zebra/pull/7063))
+- fix(changelog): Fix a broken link in CHANGELOG.md ([#6979](https://github.com/ZcashFoundation/zebra/pull/6979))
+- fix(cleanup): redundant configuration feature ([#6929](https://github.com/ZcashFoundation/zebra/pull/6929))
+- fix(deps): Replace openssl with rustls in tests and experimental features ([#7047](https://github.com/ZcashFoundation/zebra/pull/7047))
+- fix(docker): Improve Dockerfile cache use by making build commands match exactly ([#6933](https://github.com/ZcashFoundation/zebra/pull/6933))
+- fix(docker): Stop resetting the `cargo-chef` cache in the Dockerfile ([#6934](https://github.com/ZcashFoundation/zebra/pull/6934))
+- fix(logs): Avoid grouping logs for separate tasks ([#6923](https://github.com/ZcashFoundation/zebra/pull/6923))
+- fix(net): Clean up licensing, closure `move`, log typos, tracing spans ([#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
+- fix(release): Use correct cargo release manifest key name ([#7028](https://github.com/ZcashFoundation/zebra/pull/7028))
+- fix(state): Replace a chain length assertion with a NotReadyToBeCommitted error ([#7072](https://github.com/ZcashFoundation/zebra/pull/7072))
+- refactor(app): De-duplicate and fix version handling code ([#6996](https://github.com/ZcashFoundation/zebra/pull/6996))
+- refactor(consensus): Rename router\_verifier to block\_verifier\_router ([#6998](https://github.com/ZcashFoundation/zebra/pull/6998))
+- rename(state): do additional renaming for clarification purposes ([#6967](https://github.com/ZcashFoundation/zebra/pull/6967))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @dconnolly, @dimxy from komodo, @oxarbitrage, @teor2345, @upbqdn, and the Ziggurat team.
+
+
 ## [Zebra 1.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0) - 2023-06-14
 
 This is our 1.0.0 stable release.
