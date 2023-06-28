@@ -1,48 +1,73 @@
 ---
 name: Release Checklist Template
-about: Checklist of versioning to create a taggable commit for Zebra
-title: ''
-labels:
+about: Checklist to create and publish a Zebra release
+title: 'Release Zebra (version)'
+labels: A-release, C-trivial, P-Critical :ambulance:
 assignees: ''
 
 ---
 
 # Prepare for the Release
 
-These release steps can be done a week before the release, in separate PRs.
-They can be skipped for urgent releases.
-
-## Checkpoints
-
-For performance and security, we want to update the Zebra checkpoints in every release.
-- [ ] You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
-
-## Missed Dependency Updates
-
-Sometimes `dependabot` misses some dependency updates, or we accidentally turned them off.
-
-Here's how we make sure we got everything:
-- [ ] Run `cargo update` on the latest `main` branch, and keep the output
-- [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
-- [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
-- [ ] Open a separate PR with the changes
-- [ ] Add the output of `cargo update` to that PR as a comment
+- [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged.
+      (See the release ticket checklist for details)
 
 
-# Make Release Changes
+# Summarise Release Changes
 
-These release steps can be done a few days before the release, in the same PR:
-- [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged
+These steps can be done a few days before the release, in the same PR:
 
-## Versioning
+## Change Log
 
-### How to Increment Versions
+**Important**: Any merge into `main` deletes any edits to the draft changelog.
+Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
+
+We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+
+To create the final change log:
+- [ ] Copy the **latest** draft changelog into `CHANGELOG.md` (there can be multiple draft releases)
+- [ ] Delete any trivial changes
+    - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
+- [ ] Combine duplicate changes
+- [ ] Edit change descriptions so they will make sense to Zebra users
+- [ ] Check the category for each change
+  - Prefer the "Fix" category if you're not sure
+
+## README
+
+README updates can be skipped for urgent releases.
+
+Update the README to:
+- [ ] Remove any "Known Issues" that have been fixed since the last release.
+- [ ] Update the "Build and Run Instructions" with any new dependencies.
+      Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
+- [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known working Rust version in the README, book, and `Cargo.toml`s
+
+You can use a command like:
+```sh
+fastmod --fixed-strings '1.58' '1.65'
+```
+
+## Create the Release PR
+
+- [ ] Push the updated changelog and README into a new branch
+      for example: `bump-v1.0.0` - this needs to be different to the tag name
+- [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
+- [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
+- [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
+
+
+# Update Versions and End of Support
+
+## Update Zebra Version
+
+### Choose a Release Level
 
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
-Choose a release level for `zebrad` based on the changes in the release that users will see:
+Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
 - Mainnet Network Upgrades are `major` releases
-- new features, large changes, deprecations, and removals are `minor` releases
+- significant new features, large changes, deprecations, and removals are `minor` releases
 - otherwise, it is a `patch` release
 
 Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
@@ -65,37 +90,6 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
     - [ ] `cargo release publish --verbose --dry-run --workspace`
 - [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --execute --workspace`
 
-## README
-
-README updates can be skipped for urgent releases.
-
-Update the README to:
-- [ ] Remove any "Known Issues" that have been fixed since the last release.
-- [ ] Update the "Build and Run Instructions" with any new dependencies.
-      Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
-- [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known working Rust version in the README, book, and `Cargo.toml`s
-
-You can use a command like:
-```sh
-fastmod --fixed-strings '1.58' '1.65'
-```
-
-## Change Log
-
-**Important**: Any merge into `main` deletes any edits to the draft changelog.
-Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
-
-We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
-
-To create the final change log:
-- [ ] Copy the **latest** draft changelog into `CHANGELOG.md` (there can be multiple draft releases)
-- [ ] Delete any trivial changes
-    - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
-- [ ] Combine duplicate changes
-- [ ] Edit change descriptions so they will make sense to Zebra users
-- [ ] Check the category for each change
-  - Prefer the "Fix" category if you're not sure
-
 ## Update End of Support
 
 The end of support height is calculated from the current blockchain height:
@@ -111,16 +105,12 @@ The end of support height is calculated from the current blockchain height:
 
 </details>
 
-### Create the Release PR
+## Update the Release PR
 
-- [ ] Push the version increments, the updated changelog, and the release constants into a branch,
-      for example: `bump-v1.0.0` - this needs to be different to the tag name
-- [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
-- [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-- [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
+- [ ] Push the version increments and the release constants to the release branch.
 
 
-# Release Zebra
+# Publish the Zebra Release
 
 ## Create the GitHub Pre-Release
 
@@ -166,6 +156,8 @@ The end of support height is calculated from the current blockchain height:
 If building or running fails after tagging:
 
 <details>
+
+<summary>Tag a new release, following these instructions...</summary>
 
 1. Fix the bug that caused the failure
 2. Start a new `patch` release
