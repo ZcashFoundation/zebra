@@ -24,15 +24,23 @@ use super::flame;
 
 // Art generated with these two images.
 // Zebra logo: book/theme/favicon.png
-// Heart image: https://commons.wikimedia.org/wiki/File:Heart_coraz%C3%B3n.svg
-// (License: CC BY-SA 3.0)
+// License: MIT or Apache 2.0
+//
+// Heart image: https://commons.wikimedia.org/wiki/File:Love_Heart_SVG.svg
+// Author: Bubinator
+// License: Public Domain or Unconditional Use
 //
 // How to render
 //
-// Convert heart image to PNG (2000px) and run:
-// img2txt -W 40 -H 20 -f utf8 -d none Heart_corazón.svg.png > heart.utf8
+// Convert heart image to PNG (2000px):
+// curl -o heart.svg https://upload.wikimedia.org/wikipedia/commons/4/42/Love_Heart_SVG.svg
+// cargo install resvg
+// resvg --width 2000 --height 2000 heart.svg heart.png
+//
+// Then to text (40x20):
+// img2txt -W 40 -H 20 -f utf8 -d none heart.png > heart.utf8
 // img2txt -W 40 -H 20 -f utf8 -d none favicon.png > logo.utf8
-// paste -d "\0" favicon.utf8 heart.utf8 > zebra.utf8
+// paste -d "\0" logo.utf8 heart.utf8 > zebra.utf8
 static ZEBRA_ART: [u8; include_bytes!("zebra.utf8").len()] = *include_bytes!("zebra.utf8");
 
 /// A type-erased boxed writer that can be sent between threads safely.
