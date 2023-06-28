@@ -22,9 +22,8 @@ on:
 
 
 jobs:
-  # Also patched by continous-integration-docker.patch.yml, which has a different paths-ignore
   build:
-    name: Build CI Docker / Build images
+    name: Build CD Docker / Build images
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
