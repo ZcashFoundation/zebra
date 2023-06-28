@@ -1,8 +1,8 @@
 ---
-name: Release Checklist Template
-about: Checklist to create and publish a Zebra release
+name: 'Release Checklist Template'
+about: 'Checklist to create and publish a Zebra release'
 title: 'Release Zebra (version)'
-labels: A-release, C-trivial, P-Critical :ambulance:
+labels: 'A-release, C-trivial, P-Critical :ambulance:'
 assignees: ''
 
 ---
