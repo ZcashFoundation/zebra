@@ -32,7 +32,7 @@ use super::flame;
 // Convert heart image to PNG (2000px) and run:
 // img2txt -W 40 -H 20 -f utf8 -d none Heart_corazón.svg.png > heart.utf8
 // img2txt -W 40 -H 20 -f utf8 -d none favicon.png > logo.utf8
-// paste favicon.utf8 heart.utf8 > zebra.utf8
+// paste -d "\0" favicon.utf8 heart.utf8 > zebra.utf8
 static ZEBRA_ART: [u8; include_bytes!("zebra.utf8").len()] = *include_bytes!("zebra.utf8");
 
 /// A type-erased boxed writer that can be sent between threads safely.
