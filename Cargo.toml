@@ -82,3 +82,9 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+[patch.crates-io]
+# Conrado's patch to stop indicatif crashing:
+# https://github.com/console-rs/indicatif/pull/555
+# https://github.com/console-rs/indicatif/commits/main
+indicatif = { git = "https://github.com/console-rs/indicatif", rev = "1bf2cce7c455f91e7535362be02e228ceb74e4f1" }
