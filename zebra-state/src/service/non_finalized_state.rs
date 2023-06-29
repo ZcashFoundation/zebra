@@ -721,8 +721,13 @@ impl NonFinalizedState {
                         .recent_fork_length()
                         .expect("just checked recent fork height");
 
+                    let mut plural = "s";
+                    if recent_fork_length == 1 {
+                        plural = "";
+                    }
+
                     desc.push_str(&format!(
-                        " at {recent_fork_height:?} + {recent_fork_length} blocks"
+                        " at {recent_fork_height:?} + {recent_fork_length} block{plural}"
                     ));
                 }
 
