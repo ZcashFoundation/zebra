@@ -60,7 +60,7 @@ tracing-futures = "0.2.5"
 
 orchard = "0.4.0"
 
-zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.12.1", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.2" }
 tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.2" }
