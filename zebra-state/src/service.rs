@@ -970,11 +970,16 @@ impl Service<Request> for StateService {
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
-                // A checkpoint block verification could have called AwaitUtxo
-                // before this finalized block arrived in the state.
-                // So we need to check for pending UTXOs here for non-finalized blocks,
-                // even though it is redundant for most finalized blocks.
-                // (Finalized blocks are verified using block hash checkpoints
+                // A semantic block verification could have called AwaitUtxo
+                // before this checkpoint verified block arrived in the state.
+                // So we need to check for pending UTXO requests sent by running
+                // semantic block verifications.
+                //
+                // This check is redundant for most checkpoint verified blocks,
+                // because semantic verification can only succeed near the final 
+                // checkpoint, when all the UTXOs are available for the verifying block.
+                //
+                // (Checkpoint block UTXOs are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
                 self.pending_utxos
                     .check_against_ordered(&finalized.new_outputs);
