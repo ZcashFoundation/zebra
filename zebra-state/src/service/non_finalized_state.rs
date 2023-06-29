@@ -36,6 +36,8 @@ pub(crate) use chain::Chain;
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
+    // Chain Data
+    //
     /// Verified, non-finalized chains, in ascending work order.
     ///
     /// The best chain is [`NonFinalizedState::best_chain()`], or `chain_iter().next()`.
@@ -43,6 +45,8 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    // Configuration
+    //
     /// The configured Zcash network.
     pub network: Network,
 
