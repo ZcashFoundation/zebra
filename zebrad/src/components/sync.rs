@@ -8,7 +8,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, time::sleep};
+use tokio::{sync::watch, task::JoinError, time::sleep};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -668,7 +668,17 @@ where
         let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
             match res
-                .expect("panic in spawned obtain tips request")
+                .unwrap_or_else(|e @ JoinError { .. }| {
+                    if e.is_panic() {
+                        panic!("panic in obtain tips task: {e:?}");
+                    } else {
+                        info!(
+                            "task error during obtain tips task: {e:?},\
+                     is Zebra shutting down?"
+                        );
+                        Err(e.into())
+                    }
+                })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
                 Ok(zn::Response::BlockHashes(hashes)) => {

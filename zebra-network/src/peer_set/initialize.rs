@@ -213,7 +213,17 @@ where
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
         .await
-        .expect("unexpected panic in spawned initial peers task")
+        .unwrap_or_else(|e @ JoinError { .. }| {
+            if e.is_panic() {
+                panic!("panic in initial peer connections task: {e:?}");
+            } else {
+                info!(
+                    "task error during initial peer connections: {e:?},\
+                     is Zebra shutting down?"
+                );
+                Err(e.into())
+            }
+        })
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
@@ -353,8 +363,18 @@ where
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
-        let handshake_result =
-            handshake_result.expect("unexpected panic in initial peer handshake");
+        let handshake_result = handshake_result.unwrap_or_else(|e @ JoinError { .. }| {
+            if e.is_panic() {
+                panic!("panic in initial peer connection: {e:?}");
+            } else {
+                info!(
+                    "task error during initial peer connection: {e:?},\
+                     is Zebra shutting down?"
+                );
+                // Fake the address, it doesn't matter because we're shutting down anyway
+                Err((PeerSocketAddr::unspecified(), e.into()))
+            }
+        });
         match handshake_result {
             Ok(change) => {
                 handshake_success_total += 1;
