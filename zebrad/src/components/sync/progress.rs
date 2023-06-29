@@ -154,8 +154,8 @@ pub async fn show_block_chain_progress(
                     .desc(network_upgrade.to_string());
             }
 
-            // Skip logging if it isn't time for it yet
-            let elapsed_since_log = last_log_time.saturating_duration_since(instant_now);
+            // Skip logging and status updates if it isn't time for them yet.
+            let elapsed_since_log = instant_now.saturating_duration_since(last_log_time);
             if elapsed_since_log < LOG_INTERVAL {
                 tokio::time::sleep(PROGRESS_BAR_INTERVAL).await;
                 continue;
