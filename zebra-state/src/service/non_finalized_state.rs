@@ -681,7 +681,7 @@ impl NonFinalizedState {
                         howudoin::new_with_parent(chain_count_bar.id())
                     }),
                 Less => {
-                    let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                    let redundant_bars = self.chain_fork_length_bars.split_off(self.chain_count());
                     for bar in redundant_bars {
                         bar.close();
                     }
