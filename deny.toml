@@ -63,6 +63,9 @@ skip-tree = [
     # wait for backtrace and multiple dependents to upgrade
     { name = "miniz_oxide", version = "=0.6.2" },
 
+    # wait for h2 and tower to upgrade
+    { name = "indexmap", version = "=1.9.3" },
+
     # ZF crates
 
     # wait for zcashd and zcash_script to upgrade
