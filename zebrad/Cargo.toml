@@ -138,7 +138,7 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.26", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.3.8", features = ["cargo"] }
+clap = { version = "4.3.9", features = ["cargo"] }
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
