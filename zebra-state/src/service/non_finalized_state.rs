@@ -710,11 +710,11 @@ impl NonFinalizedState {
                 //     zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
                 // ));
 
-                // display work as bits
-                let mut desc = format!(
-                    "Work {:.1} bits",
-                    chain.partial_cumulative_work.difficulty_bits_for_display(),
-                );
+                // TODO: store work in the finalized state for each height (#7109),
+                //       and show the full chain work here, like `zcashd` (#7110)
+                //
+                // For now, we don't show any work here, see the deleted code in PR #7087.
+                let mut desc = String::new();
 
                 if let Some(recent_fork_height) = chain.recent_fork_height() {
                     let recent_fork_length = chain
