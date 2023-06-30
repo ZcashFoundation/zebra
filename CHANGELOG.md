@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-06-29
 
-Zebra's first patch release fixes multiple network peer connection security issues and panics. We recommend that all users upgrade to Zebra 1.0.1 or later.
+Zebra's first patch release fixes multiple peer connection security issues and panics. It also significantly reduces Zebra's CPU usage. We recommend that all users upgrade to Zebra 1.0.1 or later.
 
 As of this release, Zebra requires Rust 1.70 to build. macOS builds are no longer officially supported by the Zebra team.
 
@@ -37,6 +37,7 @@ These platforms are no longer supported by the Zebra team:
 
 #### Network Security
 
+- Fix long delays in accepting inbound handshakes, and delays in async operations throughout Zebra. ([#7103](https://github.com/ZcashFoundation/zebra/pull/7103)). Thank you to the Ziggurat Team for reporting this bug.
 - Limit each IP address to 1 peer connection, to prevent denial of service attacks. ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980), [#6993](https://github.com/ZcashFoundation/zebra/pull/6993))
 - Close new peer connections from the same IP and port, rather than replacing the older connection ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980))
 - Reduce inbound service overloads and add a timeout ([#6950](https://github.com/ZcashFoundation/zebra/pull/6950))
@@ -45,7 +46,8 @@ These platforms are no longer supported by the Zebra team:
 ### Added
 
 - Make the maximum number of connections per IP configurable ([#7013](https://github.com/ZcashFoundation/zebra/pull/7013))
-- Print a Zebra logo and welcome text if stderr is terminal ([#6945](https://github.com/ZcashFoundation/zebra/pull/6945), [#7075](https://github.com/ZcashFoundation/zebra/pull/7075))
+- Make it easier to modify Zebra's config inside the Docker image ([#7045](https://github.com/ZcashFoundation/zebra/pull/7045))
+- Print a Zebra logo and welcome text if stderr is terminal ([#6945](https://github.com/ZcashFoundation/zebra/pull/6945), [#7075](https://github.com/ZcashFoundation/zebra/pull/7075), [#7095](https://github.com/ZcashFoundation/zebra/pull/7095), [#7102](https://github.com/ZcashFoundation/zebra/pull/7102))
 
 ### Changed
 
@@ -55,6 +57,9 @@ These platforms are no longer supported by the Zebra team:
 
 ### Fixed
 
+- Stop overwriting custom user configs inside Zebra's Docker image ([#7045](https://github.com/ZcashFoundation/zebra/pull/7045))
+- Stop Zebra using 100% CPU even when idle ([#7103](https://github.com/ZcashFoundation/zebra/pull/7103)), thank you to james_katz for reporting this bug
+- Avoid potential hangs in the `tokio` async runtime ([#7094](https://github.com/ZcashFoundation/zebra/pull/7094))
 - Replace or add RPC content type header to support `zcashd` RPC examples ([#6885](https://github.com/ZcashFoundation/zebra/pull/6885))
 - Make `zebra-network` licensing clearer ([#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
 
@@ -77,7 +82,7 @@ These platforms are no longer supported by the Zebra team:
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
-@arya2, @conradoplg, @dconnolly, @dimxy from komodo, @oxarbitrage, @teor2345, @upbqdn, and the Ziggurat team.
+@arya2, @conradoplg, @dconnolly, @dimxy from komodo, james_katz, @oxarbitrage, @teor2345, @upbqdn, and the Ziggurat team.
 
 
 ## [Zebra 1.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0) - 2023-06-14
