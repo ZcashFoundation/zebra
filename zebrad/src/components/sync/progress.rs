@@ -144,6 +144,8 @@ pub async fn show_block_chain_progress(
             let network_upgrade = NetworkUpgrade::current(network, current_height);
 
             // Send progress reports for block height
+            //
+            // TODO: split the progress bar height update into its own function.
             #[cfg(feature = "progress-bar")]
             if matches!(howudoin::cancelled(), Some(true)) {
                 block_bar.close();
@@ -162,6 +164,8 @@ pub async fn show_block_chain_progress(
             } else {
                 last_log_time = instant_now;
             }
+
+            // TODO: split logging / status updates into their own function.
 
             // Work out the sync progress towards the estimated tip.
             let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
