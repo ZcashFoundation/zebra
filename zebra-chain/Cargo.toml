@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.26"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -119,7 +119,7 @@ rand_chacha = { version = "0.3.1", optional = true }
 
 tokio = { version = "1.28.2", features = ["tracing"], optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.26", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.27", optional = true }
 
 [dev-dependencies]
 # Benchmarks
