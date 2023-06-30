@@ -55,6 +55,7 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
+- [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
 
 
 # Update Versions and End of Support
@@ -76,19 +77,24 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 
 <details>
 
-<summary>If you're publishing crates for the first time:</summary>
+<summary>If you're publishing crates for the first time, click this triangle for extra steps</summary>
 
 - [ ] Install `cargo-release`: `cargo install cargo-release`
 - [ ] Make sure you are  an owner of the crate or [a member of the Zebra crates.io `owners` group on GitHub](https://github.com/orgs/ZcashFoundation/teams/owners)
 
 </details>
 
-- [ ] Update crate versions and do a release dry-run
-    - [ ] `cargo clean` (optional)
-    - [ ] `cargo release version --verbose --execute --workspace --exclude zebrad beta`
-    - [ ] `cargo release version --verbose --execute --package zebrad [ major | minor | patch ]`
-    - [ ] `cargo release publish --verbose --dry-run --workspace`
-- [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --execute --workspace`
+Check that the release will work:
+- [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
+
+```sh
+cargo clean # optional
+cargo release version --verbose --execute --workspace --exclude zebrad beta
+cargo release version --verbose --execute --package zebrad patch # [ major | minor | patch ]
+cargo release replace --verbose --execute --package zebrad
+cargo release commit --verbose --execute
+cargo release publish --verbose --dry-run --workspace
+```
 
 ## Update End of Support
 
