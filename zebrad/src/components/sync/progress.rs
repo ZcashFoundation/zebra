@@ -1,8 +1,12 @@
 //! Progress tracking for blockchain syncing.
 
-use std::{cmp::min, ops::Add, time::Duration};
+use std::{
+    cmp::min,
+    ops::Add,
+    time::{Duration, Instant},
+};
 
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use num_integer::div_ceil;
 
 use zebra_chain::{
@@ -118,17 +122,15 @@ pub async fn show_block_chain_progress(
     let mut last_state_change_height = Height(0);
 
     // The last time we logged an update.
-    // Initialised with the unix epoch, to simplify the code while still staying in the std range.
-    let mut last_log_time = Utc
-        .timestamp_opt(0, 0)
-        .single()
-        .expect("in-range number of seconds and valid nanosecond");
+    let mut last_log_time = Instant::now();
 
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
 
     loop {
         let now = Utc::now();
+        let instant_now = Instant::now();
+
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
         if let Some(estimated_height) =
@@ -142,6 +144,8 @@ pub async fn show_block_chain_progress(
             let network_upgrade = NetworkUpgrade::current(network, current_height);
 
             // Send progress reports for block height
+            //
+            // TODO: split the progress bar height update into its own function.
             #[cfg(feature = "progress-bar")]
             if matches!(howudoin::cancelled(), Some(true)) {
                 block_bar.close();
@@ -152,15 +156,16 @@ pub async fn show_block_chain_progress(
                     .desc(network_upgrade.to_string());
             }
 
-            // Skip logging if it isn't time for it yet
-            let elapsed_since_log = (now - last_log_time)
-                .to_std()
-                .expect("elapsed times are in range");
+            // Skip logging and status updates if it isn't time for them yet.
+            let elapsed_since_log = instant_now.saturating_duration_since(last_log_time);
             if elapsed_since_log < LOG_INTERVAL {
+                tokio::time::sleep(PROGRESS_BAR_INTERVAL).await;
                 continue;
             } else {
-                last_log_time = now;
+                last_log_time = instant_now;
             }
+
+            // TODO: split logging / status updates into their own function.
 
             // Work out the sync progress towards the estimated tip.
             let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
