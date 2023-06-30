@@ -976,7 +976,7 @@ impl Service<Request> for StateService {
                 // semantic block verifications.
                 //
                 // This check is redundant for most checkpoint verified blocks,
-                // because semantic verification can only succeed near the final 
+                // because semantic verification can only succeed near the final
                 // checkpoint, when all the UTXOs are available for the verifying block.
                 //
                 // (Checkpoint block UTXOs are verified using block hash checkpoints
