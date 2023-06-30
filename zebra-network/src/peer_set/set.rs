@@ -783,11 +783,11 @@ where
             return fut.map_err(Into::into).boxed();
         }
 
-        // TODO: reduce this log level after testing #2156 and #2726
-        tracing::info!(
+        tracing::debug!(
             ?hash,
             "all ready peers are missing inventory, failing request"
         );
+
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
             tokio::task::yield_now().await;
