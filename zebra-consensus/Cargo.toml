@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.26"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
@@ -62,13 +62,13 @@ orchard = "0.4.0"
 
 zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
 
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.2" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.2" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.3" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.3" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.26" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.26" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.27" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }

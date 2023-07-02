@@ -195,3 +195,7 @@ Zebra is distributed under the terms of both the MIT license
 and the Apache License (Version 2.0).
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+
+Some Zebra crates are distributed under the [MIT license only](LICENSE-MIT),
+because some of their code was originally from MIT-licensed projects.
+See each crate's directory for details.
