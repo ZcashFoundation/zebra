@@ -62,7 +62,7 @@ tempfile = "3.5.0"
 thiserror = "1.0.40"
 
 rayon = "1.7.0"
-tokio = { version = "1.29.0", features = ["rt-multi-thread", "sync", "tracing"] }
+tokio = { version = "1.29.1", features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
 
@@ -100,7 +100,7 @@ rand = "0.8.5"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"
 
-tokio = { version = "1.29.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
