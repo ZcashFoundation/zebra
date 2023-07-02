@@ -43,8 +43,9 @@ rand = "0.8.5"
 
 tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.2"
-tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
+
+tower-fallback = { path = "../tower-fallback/" }
 
 zebra-consensus = { path = "../zebra-consensus/" }
 zebra-test = { path = "../zebra-test/" }

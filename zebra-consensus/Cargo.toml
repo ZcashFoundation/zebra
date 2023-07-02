@@ -62,13 +62,31 @@ orchard = "0.4.0"
 
 zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
 
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.3" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.3" }
+# Work around a `cargo` dependency resolution bug which causes publish dry run errors like:
+# > error: failed to prepare local package for uploading
+# > no matching package named `tower-batch-control` found
+# > location searched: registry `crates-io`
+# > required by package `zebra-consensus v1.0.0-beta.27 (/home/dev/zebra/zebra-consensus)`
+#
+# These errors happen because the crate isn't published yet. Normally, `cargo` would ignore missing
+# crate versions that it's just about to publish. But Zebra triggers a bug in that code.
+#
+# To work around the bug, we allow a dependency on an earlier version of the crate. After the
+# release, the correct version will be enforced by the Cargo.lock, path dependency, or `cargo`'s
+# default "latest version" rule.
+#
+# If the earlier version is too old to compile, change it to the latest released version.
+#
+# <https://github.com/rust-lang/cargo/issues/4242>
+#
+# By default, version requirements are "^" requirements, which means "any later compatible version".
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.2" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.2" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.27" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.26" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.26" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
