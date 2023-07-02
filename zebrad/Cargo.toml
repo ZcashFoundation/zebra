@@ -35,6 +35,21 @@ pre-release-replacements = [
   {file="../book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch {{version}}"},
 ]
 
+[package.metadata.docs.rs]
+
+# Publish Zebra's supported production and developer features on docs.rs.
+# (Except for the log level features, because there are a lot of them.)
+#
+# <https://docs.rs/about/metadata>
+features = [
+    "default-release-binaries",
+    "filter-reload",
+    "flamegraph",
+    "journald",
+    "prometheus",
+    "sentry",
+]
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
