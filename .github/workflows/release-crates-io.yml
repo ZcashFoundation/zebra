@@ -104,7 +104,6 @@ jobs:
           cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --no-confirm --allow-branch '*' --prev-tag-name HEAD --dependent-version fix --package zebra-consensus --package zebra-utils beta
           cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --no-confirm --allow-branch '*' --prev-tag-name HEAD --dependent-version fix --package zebrad patch
           cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
-          cargo release commit --verbose --execute --no-confirm --allow-branch '*'
           cargo release publish --verbose --dry-run --allow-branch '*' --workspace
 
 

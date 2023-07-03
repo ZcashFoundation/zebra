@@ -94,7 +94,6 @@ cargo release commit --verbose --execute
 cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --dependent-version fix --package zebra-consensus --package zebra-utils beta
 cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --dependent-version fix --package zebrad patch # [ major | minor | patch ]
 cargo release replace --verbose --execute --package zebrad
-cargo release commit --verbose --execute
 cargo release publish --verbose --dry-run --workspace
 ```
 
