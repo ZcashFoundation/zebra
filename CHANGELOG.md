@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
-## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-06-29
+## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-07-03
 
 Zebra's first patch release fixes multiple peer connection security issues and panics. It also significantly reduces Zebra's CPU usage. We recommend that all users upgrade to Zebra 1.0.1 or later.
 
