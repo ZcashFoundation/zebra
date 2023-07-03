@@ -42,6 +42,7 @@ These platforms are no longer supported by the Zebra team:
 - Close new peer connections from the same IP and port, rather than replacing the older connection ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980))
 - Reduce inbound service overloads and add a timeout ([#6950](https://github.com/ZcashFoundation/zebra/pull/6950))
 - Stop panicking when handling inbound connection handshakes ([#6984](https://github.com/ZcashFoundation/zebra/pull/6984))
+- Stop panicking on shutdown in the syncer and network ([#7104](https://github.com/ZcashFoundation/zebra/pull/7104))
 
 ### Added
 
