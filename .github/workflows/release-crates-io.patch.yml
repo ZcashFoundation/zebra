@@ -21,7 +21,7 @@ on:
 
 
 jobs:
-  check-release
+  check-release:
     name: Check crate release dry run
     runs-on: ubuntu-latest
     steps:
