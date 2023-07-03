@@ -97,10 +97,10 @@ jobs:
       - name: Crate release dry run
         run: |
           set -ex
-          cargo release version --verbose --execute --workspace --exclude zebrad beta
-          cargo release version --verbose --execute --package zebrad patch
-          cargo release replace --verbose --execute --package zebrad
-          cargo release commit --verbose --execute
+          cargo release version --verbose --execute --no-confirm --workspace --exclude zebrad beta
+          cargo release version --verbose --execute --no-confirm --package zebrad patch
+          cargo release replace --verbose --execute --no-confirm --package zebrad
+          cargo release commit --verbose --execute --no-confirm
           cargo release publish --verbose --dry-run --workspace
 
 
