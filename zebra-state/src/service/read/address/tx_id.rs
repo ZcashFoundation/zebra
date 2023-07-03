@@ -278,6 +278,6 @@ fn apply_tx_id_changes(
     // by combining them with overlapping non-finalized block tx IDs.
     finalized_tx_ids
         .into_iter()
-        .chain(chain_tx_ids.into_iter())
+        .chain(chain_tx_ids)
         .collect()
 }

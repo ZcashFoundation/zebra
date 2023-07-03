@@ -230,7 +230,7 @@ impl Config {
 
         dns_peers
             .into_iter()
-            .chain(disk_peers.into_iter())
+            .chain(disk_peers)
             .collect()
     }
 

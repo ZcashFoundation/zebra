@@ -254,12 +254,10 @@ async fn continuous_blockchain(
     //   - checkpoints start at genesis
     //   - checkpoints end at the end of the range (there's no point in having extra blocks)
     let expected_max_height = block::Height((blockchain_len - 1).try_into().unwrap());
-    let checkpoint_list = vec![
-        &blockchain[0],
+    let checkpoint_list = [&blockchain[0],
         &blockchain[blockchain_len / 3],
         &blockchain[blockchain_len / 2],
-        &blockchain[blockchain_len - 1],
-    ];
+        &blockchain[blockchain_len - 1]];
     let checkpoint_list: BTreeMap<block::Height, block::Hash> = checkpoint_list
         .iter()
         .map(|(_block, height, hash)| (*height, *hash))

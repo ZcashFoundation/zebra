@@ -103,7 +103,7 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), BoxError> {
 fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
-    let checkpoint_data = vec![(block::Height(0), block::Hash([0; 32]))];
+    let checkpoint_data = [(block::Height(0), block::Hash([0; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
@@ -119,7 +119,7 @@ fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
 fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
-    let checkpoint_data = vec![(
+    let checkpoint_data = [(
         block::Height(block::Height::MAX.0 + 1),
         block::Hash([1; 32]),
     )];
@@ -131,7 +131,7 @@ fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
         "a checkpoint list with an invalid block height (block::Height::MAX + 1) should fail",
     );
 
-    let checkpoint_data = vec![(block::Height(u32::MAX), block::Hash([1; 32]))];
+    let checkpoint_data = [(block::Height(u32::MAX), block::Hash([1; 32]))];
 
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
