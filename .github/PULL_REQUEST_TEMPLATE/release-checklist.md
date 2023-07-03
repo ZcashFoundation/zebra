@@ -91,9 +91,9 @@ Check that the release will work:
 cargo clean # optional
 cargo release version --verbose --execute --workspace --exclude zebrad beta
 cargo release version --verbose --execute --package zebrad patch # [ major | minor | patch ]
+cargo release replace --verbose --execute --package zebrad
 cargo release commit --verbose --execute
-# TODO: fix missing dependency errors in cargo release, so we can do a dry run for all the crates 
-cargo release publish --verbose --dry-run --workspace --exclude zebra-consensus --exclude zebra-rpc --exclude zebra-utils --exclude zebrad
+cargo release publish --verbose --dry-run --workspace
 ```
 
 ## Update End of Support
