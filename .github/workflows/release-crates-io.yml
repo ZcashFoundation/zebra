@@ -100,6 +100,8 @@ jobs:
           cargo release version --verbose --execute --no-confirm --workspace --exclude zebrad beta
           cargo release version --verbose --execute --no-confirm --package zebrad patch
           cargo release replace --verbose --execute --no-confirm --package zebrad
+          git config --global user.email "release-tests-no-reply@zfnd.org"
+          git config --global user.name "Automated Release Test"
           cargo release commit --verbose --execute --no-confirm
           cargo release publish --verbose --dry-run --workspace
 
