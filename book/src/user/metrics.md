@@ -3,20 +3,31 @@
 Zebra has support for Prometheus, configured using the `prometheus` compile-time feature,
 and the [`MetricsSection`][metrics_section] runtime configuration.
 
-This requires supporting infrastructure to collect and visualize metrics, for example:
+The following steps can be used to send real time Zebra metrics data into a grafana 
+front end that you can visualize:
 
-1. Create the `zebrad.toml` file with the following contents:
+1. Build zebra with `prometheus` feature:
+   ```
+   cargo install --features prometheus --locked --git https://github.com/ZcashFoundation/zebra zebrad
+   ```
+
+2. Create a `zebrad.toml` file that we can edit:
+   ```
+   zebrad generate -o zebrad.toml
+   ```
+
+3. Add `endpoint_addr` to the `metrics` section:
    ```
    [metrics]
    endpoint_addr = "127.0.0.1:9999"
    ```
 
-2. Run Zebra, and specify the path to the `zebrad.toml` file, for example:
+4. Run Zebra, and specify the path to the `zebrad.toml` file, for example:
    ```
    zebrad -c zebrad.toml start
    ```
 
-3. Install and run Prometheus and Grafana via Docker:
+5. Install and run Prometheus and Grafana via Docker:
 
    ```
    # create a storage volume for grafana (once)
@@ -34,13 +45,15 @@ This requires supporting infrastructure to collect and visualize metrics, for ex
    Now the grafana dashboard is available at [http://localhost:3030](http://localhost:3030) ; the default username and password is `admin`/`admin`.
    Prometheus scrapes Zebra on `localhost:9999`, and provides the results on `localhost:9090`.
 
-4. Configure Grafana with a Prometheus HTTP Data Source, using Zebra's `metrics.endpoint_addr`.
+6. Configure Grafana with a Prometheus HTTP Data Source, using Zebra's `metrics.endpoint_addr`.
 
    In the grafana dashboard:
    1. Create a new Prometheus Data Source `Prometheus-Zebra`
    2. Enter the HTTP URL: `127.0.0.1:9090`
    3. Save the configuration
 
-5. Now you can add the grafana dashboards from `zebra/grafana` (Create > Import > Upload JSON File), or create your own.
+7. Now you can add the grafana dashboards from `zebra/grafana` (Create > Import > Upload JSON File), or create your own.
+
+![image info](grafana.png)
 
 [metrics_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.MetricsSection.html
