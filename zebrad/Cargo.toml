@@ -142,17 +142,15 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-# Work around a `cargo` dependency resolution bug by depending on an older Zebra version.
-# See zebra-consensus/Cargo.toml for details.
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.26" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.26" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.26" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.26" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.27" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.27" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.27" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.26", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.27", optional = true }
 
 abscissa_core = "0.7.0"
 clap = { version = "4.3.8", features = ["cargo"] }
