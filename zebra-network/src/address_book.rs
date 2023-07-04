@@ -533,7 +533,7 @@ impl AddressBook {
     }
 
     /// Is this IP ready for a new outbound connection attempt?
-    /// Checks if the most recently updated address with this IP `was_recently_updated()`.
+    /// Checks if the most recently updated outbound address with this IP `was_recently_updated()`.
     ///
     /// Note: last_response times may remain live for a long time if the local clock is changed to an earlier time.
     fn is_ready_for_connection_attempt_with_ip(

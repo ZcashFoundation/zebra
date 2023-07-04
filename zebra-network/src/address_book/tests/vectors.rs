@@ -115,10 +115,14 @@ fn address_book_peer_order() {
 /// Zebra already has recently updated outbound peers.
 #[test]
 fn reconnection_peers_skips_recently_updated_ip() {
+    // tests that reconnection_peers() skips addresses where there's a connection at that IP with a recent:
+    // - `last_attempt`
     test_reconnection_peers_skips_recently_updated_ip(MetaAddr::new_reconnect);
+    // - `last_response`
     test_reconnection_peers_skips_recently_updated_ip(|addr| {
         MetaAddr::new_responded(addr, &PeerServices::NODE_NETWORK)
     });
+    // - `last_failure`
     test_reconnection_peers_skips_recently_updated_ip(|addr| {
         MetaAddr::new_errored(addr, PeerServices::NODE_NETWORK)
     });
