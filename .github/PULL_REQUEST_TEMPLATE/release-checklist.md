@@ -89,13 +89,12 @@ Check that the release will work:
 
 ```sh
 cargo clean # optional
-cargo release version --verbose --execute --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad beta
-cargo release commit --verbose --execute
-cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --dependent-version fix --package zebra-consensus --package zebra-utils beta
-cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --dependent-version fix --package zebrad patch # [ major | minor | patch ]
+cargo release version --verbose --execute --workspace --exclude zebrad beta
+cargo release version --verbose --execute --package zebrad patch # [ major | minor | patch ]
 cargo release replace --verbose --execute --package zebrad
-cargo release publish --verbose --dry-run --workspace
 ```
+
+Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode.
 
 ## Update End of Support
 
