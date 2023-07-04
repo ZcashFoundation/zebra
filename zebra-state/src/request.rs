@@ -494,8 +494,8 @@ pub enum Request {
     ///
     /// # Note
     ///
-    /// `SemanticallyVerifiedBlock`, `ContextuallyVerifiedBlock` and
-    /// `CheckpointVerifiedBlock` are an internal Zebra implementation detail.
+    /// [`SemanticallyVerifiedBlock`], [`ContextuallyVerifiedBlock`] and
+    /// [`CheckpointVerifiedBlock`] are an internal Zebra implementation detail.
     /// There is no difference between these blocks on the Zcash network, or in Zebra's
     /// network or syncer implementations.
     ///

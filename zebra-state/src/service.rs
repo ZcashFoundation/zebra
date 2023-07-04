@@ -154,11 +154,6 @@ pub(crate) struct StateService {
     ///
     /// If `invalid_block_write_reset_receiver` gets a reset, this is:
     /// - the hash of the last valid committed block (the parent of the invalid block).
-    //
-    // TODO:
-    // - turn this into an IndexMap containing recent semantically verified block hashes and heights
-    //   (they are all potential tips)
-    // - remove block hashes once their heights are strictly less than the finalized tip
     finalized_block_write_last_sent_hash: block::Hash,
 
     /// A set of block hashes that have been sent to the block write task.
@@ -471,7 +466,7 @@ impl StateService {
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
-        // full verification of checkpoint blocks, even when it is in the channel.
+        // semantic block verification, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.non_finalized_block_write_sent_hashes
                 .add_finalized(&checkpoint_verified)
@@ -494,19 +489,19 @@ impl StateService {
 
             self.drain_finalized_queue_and_commit();
         } else {
-            // We've finished committing checkpoint verified blocks to finalized queue,
+            // We've finished committing checkpoint verified blocks to the finalized state,
             // so drop any repeated queued blocks, and return an error.
             //
             // TODO: track the latest sent height, and drop any blocks under that height
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing checkpoint verified blocks to finalized queue: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
 
             self.clear_finalized_block_queue(
-                "already finished committing checkpont verified blocks to finalized queue: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -694,8 +689,8 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending semantically verrified blocks when:
-        // - we've sent the semantically verrified block for the last checkpoint, and
+        // We've finished sending checkpoint verified blocks when:
+        // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
         //
         // We detect the last checkpoint by looking for non-finalized blocks
@@ -709,13 +704,13 @@ impl StateService {
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing semantically verified blocks to the finalized queue,
-            // and move on to committing to non-finalized blocks.
+            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
+            // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.finalized_block_write_sender.take());
 
-            // We've finished committing semantically verified blocks to finalized queue, so drop any repeated queued blocks.
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
-                "already finished committing semantically verified blocks to finalized queue: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -754,7 +749,7 @@ impl StateService {
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
     ///
-    /// The checkpoint block verifier needs access to UTXOs from finalized blocks
+    /// The semantic block verifier needs access to UTXOs from checkpoint verified blocks
     /// near the final checkpoint, so that it can verify blocks that spend those UTXOs.
     ///
     /// If it doesn't have the required UTXOs, some blocks will time out,
