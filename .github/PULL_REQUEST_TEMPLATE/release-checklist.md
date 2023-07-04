@@ -88,10 +88,10 @@ Check that the release will work:
 - [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
 
 ```sh
-cargo clean # optional
-cargo release version --verbose --execute --workspace --exclude zebrad beta
-cargo release version --verbose --execute --package zebrad patch # [ major | minor | patch ]
-cargo release replace --verbose --execute --package zebrad
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
+cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
+cargo release replace --verbose --execute --allow-branch '*' --package zebrad
+cargo release commit --verbose --execute --allow-branch '*'
 ```
 
 Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode.
