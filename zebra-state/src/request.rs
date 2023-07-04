@@ -163,7 +163,7 @@ pub struct SemanticallyVerifiedBlock {
 }
 
 /// A block ready to be committed directly to the finalized state with
-/// no checks.
+/// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
 ///
 /// This is exposed for use in checkpointing.
 ///
@@ -455,12 +455,11 @@ impl DerefMut for CheckpointVerifiedBlock {
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
-    /// Performs contextual validation of the given block, committing it to the
-    /// state if successful.
+    /// Performs contextual validation of the given semantically verified block,
+    /// committing it to the state if successful.
     ///
-    /// It is the caller's responsibility to perform semantic validation. This
-    /// request can be made out-of-order; the state service will queue it until
-    /// its parent is ready.
+    /// This request can be made out-of-order; the state service will queue it
+    /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or an error if the block fails contextual
@@ -478,12 +477,12 @@ pub enum Request {
     /// documentation for details.
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
-    /// Commit a checkpointed block to the state, skipping most block validation.
+    /// Commit a checkpointed block to the state, skipping most but not all
+    /// contextual validation.
     ///
-    /// This is exposed for use in checkpointing, which produces finalized
-    /// blocks. It is the caller's responsibility to ensure that the block is
-    /// semantically valid and final. This request can be made out-of-order;
-    /// the state service will queue it until its parent is ready.
+    /// This is exposed for use in checkpointing, which produces checkpoint vefified
+    /// blocks. This request can be made out-of-order; the state service will queue
+    /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
     /// block, or an error.
@@ -495,8 +494,9 @@ pub enum Request {
     ///
     /// # Note
     ///
-    /// Finalized and non-finalized blocks are an internal Zebra implementation detail.
-    /// There is no difference between these blocks on the network, or in Zebra's
+    /// [`SemanticallyVerifiedBlock`], [`ContextuallyVerifiedBlock`] and
+    /// [`CheckpointVerifiedBlock`] are an internal Zebra implementation detail.
+    /// There is no difference between these blocks on the Zcash network, or in Zebra's
     /// network or syncer implementations.
     ///
     /// # Consensus
