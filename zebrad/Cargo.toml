@@ -144,7 +144,7 @@ humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
 semver = "1.0.17"
-serde = { version = "1.0.164", features = ["serde_derive"] }
+serde = { version = "1.0.166", features = ["serde_derive"] }
 toml = "0.7.5"
 
 futures = "0.3.28"
