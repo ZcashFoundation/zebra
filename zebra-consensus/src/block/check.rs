@@ -315,7 +315,7 @@ pub fn merkle_root_validity(
     //
     // Duplicate transactions should cause a block to be
     // rejected, as duplicate transactions imply that the block contains a
-    // double-spend.  As a defense-in-depth, however, we also check that there
+    // double-spend. As a defense-in-depth, however, we also check that there
     // are no duplicate transaction hashes.
     //
     // ## Checkpoint Validation
