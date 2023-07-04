@@ -87,16 +87,13 @@ impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
+        self.as_bytes()
     }
 }
 
 impl FromDisk for sapling::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let cursor = std::io::Cursor::new(bytes);
-        sapling::tree::NoteCommitmentTree::zcash_deserialize(cursor)
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        sapling::tree::NoteCommitmentTree::from_bytes(bytes)
     }
 }
 
