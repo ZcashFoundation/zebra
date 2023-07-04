@@ -29,8 +29,7 @@ use zcash_primitives::merkle_tree;
 use super::sinsemilla::*;
 
 use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
-    ZcashSerialize,
+    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 /// The type that is used to update the note commitment tree.
@@ -292,7 +291,16 @@ pub struct NoteCommitmentTree {
 impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         //
-        merkle_tree::write_frontier_v1(&mut writer, self)
+        let mut data = Vec::new();
+        merkle_tree::write_frontier_v1(&mut data, self)?;
+
+        //
+        data.drain(4..8);
+
+        //
+        writer.write(data.as_slice())?;
+
+        Ok(())
     }
 }
 
@@ -300,24 +308,6 @@ impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         //
         Ok(merkle_tree::read_frontier_v1(reader)?)
-    }
-}
-
-impl ZcashSerialize for NoteCommitmentTree {
-    #[allow(clippy::unwrap_in_result)]
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        //
-        let frontier_buf = &self.inner.zcash_serialize_to_vec()?;
-        writer.write_all(frontier_buf)?;
-
-        //
-        let root_bytes: &[u8; 32] = &self
-            .root()
-            .zcash_serialize_to_vec()?
-            .as_slice()
-            .try_into()
-            .expect("root is 32 bytes");
-        writer.write_32_bytes(root_bytes)
     }
 }
 
@@ -412,6 +402,62 @@ impl NoteCommitmentTree {
         match self.inner.value() {
             Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
             None => 0,
+        }
+    }
+
+    ///
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        //
+        merkle_tree::write_frontier_v1(&mut buf, &self.inner).expect("should not fail?");
+
+        //
+        buf.drain(2..8);
+
+        //
+        let root_bytes: &[u8; 32] = &self
+            .root()
+            .zcash_serialize_to_vec()
+            .expect("should not fail?")
+            .as_slice()
+            .try_into()
+            .expect("root is 32 bytes");
+
+        let _ = &mut buf.append(&mut root_bytes.to_vec());
+
+        //
+        buf.remove(35);
+
+        //
+        buf.insert(68, 1);
+
+        buf
+    }
+
+    ///
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let mut buf: Vec<u8> = bytes.as_ref().to_vec();
+
+        //
+        buf.remove(68);
+
+        //
+        for _ in 0..6 {
+            buf.insert(2, 0);
+        }
+
+        //
+        buf.insert(41, 0);
+
+        //
+        let mut cursor = std::io::Cursor::new(buf);
+
+        NoteCommitmentTree {
+            inner: merkle_tree::read_frontier_v1(&mut cursor).unwrap(),
+            cached_root: std::sync::RwLock::new(Some(
+                Root::zcash_deserialize(&mut cursor).expect("Root deserialization should not fail"),
+            )),
         }
     }
 }

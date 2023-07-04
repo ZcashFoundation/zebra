@@ -104,15 +104,12 @@ impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
+        self.as_bytes()
     }
 }
 
 impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let cursor = std::io::Cursor::new(bytes);
-        orchard::tree::NoteCommitmentTree::zcash_deserialize(cursor)
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        orchard::tree::NoteCommitmentTree::from_bytes(bytes)
     }
 }
