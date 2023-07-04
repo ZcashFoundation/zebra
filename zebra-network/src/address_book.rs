@@ -76,10 +76,10 @@ pub struct AddressBook {
     /// The address with a last_connection_state of [`PeerAddrState::Responded`] and
     /// the most recent `last_response` time by IP.
     ///
-    /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config),
-    /// and currently only supports a `max_connections_per_ip` of 1.
+    /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config), and
+    /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
     // TODO: Replace with `by_ip` to support configured `max_connections_per_ip`
-    most_recent_by_ip: HashMap<IpAddr, MetaAddr>,
+    most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -139,7 +139,12 @@ impl AddressBook {
     /// Construct an [`AddressBook`] with the given `local_listener` on `network`.
     ///
     /// Uses the supplied [`tracing::Span`] for address book operations.
-    pub fn new(local_listener: SocketAddr, network: Network, span: Span) -> AddressBook {
+    pub fn new(
+        local_listener: SocketAddr,
+        network: Network,
+        max_connections_per_ip: usize,
+        span: Span,
+    ) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
@@ -150,6 +155,8 @@ impl AddressBook {
         // and it gets replaced by `update_metrics` anyway.
         let (address_metrics_tx, _address_metrics_rx) = watch::channel(AddressMetrics::default());
 
+        // Avoid initiating outbound handshakes when max_connections_per_ip is 1.
+        let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             local_listener: canonical_socket_addr(local_listener),
@@ -158,7 +165,7 @@ impl AddressBook {
             span,
             address_metrics_tx,
             last_address_log: None,
-            most_recent_by_ip: HashMap::new(),
+            most_recent_by_ip: should_limit_outbound_conns_per_ip.then(HashMap::new),
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -180,6 +187,7 @@ impl AddressBook {
     pub fn new_with_addrs(
         local_listener: SocketAddr,
         network: Network,
+        max_connections_per_ip: usize,
         addr_limit: usize,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
@@ -193,7 +201,7 @@ impl AddressBook {
         // The maximum number of addresses should be always greater than 0
         assert!(addr_limit > 0);
 
-        let mut new_book = AddressBook::new(local_listener, network, span);
+        let mut new_book = AddressBook::new(local_listener, network, max_connections_per_ip, span);
         new_book.addr_limit = addr_limit;
 
         let addrs = addrs
@@ -212,6 +220,8 @@ impl AddressBook {
             if new_book.should_update_most_recent_by_ip(meta_addr, instant_now, chrono_now) {
                 new_book
                     .most_recent_by_ip
+                    .as_mut()
+                    .expect("should be some when should_update_most_recent_by_ip is true")
                     .insert(socket_addr.ip(), meta_addr);
             }
             // exit as soon as we get enough addresses
@@ -348,7 +358,11 @@ impl AddressBook {
         now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
-        if let Some(previous) = self.most_recent_by_ip.get(&updated.addr.ip()) {
+        let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
+            return false
+        };
+
+        if let Some(previous) = most_recent_by_ip.get(&updated.addr.ip()) {
             updated.gt_most_recent_update(previous, now, chrono_now)
         } else {
             true
@@ -357,12 +371,16 @@ impl AddressBook {
 
     /// Returns true if `addr` is the latest entry for its IP, which is stored in `most_recent_by_ip`.
     /// The entry is checked for an exact match to the IP and port of `addr`.
-    fn is_addr_most_recent_by_ip(&self, addr: PeerSocketAddr) -> bool {
-        self.most_recent_by_ip
-            .get(&addr.ip())
-            .map_or(false, |most_recent_peer_at_ip_addr| {
-                most_recent_peer_at_ip_addr.addr == addr
-            })
+    fn should_remove_most_recent_by_ip(&self, addr: PeerSocketAddr) -> bool {
+        let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
+            return false
+        };
+
+        if let Some(previous) = most_recent_by_ip.get(&addr.ip()) {
+            previous.addr == addr
+        } else {
+            false
+        }
     }
 
     /// Apply `change` to the address book, returning the updated `MetaAddr`,
@@ -427,7 +445,10 @@ impl AddressBook {
             // Add the address to `most_recent_by_ip` if it sent the most recent
             // response Zebra has received from this IP.
             if self.should_update_most_recent_by_ip(updated, instant_now, chrono_now) {
-                self.most_recent_by_ip.insert(updated.addr.ip(), updated);
+                self.most_recent_by_ip
+                    .as_mut()
+                    .expect("should be some when should_update_most_recent_by_ip is true")
+                    .insert(updated.addr.ip(), updated);
             }
 
             debug!(
@@ -456,8 +477,11 @@ impl AddressBook {
 
                 // Check if this surplus peer's addr matches that in `most_recent_by_ip`
                 // for this the surplus peer's ip to remove it there as well.
-                if self.is_addr_most_recent_by_ip(surplus_peer.addr) {
-                    self.most_recent_by_ip.remove(&surplus_peer.addr.ip());
+                if self.should_remove_most_recent_by_ip(surplus_peer.addr) {
+                    self.most_recent_by_ip
+                        .as_mut()
+                        .expect("should be some when should_remove_most_recent_by_ip is true")
+                        .remove(&surplus_peer.addr.ip());
                 }
 
                 debug!(
@@ -500,8 +524,8 @@ impl AddressBook {
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
             // Check if this surplus peer's addr matches that in `most_recent_by_ip`
             // for this the surplus peer's ip to remove it there as well.
-            if self.is_addr_most_recent_by_ip(entry.addr) {
-                self.most_recent_by_ip.remove(&entry.addr.ip());
+            if self.should_remove_most_recent_by_ip(entry.addr) {
+                self.most_recent_by_ip.as_mut()?.remove(&entry.addr.ip());
             }
 
             std::mem::drop(_guard);
@@ -542,9 +566,11 @@ impl AddressBook {
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
-        self.most_recent_by_ip.get(ip).map_or(true, |peer| {
-            !peer.was_recently_updated(instant_now, chrono_now)
-        })
+        self.most_recent_by_ip
+            .as_ref()
+            .and_then(|most_recent_by_ip| most_recent_by_ip.get(ip))
+            .filter(|peer| peer.was_recently_updated(instant_now, chrono_now))
+            .is_none()
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,

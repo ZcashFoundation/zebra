@@ -11,14 +11,21 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::MAX_ADDRS_IN_ADDRESS_BOOK, meta_addr::MetaAddr,
-    protocol::external::types::PeerServices, AddressBook,
+    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK},
+    meta_addr::MetaAddr,
+    protocol::external::types::PeerServices,
+    AddressBook,
 };
 
 /// Make sure an empty address book is actually empty.
 #[test]
 fn address_book_empty() {
-    let address_book = AddressBook::new("0.0.0.0:0".parse().unwrap(), Mainnet, Span::current());
+    let address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
 
     assert_eq!(
         address_book
@@ -48,6 +55,7 @@ fn address_book_peer_order() {
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -64,6 +72,7 @@ fn address_book_peer_order() {
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -83,6 +92,7 @@ fn address_book_peer_order() {
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -99,6 +109,7 @@ fn address_book_peer_order() {
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -152,6 +163,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
