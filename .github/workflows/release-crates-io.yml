@@ -99,11 +99,15 @@ jobs:
           set -ex
           git config --global user.email "release-tests-no-reply@zfnd.org"
           git config --global user.name "Automated Release Test"
-          cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad beta
-          cargo release commit --verbose --execute --no-confirm --allow-branch '*'
-          cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --no-confirm --allow-branch '*' --prev-tag-name HEAD --dependent-version fix --package zebra-consensus --package zebra-utils beta
-          cargo release --no-publish --no-verify --no-tag --no-push --verbose --execute --no-confirm --allow-branch '*' --prev-tag-name HEAD --dependent-version fix --package zebrad patch
-          cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
+          # This script must be the same as:
+          # https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md#update-crate-versions
+          cargo release version --verbose --execute --workspace --exclude zebrad beta
+          cargo release version --verbose --execute --package zebrad patch
+          cargo release replace --verbose --execute --package zebrad
+          # Workaround unpublished dependency version errors
+          # https://github.com/crate-ci/cargo-release/issues/691
+
+          # Check the release will work using a dry run
           cargo release publish --verbose --dry-run --allow-branch '*' --workspace
 
 
