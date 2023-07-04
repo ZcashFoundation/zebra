@@ -20,7 +20,7 @@ To compile Zebra directly from GitHub, or from a GitHub release source archive:
 ```sh
 git clone https://github.com/ZcashFoundation/zebra.git
 cd zebra
-git checkout v1.0.0
+git checkout v1.0.1
 ```
 
 3. Build and Run `zebrad`
@@ -33,7 +33,7 @@ target/release/zebrad start
 ### Compiling from git using cargo install
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.0 zebrad
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.0.1 zebrad
 ```
 
 ### Compiling on ARM

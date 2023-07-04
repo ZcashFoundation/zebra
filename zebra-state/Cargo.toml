@@ -55,7 +55,7 @@ metrics = "0.21.1"
 mset = "0.1.1"
 regex = "1.8.4"
 rlimit = "0.9.1"
-rocksdb = { version = "0.21.0", default_features = false, features = ["lz4"] }
+rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.17"
 serde = { version = "1.0.166", features = ["serde_derive"] }
 tempfile = "3.5.0"
