@@ -228,10 +228,7 @@ impl Config {
         // Ignore disk errors because the cache is optional and the method already logs them.
         let disk_peers = self.load_peer_cache().await.unwrap_or_default();
 
-        dns_peers
-            .into_iter()
-            .chain(disk_peers)
-            .collect()
+        dns_peers.into_iter().chain(disk_peers).collect()
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
