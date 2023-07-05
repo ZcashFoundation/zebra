@@ -1,6 +1,6 @@
 [package]
 name = "tower-fallback"
-version = "0.2.41-beta.2"
+version = "0.2.41-beta.3"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Tower service combinator that sends requests to a first service, then retries processing on a second fallback service if the first service errors."
 license = "MIT OR Apache-2.0"
@@ -22,6 +22,6 @@ futures-core = "0.3.28"
 tracing = "0.1.37"
 
 [dev-dependencies]
-tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }

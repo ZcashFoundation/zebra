@@ -213,7 +213,17 @@ where
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
         .await
-        .expect("unexpected panic in spawned initial peers task")
+        .unwrap_or_else(|e @ JoinError { .. }| {
+            if e.is_panic() {
+                panic!("panic in initial peer connections task: {e:?}");
+            } else {
+                info!(
+                    "task error during initial peer connections: {e:?},\
+                     is Zebra shutting down?"
+                );
+                Err(e.into())
+            }
+        })
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
@@ -353,8 +363,18 @@ where
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
-        let handshake_result =
-            handshake_result.expect("unexpected panic in initial peer handshake");
+        let handshake_result = handshake_result.unwrap_or_else(|e @ JoinError { .. }| {
+            if e.is_panic() {
+                panic!("panic in initial peer connection: {e:?}");
+            } else {
+                info!(
+                    "task error during initial peer connection: {e:?},\
+                     is Zebra shutting down?"
+                );
+                // Fake the address, it doesn't matter because we're shutting down anyway
+                Err((PeerSocketAddr::unspecified(), e.into()))
+            }
+        });
         match handshake_result {
             Ok(change) => {
                 handshake_success_total += 1;
@@ -1138,12 +1158,29 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
 
     // # Correctness
     //
-    // Spawn address book accesses on a blocking thread,
-    // to avoid deadlocks (see #1976).
+    // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
     let span = Span::current();
-    tokio::task::spawn_blocking(move || {
+    let task_result = tokio::task::spawn_blocking(move || {
         span.in_scope(|| address_book.lock().unwrap().update(addr))
     })
-    .await
-    .expect("panic in peer failure address book update task");
+    .await;
+
+    match task_result {
+        Ok(updated_addr) => assert_eq!(
+            updated_addr.map(|addr| addr.addr()),
+            Some(addr.addr()),
+            "incorrect address updated by address book: \
+             original: {addr:?}, updated: {updated_addr:?}"
+        ),
+        Err(e @ JoinError { .. }) => {
+            if e.is_panic() {
+                panic!("panic in peer failure address book update task: {e:?}");
+            } else {
+                info!(
+                    "task error during peer failure address book update task: {e:?},\
+                     is Zebra shutting down?"
+                )
+            }
+        }
+    }
 }

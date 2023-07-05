@@ -15,13 +15,13 @@ use crate::{BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
 #[cfg(test)]
 mod tests;
 
-/// A finalized state queue block, and its corresponding [`Result`] channel.
+/// A queued checkpoint verified block, and its corresponding [`Result`] channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
-/// A non-finalized state queue block, and its corresponding [`Result`] channel.
+/// A queued semantically verified block, and its corresponding [`Result`] channel.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
@@ -264,10 +264,10 @@ impl SentHashes {
         self.update_metrics_for_block(block.height);
     }
 
-    /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
+    /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a
     /// block or UTXO is available in the state.
     ///
-    /// Used for finalized blocks close to the final checkpoint, so non-finalized blocks can look up
+    /// Used for checkpoint verified blocks close to the final checkpoint, so the semantic block verifier can look up
     /// their UTXOs.
     ///
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls

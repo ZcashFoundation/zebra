@@ -141,7 +141,7 @@ pub(crate) struct StateService {
     /// so they can be written to the [`FinalizedState`].
     ///
     /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest non-finalized block arrives.
+    /// and the lowest semantically verified block arrives.
     finalized_block_write_sender:
         Option<tokio::sync::mpsc::UnboundedSender<QueuedCheckpointVerified>>,
 
@@ -154,11 +154,6 @@ pub(crate) struct StateService {
     ///
     /// If `invalid_block_write_reset_receiver` gets a reset, this is:
     /// - the hash of the last valid committed block (the parent of the invalid block).
-    //
-    // TODO:
-    // - turn this into an IndexMap containing recent non-finalized block hashes and heights
-    //   (they are all potential tips)
-    // - remove block hashes once their heights are strictly less than the finalized tip
     finalized_block_write_last_sent_hash: block::Hash,
 
     /// A set of block hashes that have been sent to the block write task.
@@ -455,7 +450,7 @@ impl StateService {
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
 
-    /// Queue a finalized block for verification and storage in the finalized state.
+    /// Queue a checkpoint verified block for verification and storage in the finalized state.
     ///
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_to_finalized_state(
@@ -471,7 +466,7 @@ impl StateService {
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
-        // full verification of non-finalized blocks, even when it is in the channel.
+        // semantic block verification, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.non_finalized_block_write_sent_hashes
                 .add_finalized(&checkpoint_verified)
@@ -481,32 +476,32 @@ impl StateService {
         let queued = (checkpoint_verified, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
-            // We're still committing finalized blocks
+            // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
                 .insert(queued_prev_hash, queued)
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    "dropping older finalized block: got newer duplicate block",
+                    "dropping older checkpoint verified block: got newer duplicate block",
                 );
             }
 
             self.drain_finalized_queue_and_commit();
         } else {
-            // We've finished committing finalized blocks, so drop any repeated queued blocks,
-            // and return an error.
+            // We've finished committing checkpoint verified blocks to the finalized state,
+            // so drop any repeated queued blocks, and return an error.
             //
             // TODO: track the latest sent height, and drop any blocks under that height
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
 
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -636,7 +631,7 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
-    /// Queue a non finalized block for verification and check if any queued
+    /// Queue a semantically verified block for contextual verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
     /// This function encodes the logic for [committing non-finalized blocks][1]
@@ -694,8 +689,8 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending finalized blocks when:
-        // - we've sent the finalized block for the last checkpoint, and
+        // We've finished sending checkpoint verified blocks when:
+        // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
         //
         // We detect the last checkpoint by looking for non-finalized blocks
@@ -709,13 +704,13 @@ impl StateService {
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing finalized blocks,
-            // and move on to committing non-finalized blocks.
+            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
+            // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.finalized_block_write_sender.take());
 
-            // We've finished committing finalized blocks, so drop any repeated queued blocks.
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -754,7 +749,7 @@ impl StateService {
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
     ///
-    /// The non-finalized block verifier needs access to UTXOs from finalized blocks
+    /// The semantic block verifier needs access to UTXOs from checkpoint verified blocks
     /// near the final checkpoint, so that it can verify blocks that spend those UTXOs.
     ///
     /// If it doesn't have the required UTXOs, some blocks will time out,
@@ -818,7 +813,7 @@ impl StateService {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
-            "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
+            "invalid semantically verified block height: the canopy checkpoint is mandatory, pre-canopy \
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
@@ -970,11 +965,16 @@ impl Service<Request> for StateService {
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
-                // A non-finalized block verification could have called AwaitUtxo
-                // before this finalized block arrived in the state.
-                // So we need to check for pending UTXOs here for non-finalized blocks,
-                // even though it is redundant for most finalized blocks.
-                // (Finalized blocks are verified using block hash checkpoints
+                // A semantic block verification could have called AwaitUtxo
+                // before this checkpoint verified block arrived in the state.
+                // So we need to check for pending UTXO requests sent by running
+                // semantic block verifications.
+                //
+                // This check is redundant for most checkpoint verified blocks,
+                // because semantic verification can only succeed near the final
+                // checkpoint, when all the UTXOs are available for the verifying block.
+                //
+                // (Checkpoint block UTXOs are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
                 self.pending_utxos
                     .check_against_ordered(&finalized.new_outputs);

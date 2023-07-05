@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.26"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -43,39 +43,39 @@ chrono = { version = "0.4.26", default-features = false, features = ["clock", "s
 futures = "0.3.28"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
-hyper = { version = "0.14.26", features = ["http1", "server"] }
+hyper = { version = "0.14.27", features = ["http1", "server"] }
 
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
-num_cpus = "1.15.0"
+num_cpus = "1.16.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.97", features = ["preserve_order"] }
-indexmap = { version = "1.9.3", features = ["serde"] }
+serde_json = { version = "1.0.99", features = ["preserve_order"] }
+indexmap = { version = "2.0.0", features = ["serde"] }
 
-tokio = { version = "1.28.2", features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio = { version = "1.29.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
 tracing = "0.1.37"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.164", features = ["serde_derive"] }
+serde = { version = "1.0.166", features = ["serde_derive"] }
 
 # Experimental feature getblocktemplate-rpcs
-rand = { version = "0.8.5", package = "rand", optional = true }
+rand = { version = "0.8.5", optional = true }
 # ECC deps used by getblocktemplate-rpcs feature
 zcash_address = { version = "0.2.1", optional = true }
 
 # Test-only feature proptest-impl
 proptest = { version = "1.2.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26", features = ["json-conversion"] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.26" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.26" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.26" }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.26" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.26" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27", features = ["json-conversion"] }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.27" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.27" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.27" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
 
 [dev-dependencies]
 insta = { version = "1.30.0", features = ["redactions", "json", "ron"] }
@@ -83,7 +83,7 @@ insta = { version = "1.30.0", features = ["redactions", "json", "ron"] }
 proptest = "1.2.0"
 
 thiserror = "1.0.40"
-tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", features = ["proptest-impl"] }

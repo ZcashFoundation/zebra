@@ -279,6 +279,13 @@ fn serialized_sprout_tree_root_equal() {
     );
 }
 
+#[test]
+fn roundtrip_sprout_tree_root() {
+    let _init_guard = zebra_test::init();
+
+    proptest!(|(val in any::<sprout::tree::Root>())| assert_value_properties(val));
+}
+
 // TODO: test note commitment tree round-trip, after implementing proptest::Arbitrary
 
 // Sapling
@@ -347,6 +354,13 @@ fn serialized_sapling_tree_root_equal() {
     );
 }
 
+#[test]
+fn roundtrip_sapling_tree_root() {
+    let _init_guard = zebra_test::init();
+
+    proptest!(|(val in any::<sapling::tree::Root>())| assert_value_properties(val));
+}
+
 // TODO: test note commitment tree round-trip, after implementing proptest::Arbitrary
 
 // Orchard
@@ -413,6 +427,13 @@ fn serialized_orchard_tree_root_equal() {
         }
     }
     );
+}
+
+#[test]
+fn roundtrip_orchard_tree_root() {
+    let _init_guard = zebra_test::init();
+
+    proptest!(|(val in any::<orchard::tree::Root>())| assert_value_properties(val));
 }
 
 // TODO: test note commitment tree round-trip, after implementing proptest::Arbitrary

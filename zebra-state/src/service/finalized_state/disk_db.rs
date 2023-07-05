@@ -10,7 +10,14 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    ops::RangeBounds,
+    path::Path,
+    sync::Arc,
+};
 
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
@@ -146,6 +153,7 @@ impl WriteDisk for DiskWriteBatch {
 /// defined format
 //
 // TODO: just implement these methods directly on DiskDb
+//       move this trait, its methods, and support methods to another module
 pub trait ReadDisk {
     /// Returns true if a rocksdb column family `cf` does not contain any entries.
     fn zs_is_empty<C>(&self, cf: &C) -> bool
@@ -202,6 +210,26 @@ pub trait ReadDisk {
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk;
+
+    /// Returns the keys and values in `cf` in `range`, in an ordered `BTreeMap`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Ord,
+        V: FromDisk,
+        R: RangeBounds<K>;
+
+    /// Returns the keys and values in `cf` in `range`, in an unordered `HashMap`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Eq + std::hash::Hash,
+        V: FromDisk,
+        R: RangeBounds<K>;
 }
 
 impl PartialEq for DiskDb {
@@ -342,6 +370,26 @@ impl ReadDisk for DiskDb {
             })
             .expect("unexpected database failure")
     }
+
+    fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Ord,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        self.zs_range_iter(cf, range).collect()
+    }
+
+    fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Eq + std::hash::Hash,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        self.zs_range_iter(cf, range).collect()
+    }
 }
 
 impl DiskWriteBatch {
@@ -366,6 +414,58 @@ impl DiskWriteBatch {
 }
 
 impl DiskDb {
+    /// Returns an iterator over the items in `cf` in `range`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        use std::ops::Bound::{self, *};
+
+        // Replace with map() when it stabilises:
+        // https://github.com/rust-lang/rust/issues/86026
+        let map_to_vec = |bound: Bound<&K>| -> Bound<Vec<u8>> {
+            match bound {
+                Unbounded => Unbounded,
+                Included(x) => Included(x.as_bytes().as_ref().to_vec()),
+                Excluded(x) => Excluded(x.as_bytes().as_ref().to_vec()),
+            }
+        };
+
+        let start_bound = map_to_vec(range.start_bound());
+        let end_bound = map_to_vec(range.end_bound());
+        let range = (start_bound.clone(), end_bound);
+
+        let start_bound_vec =
+            if let Included(ref start_bound) | Excluded(ref start_bound) = start_bound {
+                start_bound.clone()
+            } else {
+                // Actually unused
+                Vec::new()
+            };
+
+        let start_mode = if matches!(start_bound, Unbounded) {
+            // Unbounded iterators start at the first item
+            rocksdb::IteratorMode::Start
+        } else {
+            rocksdb::IteratorMode::From(start_bound_vec.as_slice(), rocksdb::Direction::Forward)
+        };
+
+        // Reading multiple items from iterators has caused database hangs,
+        // in previous RocksDB versions
+        self.db
+            .iterator_cf(cf, start_mode)
+            .map(|result| result.expect("unexpected database failure"))
+            .map(|(key, value)| (key.to_vec(), value))
+            // Handle Excluded start and the end bound
+            .filter(move |(key, _value)| range.contains(key))
+            .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
+    }
+
     /// The ideal open file limit for Zebra
     const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
 
