@@ -160,11 +160,19 @@ pub struct Config {
     ///
     /// The default and minimum value are 1.
     ///
-    /// Note: Zebra currently requires this to be set to 1 in order to avoid initiating
-    ///       additional outbound handshakes. It will otherwise still initiate outbound handshakes
-    ///       beyond this limit. Zebra will also currently still accept more inbound connections
-    ///       per IP. In cases where additional handshakes are permitted beyond this limit,
-    ///       connections will be dropped when attempting to add them to the peer set.
+    /// # Security
+    ///
+    /// Increasing this config above 1 reduces Zebra's network security.
+    ///
+    /// If this config is greater than 1, Zebra can initiate multiple outbound handshakes to the same
+    /// IP address.
+    ///
+    /// This config does not currently limit the number of inbound connections that Zebra will accept
+    /// from the same IP address.
+    ///
+    /// If Zebra makes multiple inbound or outbound connections to the same IP, they will be dropped
+    /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
+    /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
 }
 
