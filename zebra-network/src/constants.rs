@@ -70,7 +70,7 @@ pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 /// The default maximum number of peer connections Zebra will keep for a given IP address
 /// before it drops any additional peer connections with that IP.
 ///
-/// This will be used as Config.max_connections_per_ip if no value is provided.
+/// This will be used as `Config.max_connections_per_ip` if no valid value is provided.
 ///
 /// Note: Zebra will currently avoid initiating outbound connections where it
 ///       has already recently sent or received a message to or from an address
@@ -78,6 +78,11 @@ pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 ///       to an IP based on this configuration, but it will accept more inbound
 ///       connections to an IP.
 pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
+
+/// The default peerset target size.
+///
+/// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
+pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
 
 /// The buffer size for the peer set.
 ///

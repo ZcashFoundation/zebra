@@ -107,13 +107,6 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
-    // If we want Zebra to operate with no network,
-    // we should implement a `zebrad` command that doesn't use `zebra-network`.
-    assert!(
-        config.peerset_initial_target_size > 0,
-        "Zebra must be allowed to connect to at least one peer"
-    );
-
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
