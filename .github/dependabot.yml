@@ -21,17 +21,20 @@ updates:
             - "orchard"
             - "halo2*"
             - "incrementalmerkletree"
+            - "equihash"
+            # addresses
             - "bs58"
             - "ripemd"
-            - "equihash"
+        # groups are limited to 10 items
+        crypto:
+          patterns:
             - "bellman"
             - "redjubjub"
             - "reddsa"
             - "jubjub"
             - "group"
             - "bls12_381"
-            - "blake2b_simd"
-            - "blake2s_simd"
+            - "blake*"
             - "secp256k1"
             - "sha2"
         ed25519-zebra:
