@@ -567,12 +567,10 @@ impl AddressBook {
             // if we're not checking IPs, any connection is allowed
             return true;
         };
-        
         let Some(same_ip_peer) = most_recent_by_ip.get(ip) else {
             // If there's no entry for this IP, any connection is allowed
             return true;
         };
-        
         !same_ip_peer.has_connection_recently_responded(chrono_now)
     }
 
