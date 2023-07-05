@@ -11,11 +11,24 @@ autolabeler:
       - '/secur/i'
     title:
       - '/secur/i'
+      - '/crash/i'
+      - '/destr/i'
+      - '/unsafe/i'
   - label: 'C-deprecated'
     branch:
       - '/deprecat/i'
     title:
       - '/deprecat/i'
+  - label: 'extra-reviews'
+    branch:
+      - '/remov/i'
+      - '/deprecat/i'
+    title:
+      - '/remov/i'
+      - '/deprecat/i'
+      - '/crash/i'
+      - '/destr/i'
+      - '/unsafe/i'
   - label: 'C-feature'
     branch:
       - '/feat/i'
@@ -23,10 +36,8 @@ autolabeler:
       - '/feat/i'
   - label: 'C-bug'
     branch:
-      - '/fix/i'
       - '/bug/i'
     title:
-      - '/fix/i'
       - '/bug/i'
   # Changes that are almost always trivial for users
   - label: 'C-trivial'
