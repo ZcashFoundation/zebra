@@ -105,6 +105,13 @@ use_color = false
 EOF
 fi
 fi
+
+if [[ -n "$MINER_ADDRESS" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+[mining]
+miner_address = "${MINER_ADDRESS}"
+EOF
+fi
 fi
 
 echo "Using zebrad.toml:"
