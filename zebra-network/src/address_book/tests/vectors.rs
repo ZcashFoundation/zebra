@@ -127,14 +127,16 @@ fn address_book_peer_order() {
 #[test]
 fn reconnection_peers_skips_recently_updated_ip() {
     // tests that reconnection_peers() skips addresses where there's a connection at that IP with a recent:
-    // - `last_attempt`
-    test_reconnection_peers_skips_recently_updated_ip(MetaAddr::new_reconnect);
     // - `last_response`
-    test_reconnection_peers_skips_recently_updated_ip(|addr| {
+    test_reconnection_peers_skips_recently_updated_ip(true, |addr| {
         MetaAddr::new_responded(addr, &PeerServices::NODE_NETWORK)
     });
+
+    // tests that reconnection_peers() *does not* skip addresses where there's a connection at that IP with a recent:
+    // - `last_attempt`
+    test_reconnection_peers_skips_recently_updated_ip(false, MetaAddr::new_reconnect);
     // - `last_failure`
-    test_reconnection_peers_skips_recently_updated_ip(|addr| {
+    test_reconnection_peers_skips_recently_updated_ip(false, |addr| {
         MetaAddr::new_errored(addr, PeerServices::NODE_NETWORK)
     });
 }
@@ -142,6 +144,7 @@ fn reconnection_peers_skips_recently_updated_ip() {
 fn test_reconnection_peers_skips_recently_updated_ip<
     M: Fn(crate::PeerSocketAddr) -> crate::meta_addr::MetaAddrChange,
 >(
+    should_skip_ip: bool,
     make_meta_addr_change: M,
 ) {
     let addr1 = "127.0.0.1:1".parse().unwrap();
@@ -168,10 +171,14 @@ fn test_reconnection_peers_skips_recently_updated_ip<
         Span::current(),
         addrs,
     );
-    assert_eq!(
-        address_book
-            .reconnection_peers(Instant::now(), Utc::now())
-            .next(),
-        None,
-    );
+
+    let next_reconnection_peer = address_book
+        .reconnection_peers(Instant::now(), Utc::now())
+        .next();
+
+    if should_skip_ip {
+        assert_eq!(next_reconnection_peer, None,);
+    } else {
+        assert_ne!(next_reconnection_peer, None,);
+    }
 }

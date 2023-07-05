@@ -217,7 +217,7 @@ impl AddressBook {
             // overwrite any duplicate addresses
             new_book.by_addr.insert(socket_addr, meta_addr);
             // Add the address to `most_recent_by_ip` if it has responded
-            if new_book.should_update_most_recent_by_ip(meta_addr, instant_now, chrono_now) {
+            if new_book.should_update_most_recent_by_ip(meta_addr) {
                 new_book
                     .most_recent_by_ip
                     .as_mut()
@@ -343,27 +343,22 @@ impl AddressBook {
     /// Returns true if `updated` needs to be applied to the recent outbound peer connection IP cache.
     ///
     /// Checks if there are no existing entries in the address book with this IP,
-    /// or if `updated` has a more recent update requiring the outbound connector to wait
+    /// or if `updated` has a more recent `last_response` requiring the outbound connector to wait
     /// longer before initiating handshakes with peers at this IP.
     ///
     /// This code only needs to check a single cache entry, rather than the entire address book,
     /// because other code maintains these invariants:
-    /// - `last_attempt`, `last_failure`, and `last_response` times for an entry can only increase.
-    /// - these are the only fields checked by `was_recently_updated()`
+    /// - `last_response` times for an entry can only increase.
+    /// - this is the only field checked by `has_connection_recently_responded()`
     ///
     /// See [`AddressBook::is_ready_for_connection_attempt_with_ip`] for more details.
-    fn should_update_most_recent_by_ip(
-        &self,
-        updated: MetaAddr,
-        now: Instant,
-        chrono_now: chrono::DateTime<Utc>,
-    ) -> bool {
+    fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
         let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
             return false
         };
 
         if let Some(previous) = most_recent_by_ip.get(&updated.addr.ip()) {
-            updated.gt_most_recent_update(previous, now, chrono_now)
+            updated.last_response() > previous.last_response()
         } else {
             true
         }
@@ -444,7 +439,7 @@ impl AddressBook {
 
             // Add the address to `most_recent_by_ip` if it sent the most recent
             // response Zebra has received from this IP.
-            if self.should_update_most_recent_by_ip(updated, instant_now, chrono_now) {
+            if self.should_update_most_recent_by_ip(updated) {
                 self.most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
@@ -557,19 +552,18 @@ impl AddressBook {
     }
 
     /// Is this IP ready for a new outbound connection attempt?
-    /// Checks if the most recently updated outbound address with this IP `was_recently_updated()`.
+    /// Checks if the outbound connection with the most recent response at this IP has recently responded.
     ///
     /// Note: last_response times may remain live for a long time if the local clock is changed to an earlier time.
     fn is_ready_for_connection_attempt_with_ip(
         &self,
         ip: &IpAddr,
-        instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
         self.most_recent_by_ip
             .as_ref()
             .and_then(|most_recent_by_ip| most_recent_by_ip.get(ip))
-            .filter(|peer| peer.was_recently_updated(instant_now, chrono_now))
+            .filter(|peer| peer.has_connection_recently_responded(chrono_now))
             .is_none()
     }
 
@@ -588,11 +582,7 @@ impl AddressBook {
             .descending_values()
             .filter(move |peer| {
                 peer.is_ready_for_connection_attempt(instant_now, chrono_now, self.network)
-                    && self.is_ready_for_connection_attempt_with_ip(
-                        &peer.addr.ip(),
-                        instant_now,
-                        chrono_now,
-                    )
+                    && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
             .cloned()
     }
