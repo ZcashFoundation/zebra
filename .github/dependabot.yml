@@ -127,7 +127,7 @@ updates:
         proptest:
           patterns:
             - "proptest*"
-- package-ecosystem: github-actions
+  - package-ecosystem: github-actions
     directory: '/'
     schedule:
       # tj-actions/changed-files often updates daily, which is too much for us
