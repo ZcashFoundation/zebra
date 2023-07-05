@@ -52,7 +52,7 @@ serde = { version = "1.0.166", features = ["serde_derive"] }
 futures = "0.3.28"
 futures-util = "0.3.28"
 metrics = "0.21.1"
-thiserror = "1.0.40"
+thiserror = "1.0.41"
 tokio = { version = "1.29.1", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
