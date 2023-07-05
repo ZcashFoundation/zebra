@@ -78,7 +78,7 @@ pub struct AddressBook {
     ///
     /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config), and
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
-    // TODO: Replace with `by_ip` to support configured `max_connections_per_ip`
+    // TODO: Replace with `by_ip: HashMap<IpAddr, BTreeMap<DateTime32, MetaAddr>>` to support configured `max_connections_per_ip` greater than 1
     most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
 
     /// The local listener address.
