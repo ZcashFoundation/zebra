@@ -358,9 +358,10 @@ impl AddressBook {
         };
 
         if let Some(previous) = most_recent_by_ip.get(&updated.addr.ip()) {
-            updated.last_response() > previous.last_response()
+            updated.last_connection_state == PeerAddrState::Responded
+                && updated.last_response() > previous.last_response()
         } else {
-            true
+            updated.last_connection_state == PeerAddrState::Responded
         }
     }
 
