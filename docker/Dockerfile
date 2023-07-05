@@ -64,20 +64,20 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
 #
 # We set defaults to all variables.
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-0}
+ENV RUST_BACKTRACE=${RUST_BACKTRACE:-0}
 
 ARG RUST_LIB_BACKTRACE
-ENV RUST_LIB_BACKTRACE ${RUST_LIB_BACKTRACE:-0}
+ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-0}
 
 ARG COLORBT_SHOW_HIDDEN
-ENV COLORBT_SHOW_HIDDEN ${COLORBT_SHOW_HIDDEN:-0}
+ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-0}
 
 ARG RUST_LOG
-ENV RUST_LOG ${RUST_LOG:-info}
+ENV RUST_LOG=${RUST_LOG:-info}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
-ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
+ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
 # Build zebrad with these features
 # Keep these in sync with:
@@ -86,13 +86,13 @@ ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 # Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
-ENV ENTRYPOINT_FEATURES "$TEST_FEATURES $FEATURES"
+ENV ENTRYPOINT_FEATURES="$TEST_FEATURES $FEATURES"
 
 # Use default network value if none is provided
 ARG NETWORK
-ENV NETWORK ${NETWORK:-Mainnet}
+ENV NETWORK=${NETWORK:-Mainnet}
 
-ENV CARGO_HOME /opt/zebrad/.cargo/
+ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
 # In this stage we build tests (without running then)
 #
@@ -178,7 +178,7 @@ RUN apt-get update && \
 # Config settings
 
 ARG NETWORK
-ENV NETWORK ${NETWORK:-Mainnet}
+ENV NETWORK=${NETWORK:-Mainnet}
 
 # Expose configured ports
 EXPOSE 8233 18233
