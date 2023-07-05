@@ -396,7 +396,7 @@ impl NoteCommitmentTree {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn assert_frontier_eq(&self, other: &Self) {
         // It's technically ok for the cached root not to be preserved,
-        // but it can result in expensive cryptograpic operations,
+        // but it can result in expensive cryptographic operations,
         // so we fail the tests if it happens.
         assert_eq!(self.cached_root(), other.cached_root());
 
