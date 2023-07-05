@@ -39,8 +39,8 @@ pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
 pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
     let Some(parameters) = parameters else {
-            return Ok(())
-        };
+        return Ok(());
+    };
 
     match parameters {
         JsonParameters {
@@ -267,7 +267,8 @@ where
     let mempool::Response::FullTransactions {
         transactions,
         last_seen_tip_hash,
-    } = response else {
+    } = response
+    else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
     };
 

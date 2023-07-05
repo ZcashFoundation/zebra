@@ -370,7 +370,7 @@ fn apply_utxo_changes(
     // to compensate for overlapping finalized and non-finalized blocks.
     finalized_utxos
         .into_iter()
-        .chain(created_chain_utxos.into_iter())
+        .chain(created_chain_utxos)
         .filter(|(utxo_location, _output)| !spent_chain_utxos.contains(utxo_location))
         .collect()
 }

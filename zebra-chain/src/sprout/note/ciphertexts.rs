@@ -1,3 +1,5 @@
+//! Encrypted parts of Sprout notes.
+
 use std::{fmt, io};
 
 use serde::{Deserialize, Serialize};
@@ -25,9 +27,7 @@ impl Copy for EncryptedNote {}
 
 impl Clone for EncryptedNote {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 601];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 

@@ -25,9 +25,7 @@ impl Copy for Groth16Proof {}
 
 impl Clone for Groth16Proof {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 192];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 
