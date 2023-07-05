@@ -10,7 +10,13 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constants must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    ops::RangeBounds,
+    path::Path,
+    sync::Arc,
+};
 
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
