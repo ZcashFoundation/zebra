@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
-- Zebra now requires an argument name before the list of tracing filters when running `start` without an explicit subcommand.
+- Zebra now detects subcommand name typos on the command-line. If you want to give Zebra a list of tracing filters, use `zebrad start --filters debug,...` ([#7056](https://github.com/ZcashFoundation/zebra/pull/7056))
 
 ## [Zebra 1.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0) - 2023-06-14
 

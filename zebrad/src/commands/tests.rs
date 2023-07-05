@@ -17,6 +17,7 @@ fn args_with_subcommand_pass_through() {
         (false, true, false, vec!["zebrad", "start"]),
         (false, true, true, vec!["zebrad", "-v", "start"]),
         (false, true, false, vec!["zebrad", "--filters", "warn"]),
+        (true, false, false, vec!["zebrad", "warn"]),
         (false, true, false, vec!["zebrad", "start", "warn"]),
         (true, false, false, vec!["zebrad", "help", "warn"]),
     ];
