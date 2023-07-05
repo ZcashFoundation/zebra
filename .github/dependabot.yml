@@ -14,7 +14,7 @@ updates:
       - 'A-dependencies'
       - 'P-Low :snowflake:'
     groups:
-       ecc:
+        ecc:
           patterns:
             # deliberately include zcash_script
             - "zcash_*"
