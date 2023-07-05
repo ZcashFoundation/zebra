@@ -36,6 +36,8 @@ pub(crate) use chain::Chain;
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
+    // Chain Data
+    //
     /// Verified, non-finalized chains, in ascending work order.
     ///
     /// The best chain is [`NonFinalizedState::best_chain()`], or `chain_iter().next()`.
@@ -43,6 +45,8 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    // Configuration
+    //
     /// The configured Zcash network.
     pub network: Network,
 
@@ -653,7 +657,7 @@ impl NonFinalizedState {
 
             // Update the chain count bar
             if self.chain_count_bar.is_none() {
-                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+                self.chain_count_bar = Some(howudoin::new_root().label("Chain Forks"));
             }
 
             let chain_count_bar = self
@@ -677,9 +681,11 @@ impl NonFinalizedState {
             match self.chain_count().cmp(&prev_length_bars) {
                 Greater => self
                     .chain_fork_length_bars
-                    .resize_with(self.chain_count(), howudoin::new),
+                    .resize_with(self.chain_count(), || {
+                        howudoin::new_with_parent(chain_count_bar.id())
+                    }),
                 Less => {
-                    let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                    let redundant_bars = self.chain_fork_length_bars.split_off(self.chain_count());
                     for bar in redundant_bars {
                         bar.close();
                     }
@@ -708,19 +714,24 @@ impl NonFinalizedState {
                 //     zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
                 // ));
 
-                // display work as bits
-                let mut desc = format!(
-                    "Work {:.1} bits",
-                    chain.partial_cumulative_work.difficulty_bits_for_display(),
-                );
+                // TODO: store work in the finalized state for each height (#7109),
+                //       and show the full chain work here, like `zcashd` (#7110)
+                //
+                // For now, we don't show any work here, see the deleted code in PR #7087.
+                let mut desc = String::new();
 
                 if let Some(recent_fork_height) = chain.recent_fork_height() {
                     let recent_fork_length = chain
                         .recent_fork_length()
                         .expect("just checked recent fork height");
 
+                    let mut plural = "s";
+                    if recent_fork_length == 1 {
+                        plural = "";
+                    }
+
                     desc.push_str(&format!(
-                        " at {recent_fork_height:?} + {recent_fork_length} blocks"
+                        " at {recent_fork_height:?} + {recent_fork_length} block{plural}"
                     ));
                 }
 
