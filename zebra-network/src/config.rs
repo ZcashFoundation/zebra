@@ -681,7 +681,7 @@ impl<'de> Deserialize<'de> for Config {
         ].map(|(field_name, non_zero_config_field, default_config_value)| {
             if non_zero_config_field == Some(0) {
                 warn!(
-                    ?field_name, 
+                    ?field_name,
                     ?non_zero_config_field,
                     "{field_name} should be greater than 0, using default value of {default_config_value} instead"
                 );
