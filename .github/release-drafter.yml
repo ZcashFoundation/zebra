@@ -169,7 +169,7 @@ template: |
   ### Breaking Changes
   
   This release has the following breaking changes:
-  - *TODO*: Check the `Removed` and  `Deprecated` sections for any breaking changes
+  - *TODO*: Check the `Removed` and `Deprecated` sections for any breaking changes
   - *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
   
   $CHANGES
