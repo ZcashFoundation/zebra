@@ -220,7 +220,7 @@ proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 # test feature tokio-console
-console-subscriber = { version = "0.1.8", optional = true }
+console-subscriber = { version = "0.1.10", optional = true }
 
 [build-dependencies]
 vergen = { version = "8.2.3", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
