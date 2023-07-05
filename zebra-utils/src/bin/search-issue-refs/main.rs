@@ -288,11 +288,7 @@ to create a github token."
     let mut num_closed_issues = 0;
 
     while let Some(res) = github_api_requests.join_next().await {
-        let Ok((
-            res,
-            id,
-            issue_refs,
-        )) = res else {
+        let Ok((res, id, issue_refs)) = res else {
             println!("warning: failed to join api request thread/task");
             continue;
         };

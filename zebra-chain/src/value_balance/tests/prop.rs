@@ -79,7 +79,7 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let collection = vec![value_balance1, value_balance2];
+        let collection = [value_balance1, value_balance2];
 
         let transparent = value_balance1.transparent + value_balance2.transparent;
         let sprout = value_balance1.sprout + value_balance2.sprout;

@@ -486,7 +486,7 @@ mod tests {
         // Compute the AuthDataRoot with a single [0xFF; 32] digest.
         // Since ZIP-244 specifies that this value must be used as the auth digest of
         // pre-V5 transactions, then the roots must match.
-        let expect_auth_root = vec![AuthDigest([0xFF; 32])]
+        let expect_auth_root = [AuthDigest([0xFF; 32])]
             .iter()
             .copied()
             .collect::<AuthDataRoot>();

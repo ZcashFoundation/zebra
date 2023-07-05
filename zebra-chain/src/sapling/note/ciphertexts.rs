@@ -1,3 +1,5 @@
+//! Encrypted parts of Sapling notes.
+
 use std::{fmt, io};
 
 use serde_big_array::BigArray;
@@ -24,9 +26,7 @@ impl Copy for EncryptedNote {}
 
 impl Clone for EncryptedNote {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 580];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 
@@ -73,9 +73,7 @@ impl Copy for WrappedNoteKey {}
 
 impl Clone for WrappedNoteKey {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 80];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 

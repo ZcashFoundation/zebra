@@ -1531,8 +1531,8 @@ where
 /// to be disconnected.
 fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> f32 {
     let Some(prev) = prev else {
-            return MIN_OVERLOAD_DROP_PROBABILITY;
-        };
+        return MIN_OVERLOAD_DROP_PROBABILITY;
+    };
 
     let protection_fraction_since_last_overload =
         (now - prev).as_secs_f32() / OVERLOAD_PROTECTION_INTERVAL.as_secs_f32();

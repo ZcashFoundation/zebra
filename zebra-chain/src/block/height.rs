@@ -82,7 +82,11 @@ impl TryFrom<u32> for Height {
     /// Checks that the `height` is within the valid [`Height`] range.
     fn try_from(height: u32) -> Result<Self, Self::Error> {
         // Check the bounds.
-        if Height::MIN.0 <= height && height <= Height::MAX.0 {
+        //
+        // Clippy warns that `height >= Height::MIN.0` is always true.
+        assert_eq!(Height::MIN.0, 0);
+
+        if height <= Height::MAX.0 {
             Ok(Height(height))
         } else {
             Err("heights must be less than or equal to Height::MAX")

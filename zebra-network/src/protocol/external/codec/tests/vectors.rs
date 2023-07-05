@@ -467,12 +467,13 @@ fn version_user_agent_size_limits() {
     // Encode the rest of the message onto `bytes` (relay should be optional)
     {
         let Message::Version(VersionMessage {
-        user_agent,
-        start_height,
-        ..
-    }) = invalid_version_message else {
-        unreachable!("version_message is a version");
-    };
+            user_agent,
+            start_height,
+            ..
+        }) = invalid_version_message
+        else {
+            unreachable!("version_message is a version");
+        };
 
         user_agent
             .zcash_serialize(&mut writer)
@@ -553,7 +554,8 @@ fn reject_command_and_reason_size_limits() {
                 ccode,
                 reason,
                 data,
-            } = invalid_reject_message else {
+            } = invalid_reject_message
+            else {
                 unreachable!("invalid_reject_message is a reject");
             };
 
