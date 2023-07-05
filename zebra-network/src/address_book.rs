@@ -521,7 +521,9 @@ impl AddressBook {
             // Check if this surplus peer's addr matches that in `most_recent_by_ip`
             // for this the surplus peer's ip to remove it there as well.
             if self.should_remove_most_recent_by_ip(entry.addr) {
-                self.most_recent_by_ip.as_mut()?.remove(&entry.addr.ip());
+                if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
+                    most_recent_by_ip.remove(&entry.addr.ip());
+                }
             }
 
             std::mem::drop(_guard);
@@ -561,11 +563,17 @@ impl AddressBook {
         ip: &IpAddr,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
-        self.most_recent_by_ip
-            .as_ref()
-            .and_then(|most_recent_by_ip| most_recent_by_ip.get(ip))
-            .filter(|peer| peer.has_connection_recently_responded(chrono_now))
-            .is_none()
+        let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
+            // if we're not checking IPs, any connection is allowed
+            return true;
+        }
+        
+        let Some(same_ip_peer) = most_recent_by_ip.get(ip) else {
+            // If there's no entry for this IP, any connection is allowed
+            return true;
+        }
+        
+        !same_ip_peer.has_connection_recently_responded(chrono_now)
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,
