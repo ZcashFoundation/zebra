@@ -229,7 +229,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, use_internet_connection) {
         return Ok(None);
     }
 
@@ -287,7 +287,7 @@ pub fn spawn_zebrad_without_rpc<S: AsRef<str> + std::fmt::Debug>(
     };
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, use_internet_connection) {
         return Ok(None);
     }
 
@@ -317,8 +317,9 @@ pub fn spawn_zebrad_without_rpc<S: AsRef<str> + std::fmt::Debug>(
 pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + std::fmt::Debug>(
     test_name: S,
     test_type: TestType,
+    use_internet_connection: bool,
 ) -> bool {
-    if zebra_test::net::zebra_skip_network_tests() {
+    if use_internet_connection && zebra_test::net::zebra_skip_network_tests() {
         return false;
     }
 
