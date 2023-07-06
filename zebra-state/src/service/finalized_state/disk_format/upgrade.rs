@@ -14,7 +14,10 @@ use zebra_chain::{block::Height, parameters::Network};
 
 use DbFormatChange::*;
 
-use crate::{config::write_database_format_version_to_disk, Config};
+use crate::{
+    config::write_database_format_version_to_disk, database_format_version_in_code,
+    database_format_version_on_disk, Config,
+};
 
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,7 +165,11 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) {
-        let Upgrade { newer_running_version: _, older_disk_version } = self else {
+        let Upgrade {
+            newer_running_version,
+            older_disk_version,
+        } = self
+        else {
             // If it's not an upgrade, it's a downgrade.
 
             // # Correctness
@@ -170,7 +177,7 @@ impl DbFormatChange {
             // At the start of a format downgrade, the database must be marked as partially or
             // fully downgraded. This lets newer Zebra versions know that some blocks with older
             // formats have been added to the database.
-            Self::mark_as_changed(&config, network);
+            Self::mark_as_downgraded(&config, network);
 
             // Older supported versions just assume they can read newer formats,
             // because they can't predict all changes a newer Zebra version could make.
@@ -185,7 +192,13 @@ impl DbFormatChange {
         // If the format change is outside RocksDb, put new code above this comment!
         let Some(initial_tip_height) = initial_tip_height else {
             // If the database is empty, then the RocksDb format doesn't need any changes.
-            Self::mark_as_changed(&config, network);
+            info!(
+                ?newer_running_version,
+                ?older_disk_version,
+                "marking empty database as upgraded"
+            );
+
+            Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
             return;
         };
 
@@ -216,30 +229,123 @@ impl DbFormatChange {
             }
         }
 
+        // At the end of each format upgrade, the database is marked as upgraded to that version.
+        // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
+        // optimisation.
+        info!(
+            ?initial_tip_height,
+            ?newer_running_version,
+            ?older_disk_version,
+            "marking database as upgraded"
+        );
+        Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+
         // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
         //
         // Run the latest format upgrade code after the other upgrades are complete,
-        // but before marking the format as upgraded. The code should check `cancel_receiver`
+        // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
-
-        // At the end of a format upgrade, the database is marked as fully upgraded.
-        // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
-        // optimisation.
-        Self::mark_as_changed(&config, network);
     }
 
-    /// Mark the database as fully upgraded.
-    /// This should be called after database format is up-to-date.
+    /// Mark the database as upgraded to `format_upgrade_version`.
+    ///
+    /// This should be called when an older database is opened by an older Zebra version,
+    /// after each version upgrade is complete.
     ///
     /// # Concurrency
     ///
     /// The version must only be updated while RocksDB is holding the database
     /// directory lock. This prevents multiple Zebra instances corrupting the version
     /// file.
-    fn mark_as_changed(config: &Config, network: Network) {
-        write_database_format_version_to_disk(config, network)
+    ///
+    /// # Panics
+    ///
+    /// If the format should not have been upgraded, because the running version is:
+    /// - older than the disk version (that's a downgrade)
+    /// - the same as to the disk version (no upgrade needed)
+    ///
+    /// If the format should not have been upgraded, because the format upgrade version is:
+    /// - older or the same as the disk version
+    ///   (multiple upgrades to the same version are not allowed)
+    /// - greater than the running version (that's a logic bug)
+    fn mark_as_upgraded_to(format_upgrade_version: &Version, config: &Config, network: Network) {
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file")
+            .expect("tried to upgrade a newly created database");
+        let running_version = database_format_version_in_code();
+
+        assert!(
+            running_version > disk_version,
+            "can't upgrade a database that is being opened by an older or the same Zebra version:\n\
+             disk: {disk_version}\n\
+             upgrade: {format_upgrade_version}\n\
+             running: {running_version}"
+        );
+
+        assert!(
+            format_upgrade_version > &disk_version,
+            "can't upgrade a database that has already been upgraded, or is newer:\n\
+             disk: {disk_version}\n\
+             upgrade: {format_upgrade_version}\n\
+             running: {running_version}"
+        );
+
+        assert!(
+            format_upgrade_version <= &running_version,
+            "can't upgrade to a newer version than the running Zebra version:\n\
+             disk: {disk_version}\n\
+             upgrade: {format_upgrade_version}\n\
+             running: {running_version}"
+        );
+
+        info!(
+            ?running_version,
+            ?format_upgrade_version,
+            ?disk_version,
+            "marking database format as upgraded"
+        );
+
+        write_database_format_version_to_disk(format_upgrade_version, config, network)
+            .expect("unable to write database format version file to disk");
+    }
+
+    /// Mark the database as downgraded to the running database version.
+    /// This should be called after a newer database is opened by an older Zebra version.
+    ///
+    /// # Concurrency
+    ///
+    /// The version must only be updated while RocksDB is holding the database
+    /// directory lock. This prevents multiple Zebra instances corrupting the version
+    /// file.
+    ///
+    /// # Panics
+    ///
+    /// If the format should have been upgraded, because the running version is newer.
+    /// If the state is newly created, because the running version should be the same.
+    ///
+    /// Multiple downgrades are allowed, because they all downgrade to the same running version.
+    fn mark_as_downgraded(config: &Config, network: Network) {
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file")
+            .expect("can't downgrade a newly created database");
+        let running_version = database_format_version_in_code();
+
+        assert!(
+            disk_version >= running_version,
+            "can't downgrade a database that is being opened by a newer Zebra version:\n\
+             disk: {disk_version}\n\
+             running: {running_version}"
+        );
+
+        info!(
+            ?running_version,
+            ?disk_version,
+            "marking database format as downgraded"
+        );
+
+        write_database_format_version_to_disk(&running_version, config, network)
             .expect("unable to write database format version file to disk");
     }
 }
