@@ -35,6 +35,11 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
+      force_save_to_disk:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force tests to always create a cached state disk, if they already create disks'
       no_cache:
         description: 'Disable the Docker cache for this build'
         required: false
@@ -330,6 +335,7 @@ jobs:
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
     secrets: inherit
@@ -391,6 +397,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
@@ -430,6 +437,7 @@ jobs:
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -502,6 +510,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
@@ -545,6 +554,7 @@ jobs:
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -577,6 +587,7 @@ jobs:
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
