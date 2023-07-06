@@ -229,7 +229,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
         return Ok(None);
     }
 
@@ -256,7 +256,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 
 /// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
 #[tracing::instrument]
-pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + std::fmt::Debug>(
     test_name: S,
     test_type: TestType,
 ) -> bool {

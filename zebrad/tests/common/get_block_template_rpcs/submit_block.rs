@@ -15,7 +15,7 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 
 use crate::common::{
     cached_state::get_raw_future_blocks,
-    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     test_type::TestType,
 };
 
@@ -31,7 +31,7 @@ pub(crate) async fn run() -> Result<()> {
     let network = Network::Mainnet;
 
     // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
         return Ok(());
     }
 
@@ -50,7 +50,7 @@ pub(crate) async fn run() -> Result<()> {
     let should_sync = false;
     let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
-            .expect("Already checked zebra state path with can_spawn_zebrad_for_rpc");
+            .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 
     let rpc_address = zebra_rpc_address.expect("submitblock test must have RPC port");
 

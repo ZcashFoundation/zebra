@@ -30,7 +30,7 @@ use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::get_future_blocks,
-    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
         sync::wait_for_zebrad_and_lightwalletd_sync,
@@ -62,7 +62,7 @@ pub async fn run() -> Result<()> {
     let network = Mainnet;
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
         return Ok(());
     }
 
