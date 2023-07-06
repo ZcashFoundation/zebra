@@ -254,6 +254,64 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     Ok(Some((zebrad, config.rpc.listen_addr)))
 }
 
+/// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
+///
+/// If `use_cached_state` is `true`, then update the cached state to the tip.
+/// Otherwise, just create an empty state.
+///
+/// If `use_internet_connection` is `false` then spawn, but without any peers.
+/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
+/// environmental variable to provide an initial state to the zebrad instance.
+///
+/// Returns:
+/// - `Ok(Some(zebrad))` on success,
+/// - `Ok(None)` if the test doesn't have the required network or cached state, and
+/// - `Err(_)` if spawning zebrad fails.
+#[tracing::instrument]
+pub fn spawn_zebrad_without_rpc<S: AsRef<str> + std::fmt::Debug>(
+    network: Network,
+    test_name: S,
+    use_cached_state: bool,
+    use_internet_connection: bool,
+) -> Result<Option<TestChild<TempDir>>> {
+    use TestType::*;
+
+    let test_name = test_name.as_ref();
+
+    let test_type = if use_cached_state {
+        UpdateZebraCachedStateNoRpc
+    } else {
+        LaunchWithEmptyState {
+            launches_lightwalletd: false,
+        }
+    };
+
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
+        return Ok(None);
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name, use_internet_connection)
+        .expect("already checked config")?;
+
+    config.network.network = network;
+
+    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+
+    // Writes a configuration that does not have RPC listen_addr set.
+    // If the state path env var is set, uses it in the config.
+    let zebrad = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+    Ok(Some(zebrad))
+}
+
 /// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
 #[tracing::instrument]
 pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + std::fmt::Debug>(
