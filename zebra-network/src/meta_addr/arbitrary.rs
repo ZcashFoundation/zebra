@@ -1,6 +1,6 @@
 //! Randomised test data generation for MetaAddr.
 
-use std::time::Instant;
+use std::{net::IpAddr, time::Instant};
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
@@ -99,7 +99,17 @@ impl MetaAddrChange {
             .boxed()
     }
 
-    /// Create a strategy that generates [`MetaAddrChange`]s which are ready for
+    /// Create a strategy that generates [`IpAddr`]s for [`MetaAddrChange`]s which are ready for
+    /// outbound connections.
+    pub fn ready_outbound_strategy_ip() -> BoxedStrategy<IpAddr> {
+        any::<IpAddr>()
+            .prop_filter("failed MetaAddr::is_valid_for_outbound", |ip| {
+                !ip.is_unspecified()
+            })
+            .boxed()
+    }
+
+    /// Create a strategy that generates port numbers for [`MetaAddrChange`]s which are ready for
     /// outbound connections.
     ///
     /// Currently, all generated changes are the [`NewAlternate`][1] variant.
@@ -107,7 +117,7 @@ impl MetaAddrChange {
     /// fields. (After PR #2276 merges.)
     ///
     /// [1]: super::NewAlternate
-    pub fn ready_outbound_strategy() -> BoxedStrategy<Self> {
+    pub fn ready_outbound_strategy_port() -> BoxedStrategy<u16> {
         (
             canonical_peer_addr_strategy(),
             any::<Instant>(),
@@ -125,7 +135,7 @@ impl MetaAddrChange {
                         .into_new_meta_addr(instant_now, local_now)
                         .last_known_info_is_valid_for_outbound(Mainnet)
                     {
-                        Some(change)
+                        Some(addr.port())
                     } else {
                         None
                     }
