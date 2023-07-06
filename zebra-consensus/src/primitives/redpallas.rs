@@ -134,7 +134,12 @@ impl Verifier {
             let _ = rsp_tx.send(());
         });
 
-        rsp_rx.await.expect("sender should not be dropped")
+        if let Err(error) = rsp_rx.await {
+            tracing::info!(
+                ?error,
+                "threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?"
+            );
+        }
     }
 
     /// Verify a single item using a thread pool, and return the result.
@@ -154,7 +159,13 @@ impl Verifier {
             let _ = rsp_tx.send(item.verify_single());
         });
 
-        rsp_rx.await.expect("sender should not be dropped")
+        rsp_rx.await.map_err(|error| {
+            tracing::info!(
+                ?error,
+                "threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?"
+            );
+            Error::InvalidSignature
+        })?
     }
 }
 
