@@ -55,7 +55,7 @@ ordered-map = "0.4.2"
 pin-project = "1.1.2"
 rand = "0.8.5"
 rayon = "1.7.0"
-regex = "1.8.4"
+regex = "1.9.0"
 serde = { version = "1.0.166", features = ["serde_derive"] }
 tempfile = "3.5.0"
 thiserror = "1.0.41"
