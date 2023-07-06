@@ -1372,6 +1372,11 @@ impl<T> TestOutput<T> {
     fn was_killed(&self) -> bool {
         self.output.status.signal() == Some(9)
     }
+
+    /// Takes the generic `dir` paramter out of this `TestOutput`.
+    pub fn take_dir(&mut self) -> Option<T> {
+        self.dir.take()
+    }
 }
 
 /// Add context to an error report

@@ -2405,15 +2405,18 @@ async fn generate_checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Testnet).await
 }
 
-/// Check that new states are created with the current state format.
+/// Check that new states are created with the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
 #[tokio::test]
 pub(crate) async fn new_state_format() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let test_name = "get_peer_info_test";
+    let test_name = "new_state_format_test/new";
     let network = Network::Mainnet;
 
-    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false)?;
+    // # Create a new state and check it has the current version
+
+    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, None)?;
 
     // Skip the test unless it has the required state and environmental variables.
     let Some(mut zebrad) = zebrad else {
@@ -2423,6 +2426,41 @@ pub(crate) async fn new_state_format() -> Result<()> {
     tracing::info!(?network, "running {} using zebrad", test_name);
 
     zebrad.expect_stdout_line_matches("creating new database with the current format")?;
+    let logs = zebrad.kill_and_return_output(false)?;
+
+    assert!(
+        !logs.contains("marking database format as upgraded"),
+        "unexpected format upgrade in logs:\n\
+         {logs}"
+    );
+    assert!(
+        !logs.contains("marking database format as downgraded"),
+        "unexpected format downgrade in logs:\n\
+         {logs}"
+    );
+
+    let output = zebrad.wait_with_output()?;
+    let mut output = output.assert_failure()?;
+
+    let dir = output
+        .take_dir()
+        .expect("dir should not already have been taken");
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    // # Reopen that state and check the version hasn't changed
+
+    let test_name = "new_state_format_test/reopen";
+
+    let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir)?
+        .expect("unexpectedly missing required state or env vars");
+
+    tracing::info!(?network, "running {} using zebrad", test_name);
+
+    zebrad.expect_stdout_line_matches("trying to open current database format")?;
     let logs = zebrad.kill_and_return_output(false)?;
 
     assert!(

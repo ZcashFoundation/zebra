@@ -108,7 +108,7 @@ impl DbFormatChange {
                 })
             }
             Ordering::Equal => {
-                info!(?running_version, "trying to open matching database format");
+                info!(?running_version, "trying to open current database format");
 
                 None
             }
