@@ -33,6 +33,8 @@ use zebra_chain::{
     sprout::{JoinSplit, Nullifier, RandomSeed},
 };
 
+use crate::BoxError;
+
 mod params;
 #[cfg(test)]
 mod tests;
@@ -73,7 +75,10 @@ pub type ItemVerifyingKey = PreparedVerifyingKey<Bls12>;
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static SPEND_VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> BoxFuture<'static, VerifyResult>>>,
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+    >,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -112,7 +117,10 @@ pub static SPEND_VERIFIER: Lazy<
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static OUTPUT_VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> BoxFuture<'static, VerifyResult>>>,
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+    >,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -426,21 +434,19 @@ impl Verifier {
             //   possible implementation: return a closure in a Future,
             //   then run it using scope_fifo() in the worker task,
             //   limiting the number of concurrent batches to the number of rayon threads
-            Self::verify(batch, vk, tx);
-            let _ = rsp_tx.send(());
+            let result = batch.verify(thread_rng(), vk);
+            let _ = rsp_tx.send(result);
         });
 
-        if let Err(error) = rsp_rx.await {
-            tracing::info!(
-                ?error,
-                "threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?"
-            );
-        }
+        let _ = tx.send(rsp_rx.await.ok());
     }
 
     /// Verify a single item using a thread pool, and return the result.
     /// This function returns a future that becomes ready when the item is completed.
-    async fn verify_single_spawning(item: Item, pvk: &'static ItemVerifyingKey) -> VerifyResult {
+    async fn verify_single_spawning(
+        item: Item,
+        pvk: &'static ItemVerifyingKey,
+    ) -> Result<(), BoxError> {
         let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
@@ -455,13 +461,12 @@ impl Verifier {
             let _ = rsp_tx.send(item.verify_single(pvk));
         });
 
-        rsp_rx.await.map_err(|error| {
-            tracing::info!(
-                ?error,
+        rsp_rx
+            .await
+            .map_err(|_| {
                 "threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?"
-            );
-            bellman::VerificationError::InvalidProof
-        })?
+            })?
+            .map_err(BoxError::from)
     }
 }
 
@@ -478,8 +483,8 @@ impl fmt::Debug for Verifier {
 
 impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
-    type Error = VerificationError;
-    type Future = Pin<Box<dyn Future<Output = VerifyResult> + Send + 'static>>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -500,7 +505,7 @@ impl Service<BatchControl<Item>> for Verifier {
                             let result = rx
                                 .borrow()
                                 .as_ref()
-                                .expect("completed batch must send a value")
+                                .ok_or("threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?")?
                                 .clone();
 
                             if result.is_ok() {
@@ -511,7 +516,7 @@ impl Service<BatchControl<Item>> for Verifier {
                                 metrics::counter!("proofs.groth16.invalid", 1);
                             }
 
-                            result
+                            result.map_err(BoxError::from)
                         }
                         Err(_recv_error) => panic!("verifier was dropped without flushing"),
                     }
