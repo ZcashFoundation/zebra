@@ -14,7 +14,6 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     io,
-    ops::Deref,
     sync::Arc,
 };
 
@@ -333,14 +332,9 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Sapling
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        if let Some(root) = self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked")
-            .deref()
-        {
+        if let Some(root) = self.cached_root() {
             // Return cached root.
-            return *root;
+            return root;
         }
 
         // Get exclusive access, compute the root, and cache it.
@@ -359,6 +353,15 @@ impl NoteCommitmentTree {
                 root
             }
         }
+    }
+
+    /// Returns the current root of the tree, if it has already been cached.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn cached_root(&self) -> Option<Root> {
+        *self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked")
     }
 
     /// Gets the Jubjub-based Pedersen hash of root node of this merkle tree of
@@ -382,16 +385,34 @@ impl NoteCommitmentTree {
     pub fn count(&self) -> u64 {
         self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
     }
+
+    /// Checks if the tree roots and inner data structures of `self` and `other` are equal.
+    ///
+    /// # Panics
+    ///
+    /// If they aren't equal, with a message explaining the differences.
+    ///
+    /// Only for use in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn assert_frontier_eq(&self, other: &Self) {
+        // It's technically ok for the cached root not to be preserved,
+        // but it can result in expensive cryptographic operations,
+        // so we fail the tests if it happens.
+        assert_eq!(self.cached_root(), other.cached_root());
+
+        // Check the data in the internal data structure
+        assert_eq!(self.inner, other.inner);
+
+        // Check the RPC serialization format (not the same as the Zebra database format)
+        assert_eq!(SerializedTree::from(self), SerializedTree::from(other));
+    }
 }
 
 impl Clone for NoteCommitmentTree {
     /// Clones the inner tree, and creates a new [`RwLock`](std::sync::RwLock)
     /// with the cloned root data.
     fn clone(&self) -> Self {
-        let cached_root = *self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked");
+        let cached_root = self.cached_root();
 
         Self {
             inner: self.inner.clone(),

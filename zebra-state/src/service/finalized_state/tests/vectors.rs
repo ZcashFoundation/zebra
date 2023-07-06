@@ -48,9 +48,18 @@ fn sprout_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the sprout tree database serialization format has not changed for one commitment.
@@ -85,9 +94,18 @@ fn sprout_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the sprout tree database serialization format has not changed when the number of
@@ -131,9 +149,18 @@ fn sprout_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the sapling tree database serialization format has not changed.
@@ -172,9 +199,18 @@ fn sapling_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the sapling tree database serialization format has not changed for one commitment.
@@ -209,9 +245,18 @@ fn sapling_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the sapling tree database serialization format has not changed when the number of
@@ -259,9 +304,18 @@ fn sapling_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the orchard tree database serialization format has not changed.
@@ -310,9 +364,18 @@ fn orchard_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the orchard tree database serialization format has not changed for one commitment.
@@ -349,9 +412,18 @@ fn orchard_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
 
 /// Check that the orchard tree database serialization format has not changed when the number of
@@ -399,7 +471,16 @@ fn orchard_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(serialized_tree);
+    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
 
+    // This check isn't enough to show that the entire struct is the same, because it just compares
+    // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
+    // roots.)
     assert_eq!(incremental_tree.root(), deserialized_tree.root());
+
+    incremental_tree.assert_frontier_eq(&deserialized_tree);
+
+    // Double-check that the internal format is the same by re-serializing the tree.
+    let re_serialized_tree = deserialized_tree.as_bytes();
+    assert_eq!(serialized_tree, re_serialized_tree);
 }
