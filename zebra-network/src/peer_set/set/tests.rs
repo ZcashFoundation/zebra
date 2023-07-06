@@ -23,6 +23,7 @@ use zebra_chain::{
 
 use crate::{
     address_book::AddressMetrics,
+    constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{set::MorePeers, InventoryChange, PeerSet},
     protocol::external::types::Version,
@@ -333,7 +334,12 @@ impl PeerSetGuard {
         let local_listener = "127.0.0.1:1000"
             .parse()
             .expect("Invalid local listener address");
-        let address_book = AddressBook::new(local_listener, Network::Mainnet, Span::none());
+        let address_book = AddressBook::new(
+            local_listener,
+            Network::Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::none(),
+        );
 
         Arc::new(std::sync::Mutex::new(address_book))
     }
