@@ -437,7 +437,7 @@ jobs:
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
-      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -510,7 +510,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
-      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk }}
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
@@ -554,7 +554,7 @@ jobs:
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
       saves_to_disk: true
-      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -587,7 +587,7 @@ jobs:
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: true
-      force_save_to_disk: ${{ github.event.inputs.force_save_to_disk }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk }}
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
