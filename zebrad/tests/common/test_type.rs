@@ -2,6 +2,9 @@
 
 use std::{env, path::PathBuf, time::Duration};
 
+use indexmap::IndexSet;
+
+use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
@@ -154,7 +157,11 @@ impl TestType {
     ///
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
-    pub fn zebrad_config<S: AsRef<str>>(&self, test_name: S) -> Option<Result<ZebradConfig>> {
+    pub fn zebrad_config<S: AsRef<str>>(
+        &self,
+        test_name: S,
+        use_internet_connection: bool,
+    ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
             random_known_rpc_port_config(true)
@@ -177,22 +184,34 @@ impl TestType {
             config.rpc.parallel_cpu_threads = 0;
         }
 
-        if !self.needs_zebra_cached_state() {
-            return Some(Ok(config));
+        if !use_internet_connection {
+            config.network.initial_mainnet_peers = IndexSet::new();
+            config.network.initial_testnet_peers = IndexSet::new();
+            // Avoid re-using cached peers from disk when we're supposed to be a disconnected instance
+            config.network.cache_dir = CacheDir::disabled();
+
+            // Activate the mempool immediately by default
+            config.mempool.debug_enable_at_height = Some(0);
         }
 
+        // Add a fake miner address for mining RPCs
         #[cfg(feature = "getblocktemplate-rpcs")]
         let _ = config.mining.miner_address.insert(
             zebra_chain::transparent::Address::from_script_hash(config.network.network, [0x7e; 20]),
         );
 
+        if !self.needs_zebra_cached_state() {
+            return Some(Ok(config));
+        }
+
+        // If we have a cached state, update the config to use it
         let zebra_state_path = self.zebrad_state_path(test_name)?;
-
-        config.sync.checkpoint_verify_concurrency_limit =
-            zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
-
         config.state.ephemeral = false;
         config.state.cache_dir = zebra_state_path;
+
+        // And reset the concurrency to the default value
+        config.sync.checkpoint_verify_concurrency_limit =
+            zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
         Some(Ok(config))
     }

@@ -13,7 +13,6 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
-use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
@@ -236,19 +235,10 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name)
+        .zebrad_config(test_name, use_internet_connection)
         .expect("already checked config")?;
 
-    // TODO: move this into zebrad_config()
     config.network.network = network;
-    if !use_internet_connection {
-        config.network.initial_mainnet_peers = IndexSet::new();
-        config.network.initial_testnet_peers = IndexSet::new();
-        // Avoid re-using cached peers from disk when we're supposed to be a disconnected instance
-        config.network.cache_dir = CacheDir::disabled();
-
-        config.mempool.debug_enable_at_height = Some(0);
-    }
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
@@ -282,7 +272,7 @@ pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     }
 
     // Check if we have any necessary cached states for the zebrad config
-    test_type.zebrad_config(test_name).is_some()
+    test_type.zebrad_config(test_name, true).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:
