@@ -166,8 +166,8 @@ use common::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
     launch::{
-        spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, EXTENDED_LAUNCH_DELAY,
-        LAUNCH_DELAY,
+        spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY,
     },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
@@ -2381,6 +2381,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 
     Ok(())
 }
+
 /// Test `zebra-checkpoints` on mainnet.
 ///
 /// If you want to run this test individually, see the module documentation.
@@ -2402,4 +2403,46 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 #[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Testnet).await
+}
+
+/// Check that new states are created with the current state format.
+#[tokio::test]
+pub(crate) async fn new_state_format() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let test_name = "get_peer_info_test";
+    let network = Network::Mainnet;
+
+    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false)?;
+
+    // Skip the test unless it has the required state and environmental variables.
+    let Some(mut zebrad) = zebrad else {
+        return Ok(());
+    };
+
+    tracing::info!(?network, "running {} using zebrad", test_name);
+
+    zebrad.expect_stdout_line_matches("creating new database with the current format")?;
+    let logs = zebrad.kill_and_return_output(false)?;
+
+    assert!(
+        !logs.contains("marking database format as upgraded"),
+        "unexpected format upgrade in logs:\n\
+         {logs}"
+    );
+    assert!(
+        !logs.contains("marking database format as downgraded"),
+        "unexpected format downgrade in logs:\n\
+         {logs}"
+    );
+
+    let output = zebrad.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
 }
