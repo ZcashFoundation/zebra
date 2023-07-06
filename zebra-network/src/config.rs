@@ -19,8 +19,9 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants::{
-        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP, DNS_LOOKUP_TIMEOUT,
-        INBOUND_PEER_LIMIT_MULTIPLIER, MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
+        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP,
+        DEFAULT_PEERSET_INITIAL_TARGET_SIZE, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
+        MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
@@ -158,6 +159,20 @@ pub struct Config {
     /// before it drops any additional peer connections with that IP.
     ///
     /// The default and minimum value are 1.
+    ///
+    /// # Security
+    ///
+    /// Increasing this config above 1 reduces Zebra's network security.
+    ///
+    /// If this config is greater than 1, Zebra can initiate multiple outbound handshakes to the same
+    /// IP address.
+    ///
+    /// This config does not currently limit the number of inbound connections that Zebra will accept
+    /// from the same IP address.
+    ///
+    /// If Zebra makes multiple inbound or outbound connections to the same IP, they will be dropped
+    /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
+    /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
 }
 
@@ -593,7 +608,7 @@ impl Default for Config {
             //
             // But Zebra should only make a small number of initial outbound connections,
             // so that idle peers don't use too many connection slots.
-            peerset_initial_target_size: 25,
+            peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
         }
     }
@@ -629,7 +644,7 @@ impl<'de> Deserialize<'de> for Config {
                     cache_dir: config.cache_dir,
                     peerset_initial_target_size: config.peerset_initial_target_size,
                     crawl_new_peer_interval: config.crawl_new_peer_interval,
-                    max_connections_per_ip: Some(DEFAULT_MAX_CONNS_PER_IP),
+                    max_connections_per_ip: Some(config.max_connections_per_ip),
                 }
             }
         }
@@ -655,6 +670,23 @@ impl<'de> Deserialize<'de> for Config {
             },
         }?;
 
+        let [max_connections_per_ip, peerset_initial_target_size] = [
+            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 
+            // If we want Zebra to operate with no network,
+            // we should implement a `zebrad` command that doesn't use `zebra-network`.
+            ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
+        ].map(|(field_name, non_zero_config_field, default_config_value)| {
+            if non_zero_config_field == Some(0) {
+                warn!(
+                    ?field_name,
+                    ?non_zero_config_field,
+                    "{field_name} should be greater than 0, using default value of {default_config_value} instead"
+                );
+            }
+
+            non_zero_config_field.filter(|config_value| config_value > &0).unwrap_or(default_config_value)
+        });
+
         Ok(Config {
             listen_addr: canonical_socket_addr(listen_addr),
             network,
@@ -663,7 +695,7 @@ impl<'de> Deserialize<'de> for Config {
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
-            max_connections_per_ip: max_connections_per_ip.unwrap_or(DEFAULT_MAX_CONNS_PER_IP),
+            max_connections_per_ip,
         })
     }
 }
