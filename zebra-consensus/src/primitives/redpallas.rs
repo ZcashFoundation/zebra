@@ -20,6 +20,8 @@ use zebra_chain::primitives::reddsa::{batch, orchard, Error};
 
 use crate::BoxError;
 
+use super::{spawn_fifo, spawn_fifo_and_convert};
+
 #[cfg(test)]
 mod tests;
 
@@ -126,45 +128,24 @@ impl Verifier {
     /// Flush the batch using a thread pool, and return the result via the channel.
     /// This function returns a future that becomes ready when the batch is completed.
     async fn flush_spawning(batch: BatchVerifier, tx: Sender) {
-        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
-
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        rayon::spawn_fifo(|| {
-            // TODO:
-            // - spawn batches so rayon executes them in FIFO order
-            //   possible implementation: return a closure in a Future,
-            //   then run it using scope_fifo() in the worker task,
-            //   limiting the number of concurrent batches to the number of rayon threads
-            let result = batch.verify(thread_rng());
-            let _ = rsp_tx.send(result);
-        });
-
-        let _ = tx.send(rsp_rx.await.ok());
+        // TODO:
+        // - spawn batches so rayon executes them in FIFO order
+        //   possible implementation: return a closure in a Future,
+        //   then run it using scope_fifo() in the worker task,
+        //   limiting the number of concurrent batches to the number of rayon threads
+        let _ = tx.send(spawn_fifo(move || batch.verify(thread_rng())).await.ok());
     }
 
     /// Verify a single item using a thread pool, and return the result.
     /// This function returns a future that becomes ready when the item is completed.
     async fn verify_single_spawning(item: Item) -> Result<(), BoxError> {
-        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
-
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        rayon::spawn_fifo(|| {
-            // Rayon doesn't have a spawn function that returns a value,
-            // so we use a oneshot channel instead.
-            //
-            // TODO:
-            // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
-            // - spawn fallback individual verifications so rayon executes them in FIFO order,
-            //   if possible
-            let _ = rsp_tx.send(item.verify_single());
-        });
-
-        rsp_rx
-            .await
-            .map_err(|_| {
-                "threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?"
-            })?
-            .map_err(BoxError::from)
+        // TODO:
+        // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
+        // - spawn fallback individual verifications so rayon executes them in FIFO order,
+        //   if possible
+        spawn_fifo_and_convert(move || item.verify_single()).await
     }
 }
 
