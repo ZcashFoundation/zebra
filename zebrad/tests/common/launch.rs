@@ -286,13 +286,16 @@ where
     use TestType::*;
 
     let test_name = test_name.as_ref();
+    let reuse_state_path = reuse_state_path.into();
 
     let test_type = if use_cached_state {
         UpdateZebraCachedStateNoRpc
-    } else {
+    } else if ephemeral || reuse_state_path.is_none() {
         LaunchWithEmptyState {
             launches_lightwalletd: false,
         }
+    } else {
+        UseAnyState
     };
 
     // Skip the test unless the user specifically asked for it
@@ -310,7 +313,6 @@ where
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
     let testdir = reuse_state_path
-        .into()
         .unwrap_or_else(|| testdir().expect("failed to create test temporary directory"));
 
     // Writes a configuration that does not have RPC listen_addr set.
