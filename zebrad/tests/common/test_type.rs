@@ -155,12 +155,15 @@ impl TestType {
 
     /// Returns a Zebra config for this test.
     ///
+    /// `ephemeral` is ignored if the test is using a cached state.
+    ///
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
-    pub fn zebrad_config<S: AsRef<str>>(
+    pub fn zebrad_config<Str: AsRef<str>>(
         &self,
-        test_name: S,
+        test_name: Str,
         use_internet_connection: bool,
+        ephemeral: bool,
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
@@ -201,6 +204,7 @@ impl TestType {
         );
 
         if !self.needs_zebra_cached_state() {
+            config.state.ephemeral = ephemeral;
             return Some(Ok(config));
         }
 

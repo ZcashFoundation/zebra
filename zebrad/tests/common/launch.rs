@@ -236,7 +236,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection)
+        .zebrad_config(test_name, use_internet_connection, true)
         .expect("already checked config")?;
 
     config.network.network = network;
@@ -276,6 +276,7 @@ pub fn spawn_zebrad_without_rpc<Str, Dir>(
     test_name: Str,
     use_cached_state: bool,
     use_internet_connection: bool,
+    ephemeral: bool,
     reuse_state_path: Dir,
 ) -> Result<Option<TestChild<TempDir>>>
 where
@@ -301,7 +302,7 @@ where
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection)
+        .zebrad_config(test_name, use_internet_connection, ephemeral)
         .expect("already checked config")?;
 
     config.network.network = network;
@@ -342,8 +343,9 @@ pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
         return false;
     }
 
-    // Check if we have any necessary cached states for the zebrad config
-    test_type.zebrad_config(test_name, true).is_some()
+    // Check if we have any necessary cached states for the zebrad config.
+    // The ephemeral value doesn't matter here.
+    test_type.zebrad_config(test_name, true, true).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

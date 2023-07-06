@@ -2416,7 +2416,7 @@ pub(crate) async fn new_state_format() -> Result<()> {
 
     // # Create a new state and check it has the current version
 
-    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, None)?;
+    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, false, None)?;
 
     // Skip the test unless it has the required state and environmental variables.
     let Some(mut zebrad) = zebrad else {
@@ -2455,7 +2455,7 @@ pub(crate) async fn new_state_format() -> Result<()> {
 
     let test_name = "new_state_format_test/reopen";
 
-    let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir)?
+    let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, false, dir)?
         .expect("unexpectedly missing required state or env vars");
 
     tracing::info!(?network, "running {} using zebrad", test_name);
