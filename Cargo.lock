@@ -1860,6 +1860,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "home"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5444c27eef6923071f7ebcc33e3444508466a76f7a2b93da00ed6e19f30c1ddb"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "hostname"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2307,6 +2316,15 @@ dependencies = [
  "group",
  "rand_core 0.6.4",
  "subtle",
+]
+
+[[package]]
+name = "known-folders"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b6f1427d9c43b1cce87434c4d9eca33f43bdbb6246a762aa823a582f74c1684"
+dependencies = [
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -5607,6 +5625,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xdg"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "688597db5a750e9cad4511cb94729a078e274308099a0382b5b8203bbc767fee"
+dependencies = [
+ "home",
+]
+
+[[package]]
 name = "yaml-rust"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5779,22 +5806,24 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b209661425fa780ff4fd1b5d8ef2148f569536b5071051143eede32e291e1a65"
+checksum = "59d2e066a717f28451a081f2ebd483ddda896cf00d572972c10979d645ffa6c4"
 dependencies = [
  "bellman",
  "blake2b_simd",
  "bls12_381",
- "directories",
  "group",
+ "home",
  "incrementalmerkletree 0.4.0",
  "jubjub",
+ "known-folders",
  "lazy_static",
  "minreq",
  "rand_core 0.6.4",
  "redjubjub",
  "tracing",
+ "xdg",
  "zcash_primitives 0.12.0",
 ]
 
@@ -5930,7 +5959,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
- "zcash_proofs 0.12.0",
+ "zcash_proofs 0.12.1",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
