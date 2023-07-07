@@ -287,16 +287,21 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
+impl serde::Serialize for NoteCommitmentTree {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.as_bytes())
+    }
+}
+
 impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         //
         let mut data = Vec::new();
         merkle_tree::write_frontier_v1(&mut data, self)?;
 
-        //
-        data.drain(4..8);
-
-        //
         writer.write_all(data.as_slice())?;
 
         Ok(())

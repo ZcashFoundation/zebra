@@ -453,8 +453,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 "." => insta::sorted_redaction()
             }
         );
-        //insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
-        //insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
+        insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
+        insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
 
         // The zcash_history types used in this tree don't support serde.
         insta::assert_debug_snapshot!("history_tree", (max_height, history_tree_at_tip));

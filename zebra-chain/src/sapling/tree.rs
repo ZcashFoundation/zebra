@@ -287,6 +287,15 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
+impl serde::Serialize for NoteCommitmentTree {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.as_bytes())
+    }
+}
+
 impl NoteCommitmentTree {
     /// Adds a note commitment u-coordinate to the tree.
     ///
