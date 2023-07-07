@@ -2408,11 +2408,18 @@ async fn generate_checkpoints_testnet() -> Result<()> {
 /// Check that new states are created with the current state format version,
 /// and that restarting `zebrad` doesn't change the format version.
 #[tokio::test]
-pub(crate) async fn new_state_format() -> Result<()> {
+async fn new_state_format() -> Result<()> {
+    for network in [Mainnet, Testnet] {
+        state_format_test("new_state_format_test", network).await?;
+    }
+
+    Ok(())
+}
+
+async fn state_format_test(base_test_name: &str, network: Network) -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let test_name = "new_state_format_test/new";
-    let network = Network::Mainnet;
+    let test_name = &format!("{base_test_name}/new");
 
     // # Create a new state and check it has the current version
 
@@ -2423,7 +2430,7 @@ pub(crate) async fn new_state_format() -> Result<()> {
         return Ok(());
     };
 
-    tracing::info!(?network, "running {} using zebrad", test_name);
+    tracing::info!(?network, "running {test_name} using zebrad");
 
     zebrad.expect_stdout_line_matches("creating new database with the current format")?;
     zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
@@ -2455,12 +2462,12 @@ pub(crate) async fn new_state_format() -> Result<()> {
 
     // # Reopen that state and check the version hasn't changed
 
-    let test_name = "new_state_format_test/reopen";
+    let test_name = &format!("{base_test_name}/reopen");
 
     let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
         .expect("unexpectedly missing required state or env vars");
 
-    tracing::info!(?network, "running {} using zebrad", test_name);
+    tracing::info!(?network, "running {test_name} using zebrad");
 
     zebrad.expect_stdout_line_matches("trying to open current database format")?;
     zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
