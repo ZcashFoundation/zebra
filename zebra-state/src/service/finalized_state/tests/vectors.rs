@@ -3,7 +3,6 @@
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::FromHex;
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 use zebra_chain::{orchard, sapling};
 
 #[test]

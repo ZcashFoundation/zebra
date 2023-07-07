@@ -12,7 +12,6 @@
 
 use std::{fmt, io, ops::Deref};
 
-use bridgetree::{self};
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
@@ -22,6 +21,10 @@ use thiserror::Error;
 use super::commitment::NoteCommitment;
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+
+mod legacy;
+
+use crate::sprout::tree::legacy::LegacyFrontier;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -208,7 +211,7 @@ pub enum NoteCommitmentTreeError {
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`bridgetree::Frontier`].
     ///
@@ -225,7 +228,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sprout = MERKLE_DEPTH = 29.
-    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
+    inner: LegacyFrontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -280,12 +283,19 @@ impl ZcashDeserialize for NoteCommitmentTree {
 }
 
 impl NoteCommitmentTree {
+    fn update_inner_legacy(&mut self, frontier: Frontier<Node, MERKLE_DEPTH>) {
+        self.inner = LegacyFrontier::to_legacy(frontier);
+    }
+
     /// Appends a note commitment to the leafmost layer of the tree.
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(cm.into()) {
+        let mut frontier = self.inner.to_frontier_from_mut();
+
+        if frontier.append(cm.into()) {
+            self.update_inner_legacy(frontier);
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -324,7 +334,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root(self.inner.root().0);
+                let root = Root(self.inner.to_frontier().root().0);
                 *write_root = Some(root);
                 root
             }
@@ -351,7 +361,7 @@ impl NoteCommitmentTree {
     ///
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
-        match self.inner.value() {
+        match Frontier::from(self.inner.clone()).value() {
             Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
             None => 0,
         }
@@ -376,7 +386,7 @@ impl Clone for NoteCommitmentTree {
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: bridgetree::Frontier::empty(),
+            inner: LegacyFrontier::empty(),
             cached_root: Default::default(),
         }
     }

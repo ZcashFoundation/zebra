@@ -288,20 +288,6 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
-impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        //
-        merkle_tree::write_frontier_v1(&mut writer, self)
-    }
-}
-
-impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        //
-        Ok(merkle_tree::read_frontier_v0(reader)?)
-    }
-}
-
 impl NoteCommitmentTree {
     /// Adds a note commitment u-coordinate to the tree.
     ///
@@ -390,47 +376,21 @@ impl NoteCommitmentTree {
         //
         merkle_tree::write_frontier_v1(&mut buf, &self.inner).expect("should not fail?");
 
-        //
-        buf.drain(2..8);
-
-        //
-        let root_bytes: &[u8; 32] = &self
-            .root()
-            .zcash_serialize_to_vec()
-            .expect("should not fail?")
-            .as_slice()
-            .try_into()
-            .expect("root is 32 bytes");
-
-        let _ = &mut buf.append(&mut root_bytes.to_vec());
-
-        //
-        buf.remove(35);
-
-        //
-        buf.insert(68, 1);
-
         buf
     }
 
     ///
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let mut buf: Vec<u8> = bytes.as_ref().to_vec();
+        let buf: Vec<u8> = bytes.as_ref().to_vec();
 
-        //
-        buf.remove(68);
+        if buf.len() == 1 {
+            return NoteCommitmentTree {
+                inner: bridgetree::Frontier::empty(),
+                cached_root: std::sync::RwLock::new(None),
+            };
+        };
 
-        //
-        for _ in 0..6 {
-            buf.insert(2, 0);
-        }
-
-        //
-        buf.insert(41, 0);
-
-        //
         let mut cursor = std::io::Cursor::new(buf);
-
         NoteCommitmentTree {
             inner: merkle_tree::read_frontier_v1(&mut cursor).unwrap(),
             cached_root: std::sync::RwLock::new(Some(
@@ -599,10 +559,8 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             })
             .expect("Parent nodes in a note commitment tree should be serializable");
             */
-            serialized_tree = tree
-                .inner
-                .zcash_serialize_to_vec()
-                .expect("... should not fail");
+            merkle_tree::write_frontier_v1(&mut serialized_tree, &tree.inner)
+                .expect("should always work?");
         }
 
         Self(serialized_tree)
