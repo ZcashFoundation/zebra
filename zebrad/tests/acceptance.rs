@@ -136,6 +136,7 @@
 //! ```
 
 use std::{
+    cmp::Ordering,
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
@@ -2526,10 +2527,10 @@ async fn state_format_test(
 
         let running_version = database_format_version_in_code();
 
-        if fake_version < &running_version {
-            expect_older_version = true;
-        } else if fake_version > &running_version {
-            expect_newer_version = true;
+        match fake_version.cmp(&running_version) {
+            Ordering::Less => expect_older_version = true,
+            Ordering::Equal => {}
+            Ordering::Greater => expect_newer_version = true,
         }
     }
 
