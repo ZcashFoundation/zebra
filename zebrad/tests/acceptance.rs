@@ -2419,6 +2419,9 @@ async fn new_state_format() -> Result<()> {
 
 /// Check that outdated states are updated to the current state format version,
 /// and that restarting `zebrad` doesn't change the updated format version.
+///
+/// TODO: test partial updates, once we have some updates that take a while.
+///       (or just add a delay during tests)
 #[tokio::test]
 async fn update_state_format() -> Result<()> {
     let mut fake_version = database_format_version_in_code();
