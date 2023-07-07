@@ -2432,6 +2432,29 @@ async fn update_state_format() -> Result<()> {
     Ok(())
 }
 
+/// Check that newer state formats are downgraded to the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
+///
+/// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
+#[tokio::test]
+async fn downgrade_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = u16::MAX.into();
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test(
+            "downgrade_state_format_test",
+            network,
+            3,
+            Some(&fake_version),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Test state format changes, see calling tests for details.
 async fn state_format_test(
     base_test_name: &str,
@@ -2483,9 +2506,11 @@ async fn state_format_test(
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     // # Apply the fake version if needed
+    let mut expect_older_version = false;
+    let mut expect_newer_version = false;
 
     if let Some(fake_version) = fake_version {
-        let test_name = &format!("{base_test_name}/apply_fake_version");
+        let test_name = &format!("{base_test_name}/apply_fake_version/{fake_version}");
         tracing::info!(?network, "running {test_name} using zebra-state");
 
         let mut config = UseAnyState
@@ -2495,13 +2520,25 @@ async fn state_format_test(
 
         zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
             .expect("can't write fake database version to disk");
+
+        let running_version = database_format_version_in_code();
+
+        if fake_version < &running_version {
+            expect_older_version = true;
+        } else if fake_version > &running_version {
+            expect_newer_version = true;
+        }
     }
 
     // # Reopen that state and check the version hasn't changed
 
     for reopened in 0..reopen_count {
-        let expect_older_version = fake_version.is_some() && reopened == 0;
         let test_name = &format!("{base_test_name}/reopen/{reopened}");
+
+        if reopened > 0 {
+            expect_older_version = false;
+            expect_newer_version = false;
+        }
 
         let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
             .expect("unexpectedly missing required state or env vars");
@@ -2512,6 +2549,9 @@ async fn state_format_test(
             zebrad.expect_stdout_line_matches("trying to open older database format")?;
             zebrad.expect_stdout_line_matches("marking database format as upgraded")?;
             zebrad.expect_stdout_line_matches("database is fully upgraded")?;
+        } else if expect_newer_version {
+            zebrad.expect_stdout_line_matches("trying to open newer database format")?;
+            zebrad.expect_stdout_line_matches("marking database format as downgraded")?;
         } else {
             zebrad.expect_stdout_line_matches("trying to open current database format")?;
             zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
@@ -2527,11 +2567,13 @@ async fn state_format_test(
             );
         }
 
-        assert!(
-            !logs.contains("marking database format as downgraded"),
-            "unexpected format downgrade in logs:\n\
-         {logs}"
-        );
+        if !expect_newer_version {
+            assert!(
+                !logs.contains("marking database format as downgraded"),
+                "unexpected format downgrade in logs:\n\
+                 {logs}"
+            );
+        }
 
         let output = zebrad.wait_with_output()?;
         let mut output = output.assert_failure()?;
