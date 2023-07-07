@@ -60,4 +60,7 @@ pub use service::{
     init_test, init_test_services, ReadStateService,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use config::write_database_format_version_to_disk;
+
 pub(crate) use request::ContextuallyVerifiedBlock;

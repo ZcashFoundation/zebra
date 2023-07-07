@@ -175,8 +175,6 @@ impl DbFormatChange {
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(&config, network);
-
-                return;
             }
             Downgrade { .. } => {
                 // # Correctness
@@ -191,7 +189,6 @@ impl DbFormatChange {
                 //
                 // The resposibility of staying backwards-compatible is on the newer version.
                 // We do this on a best-effort basis for versions that are still supported.
-                return;
             }
         }
     }
@@ -230,6 +227,14 @@ impl DbFormatChange {
             );
 
             Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
+
+            info!(
+                ?initial_tip_height,
+                ?newer_running_version,
+                ?older_disk_version,
+                "database is fully upgraded"
+            );
+
             return;
         };
 
@@ -278,6 +283,12 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+        info!(
+            ?initial_tip_height,
+            ?newer_running_version,
+            ?older_disk_version,
+            "database is fully upgraded"
+        );
     }
 
     /// Mark a newly created database with the current format version.

@@ -146,6 +146,7 @@ use color_eyre::{
     eyre::{eyre, Result, WrapErr},
     Help,
 };
+use semver::Version;
 
 use zebra_chain::{
     block::{self, Height},
@@ -153,7 +154,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::constants::LOCK_FILE_ERROR;
+use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
@@ -2410,16 +2411,33 @@ async fn generate_checkpoints_testnet() -> Result<()> {
 #[tokio::test]
 async fn new_state_format() -> Result<()> {
     for network in [Mainnet, Testnet] {
-        state_format_test("new_state_format_test", network, 2).await?;
+        state_format_test("new_state_format_test", network, 2, None).await?;
     }
 
     Ok(())
 }
 
+/// Check that outdated states are updated to the current state format version,
+/// and that restarting `zebrad` doesn't change the updated format version.
+#[tokio::test]
+async fn update_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = 0;
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test("update_state_format_test", network, 3, Some(&fake_version)).await?;
+    }
+
+    Ok(())
+}
+
+/// Test state format changes, see calling tests for details.
 async fn state_format_test(
     base_test_name: &str,
     network: Network,
     reopen_count: usize,
+    fake_version: Option<&Version>,
 ) -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -2464,26 +2482,51 @@ async fn state_format_test(
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
+    // # Apply the fake version if needed
+
+    if let Some(fake_version) = fake_version {
+        let test_name = &format!("{base_test_name}/apply_fake_version");
+        tracing::info!(?network, "running {test_name} using zebra-state");
+
+        let mut config = UseAnyState
+            .zebrad_config(test_name, false, Some(dir.path()))
+            .expect("already checked config")?;
+        config.network.network = network;
+
+        zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
+            .expect("can't write fake database version to disk");
+    }
+
     // # Reopen that state and check the version hasn't changed
 
-    for _ in 0..reopen_count {
-        let test_name = &format!("{base_test_name}/reopen/{reopen_count}");
+    for reopened in 0..reopen_count {
+        let expect_older_version = fake_version.is_some() && reopened == 0;
+        let test_name = &format!("{base_test_name}/reopen/{reopened}");
 
         let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
             .expect("unexpectedly missing required state or env vars");
 
         tracing::info!(?network, "running {test_name} using zebrad");
 
-        zebrad.expect_stdout_line_matches("trying to open current database format")?;
-        zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+        if expect_older_version {
+            zebrad.expect_stdout_line_matches("trying to open older database format")?;
+            zebrad.expect_stdout_line_matches("marking database format as upgraded")?;
+            zebrad.expect_stdout_line_matches("database is fully upgraded")?;
+        } else {
+            zebrad.expect_stdout_line_matches("trying to open current database format")?;
+            zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+        }
 
         let logs = zebrad.kill_and_return_output(false)?;
 
-        assert!(
-            !logs.contains("marking database format as upgraded"),
-            "unexpected format upgrade in logs:\n\
-         {logs}"
-        );
+        if !expect_older_version {
+            assert!(
+                !logs.contains("marking database format as upgraded"),
+                "unexpected format upgrade in logs:\n\
+                 {logs}"
+            );
+        }
+
         assert!(
             !logs.contains("marking database format as downgraded"),
             "unexpected format downgrade in logs:\n\
