@@ -187,7 +187,7 @@ impl DbFormatChange {
                 // Older supported versions just assume they can read newer formats,
                 // because they can't predict all changes a newer Zebra version could make.
                 //
-                // The resposibility of staying backwards-compatible is on the newer version.
+                // The responsibility of staying backwards-compatible is on the newer version.
                 // We do this on a best-effort basis for versions that are still supported.
             }
         }
