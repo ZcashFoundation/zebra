@@ -1373,7 +1373,7 @@ impl<T> TestOutput<T> {
         self.output.status.signal() == Some(9)
     }
 
-    /// Takes the generic `dir` paramter out of this `TestOutput`.
+    /// Takes the generic `dir` parameter out of this `TestOutput`.
     pub fn take_dir(&mut self) -> Option<T> {
         self.dir.take()
     }
