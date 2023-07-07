@@ -236,7 +236,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection, true)
+        .zebrad_config(test_name, use_internet_connection, None)
         .expect("already checked config")?;
 
     config.network.network = network;
@@ -258,13 +258,14 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 /// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
 ///
 /// If `use_cached_state` is `true`, then update the cached state to the tip.
-/// Otherwise, just create an empty state.
+/// If `ephemeral` is `true`, then use an ephemeral state path.
+/// If `reuse_state_path` is `Some(path)`, then use the state at that path, and take ownership of
+/// the temporary directory, so it isn't deleted until the test ends.
+/// Otherwise, just create an empty state in this test's new temporary directory.
 ///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
 /// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
 /// environmental variable to provide an initial state to the zebrad instance.
-///
-/// If `reuse_state_path` is `Some(tempdir)`, use that directory as the state path.
 ///
 /// Returns:
 /// - `Ok(Some(zebrad))` on success,
@@ -275,9 +276,9 @@ pub fn spawn_zebrad_without_rpc<Str, Dir>(
     network: Network,
     test_name: Str,
     use_cached_state: bool,
-    use_internet_connection: bool,
     ephemeral: bool,
     reuse_state_path: Dir,
+    use_internet_connection: bool,
 ) -> Result<Option<TestChild<TempDir>>>
 where
     Str: AsRef<str> + Debug,
@@ -286,16 +287,22 @@ where
     use TestType::*;
 
     let test_name = test_name.as_ref();
-    let reuse_state_path = reuse_state_path.into();
 
-    let test_type = if use_cached_state {
-        UpdateZebraCachedStateNoRpc
-    } else if ephemeral || reuse_state_path.is_none() {
-        LaunchWithEmptyState {
-            launches_lightwalletd: false,
-        }
+    let reuse_state_path = reuse_state_path.into();
+    let testdir = reuse_state_path
+        .unwrap_or_else(|| testdir().expect("failed to create test temporary directory"));
+
+    let (test_type, replace_cache_dir) = if use_cached_state {
+        (UpdateZebraCachedStateNoRpc, None)
+    } else if ephemeral {
+        (
+            LaunchWithEmptyState {
+                launches_lightwalletd: false,
+            },
+            None,
+        )
     } else {
-        UseAnyState
+        (UseAnyState, Some(testdir.path()))
     };
 
     // Skip the test unless the user specifically asked for it
@@ -305,15 +312,12 @@ where
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection, ephemeral)
+        .zebrad_config(test_name, use_internet_connection, replace_cache_dir)
         .expect("already checked config")?;
 
     config.network.network = network;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
-
-    let testdir = reuse_state_path
-        .unwrap_or_else(|| testdir().expect("failed to create test temporary directory"));
 
     // Writes a configuration that does not have RPC listen_addr set.
     // If the state path env var is set, uses it in the config.
@@ -346,8 +350,8 @@ pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
     }
 
     // Check if we have any necessary cached states for the zebrad config.
-    // The ephemeral value doesn't matter here.
-    test_type.zebrad_config(test_name, true, true).is_some()
+    // The cache_dir value doesn't matter here.
+    test_type.zebrad_config(test_name, true, None).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

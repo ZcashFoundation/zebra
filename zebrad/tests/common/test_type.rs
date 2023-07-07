@@ -1,6 +1,10 @@
 //! Provides TestType enum with shared code for acceptance tests
 
-use std::{env, path::PathBuf, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use indexmap::IndexSet;
 
@@ -163,7 +167,7 @@ impl TestType {
 
     /// Returns a Zebra config for this test.
     ///
-    /// `ephemeral` is ignored if the test is using a cached state.
+    /// `replace_cache_dir` replaces any cached or ephemeral state.
     ///
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
@@ -171,7 +175,7 @@ impl TestType {
         &self,
         test_name: Str,
         use_internet_connection: bool,
-        ephemeral: bool,
+        replace_cache_dir: Option<&Path>,
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
@@ -211,19 +215,19 @@ impl TestType {
             zebra_chain::transparent::Address::from_script_hash(config.network.network, [0x7e; 20]),
         );
 
-        if !self.needs_zebra_cached_state() {
-            config.state.ephemeral = ephemeral;
-            return Some(Ok(config));
+        // If we have a cached state, or we don't want to be ephemeral, update the config to use it
+        if replace_cache_dir.is_some() || self.needs_zebra_cached_state() {
+            let zebra_state_path = replace_cache_dir
+                .map(|path| path.to_owned())
+                .or_else(|| self.zebrad_state_path(test_name))?;
+
+            config.state.ephemeral = false;
+            config.state.cache_dir = zebra_state_path;
+
+            // And reset the concurrency to the default value
+            config.sync.checkpoint_verify_concurrency_limit =
+                zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
         }
-
-        // If we have a cached state, update the config to use it
-        let zebra_state_path = self.zebrad_state_path(test_name)?;
-        config.state.ephemeral = false;
-        config.state.cache_dir = zebra_state_path;
-
-        // And reset the concurrency to the default value
-        config.sync.checkpoint_verify_concurrency_limit =
-            zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
         Some(Ok(config))
     }
