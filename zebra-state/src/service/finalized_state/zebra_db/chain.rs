@@ -21,6 +21,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
@@ -69,15 +70,14 @@ impl DiskWriteBatch {
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
-        history_tree: Arc<HistoryTree>,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let SemanticallyVerifiedBlock { height, .. } = finalized;
+        let height = finalized.verified.height;
 
         // Update the tree in state
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&history_tree_cf, h);
         }
@@ -87,7 +87,7 @@ impl DiskWriteBatch {
         // Otherwise, the ReadStateService could access a height
         // that was just deleted by a concurrent StateService write.
         // This requires a database version update.
-        if let Some(history_tree) = history_tree.as_ref().as_ref() {
+        if let Some(history_tree) = finalized.treestate.history_tree.as_ref().as_ref() {
             self.zs_insert(&history_tree_cf, height, history_tree);
         }
 

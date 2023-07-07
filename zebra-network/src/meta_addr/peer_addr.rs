@@ -3,7 +3,7 @@
 
 use std::{
     fmt,
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr},
     ops::{Deref, DerefMut},
     str::FromStr,
 };
@@ -66,6 +66,11 @@ impl DerefMut for PeerSocketAddr {
 }
 
 impl PeerSocketAddr {
+    /// Returns an unspecified `PeerSocketAddr`, which can't be used for outbound connections.
+    pub fn unspecified() -> Self {
+        Self(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))
+    }
+
     /// Return the underlying [`SocketAddr`], which allows sensitive peer address information to
     /// be printed and logged.
     pub fn remove_socket_addr_privacy(&self) -> SocketAddr {

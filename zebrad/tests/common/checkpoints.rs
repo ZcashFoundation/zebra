@@ -303,7 +303,7 @@ impl ZebraCheckpointsTestDirExt for TempDir {
 
         let zebra_checkpoints = self.spawn_child_with_command(zebra_checkpoints_path, args.clone());
 
-        let Err(system_path_error) = zebra_checkpoints else  {
+        let Err(system_path_error) = zebra_checkpoints else {
             return zebra_checkpoints;
         };
 

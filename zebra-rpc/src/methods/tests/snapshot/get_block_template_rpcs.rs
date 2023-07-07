@@ -286,10 +286,11 @@ pub async fn test_responses<State, ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -330,10 +331,11 @@ pub async fn test_responses<State, ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn

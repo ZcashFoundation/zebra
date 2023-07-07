@@ -782,7 +782,9 @@ async fn state_error_converted_correctly() {
         "expected matching state and transaction errors"
     );
 
-    let TransactionError::ValidateContextError(propagated_validate_context_error) = transaction_error else {
+    let TransactionError::ValidateContextError(propagated_validate_context_error) =
+        transaction_error
+    else {
         panic!("should be a ValidateContextError variant");
     };
 

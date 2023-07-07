@@ -51,6 +51,7 @@ impl AddressBookUpdater {
         let address_book = AddressBook::new(
             local_listener,
             config.network,
+            config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),
         );
         let address_metrics = address_book.address_metrics_watcher();
@@ -58,14 +59,12 @@ impl AddressBookUpdater {
 
         #[cfg(feature = "progress-bar")]
         let (mut address_info, address_bar, never_bar, failed_bar) = {
-            let address_bar = howudoin::new().label("Known Peers");
+            let address_bar = howudoin::new_root().label("Known Peers");
+            let never_bar =
+                howudoin::new_with_parent(address_bar.id()).label("Never Attempted Peers");
+            let failed_bar = howudoin::new_with_parent(never_bar.id()).label("Failed Peers");
 
-            (
-                address_metrics.clone(),
-                address_bar,
-                howudoin::new_with_parent(address_bar.id()).label("Never Attempted Peers"),
-                howudoin::new_with_parent(address_bar.id()).label("Failed Peers"),
-            )
+            (address_metrics.clone(), address_bar, never_bar, failed_bar)
         };
 
         let worker_address_book = address_book.clone();

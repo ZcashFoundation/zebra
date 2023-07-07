@@ -163,7 +163,7 @@ pub struct SemanticallyVerifiedBlock {
 }
 
 /// A block ready to be committed directly to the finalized state with
-/// no checks.
+/// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
 ///
 /// This is exposed for use in checkpointing.
 ///
@@ -255,43 +255,62 @@ impl Treestate {
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
 /// database and recompute a new one.
-pub struct ContextuallyVerifiedBlockWithTrees {
+pub struct SemanticallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub block: SemanticallyVerifiedBlock,
+    pub verified: SemanticallyVerifiedBlock,
     /// The tresstate associated with the block.
-    pub treestate: Option<Treestate>,
+    pub treestate: Treestate,
 }
 
-impl ContextuallyVerifiedBlockWithTrees {
+/// Contains a block ready to be committed.
+///
+/// Zebra's state service passes this `enum` over to the finalized state
+/// when committing a block.
+pub enum FinalizableBlock {
+    Checkpoint {
+        checkpoint_verified: CheckpointVerifiedBlock,
+    },
+    Contextual {
+        contextually_verified: ContextuallyVerifiedBlock,
+        treestate: Treestate,
+    },
+}
+
+impl FinalizableBlock {
+    /// Create a new [`FinalizableBlock`] given a [`ContextuallyVerifiedBlock`].
     pub fn new(contextually_verified: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
-        Self {
-            block: SemanticallyVerifiedBlock::from(contextually_verified),
-            treestate: Some(treestate),
+        Self::Contextual {
+            contextually_verified,
+            treestate,
+        }
+    }
+
+    #[cfg(test)]
+    /// Extract a [`Block`] from a [`FinalizableBlock`] variant.
+    pub fn inner_block(&self) -> Arc<Block> {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => checkpoint_verified.block.clone(),
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => contextually_verified.block.clone(),
         }
     }
 }
 
-impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
-    fn from(block: Arc<Block>) -> Self {
-        Self::from(SemanticallyVerifiedBlock::from(block))
-    }
-}
-
-impl From<SemanticallyVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
-    fn from(semantically_verified: SemanticallyVerifiedBlock) -> Self {
-        Self {
-            block: semantically_verified,
-            treestate: None,
-        }
-    }
-}
-
-impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
+impl From<CheckpointVerifiedBlock> for FinalizableBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        Self {
-            block: checkpoint_verified.0,
-            treestate: None,
+        Self::Checkpoint {
+            checkpoint_verified,
         }
+    }
+}
+
+impl From<Arc<Block>> for FinalizableBlock {
+    fn from(block: Arc<Block>) -> Self {
+        Self::from(CheckpointVerifiedBlock::from(block))
     }
 }
 
@@ -413,6 +432,12 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     }
 }
 
+impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
+    fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
+        checkpoint_verified.0
+    }
+}
+
 impl Deref for CheckpointVerifiedBlock {
     type Target = SemanticallyVerifiedBlock;
 
@@ -430,12 +455,11 @@ impl DerefMut for CheckpointVerifiedBlock {
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
-    /// Performs contextual validation of the given block, committing it to the
-    /// state if successful.
+    /// Performs contextual validation of the given semantically verified block,
+    /// committing it to the state if successful.
     ///
-    /// It is the caller's responsibility to perform semantic validation. This
-    /// request can be made out-of-order; the state service will queue it until
-    /// its parent is ready.
+    /// This request can be made out-of-order; the state service will queue it
+    /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or an error if the block fails contextual
@@ -453,12 +477,12 @@ pub enum Request {
     /// documentation for details.
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
-    /// Commit a checkpointed block to the state, skipping most block validation.
+    /// Commit a checkpointed block to the state, skipping most but not all
+    /// contextual validation.
     ///
-    /// This is exposed for use in checkpointing, which produces finalized
-    /// blocks. It is the caller's responsibility to ensure that the block is
-    /// semantically valid and final. This request can be made out-of-order;
-    /// the state service will queue it until its parent is ready.
+    /// This is exposed for use in checkpointing, which produces checkpoint vefified
+    /// blocks. This request can be made out-of-order; the state service will queue
+    /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
     /// block, or an error.
@@ -470,8 +494,9 @@ pub enum Request {
     ///
     /// # Note
     ///
-    /// Finalized and non-finalized blocks are an internal Zebra implementation detail.
-    /// There is no difference between these blocks on the network, or in Zebra's
+    /// [`SemanticallyVerifiedBlock`], [`ContextuallyVerifiedBlock`] and
+    /// [`CheckpointVerifiedBlock`] are an internal Zebra implementation detail.
+    /// There is no difference between these blocks on the Zcash network, or in Zebra's
     /// network or syncer implementations.
     ///
     /// # Consensus
