@@ -128,11 +128,6 @@ impl Verifier {
     /// This function returns a future that becomes ready when the batch is completed.
     async fn flush_spawning(batch: BatchVerifier, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        // TODO:
-        // - spawn batches so rayon executes them in FIFO order
-        //   possible implementation: return a closure in a Future,
-        //   then run it using scope_fifo() in the worker task,
-        //   limiting the number of concurrent batches to the number of rayon threads
         let _ = tx.send(spawn_fifo(move || batch.verify(thread_rng())).await.ok());
     }
 
