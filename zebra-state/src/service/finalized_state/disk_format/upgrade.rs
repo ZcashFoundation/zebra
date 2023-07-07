@@ -22,6 +22,11 @@ use crate::{
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
+    /// Marking the format as newly created by `running_version`.
+    ///
+    /// Newly created databases have no disk version.
+    NewlyCreated { running_version: Version },
+
     /// Upgrading the format from `older_disk_version` to `newer_running_version`.
     ///
     /// Until this upgrade is complete, the format is a mixture of both versions.
@@ -79,7 +84,7 @@ impl DbFormatChange {
                 "creating new database with the current format"
             );
 
-            return None;
+            return Some(NewlyCreated { running_version });
         };
 
         match disk_version.cmp(&running_version) {
@@ -154,11 +159,51 @@ impl DbFormatChange {
     /// Apply this format change to the database.
     /// Format changes should be launched in an independent `std::thread`.
     ///
+    /// See `apply_format_upgrade()` for details.
+    fn apply_format_change(
+        self,
+        config: Config,
+        network: Network,
+        initial_tip_height: Option<Height>,
+        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+    ) {
+        match self {
+            // Handled in the rest of this function.
+            Upgrade { .. } => {
+                self.apply_format_upgrade(config, network, initial_tip_height, cancel_receiver)
+            }
+
+            NewlyCreated { .. } => {
+                Self::mark_as_newly_created(&config, network);
+
+                return;
+            }
+            Downgrade { .. } => {
+                // # Correctness
+                //
+                // At the start of a format downgrade, the database must be marked as partially or
+                // fully downgraded. This lets newer Zebra versions know that some blocks with older
+                // formats have been added to the database.
+                Self::mark_as_downgraded(&config, network);
+
+                // Older supported versions just assume they can read newer formats,
+                // because they can't predict all changes a newer Zebra version could make.
+                //
+                // The resposibility of staying backwards-compatible is on the newer version.
+                // We do this on a best-effort basis for versions that are still supported.
+                return;
+            }
+        }
+    }
+
+    /// Apply any required format updates to the database.
+    /// Format changes should be launched in an independent `std::thread`.
+    ///
     /// If `cancel_receiver` gets a message, or its sender is dropped,
     /// the format change stops running early.
     //
-    // New format changes must be added to the *end* of this method.
-    fn apply_format_change(
+    // New format upgrades must be added to the *end* of this method.
+    fn apply_format_upgrade(
         self,
         config: Config,
         network: Network,
@@ -170,21 +215,7 @@ impl DbFormatChange {
             older_disk_version,
         } = self
         else {
-            // If it's not an upgrade, it's a downgrade.
-
-            // # Correctness
-            //
-            // At the start of a format downgrade, the database must be marked as partially or
-            // fully downgraded. This lets newer Zebra versions know that some blocks with older
-            // formats have been added to the database.
-            Self::mark_as_downgraded(&config, network);
-
-            // Older supported versions just assume they can read newer formats,
-            // because they can't predict all changes a newer Zebra version could make.
-            //
-            // The resposibility of staying backwards-compatible is on the newer version.
-            // We do this on a best-effort basis for versions that are still supported.
-            return;
+            unreachable!("already checked for Upgrade")
         };
 
         // # New Upgrades Sometimes Go Here
@@ -247,6 +278,41 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+    }
+
+    /// Mark a newly created database with the current format version.
+    ///
+    /// This should be called when a newly created database is opened.
+    ///
+    /// # Concurrency
+    ///
+    /// The version must only be updated while RocksDB is holding the database
+    /// directory lock. This prevents multiple Zebra instances corrupting the version
+    /// file.
+    ///
+    /// # Panics
+    ///
+    /// If the format should not have been upgraded, because the database is not newly created.
+    fn mark_as_newly_created(config: &Config, network: Network) {
+        let disk_version = database_format_version_on_disk(config, network)
+            .expect("unable to read database format version file path");
+        let running_version = database_format_version_in_code();
+
+        assert_eq!(
+            disk_version, None,
+            "can't overwrite the format version in an existing database:\n\
+             disk: {disk_version:?}\n\
+             running: {running_version}"
+        );
+
+        info!(
+            ?running_version,
+            ?disk_version,
+            "marking database format as newly created"
+        );
+
+        write_database_format_version_to_disk(&running_version, config, network)
+            .expect("unable to write database format version file to disk");
     }
 
     /// Mark the database as upgraded to `format_upgrade_version`.
