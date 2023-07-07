@@ -364,10 +364,9 @@ impl NoteCommitmentTree {
     ///
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
-        match self.inner.clone().value() {
-            Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
-            None => 0,
-        }
+        self.inner
+            .value()
+            .map_or(0, |x| u64::from(x.position()) + 1)
     }
 
     /// Checks if the tree roots and inner data structures of `self` and `other` are equal.

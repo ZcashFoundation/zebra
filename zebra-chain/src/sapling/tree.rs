@@ -375,10 +375,9 @@ impl NoteCommitmentTree {
     ///
     /// For Sapling, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
-        match self.inner.value() {
-            Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
-            None => 0,
-        }
+        self.inner
+            .value()
+            .map_or(0, |x| u64::from(x.position()) + 1)
     }
 
     ///
