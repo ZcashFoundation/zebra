@@ -10,7 +10,7 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-use std::{fmt, io, ops::Deref};
+use std::{fmt, ops::Deref};
 
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::frontier::Frontier;
@@ -20,10 +20,7 @@ use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
-
 mod legacy;
-
 use crate::sprout::tree::legacy::LegacyFrontier;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -246,40 +243,6 @@ pub struct NoteCommitmentTree {
     /// only written once per tree update. Each tree has its own cached root, a
     /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
-}
-
-impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // TODO: Add correct serialization.
-        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
-        writer.write_all(buf)?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        // TODO: Add deserialization
-        Ok(Frontier::empty())
-    }
-}
-
-impl ZcashSerialize for NoteCommitmentTree {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // TODO: Add correct serialization.
-        let buf: &[u8] = &self.zcash_serialize_to_vec()?;
-        writer.write_all(buf)?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for NoteCommitmentTree {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        // TODO: Add deserialization
-        Ok(NoteCommitmentTree::default())
-    }
 }
 
 impl NoteCommitmentTree {
