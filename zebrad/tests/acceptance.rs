@@ -2426,6 +2426,8 @@ pub(crate) async fn new_state_format() -> Result<()> {
     tracing::info!(?network, "running {} using zebrad", test_name);
 
     zebrad.expect_stdout_line_matches("creating new database with the current format")?;
+    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+
     let logs = zebrad.kill_and_return_output(false)?;
 
     assert!(
@@ -2461,6 +2463,8 @@ pub(crate) async fn new_state_format() -> Result<()> {
     tracing::info!(?network, "running {} using zebrad", test_name);
 
     zebrad.expect_stdout_line_matches("trying to open current database format")?;
+    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+
     let logs = zebrad.kill_and_return_output(false)?;
 
     assert!(
