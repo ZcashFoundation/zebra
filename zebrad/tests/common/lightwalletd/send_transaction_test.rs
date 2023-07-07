@@ -62,7 +62,7 @@ pub async fn run() -> Result<()> {
     let network = Mainnet;
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, true) {
         return Ok(());
     }
 

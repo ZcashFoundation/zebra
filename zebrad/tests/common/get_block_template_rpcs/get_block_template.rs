@@ -66,7 +66,7 @@ pub(crate) async fn run() -> Result<()> {
     let network = Network::Mainnet;
 
     // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
-    if !can_spawn_zebrad_for_test_type(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, true) {
         return Ok(());
     }
 
