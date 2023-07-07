@@ -2410,13 +2410,17 @@ async fn generate_checkpoints_testnet() -> Result<()> {
 #[tokio::test]
 async fn new_state_format() -> Result<()> {
     for network in [Mainnet, Testnet] {
-        state_format_test("new_state_format_test", network).await?;
+        state_format_test("new_state_format_test", network, 2).await?;
     }
 
     Ok(())
 }
 
-async fn state_format_test(base_test_name: &str, network: Network) -> Result<()> {
+async fn state_format_test(
+    base_test_name: &str,
+    network: Network,
+    reopen_count: usize,
+) -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let test_name = &format!("{base_test_name}/new");
@@ -2451,7 +2455,7 @@ async fn state_format_test(base_test_name: &str, network: Network) -> Result<()>
     let output = zebrad.wait_with_output()?;
     let mut output = output.assert_failure()?;
 
-    let dir = output
+    let mut dir = output
         .take_dir()
         .expect("dir should not already have been taken");
 
@@ -2462,36 +2466,41 @@ async fn state_format_test(base_test_name: &str, network: Network) -> Result<()>
 
     // # Reopen that state and check the version hasn't changed
 
-    let test_name = &format!("{base_test_name}/reopen");
+    for _ in 0..reopen_count {
+        let test_name = &format!("{base_test_name}/reopen/{reopen_count}");
 
-    let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
-        .expect("unexpectedly missing required state or env vars");
+        let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
+            .expect("unexpectedly missing required state or env vars");
 
-    tracing::info!(?network, "running {test_name} using zebrad");
+        tracing::info!(?network, "running {test_name} using zebrad");
 
-    zebrad.expect_stdout_line_matches("trying to open current database format")?;
-    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+        zebrad.expect_stdout_line_matches("trying to open current database format")?;
+        zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
 
-    let logs = zebrad.kill_and_return_output(false)?;
+        let logs = zebrad.kill_and_return_output(false)?;
 
-    assert!(
-        !logs.contains("marking database format as upgraded"),
-        "unexpected format upgrade in logs:\n\
+        assert!(
+            !logs.contains("marking database format as upgraded"),
+            "unexpected format upgrade in logs:\n\
          {logs}"
-    );
-    assert!(
-        !logs.contains("marking database format as downgraded"),
-        "unexpected format downgrade in logs:\n\
+        );
+        assert!(
+            !logs.contains("marking database format as downgraded"),
+            "unexpected format downgrade in logs:\n\
          {logs}"
-    );
+        );
 
-    let output = zebrad.wait_with_output()?;
-    let output = output.assert_failure()?;
+        let output = zebrad.wait_with_output()?;
+        let mut output = output.assert_failure()?;
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        dir = output
+            .take_dir()
+            .expect("dir should not already have been taken");
 
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    }
     Ok(())
 }
