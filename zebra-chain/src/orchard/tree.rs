@@ -20,7 +20,6 @@ use std::{
 use bitvec::prelude::*;
 use bridgetree;
 use halo2::pasta::{group::ff::PrimeField, pallas};
-use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
 use thiserror::Error;
 use zcash_primitives::merkle_tree;
@@ -296,18 +295,6 @@ impl serde::Serialize for NoteCommitmentTree {
     }
 }
 
-impl ZcashSerialize for Frontier<Node, MERKLE_DEPTH> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        //
-        let mut data = Vec::new();
-        merkle_tree::write_frontier_v1(&mut data, self)?;
-
-        writer.write_all(data.as_slice())?;
-
-        Ok(())
-    }
-}
-
 impl NoteCommitmentTree {
     /// Adds a note commitment x-coordinate to the tree.
     ///
@@ -529,14 +516,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             return Self(vec![]);
         }
 
-        // Convert the note commitment tree from
-        // [`Frontier`](bridgetree::Frontier) to
-        // [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree).
-        let serialized_tree = tree
-            .inner
-            .zcash_serialize_to_vec()
-            .expect("note commitment tree should be serializable");
-        Self(serialized_tree)
+        Self(tree.as_bytes())
     }
 }
 
