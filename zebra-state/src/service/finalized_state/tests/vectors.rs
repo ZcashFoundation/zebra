@@ -10,8 +10,6 @@ use rand::random;
 
 use zebra_chain::{orchard, sapling, sprout};
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
-
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {

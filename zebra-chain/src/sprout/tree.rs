@@ -20,8 +20,7 @@ use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
-mod legacy;
-use crate::sprout::tree::legacy::LegacyFrontier;
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -129,6 +128,20 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
+impl ZcashSerialize for Root {
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
+
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Root {
+    fn zcash_deserialize<R: std::io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(Self::from(reader.read_32_bytes()?))
+    }
+}
+
 /// A node of the Sprout note commitment tree.
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct Node([u8; 32]);
@@ -136,6 +149,27 @@ struct Node([u8; 32]);
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
+    }
+}
+
+/// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
+///
+/// Zebra stores Sapling note commitment trees as [`Frontier`][1]s while the
+/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
+/// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
+///
+/// [1]: bridgetree::Frontier
+/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [3]: incrementalmerkletree::frontier::CommitmentTree
+impl zcash_primitives::merkle_tree::HashSer for Node {
+    fn read<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
+        let mut node = [0u8; 32];
+        reader.read_exact(&mut node)?;
+        Ok(Self(node))
+    }
+
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        writer.write_all(self.0.as_ref())
     }
 }
 
@@ -208,7 +242,7 @@ pub enum NoteCommitmentTreeError {
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`bridgetree::Frontier`].
     ///
@@ -225,7 +259,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sprout = MERKLE_DEPTH = 29.
-    inner: LegacyFrontier<Node, MERKLE_DEPTH>,
+    inner: Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -245,20 +279,22 @@ pub struct NoteCommitmentTree {
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
-impl NoteCommitmentTree {
-    fn update_inner_legacy(&mut self, frontier: Frontier<Node, MERKLE_DEPTH>) {
-        self.inner = LegacyFrontier::to_legacy(frontier);
+impl serde::Serialize for NoteCommitmentTree {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.as_bytes())
     }
+}
 
+impl NoteCommitmentTree {
     /// Appends a note commitment to the leafmost layer of the tree.
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
-        let mut frontier = self.inner.to_frontier_from_mut();
-
-        if frontier.append(cm.into()) {
-            self.update_inner_legacy(frontier);
+        if self.inner.append(cm.into()) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -292,7 +328,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root(self.inner.to_frontier().root().0);
+                let root = Root(self.inner.root().0);
                 *write_root = Some(root);
                 root
             }
@@ -328,7 +364,7 @@ impl NoteCommitmentTree {
     ///
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
-        match Frontier::from(self.inner.clone()).value() {
+        match self.inner.clone().value() {
             Some(non_empty_frontier) => u64::from(non_empty_frontier.position()),
             None => 0,
         }
@@ -351,6 +387,62 @@ impl NoteCommitmentTree {
         // Check the data in the internal data structure
         assert_eq!(self.inner, other.inner);
     }
+
+    ///
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        //
+        if self.inner.value().is_none() {
+            return buf;
+        }
+
+        //
+        let frontier_data = self.inner.value().unwrap();
+
+        let ommers: Vec<Node> = frontier_data.ommers().to_vec();
+        let leaf: Node = *frontier_data.leaf();
+
+        let frontier32: Frontier<Node, 32> =
+            Frontier::from_parts(frontier_data.position(), leaf, ommers).unwrap();
+
+        zcash_primitives::merkle_tree::write_frontier_v1(&mut buf, &frontier32)
+            .expect("should not fail?");
+
+        buf
+    }
+
+    ///
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let buf: Vec<u8> = bytes.as_ref().to_vec();
+
+        if buf.is_empty() {
+            return NoteCommitmentTree {
+                inner: bridgetree::Frontier::empty(),
+                cached_root: std::sync::RwLock::new(None),
+            };
+        };
+
+        let mut cursor = std::io::Cursor::new(buf);
+
+        let frontier_data = zcash_primitives::merkle_tree::read_frontier_v1(&mut cursor).unwrap();
+        let frontier_data_parts = frontier_data.value().unwrap();
+        let ommers: Vec<Node> = frontier_data_parts.ommers().to_vec();
+        let leaf: Node = *frontier_data_parts.leaf();
+
+        let frontier29: Frontier<Node, 29> =
+            Frontier::from_parts(frontier_data_parts.position(), leaf, ommers).unwrap();
+
+        let cached_root = match Root::zcash_deserialize(&mut cursor) {
+            Ok(root) => std::sync::RwLock::new(Some(root)),
+            _ => std::sync::RwLock::new(None),
+        };
+
+        NoteCommitmentTree {
+            inner: frontier29,
+            cached_root,
+        }
+    }
 }
 
 impl Clone for NoteCommitmentTree {
@@ -368,7 +460,7 @@ impl Clone for NoteCommitmentTree {
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: LegacyFrontier::empty(),
+            inner: Frontier::empty(),
             cached_root: Default::default(),
         }
     }

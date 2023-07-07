@@ -5,8 +5,6 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use bincode::Options;
-
 use zebra_chain::{orchard, sapling, sprout};
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -92,17 +90,13 @@ impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
-            .expect("serialization to vec doesn't fail")
+        self.as_bytes()
     }
 }
 
 impl FromDisk for sprout::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        sprout::tree::NoteCommitmentTree::from_bytes(bytes)
     }
 }
 impl IntoDisk for sapling::tree::NoteCommitmentTree {
