@@ -138,13 +138,8 @@ impl Verifier {
     }
 
     /// Verify a single item using a thread pool, and return the result.
-    /// This function returns a future that becomes ready when the item is completed.
     async fn verify_single_spawning(item: Item) -> Result<(), BoxError> {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        // TODO:
-        // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
-        // - spawn fallback individual verifications so rayon executes them in FIFO order,
-        //   if possible
         spawn_fifo_and_convert(move || item.verify_single()).await
     }
 }
