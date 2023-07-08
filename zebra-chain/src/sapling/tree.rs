@@ -380,37 +380,39 @@ impl NoteCommitmentTree {
             .map_or(0, |x| u64::from(x.position()) + 1)
     }
 
-    ///
+    /// Get raw bytes given a [`CommitmentTree`].
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
-        //
-        merkle_tree::write_frontier_v1(&mut buf, &self.inner).expect("should not fail?");
-
-        if let Some(cached_root) = self.cached_root() {
-            buf.append(&mut Root::zcash_serialize_to_vec(&cached_root).unwrap());
-        };
+        if merkle_tree::write_frontier_v1(&mut buf, &self.inner).is_ok() {
+            if let Some(cached_root) = self.cached_root() {
+                buf.append(
+                    &mut Root::zcash_serialize_to_vec(&cached_root)
+                        .expect("if we have a root then it should be serialaizable"),
+                );
+            };
+        }
 
         buf
     }
 
-    ///
+    /// Get a [`CommitmentTree`] from the raw bytes.
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let buf: Vec<u8> = bytes.as_ref().to_vec();
-
-        if buf.len() == 1 {
-            return NoteCommitmentTree {
-                inner: bridgetree::Frontier::empty(),
-                cached_root: std::sync::RwLock::new(None),
-            };
-        };
-
         let mut cursor = std::io::Cursor::new(buf);
-        NoteCommitmentTree {
-            inner: merkle_tree::read_frontier_v1(&mut cursor).unwrap(),
-            cached_root: std::sync::RwLock::new(Some(
-                Root::zcash_deserialize(&mut cursor).expect("Root deserialization should not fail"),
-            )),
+
+        if let Ok(frontier_data) = zcash_primitives::merkle_tree::read_frontier_v1(&mut cursor) {
+            let cached_root = match Root::zcash_deserialize(&mut cursor) {
+                Ok(root) => std::sync::RwLock::new(Some(root)),
+                _ => Default::default(),
+            };
+
+            NoteCommitmentTree {
+                inner: frontier_data,
+                cached_root,
+            }
+        } else {
+            NoteCommitmentTree::default()
         }
     }
 
