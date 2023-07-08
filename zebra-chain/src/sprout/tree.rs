@@ -408,6 +408,10 @@ impl NoteCommitmentTree {
         zcash_primitives::merkle_tree::write_frontier_v1(&mut buf, &frontier32)
             .expect("should not fail?");
 
+        if let Some(cached_root) = self.cached_root() {
+            buf.append(&mut Root::zcash_serialize_to_vec(&cached_root).unwrap());
+        };
+
         buf
     }
 
