@@ -31,12 +31,15 @@ fi
 : "${TRACING_ENDPOINT_PORT:=3000}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:=0.0.0.0}"
+if [[ -z "${RPC_PORT}" ]]; then
+if [[ " ${FEATURES} " =~ " getblocktemplate-rpcs " ]]; then
 if [[ "${NETWORK}" = "Mainnet" ]]; then
 : "${RPC_PORT:=8232}"
 elif [[ "${NETWORK}" = "Testnet" ]]; then
 : "${RPC_PORT:=18232}"
 fi
-
+fi
+fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
 # variables set by the Dockerfile or the user. If the user has already created a config, don't replace it.
@@ -65,9 +68,8 @@ endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
 fi
 
-# Set this to enable the RPC port
-if [[ " $FEATURES " =~ " getblocktemplate-rpcs " ]]; then # spaces are important here to avoid partial matches
-cat <<EOF >> "$ZEBRA_CONF_PATH"
+if [[ "${RPC_PORT}" ]]; then
+cat <<EOF >> "${ZEBRA_CONF_PATH}"
 [rpc]
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
