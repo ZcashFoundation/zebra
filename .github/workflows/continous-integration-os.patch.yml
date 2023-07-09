@@ -60,7 +60,7 @@ jobs:
         checks:
           - bans
           - sources
-        features: ['', '--all-features']
+        features: ['', '--features default-release-binaries', '--all-features']
 
     steps:
       - run: 'echo "No build required"'
