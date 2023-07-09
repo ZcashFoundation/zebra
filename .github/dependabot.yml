@@ -2,7 +2,7 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: '/'
-    # serde, clap, ans other dependencies sometimes have multiple updates in a week
+    # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
       interval: weekly
       timezone: America/New_York
@@ -16,7 +16,7 @@ updates:
     groups:
         ecc:
           patterns:
-            # deliberately include zcash_script
+            # deliberately include zcash_script (even though it is maintained by ZF)
             - "zcash_*"
             - "orchard"
             - "halo2*"
