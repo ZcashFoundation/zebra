@@ -1778,7 +1778,7 @@ jobs:
           fi
 
           echo "Found initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
-          echo "INITIAL_DISK_DB_VERSION=$INITIAL_DISK_DB_VERSION" >> "$INITIAL_DISK_DB_VERSION"
+          echo "INITIAL_DISK_DB_VERSION=$INITIAL_DISK_DB_VERSION" >> "$GITHUB_ENV"
 
           RUNNING_DB_VERSION=$( \
           echo "$DOCKER_LOGS" | \
@@ -1801,7 +1801,7 @@ jobs:
 
           RUNNING_DB_VERSION="v${RUNNING_DB_VERSION//./-}"
           echo "Found running database version in logs: $RUNNING_DB_VERSION"
-          echo "RUNNING_DB_VERSION=$RUNNING_DB_VERSION" >> "$RUNNING_DB_VERSION"
+          echo "RUNNING_DB_VERSION=$RUNNING_DB_VERSION" >> "$GITHUB_ENV"
 
           if [[ "$INITIAL_DISK_DB_VERSION" = "$RUNNING_DB_VERSION" ]]; then
               DB_VERSION_SUMMARY="$RUNNING_DB_VERSION"
@@ -1812,7 +1812,7 @@ jobs:
           fi
 
           echo "Summarised database versions from logs: $DB_VERSION_SUMMARY"
-          echo "DB_VERSION_SUMMARY=$DB_VERSION_SUMMARY" >> "$DB_VERSION_SUMMARY"
+          echo "DB_VERSION_SUMMARY=$DB_VERSION_SUMMARY" >> "$GITHUB_ENV"
 
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
