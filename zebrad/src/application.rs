@@ -266,7 +266,8 @@ impl Application for ZebradApp {
         let disk_db_version =
             match database_format_version_on_disk(&config.state, config.network.network) {
                 Ok(Some(version)) => version.to_string(),
-                Ok(None) => "creating new database".to_string(),
+                // This "version" is specially formatted to match a relaxed version regex in CI
+                Ok(None) => "creating.new.database".to_string(),
                 Err(error) => {
                     let mut error = format!("error: {error:?}");
                     error.truncate(100);

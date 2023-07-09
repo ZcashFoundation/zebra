@@ -1754,8 +1754,8 @@ jobs:
           # either a semantic version or "creating new database"
           INITIAL_DISK_DB_VERSION=$( \
           echo "$DOCKER_LOGS" | \
-          grep --extended-regexp --only-matching 'initial disk state version: [0-9a-z\. ]+' | \
-          grep --extended-regexp --only-matching '[0-9a-z\. ]+' | \
+          grep --extended-regexp --only-matching 'initial disk state version: [0-9a-z\.]+' | \
+          grep --extended-regexp --only-matching '[0-9a-z\.]+' | \
           tail -1 || \
           [[ $? == 1 ]] \
           )
@@ -1771,7 +1771,7 @@ jobs:
               false
           fi
 
-          if [[ "$INITIAL_DISK_DB_VERSION" = "creating new database" ]]; then
+          if [[ "$INITIAL_DISK_DB_VERSION" = "creating.new.database" ]]; then
               INITIAL_DISK_DB_VERSION="new"
           else
               INITIAL_DISK_DB_VERSION="v${INITIAL_DISK_DB_VERSION//./-}"
