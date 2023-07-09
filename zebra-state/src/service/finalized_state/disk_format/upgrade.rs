@@ -247,10 +247,9 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
 
             info!(
-                ?initial_tip_height,
                 ?newer_running_version,
                 ?older_disk_version,
-                "database is fully upgraded"
+                "empty database is fully upgraded"
             );
 
             return;
@@ -339,14 +338,14 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
+        write_database_format_version_to_disk(&running_version, config, network)
+            .expect("unable to write database format version file to disk");
+
         info!(
             ?running_version,
             ?disk_version,
-            "marking database format as newly created"
+            "marked database format as newly created"
         );
-
-        write_database_format_version_to_disk(&running_version, config, network)
-            .expect("unable to write database format version file to disk");
     }
 
     /// Mark the database as upgraded to `format_upgrade_version`.
@@ -400,15 +399,15 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
+        write_database_format_version_to_disk(format_upgrade_version, config, network)
+            .expect("unable to write database format version file to disk");
+
         info!(
             ?running_version,
             ?format_upgrade_version,
             ?disk_version,
-            "marking database format as upgraded"
+            "marked database format as upgraded"
         );
-
-        write_database_format_version_to_disk(format_upgrade_version, config, network)
-            .expect("unable to write database format version file to disk");
     }
 
     /// Mark the database as downgraded to the running database version.
@@ -439,14 +438,14 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
+        write_database_format_version_to_disk(&running_version, config, network)
+            .expect("unable to write database format version file to disk");
+
         info!(
             ?running_version,
             ?disk_version,
-            "marking database format as downgraded"
+            "marked database format as downgraded"
         );
-
-        write_database_format_version_to_disk(&running_version, config, network)
-            .expect("unable to write database format version file to disk");
     }
 }
 

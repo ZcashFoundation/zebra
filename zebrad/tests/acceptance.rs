@@ -2487,12 +2487,12 @@ async fn state_format_test(
     let logs = zebrad.kill_and_return_output(false)?;
 
     assert!(
-        !logs.contains("marking database format as upgraded"),
+        !logs.contains("marked database format as upgraded"),
         "unexpected format upgrade in logs:\n\
          {logs}"
     );
     assert!(
-        !logs.contains("marking database format as downgraded"),
+        !logs.contains("marked database format as downgraded"),
         "unexpected format downgrade in logs:\n\
          {logs}"
     );
@@ -2551,11 +2551,11 @@ async fn state_format_test(
 
         if expect_older_version {
             zebrad.expect_stdout_line_matches("trying to open older database format")?;
-            zebrad.expect_stdout_line_matches("marking database format as upgraded")?;
+            zebrad.expect_stdout_line_matches("marked database format as upgraded")?;
             zebrad.expect_stdout_line_matches("database is fully upgraded")?;
         } else if expect_newer_version {
             zebrad.expect_stdout_line_matches("trying to open newer database format")?;
-            zebrad.expect_stdout_line_matches("marking database format as downgraded")?;
+            zebrad.expect_stdout_line_matches("marked database format as downgraded")?;
         } else {
             zebrad.expect_stdout_line_matches("trying to open current database format")?;
             zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
@@ -2565,7 +2565,7 @@ async fn state_format_test(
 
         if !expect_older_version {
             assert!(
-                !logs.contains("marking database format as upgraded"),
+                !logs.contains("marked database format as upgraded"),
                 "unexpected format upgrade in logs:\n\
                  {logs}"
             );
@@ -2573,7 +2573,7 @@ async fn state_format_test(
 
         if !expect_newer_version {
             assert!(
-                !logs.contains("marking database format as downgraded"),
+                !logs.contains("marked database format as downgraded"),
                 "unexpected format downgrade in logs:\n\
                  {logs}"
             );
