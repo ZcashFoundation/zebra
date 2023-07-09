@@ -2484,6 +2484,9 @@ async fn state_format_test(
     zebrad.expect_stdout_line_matches("creating new database with the current format")?;
     zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
 
+    // Give Zebra enough time to actually write the database to disk.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     let logs = zebrad.kill_and_return_output(false)?;
 
     assert!(
@@ -2525,6 +2528,9 @@ async fn state_format_test(
         zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
             .expect("can't write fake database version to disk");
 
+        // Give zebra_state enough time to actually write the database version to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
         let running_version = database_format_version_in_code();
 
         match fake_version.cmp(&running_version) {
@@ -2560,6 +2566,9 @@ async fn state_format_test(
             zebrad.expect_stdout_line_matches("trying to open current database format")?;
             zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
         }
+
+        // Give Zebra enough time to actually write the database to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         let logs = zebrad.kill_and_return_output(false)?;
 
