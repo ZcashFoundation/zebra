@@ -76,16 +76,32 @@ impl ZebraDb {
 
         db.check_max_on_disk_tip_height();
 
+        // We have to get this height before we spawn the upgrade task, because threads can take
+        // a while to start, and new blocks can be committed as soon as we return from this method.
         let initial_tip_height = db.finalized_tip_height();
 
         // Start any required format changes.
+        //
+        // TODO: should debug_stop_at_height wait for these upgrades, or not?
         if let Some(format_change) = format_change {
             // Launch the format change and install its handle in the database.
-            db.format_change_handle = Some(format_change.spawn_format_change(
+            //
+            // `upgrade_db` is a special clone of the database, which can't be used to shut down
+            // the upgrade task. (Because the task hasn't been launched yet,
+            // `db.format_change_handle` is always None.)
+            //
+            // It can be a FinalizedState if needed, or the FinalizedState methods needed for
+            // upgrades can be moved to ZebraDb.
+            let upgrade_db = db.clone();
+
+            let format_change_handle = format_change.spawn_format_change(
                 config.clone(),
                 network,
                 initial_tip_height,
-            ));
+                upgrade_db,
+            );
+
+            db.format_change_handle = Some(format_change_handle);
         }
 
         db

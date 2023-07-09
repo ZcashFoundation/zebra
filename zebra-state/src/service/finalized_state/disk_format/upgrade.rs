@@ -16,7 +16,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk, database_format_version_in_code,
-    database_format_version_on_disk, Config,
+    database_format_version_on_disk, service::finalized_state::ZebraDb, Config,
 };
 
 /// The kind of database format change we're performing.
@@ -127,11 +127,15 @@ impl DbFormatChange {
     }
 
     /// Launch a `std::thread` that applies this format change to the database.
+    ///
+    /// `initial_tip_height` is the database height when it was opened, and `upgrade_db` is the
+    /// database instance to upgrade.
     pub fn spawn_format_change(
         self,
         config: Config,
         network: Network,
         initial_tip_height: Option<Height>,
+        upgrade_db: ZebraDb,
     ) -> DbFormatChangeThreadHandle {
         // # Correctness
         //
@@ -142,7 +146,13 @@ impl DbFormatChange {
         let span = Span::current();
         let update_task = thread::spawn(move || {
             span.in_scope(move || {
-                self.apply_format_change(config, network, initial_tip_height, cancel_receiver);
+                self.apply_format_change(
+                    config,
+                    network,
+                    initial_tip_height,
+                    upgrade_db,
+                    cancel_receiver,
+                );
             })
         });
 
@@ -157,7 +167,9 @@ impl DbFormatChange {
     }
 
     /// Apply this format change to the database.
-    /// Format changes should be launched in an independent `std::thread`.
+    ///
+    /// Format changes should be launched in an independent `std::thread`, which runs until the
+    /// upgrade is finished.
     ///
     /// See `apply_format_upgrade()` for details.
     fn apply_format_change(
@@ -165,13 +177,18 @@ impl DbFormatChange {
         config: Config,
         network: Network,
         initial_tip_height: Option<Height>,
+        upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) {
         match self {
             // Handled in the rest of this function.
-            Upgrade { .. } => {
-                self.apply_format_upgrade(config, network, initial_tip_height, cancel_receiver)
-            }
+            Upgrade { .. } => self.apply_format_upgrade(
+                config,
+                network,
+                initial_tip_height,
+                upgrade_db,
+                cancel_receiver,
+            ),
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(&config, network);
@@ -205,6 +222,7 @@ impl DbFormatChange {
         config: Config,
         network: Network,
         initial_tip_height: Option<Height>,
+        upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) {
         let Upgrade {
@@ -260,6 +278,9 @@ impl DbFormatChange {
                 && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
             {
                 // TODO: Do one format upgrade step here
+                //
+                // This fake step just shows how to access the database.
+                let _replace_me_ = upgrade_db.tip();
 
                 upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
             }
@@ -275,6 +296,8 @@ impl DbFormatChange {
             "marking database as upgraded"
         );
         Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+
+        // End of example format change.
 
         // # New Upgrades Usually Go Here
         //
