@@ -31,6 +31,11 @@ fi
 : "${TRACING_ENDPOINT_PORT:=3000}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:=0.0.0.0}"
+if [[ "${NETWORK}" = "Mainnet" ]]; then
+: "${RPC_PORT:=8232}"
+elif [[ "${NETWORK}" = "Testnet" ]]; then
+: "${RPC_PORT:=18232}"
+fi
 
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
