@@ -1043,18 +1043,31 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.0.0-rc.2"
+version = "4.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03d928d978dbec61a1167414f5ec534f24bea0d7a0d24dd9b6233d3d8223e585"
+checksum = "436ace70fc06e06f7f689d2624dc4e2f0ea666efb5aa704215f7249ae6e047a7"
 dependencies = [
  "cfg-if 1.0.0",
+ "cpufeatures",
+ "curve25519-dalek-derive",
  "digest 0.10.7",
  "fiat-crypto",
- "packed_simd_2",
  "platforms",
+ "rustc_version 0.4.0",
  "serde",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83fdaf97f4804dcebfa5862639bc9ce4121e82140bec2a987ac5140294865b5b"
+dependencies = [
+ "proc-macro2 1.0.63",
+ "quote 1.0.29",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1257,9 +1270,9 @@ dependencies = [
 
 [[package]]
 name = "ed25519-zebra"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6af5e1fb700a3c779c7a7ed25c8c0b7f193db101de3773ac46e704bcb882d772"
+checksum = "ffb0d653b2c06ec7ec1b4c570bb4eac748035d6f44dd14e5fd9e7e2549938488"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
@@ -1483,7 +1496,7 @@ checksum = "26c4b37de5ae15812a764c958297cfc50f5c010438f60c6ce75d11b802abd404"
 dependencies = [
  "cbc",
  "cipher",
- "libm 0.2.7",
+ "libm",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2323,12 +2336,6 @@ dependencies = [
 
 [[package]]
 name = "libm"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
-
-[[package]]
-name = "libm"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7012b1bbb0719e1097c47611d3898568c546d597c2e74d66f6087edd5233ff4"
@@ -2715,7 +2722,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
- "libm 0.2.7",
+ "libm",
 ]
 
 [[package]]
@@ -2880,16 +2887,6 @@ name = "owo-colors"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
-
-[[package]]
-name = "packed_simd_2"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1914cd452d8fccd6f9db48147b29fd4ae05bea9dc5d9ad578509f72415de282"
-dependencies = [
- "cfg-if 1.0.0",
- "libm 0.1.4",
-]
 
 [[package]]
 name = "pairing"
@@ -5519,9 +5516,9 @@ dependencies = [
 
 [[package]]
 name = "x25519-dalek"
-version = "2.0.0-rc.2"
+version = "2.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabd6e16dd08033932fc3265ad4510cc2eab24656058a6dcb107ffe274abcc95"
+checksum = "ec7fae07da688e17059d5886712c933bb0520f15eff2e09cfa18e30968f4e63a"
 dependencies = [
  "curve25519-dalek",
  "rand_core 0.6.4",
