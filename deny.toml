@@ -119,9 +119,6 @@ skip-tree = [
     # upgrade abscissa (required dependency) and arti (optional dependency)
     { name = "semver", version = "=0.9.0" },
 
-    # wait for packed_simd_2 to upgrade
-    { name = "libm", version = "=0.1.4" },
-
     # Elasticsearch dependencies
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
