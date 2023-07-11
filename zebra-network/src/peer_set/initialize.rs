@@ -51,6 +51,8 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+mod recent_by_ip;
+
 /// A successful outbound peer connection attempt or inbound connection handshake.
 ///
 /// The [`Handshake`](peer::Handshake) service returns a [`Result`]. Only successful connections
@@ -576,6 +578,9 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
+    #[cfg(not(any(test, feature = "proptest-impl")))]
+    let mut recent_inbound_connections = recent_by_ip::RecentByIp::default();
+
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
@@ -603,9 +608,13 @@ where
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
 
-            if active_inbound_connections.update_count()
-                >= config.peerset_inbound_connection_limit()
-            {
+            let should_drop = active_inbound_connections.update_count()
+                >= config.peerset_inbound_connection_limit();
+
+            #[cfg(not(any(test, feature = "proptest-impl")))]
+            let should_drop = should_drop || recent_inbound_connections.has_or_add(addr.ip());
+
+            if should_drop {
                 // Too many open inbound connections or pending handshakes already.
                 // Close the connection.
                 std::mem::drop(tcp_stream);
