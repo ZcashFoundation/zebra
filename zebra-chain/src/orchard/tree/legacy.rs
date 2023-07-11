@@ -56,7 +56,12 @@ impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
 impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
     fn from(frontier: Frontier<Node, MERKLE_DEPTH>) -> Self {
         if let Some(frontier_data) = frontier.value() {
-            let leaf = LegacyLeaf::Left(*frontier_data.leaf());
+            let mut leaf = LegacyLeaf::Left(*frontier_data.leaf());
+            if frontier_data.position().is_odd() {
+                // TODO: This capture whats happening in `orchard_note_commitment_tree_serialization_pow2`
+                // but i don't know how to `Node::combine` to make the legacy leaf in thgis case.
+                leaf = LegacyLeaf::Left(*frontier_data.leaf());
+            }
 
             LegacyFrontier {
                 frontier: Some(LegacyNonEmptyFrontier {
