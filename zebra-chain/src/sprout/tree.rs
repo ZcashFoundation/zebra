@@ -22,6 +22,9 @@ use super::commitment::NoteCommitment;
 
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
+mod legacy;
+use legacy::LegacyNoteCommitmentTree;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
@@ -242,7 +245,9 @@ pub enum NoteCommitmentTreeError {
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(into = "LegacyNoteCommitmentTree")]
+#[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`bridgetree::Frontier`].
     ///
@@ -277,15 +282,6 @@ pub struct NoteCommitmentTree {
     /// only written once per tree update. Each tree has its own cached root, a
     /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
-}
-
-impl serde::Serialize for NoteCommitmentTree {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_bytes(&self.as_bytes())
-    }
 }
 
 impl NoteCommitmentTree {
@@ -385,60 +381,6 @@ impl NoteCommitmentTree {
 
         // Check the data in the internal data structure
         assert_eq!(self.inner, other.inner);
-    }
-
-    /// Get raw bytes given a [`CommitmentTree`].
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-
-        if let Some(frontier_data) = self.inner.value() {
-            let ommers: Vec<Node> = frontier_data.ommers().to_vec();
-            let leaf: Node = *frontier_data.leaf();
-
-            let frontier32: Frontier<Node, 32> =
-                Frontier::from_parts(frontier_data.position(), leaf, ommers)
-                    .unwrap_or(Frontier::empty());
-
-            zcash_primitives::merkle_tree::write_frontier_v1(&mut buf, &frontier32)
-                .expect("frontier writting should not fail because we got all the data needed");
-
-            if let Some(cached_root) = self.cached_root() {
-                buf.append(
-                    &mut Root::zcash_serialize_to_vec(&cached_root)
-                        .expect("if we have a root then it should be serialaizable"),
-                );
-            };
-        }
-
-        buf
-    }
-
-    /// Get a [`CommitmentTree`] from the raw bytes.
-    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let buf: Vec<u8> = bytes.as_ref().to_vec();
-        let mut cursor = std::io::Cursor::new(buf);
-
-        if let Ok(frontier_data) = zcash_primitives::merkle_tree::read_frontier_v1(&mut cursor) {
-            let mut frontier29: Frontier<Node, 29> = Frontier::empty();
-            if let Some(frontier_data_parts) = frontier_data.value() {
-                let ommers: Vec<Node> = frontier_data_parts.ommers().to_vec();
-                let leaf: Node = *frontier_data_parts.leaf();
-                frontier29 = Frontier::from_parts(frontier_data_parts.position(), leaf, ommers)
-                    .expect("no sprout note commitment tree should be bigger than 29 in depth");
-            }
-
-            let cached_root = match Root::zcash_deserialize(&mut cursor) {
-                Ok(root) => std::sync::RwLock::new(Some(root)),
-                _ => Default::default(),
-            };
-
-            NoteCommitmentTree {
-                inner: frontier29,
-                cached_root,
-            }
-        } else {
-            NoteCommitmentTree::default()
-        }
     }
 }
 

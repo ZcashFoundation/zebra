@@ -5,6 +5,8 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
+use bincode::Options;
+
 use zebra_chain::{orchard, sapling, sprout};
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -90,26 +92,34 @@ impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.as_bytes()
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sprout::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        sprout::tree::NoteCommitmentTree::from_bytes(bytes)
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 impl IntoDisk for sapling::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.as_bytes()
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for sapling::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        sapling::tree::NoteCommitmentTree::from_bytes(bytes)
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
 
@@ -117,12 +127,16 @@ impl IntoDisk for orchard::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.as_bytes()
+        bincode::DefaultOptions::new()
+            .serialize(self)
+            .expect("serialization to vec doesn't fail")
     }
 }
 
 impl FromDisk for orchard::tree::NoteCommitmentTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        orchard::tree::NoteCommitmentTree::from_bytes(bytes)
+        bincode::DefaultOptions::new()
+            .deserialize(bytes.as_ref())
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }

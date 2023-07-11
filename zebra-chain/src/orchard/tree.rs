@@ -20,6 +20,7 @@ use std::{
 use bitvec::prelude::*;
 use bridgetree;
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
 use zcash_primitives::merkle_tree;
@@ -29,6 +30,9 @@ use super::sinsemilla::*;
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
+
+mod legacy;
+use legacy::LegacyNoteCommitmentTree;
 
 /// The type that is used to update the note commitment tree.
 ///
@@ -194,7 +198,7 @@ impl merkle_tree::HashSer for Node {
     }
 }
 
-impl incrementalmerkletree::Hashable for Node {
+impl Hashable for Node {
     fn empty_leaf() -> Self {
         Self(NoteCommitmentTree::uncommitted())
     }
@@ -249,7 +253,9 @@ pub enum NoteCommitmentTreeError {
 }
 
 /// Orchard Incremental Note Commitment Tree
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(into = "LegacyNoteCommitmentTree")]
+#[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
@@ -284,15 +290,6 @@ pub struct NoteCommitmentTree {
     /// only written once per tree update. Each tree has its own cached root, a
     /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
-}
-
-impl serde::Serialize for NoteCommitmentTree {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_bytes(&self.as_bytes())
-    }
 }
 
 impl NoteCommitmentTree {
@@ -379,40 +376,20 @@ impl NoteCommitmentTree {
             .map_or(0, |x| u64::from(x.position()) + 1)
     }
 
-    /// Get raw bytes given a [`CommitmentTree`].
-    pub fn as_bytes(&self) -> Vec<u8> {
+    /// Get raw bytes given a [`NoteCommitmentTree`].
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
-        if merkle_tree::write_frontier_v1(&mut buf, &self.inner).is_ok() {
-            if let Some(cached_root) = self.cached_root() {
-                buf.append(
-                    &mut Root::zcash_serialize_to_vec(&cached_root)
-                        .expect("if we have a root then it should be serialaizable"),
-                );
-            };
-        }
+        let _ = merkle_tree::write_frontier_v1(&mut buf, &self.inner);
+
+        if let Some(cached_root) = self.cached_root() {
+            buf.append(
+                &mut Root::zcash_serialize_to_vec(&cached_root)
+                    .expect("if we have a root then it should be serialaizable"),
+            );
+        };
 
         buf
-    }
-
-    /// Get a [`CommitmentTree`] from the raw bytes.
-    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let buf: Vec<u8> = bytes.as_ref().to_vec();
-        let mut cursor = std::io::Cursor::new(buf);
-
-        if let Ok(frontier_data) = zcash_primitives::merkle_tree::read_frontier_v1(&mut cursor) {
-            let cached_root = match Root::zcash_deserialize(&mut cursor) {
-                Ok(root) => std::sync::RwLock::new(Some(root)),
-                _ => Default::default(),
-            };
-
-            NoteCommitmentTree {
-                inner: frontier_data,
-                cached_root,
-            }
-        } else {
-            NoteCommitmentTree::default()
-        }
     }
 
     /// Checks if the tree roots and inner data structures of `self` and `other` are equal.
@@ -520,7 +497,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             return Self(vec![]);
         }
 
-        Self(tree.as_bytes())
+        Self(tree.to_bytes())
     }
 }
 
