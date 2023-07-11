@@ -32,6 +32,7 @@ impl Default for RecentByIp {
 }
 
 impl RecentByIp {
+    /// Creates a new [`RecentByIp`]
     pub fn new(time_limit: Option<Duration>, max_connections_per_ip: Option<usize>) -> Self {
         let (by_time, by_ip) = Default::default();
         Self {
@@ -61,10 +62,10 @@ impl RecentByIp {
         }
     }
 
-    /// Prunes entries older than [`constants::MIN_PEER_RECONNECTION_DELAY`].
+    /// Prunes entries older than `time_limit`, decrementing or removing their counts in `by_ip`.
     fn prune_by_time(&mut self, now: Instant) {
         while let Some((ip, time)) = self.by_time.pop_front() {
-            if now.saturating_duration_since(time) <= constants::MIN_PEER_RECONNECTION_DELAY {
+            if now.saturating_duration_since(time) <= self.time_limit {
                 return self.by_time.push_front((ip, time));
             }
 
@@ -80,8 +81,11 @@ impl RecentByIp {
 
 #[test]
 fn old_connection_attempts_are_pruned() {
+    const TEST_TIME_LIMIT: Duration = Duration::from_secs(5);
+
     let _init_guard = zebra_test::init();
-    let mut recent_connections = RecentByIp::default();
+
+    let mut recent_connections = RecentByIp::new(Some(TEST_TIME_LIMIT), None);
     let ip = "127.0.0.1".parse().expect("should parse");
 
     assert!(
@@ -93,22 +97,21 @@ fn old_connection_attempts_are_pruned() {
         "should be past max_connections_per_ip limit"
     );
 
-    std::thread::sleep(constants::MIN_PEER_RECONNECTION_DELAY / 3);
+    std::thread::sleep(TEST_TIME_LIMIT / 3);
 
     assert!(
         recent_connections.is_past_limit_or_add(ip),
-        "should still contain entry after a third of the reconnection delay"
+        "should still contain entry after a third of the time limit"
     );
 
-    std::thread::sleep(3 * constants::MIN_PEER_RECONNECTION_DELAY / 4);
+    std::thread::sleep(3 * TEST_TIME_LIMIT / 4);
 
     assert!(
         !recent_connections.is_past_limit_or_add(ip),
-        "should prune entry after 13/12 * MIN_PEER_RECONNECTION_DELAY"
+        "should prune entry after 13/12 * time_limit"
     );
 
     const TEST_MAX_CONNS_PER_IP: usize = 3;
-    const TEST_TIME_LIMIT: Duration = Duration::from_secs(5);
 
     let mut recent_connections =
         RecentByIp::new(Some(TEST_TIME_LIMIT), Some(TEST_MAX_CONNS_PER_IP));
