@@ -727,7 +727,7 @@ async fn listener_peer_limit_zero_handshake_panic() {
     });
 
     let (_config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(0, unreachable_inbound_handshaker).await;
+        spawn_inbound_listener_with_peer_limit(0, None, unreachable_inbound_handshaker).await;
 
     let peer_result = peerset_rx.try_next();
     assert!(
@@ -752,7 +752,7 @@ async fn listener_peer_limit_one_handshake_error() {
         service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
 
     let (_config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(1, error_inbound_handshaker).await;
+        spawn_inbound_listener_with_peer_limit(1, None, error_inbound_handshaker).await;
 
     let peer_result = peerset_rx.try_next();
     assert!(
@@ -794,8 +794,12 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             Ok(fake_client)
         });
 
-    let (config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(1, success_disconnect_inbound_handshaker).await;
+    let (config, mut peerset_rx) = spawn_inbound_listener_with_peer_limit(
+        1,
+        usize::MAX,
+        success_disconnect_inbound_handshaker,
+    )
+    .await;
 
     let mut peer_count: usize = 0;
     loop {
@@ -853,7 +857,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
         });
 
     let (config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(1, success_stay_open_inbound_handshaker).await;
+        spawn_inbound_listener_with_peer_limit(1, None, success_stay_open_inbound_handshaker).await;
 
     let mut peer_change_count: usize = 0;
     loop {
@@ -917,7 +921,7 @@ async fn listener_peer_limit_default_handshake_error() {
         service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
 
     let (_config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(None, error_inbound_handshaker).await;
+        spawn_inbound_listener_with_peer_limit(None, None, error_inbound_handshaker).await;
 
     let peer_result = peerset_rx.try_next();
     assert!(
@@ -963,8 +967,12 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             Ok(fake_client)
         });
 
-    let (config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(None, success_disconnect_inbound_handshaker).await;
+    let (config, mut peerset_rx) = spawn_inbound_listener_with_peer_limit(
+        None,
+        usize::MAX,
+        success_disconnect_inbound_handshaker,
+    )
+    .await;
 
     let mut peer_count: usize = 0;
     loop {
@@ -1022,7 +1030,8 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
         });
 
     let (config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(None, success_stay_open_inbound_handshaker).await;
+        spawn_inbound_listener_with_peer_limit(None, None, success_stay_open_inbound_handshaker)
+            .await;
 
     let mut peer_change_count: usize = 0;
     loop {
@@ -1609,6 +1618,7 @@ where
 /// Returns the generated [`Config`], and the peer set receiver.
 async fn spawn_inbound_listener_with_peer_limit<S>(
     peerset_initial_target_size: impl Into<Option<usize>>,
+    max_connections_per_ip: impl Into<Option<usize>>,
     listen_handshaker: S,
 ) -> (Config, mpsc::Receiver<DiscoveredPeer>)
 where
@@ -1623,6 +1633,9 @@ where
     let listen_addr = "127.0.0.1:0".parse().unwrap();
     let mut config = Config {
         listen_addr,
+        max_connections_per_ip: max_connections_per_ip
+            .into()
+            .unwrap_or(constants::DEFAULT_MAX_CONNS_PER_IP),
         ..Config::default()
     };
 

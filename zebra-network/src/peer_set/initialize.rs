@@ -578,8 +578,8 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
-    #[cfg(not(any(test, feature = "proptest-impl")))]
-    let mut recent_inbound_connections = recent_by_ip::RecentByIp::default();
+    let mut recent_inbound_connections =
+        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
 
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
@@ -608,13 +608,10 @@ where
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
 
-            let should_drop = active_inbound_connections.update_count()
-                >= config.peerset_inbound_connection_limit();
-
-            #[cfg(not(any(test, feature = "proptest-impl")))]
-            let should_drop = should_drop || recent_inbound_connections.has_or_add(addr.ip());
-
-            if should_drop {
+            if active_inbound_connections.update_count()
+                >= config.peerset_inbound_connection_limit()
+                || recent_inbound_connections.is_past_limit_or_add(addr.ip())
+            {
                 // Too many open inbound connections or pending handshakes already.
                 // Close the connection.
                 std::mem::drop(tcp_stream);
