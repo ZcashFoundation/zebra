@@ -8,6 +8,16 @@
 # - release: builds release binary
 # - runtime: is our runtime environment
 #
+# We first set default values for build arguments used across the stages.
+# Each stage must define the build arguments (ARGs) it uses.
+#
+# Build zebrad with these features
+# Keep these in sync with:
+# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
+ARG FEATURES="default-release-binaries"
+ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
+ARG NETWORK="Mainnet"
+
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
@@ -58,39 +68,17 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# TODO: just keep the backtrace, colorbt, rust_log, and cargo_home variables as those are the only needed at build time.
-# Build arguments and variables set to change how tests are run, tracelog levels,
-# and Network to be used (Mainnet or Testnet)
+# Build arguments and variables set to change how tests are run and tracelog levels
 #
 # We set defaults to all variables.
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE=${RUST_BACKTRACE:-0}
-
-ARG RUST_LIB_BACKTRACE
-ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-0}
 
 ARG COLORBT_SHOW_HIDDEN
 ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-0}
 
 ARG RUST_LOG
 ENV RUST_LOG=${RUST_LOG:-info}
-
-# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS
-ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
-
-# Build zebrad with these features
-# Keep these in sync with:
-# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
-ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-# Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
-# separately from the test and production image builds.
-ENV TEST_FEATURES="$TEST_FEATURES $FEATURES"
-
-# Use default network value if none is provided
-ARG NETWORK
-ENV NETWORK=${NETWORK:-Mainnet}
 
 ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
@@ -107,6 +95,19 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # cargo uses timestamps for its cache, so they need to be in this order:
 # unmodified source files < previous build cache < modified source files
 COPY . .
+
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
+
+# Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# separately from the test and production image builds.
+ARG FEATURES
+ARG TEST_FEATURES
+ENV TEST_FEATURES="$FEATURES $TEST_FEATURES"
+
+ARG NETWORK
+ENV NETWORK=${NETWORK}
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -145,6 +146,8 @@ FROM deps AS release
 
 COPY . .
 
+ARG FEATURES
+
 # This is the caching layer for Rust zebrad builds.
 # It creates a fake empty zebrad binary, see above for details.
 #
@@ -175,10 +178,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
 
-# Config settings
-
+# Config settings for zebrad
 ARG NETWORK
-ENV NETWORK=${NETWORK:-Mainnet}
+ENV NETWORK=${NETWORK}
+
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # Expose configured ports
 EXPOSE 8233 18233
