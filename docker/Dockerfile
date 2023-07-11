@@ -15,7 +15,7 @@
 # Keep these in sync with:
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
+ARG TEST_FEATURES="${FEATURES} lightwalletd-grpc-tests zebra-checkpoints"
 ARG NETWORK="Mainnet"
 
 # This stage implements cargo-chef for docker layer caching
@@ -68,7 +68,7 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Build arguments and variables set to change how tests are run and tracelog levels
+# Build arguments and variables set for tracelog levels and debug information
 #
 # We set defaults to all variables.
 ARG RUST_BACKTRACE
@@ -79,6 +79,9 @@ ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-0}
 
 ARG RUST_LOG
 ENV RUST_LOG=${RUST_LOG:-info}
+
+ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA:-unknown}
 
 ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
@@ -102,12 +105,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
 # Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
-ARG FEATURES
 ARG TEST_FEATURES
-ENV TEST_FEATURES="$FEATURES $TEST_FEATURES"
-
-ARG NETWORK
-ENV NETWORK=${NETWORK}
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -133,6 +131,12 @@ RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
+
+# Entrypoint environment variables
+ARG NETWORK
+ENV NETWORK=${NETWORK}
+
+ENV TEST_FEATURES=${TEST_FEATURES}
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT [ "/entrypoint.sh" ]
