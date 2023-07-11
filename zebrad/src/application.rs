@@ -7,8 +7,9 @@ use abscissa_core::{
     config::CfgCell,
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths,
 };
+use semver::{BuildMetadata, Version};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
@@ -29,59 +30,119 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
-/// Returns the zebrad version for this build, in SemVer 2.0 format.
+/// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
-/// Includes the git commit and the number of commits since the last version
-/// tag, if available.
+/// Includes `git describe` build metatata if available:
+/// - the number of commits since the last version tag, and
+/// - the git commit.
 ///
 /// For details, see <https://semver.org/>
-pub fn app_version() -> Version {
+pub fn build_version() -> Version {
+    // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-    let vergen_git_describe: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
-    match vergen_git_describe {
-        // change the git describe format to the semver 2.0 format
-        Some(mut vergen_git_describe) if !vergen_git_describe.is_empty() => {
-            // strip the leading "v", if present
-            if &vergen_git_describe[0..1] == "v" {
-                vergen_git_describe = &vergen_git_describe[1..];
-            }
+    // We're using the same library as cargo uses internally, so this is guaranteed.
+    let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
+        panic!(
+            "unexpected invalid CARGO_PKG_VERSION: {error:?} in {CARGO_PKG_VERSION:?}, \
+             should have been checked by cargo"
+        )
+    });
 
-            // split into tag, commit count, hash
-            let rparts: Vec<_> = vergen_git_describe.rsplitn(3, '-').collect();
-
-            match rparts.as_slice() {
-                // assume it's a cargo package version or a git tag with no hash
-                [_] | [_, _] => vergen_git_describe.parse().unwrap_or_else(|_| {
-                    panic!(
-                        "VERGEN_GIT_DESCRIBE without a hash {vergen_git_describe:?} must be valid semver 2.0"
-                    )
-                }),
-
-                // it's the "git describe" format, which doesn't quite match SemVer 2.0
-                [hash, commit_count, tag] => {
-                    let semver_fix = format!("{tag}+{commit_count}.{hash}");
-                    semver_fix.parse().unwrap_or_else(|_|
-                                                      panic!("Modified VERGEN_GIT_DESCRIBE {vergen_git_describe:?} -> {rparts:?} -> {semver_fix:?} must be valid. Note: CARGO_PKG_VERSION was {CARGO_PKG_VERSION:?}."))
-                }
-
-                _ => unreachable!("split is limited to 3 parts"),
-            }
-        }
-        _ => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
-            panic!("CARGO_PKG_VERSION {CARGO_PKG_VERSION:?} must be valid semver 2.0")
-        }),
-    }
+    vergen_build_version().unwrap_or(fallback_version)
 }
 
-/// The Zebra current release version.
-pub fn release_version() -> String {
-    app_version()
-        .to_string()
-        .split('+')
-        .next()
-        .expect("always at least 1 slice")
-        .to_string()
+/// Returns the `zebrad` version from this build, if available from `vergen`.
+fn vergen_build_version() -> Option<Version> {
+    // VERGEN_GIT_DESCRIBE should be in the format:
+    // - v1.0.0-rc.9-6-g319b01bb84
+    // - v1.0.0-6-g319b01bb84
+    // but sometimes it is just a short commit hash. See #6879 for details.
+    //
+    // Currently it is the output of `git describe --tags --dirty --match='v*.*.*'`,
+    // or whatever is specified in zebrad/build.rs.
+    const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
+
+    // The SemVer 2.0 format is:
+    // - 1.0.0-rc.9+6.g319b01bb84
+    // - 1.0.0+6.g319b01bb84
+    //
+    // Or as a pattern:
+    // - version: major`.`minor`.`patch
+    // - optional pre-release: `-`tag[`.`tag ...]
+    // - optional build: `+`tag[`.`tag ...]
+    // change the git describe format to the semver 2.0 format
+    let Some(vergen_git_describe) = VERGEN_GIT_DESCRIBE else {
+        return None;
+    };
+
+    // `git describe` uses "dirty" for uncommitted changes,
+    // but users won't understand what that means.
+    let vergen_git_describe = vergen_git_describe.replace("dirty", "modified");
+
+    // Split using "git describe" separators.
+    let mut vergen_git_describe = vergen_git_describe.split('-').peekable();
+
+    // Check the "version core" part.
+    let version = vergen_git_describe.next();
+    let Some(mut version) = version else {
+        return None;
+    };
+
+    // strip the leading "v", if present.
+    version = version.strip_prefix('v').unwrap_or(version);
+
+    // If the initial version is empty, just a commit hash, or otherwise invalid.
+    if Version::parse(version).is_err() {
+        return None;
+    }
+
+    let mut semver = version.to_string();
+
+    // Check if the next part is a pre-release or build part,
+    // but only consume it if it is a pre-release tag.
+    let Some(part) = vergen_git_describe.peek() else {
+        // No pre-release or build.
+        return semver.parse().ok();
+    };
+
+    if part.starts_with(char::is_alphabetic) {
+        // It's a pre-release tag.
+        semver.push('-');
+        semver.push_str(part);
+
+        // Consume the pre-release tag to move on to the build tags, if any.
+        let _ = vergen_git_describe.next();
+    }
+
+    // Check if the next part is a build part.
+    let Some(build) = vergen_git_describe.peek() else {
+        // No build tags.
+        return semver.parse().ok();
+    };
+
+    if !build.starts_with(char::is_numeric) {
+        // It's not a valid "commit count" build tag from "git describe".
+        return None;
+    }
+
+    // Append the rest of the build parts with the correct `+` and `.` separators.
+    let build_parts: Vec<_> = vergen_git_describe.collect();
+    let build_parts = build_parts.join(".");
+
+    semver.push('+');
+    semver.push_str(&build_parts);
+
+    semver.parse().ok()
+}
+
+/// The Zebra current release version, without any build metadata.
+pub fn release_version() -> Version {
+    let mut release_version = build_version();
+
+    release_version.build = BuildMetadata::EMPTY;
+
+    release_version
 }
 
 /// The User-Agent string provided by the node.
@@ -105,11 +166,6 @@ pub struct ZebradApp {
 }
 
 impl ZebradApp {
-    /// Are standard output and standard error both connected to ttys?
-    fn outputs_are_ttys() -> bool {
-        atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
-    }
-
     /// Returns the git commit for this build, if available.
     ///
     ///
@@ -154,8 +210,7 @@ impl Application for ZebradApp {
         //       of the `color_eyre::install` part of `Terminal::new` without
         //       ColorChoice::Never?
 
-        // The Tracing component uses stdout directly and will apply colors
-        // `if Self::outputs_are_ttys() && config.tracing.use_colors`
+        // The Tracing component uses stdout directly and will apply colors automatically.
         //
         // Note: It's important to use `ColorChoice::Never` here to avoid panicking in
         //       `register_components()` below if `color_eyre::install()` is called
@@ -180,10 +235,12 @@ impl Application for ZebradApp {
         let mut components = self.framework_components(command)?;
 
         // Load config *after* framework components so that we can
-        // report an error to the terminal if it occurs.
+        // report an error to the terminal if it occurs (unless used with a command that doesn't need the config).
         let config = match command.config_path() {
             Some(path) => match self.load_config(&path) {
                 Ok(config) => config,
+                // Ignore errors loading the config for some commands.
+                Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
                 Err(e) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
@@ -194,7 +251,7 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
-        let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
+        let theme = if config.tracing.use_color_stdout_and_stderr() {
             color_eyre::config::Theme::dark()
         } else {
             color_eyre::config::Theme::new()
@@ -205,7 +262,7 @@ impl Application for ZebradApp {
 
         let app_metadata = vec![
             // cargo or git tag + short commit
-            ("version", app_version().to_string()),
+            ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
             // constants
@@ -313,7 +370,7 @@ impl Application for ZebradApp {
         #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
-            release: Some(app_version().to_string().into()),
+            release: Some(build_version().to_string().into()),
             ..Default::default()
         });
 
@@ -362,7 +419,11 @@ impl Application for ZebradApp {
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
         }
-        components.push(Box::new(Tracing::new(tracing_config)?));
+        components.push(Box::new(Tracing::new(
+            config.network.network,
+            tracing_config,
+            command.cmd().uses_intro(),
+        )?));
 
         // Log git metadata and platform info when zebrad starts up
         if is_server {

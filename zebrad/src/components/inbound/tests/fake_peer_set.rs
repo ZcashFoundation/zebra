@@ -23,7 +23,9 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
-use zebra_network::{AddressBook, InventoryResponse, Request, Response};
+use zebra_network::{
+    constants::DEFAULT_MAX_CONNS_PER_IP, AddressBook, InventoryResponse, Request, Response,
+};
 use zebra_node_services::mempool;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -771,6 +773,7 @@ async fn setup(
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));

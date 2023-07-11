@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// An ongoing task that regularly caches the current `address_book` to disk, based on `config`.
+#[instrument(skip(config, address_book))]
 pub async fn peer_cache_updater(
     config: Config,
     address_book: Arc<Mutex<AddressBook>>,
@@ -24,7 +25,7 @@ pub async fn peer_cache_updater(
     //
     // TODO: turn the initial sleep time into a parameter of this function,
     //       and allow it to be set in tests
-    sleep(DNS_LOOKUP_TIMEOUT * 2).await;
+    sleep(DNS_LOOKUP_TIMEOUT * 4).await;
 
     loop {
         // Ignore errors because updating the cache is optional.

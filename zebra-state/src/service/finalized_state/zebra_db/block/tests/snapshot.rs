@@ -217,6 +217,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     if let Some((max_height, tip_block_hash)) = tip {
         // Check that the database returns empty note commitment trees for the
         // genesis block.
+        //
+        // We only store the sprout tree for the tip by height, so we can't check sprout here.
         let sapling_tree = state
             .sapling_note_commitment_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has a Sapling tree");
@@ -241,9 +243,11 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
         // Shielded
 
+        let stored_sprout_trees = state.sprout_note_commitments_full_map();
         let mut stored_sapling_trees = Vec::new();
         let mut stored_orchard_trees = Vec::new();
 
+        let sprout_tree_at_tip = state.sprout_note_commitment_tree();
         let sapling_tree_at_tip = state.sapling_note_commitment_tree();
         let orchard_tree_at_tip = state.orchard_note_commitment_tree();
 
@@ -268,9 +272,11 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .block(query_height.into())
                 .expect("heights up to tip have blocks");
 
-            // Check the sapling and orchard note commitment trees.
+            // Check the shielded note commitment trees.
             //
-            // TODO: test the rest of the shielded data (anchors, nullifiers, sprout)
+            // We only store the sprout tree for the tip by height, so we can't check sprout here.
+            //
+            // TODO: test the rest of the shielded data (anchors, nullifiers)
             let sapling_tree_by_height = state
                 .sapling_note_commitment_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
@@ -297,6 +303,18 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             if query_height == max_height {
                 assert_eq!(stored_block_hash, tip_block_hash);
 
+                // We only store the sprout tree for the tip by height,
+                // so the sprout check is less strict.
+                // We enforce the tip tree order by snapshotting it as well.
+                if let Some(stored_tree) = stored_sprout_trees.get(&sprout_tree_at_tip.root()) {
+                    assert_eq!(
+                        &sprout_tree_at_tip, stored_tree,
+                        "unexpected missing sprout tip tree:\n\
+                         all trees: {stored_sprout_trees:?}"
+                    );
+                } else {
+                    assert_eq!(sprout_tree_at_tip, Default::default());
+                }
                 assert_eq!(sapling_tree_at_tip, sapling_tree_by_height);
                 assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
 
@@ -427,6 +445,14 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         // These snapshots will change if the trees do not have cached roots.
         // But we expect them to always have cached roots,
         // because those roots are used to populate the anchor column families.
+        insta::assert_ron_snapshot!("sprout_tree_at_tip", sprout_tree_at_tip);
+        insta::assert_ron_snapshot!(
+            "sprout_trees",
+            stored_sprout_trees,
+            {
+                "." => insta::sorted_redaction()
+            }
+        );
         insta::assert_ron_snapshot!("sapling_trees", stored_sapling_trees);
         insta::assert_ron_snapshot!("orchard_trees", stored_orchard_trees);
 

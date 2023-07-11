@@ -419,12 +419,12 @@ proptest! {
             // the genesis block has a zero-valued transparent output,
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
-                let utxos = &block.new_outputs;
+                let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
                 let block_value_pool = &block.block.chain_value_pool_change(utxos)?;
                 expected_finalized_value_pool += *block_value_pool;
             }
 
-            let result_receiver = state_service.queue_and_commit_finalized(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_finalized_state(block.clone());
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
@@ -450,7 +450,7 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            let result_receiver = state_service.queue_and_commit_non_finalized(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -509,7 +509,7 @@ proptest! {
                 TipAction::grow_with(expected_block.clone().into())
             };
 
-            let result_receiver = state_service.queue_and_commit_finalized(block);
+            let result_receiver = state_service.queue_and_commit_to_finalized_state(block);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
@@ -532,7 +532,7 @@ proptest! {
                 TipAction::grow_with(expected_block.clone().into())
             };
 
-            let result_receiver = state_service.queue_and_commit_non_finalized(block);
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);

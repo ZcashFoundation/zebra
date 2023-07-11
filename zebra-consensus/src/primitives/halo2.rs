@@ -16,7 +16,7 @@ use rand::{thread_rng, CryptoRng, RngCore};
 use thiserror::Error;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
 use crate::BoxError;

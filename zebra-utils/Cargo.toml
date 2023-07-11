@@ -1,9 +1,23 @@
 [package]
 name = "zebra-utils"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.25"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
+
+# zebra-utils has a separate README file
+readme = "README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+
+# Zebra is only supported on the latest stable Rust version. See the README for details.
+# Any Zebra release can break compatibility with older Rust versions.
+rust-version = "1.70"
 
 [[bin]]
 name = "zebra-checkpoints"
@@ -55,23 +69,23 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 structopt = "0.3.26"
 hex = "0.4.3"
-serde_json = "1.0.96"
+serde_json = "1.0.100"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.17"
-thiserror = "1.0.40"
+thiserror = "1.0.43"
 
-zebra-node-services = { path = "../zebra-node-services" }
-zebra-chain = { path = "../zebra-chain" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
+
+# These crates are needed for the block-template-to-proposal binary
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.27", optional = true }
 
 # These crates are needed for the zebra-checkpoints binary
-itertools = { version = "0.10.5", optional = true }
+itertools = { version = "0.11.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { version = "1.8.4", optional = true }
 reqwest =  { version = "0.11.18", optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
-tokio = { version = "1.28.2", features = ["full"], optional = true }
-
-# These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", optional = true }
+tokio = { version = "1.29.1", features = ["full"], optional = true }

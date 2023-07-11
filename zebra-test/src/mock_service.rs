@@ -146,6 +146,7 @@ pub struct ResponseSender<Request, Response, Error> {
 impl<Request, Response, Assertion, Error> Service<Request>
     for MockService<Request, Response, Assertion, Error>
 where
+    Request: Send + 'static,
     Response: Send + 'static,
     Error: Send + 'static,
 {

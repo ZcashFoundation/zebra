@@ -1,66 +1,117 @@
 #!/usr/bin/env bash
 
-# show the commands we are executing
+# Show the commands we are executing
 set -x
-# exit if a command fails
+# Exit if a command fails
 set -e
-# exit if any command in a pipeline fails
+# Exit if any command in a pipeline fails
 set -o pipefail
 
-echo "Config variables:"
-echo "NETWORK=$NETWORK"
-echo "RPC_PORT=$RPC_PORT"
-echo "LOG_FILE=$LOG_FILE"
+# Set this to change the default cached state directory
+# Path and name of the config file
+: "${ZEBRA_CONF_DIR:=/etc/zebrad}"
+: "${ZEBRA_CONF_FILE:=zebrad.toml}"
+if [[ -n "$ZEBRA_CONF_DIR" ]] && [[ -n "$ZEBRA_CONF_FILE" ]]; then
+    ZEBRA_CONF_PATH="$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE"
+fi
 
-echo "Config location:"
-echo "ZEBRA_CONF_DIR=$ZEBRA_CONF_DIR"
-echo "ZEBRA_CONF_FILE=$ZEBRA_CONF_FILE"
-echo "ZEBRA_CONF_PATH=$ZEBRA_CONF_PATH"
-
-echo "Other variables:"
-echo "SHORT_SHA=$SHORT_SHA"
-echo "SENTRY_DSN=$SENTRY_DSN"
-
-# Create the conf path and file if it does not exist.
-mkdir -p "$ZEBRA_CONF_DIR"
-touch "$ZEBRA_CONF_PATH"
+# [network]
+: "${NETWORK:=Mainnet}"
+: "${ZEBRA_LISTEN_ADDR:=0.0.0.0}"
+# [consensus]
+: "${ZEBRA_CHECKPOINT_SYNC:=true}"
+# [state]
+: "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad-cache}"
+# [metrics]
+: "${METRICS_ENDPOINT_ADDR:=0.0.0.0}"
+: "${METRICS_ENDPOINT_PORT:=9999}"
+# [tracing]
+: "${LOG_COLOR:=false}"
+: "${TRACING_ENDPOINT_ADDR:=0.0.0.0}"
+: "${TRACING_ENDPOINT_PORT:=3000}"
+# [rpc]
+: "${RPC_LISTEN_ADDR:=0.0.0.0}"
+if [[ -z "${RPC_PORT}" ]]; then
+if [[ " ${FEATURES} " =~ " getblocktemplate-rpcs " ]]; then
+if [[ "${NETWORK}" = "Mainnet" ]]; then
+: "${RPC_PORT:=8232}"
+elif [[ "${NETWORK}" = "Testnet" ]]; then
+: "${RPC_PORT:=18232}"
+fi
+fi
+fi
 
 # Populate `zebrad.toml` before starting zebrad, using the environmental
-# variables set by the Dockerfile.
+# variables set by the Dockerfile or the user. If the user has already created a config, don't replace it.
 #
 # We disable most ports by default, so the default config is secure.
 # Users have to opt-in to additional functionality by setting environmental variables.
-#
-# TODO:
-#  - make `cache_dir`, `metrics.endpoint_addr`, and `tracing.endpoint_addr` into Docker arguments
-#  - add an $EXTRA_CONFIG or $REPLACEMENT_CONFIG environmental variable
+if [[ -n "$ZEBRA_CONF_PATH" ]] && [[ ! -f "$ZEBRA_CONF_PATH" ]]; then
+
+# Create the conf path and file
+mkdir -p "$ZEBRA_CONF_DIR"
+touch "$ZEBRA_CONF_PATH"
+
+# Populate the conf file
 cat <<EOF > "$ZEBRA_CONF_PATH"
 [network]
 network = "$NETWORK"
-listen_addr = "0.0.0.0"
-
+listen_addr = "$ZEBRA_LISTEN_ADDR"
 [state]
-cache_dir = "/zebrad-cache"
-
-[metrics]
-#endpoint_addr = "0.0.0.0:9999"
+cache_dir = "$ZEBRA_CACHED_STATE_DIR"
 EOF
 
-if [[ -n "$RPC_PORT" ]]; then
+if [[ " $FEATURES " =~ " prometheus " ]]; then # spaces are important here to avoid partial matches
 cat <<EOF >> "$ZEBRA_CONF_PATH"
-[rpc]
-listen_addr = "0.0.0.0:${RPC_PORT}"
+[metrics]
+endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
 fi
 
-if [[ -n "$LOG_FILE" ]]; then
-mkdir -p $(dirname "$LOG_FILE")
+if [[ "${RPC_PORT}" ]]; then
+cat <<EOF >> "${ZEBRA_CONF_PATH}"
+[rpc]
+listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
+EOF
+fi
 
+if [[ -n "$LOG_FILE" ]] || [[ -n "$LOG_COLOR" ]] || [[ -n "$TRACING_ENDPOINT_ADDR" ]]; then
 cat <<EOF >> "$ZEBRA_CONF_PATH"
 [tracing]
-log_file = "${LOG_FILE}"
-#endpoint_addr = "0.0.0.0:3000"
 EOF
+if [[ " $FEATURES " =~ " filter-reload " ]]; then # spaces are important here to avoid partial matches
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+endpoint_addr = "${TRACING_ENDPOINT_ADDR}:${TRACING_ENDPOINT_PORT}"
+EOF
+fi
+# Set this to log to a file, if not set, logs to standard output
+if [[ -n "$LOG_FILE" ]]; then
+mkdir -p "$(dirname "$LOG_FILE")"
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+log_file = "${LOG_FILE}"
+EOF
+fi
+
+# Zebra automatically detects if it is attached to a terminal, and uses colored output.
+# Set this to 'true' to force using color even if the output is not a terminal.
+# Set this to 'false' to disable using color even if the output is a terminal.
+if [[ "$LOG_COLOR" = "true" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+force_use_color = true
+EOF
+elif [[ "$LOG_COLOR" = "false" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+use_color = false
+EOF
+fi
+fi
+
+if [[ -n "$MINER_ADDRESS" ]]; then
+cat <<EOF >> "$ZEBRA_CONF_PATH"
+[mining]
+miner_address = "${MINER_ADDRESS}"
+EOF
+fi
 fi
 
 echo "Using zebrad.toml:"

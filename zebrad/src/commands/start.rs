@@ -82,9 +82,9 @@ use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
-    application::{app_version, user_agent},
+    application::{build_version, user_agent},
     components::{
-        inbound::{self, InboundSetupData},
+        inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
         tokio::{RuntimeRun, TokioComponent},
@@ -132,10 +132,18 @@ impl StartCmd {
         // The service that our node uses to respond to requests by peers. The
         // load_shed middleware ensures that we reduce the size of the peer set
         // in response to excess load.
+        //
+        // # Security
+        //
+        // This layer stack is security-sensitive, modifying it can cause hangs,
+        // or enable denial of service attacks.
+        //
+        // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
+            .timeout(MAX_INBOUND_RESPONSE_TIME)
             .service(Inbound::new(
                 config.sync.full_verify_concurrency_limit,
                 setup_rx,
@@ -150,7 +158,7 @@ impl StartCmd {
         .await;
 
         info!("initializing verifiers");
-        let (router_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
+        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -164,7 +172,7 @@ impl StartCmd {
             &config,
             max_checkpoint_height,
             peer_set.clone(),
-            router_verifier.clone(),
+            block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
         );
@@ -189,7 +197,7 @@ impl StartCmd {
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
             block_download_peer_set: peer_set.clone(),
-            block_verifier: router_verifier.clone(),
+            block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state,
             latest_chain_tip: latest_chain_tip.clone(),
@@ -207,10 +215,11 @@ impl StartCmd {
             config.mining.clone(),
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
-            app_version(),
+            build_version(),
+            user_agent(),
             mempool.clone(),
             read_only_state_service,
-            router_verifier,
+            block_verifier_router,
             sync_status.clone(),
             address_book,
             latest_chain_tip.clone(),

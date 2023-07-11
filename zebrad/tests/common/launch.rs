@@ -39,7 +39,7 @@ pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
 /// After we launch `zebrad`, wait this long in extended tests.
 /// See [`LAUNCH_DELAY`] for details.
-pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(25);
+pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(45);
 
 /// After we launch `lightwalletd`, wait this long for the command to start up,
 /// take the actions expected by the quick tests, and log the expected logs.

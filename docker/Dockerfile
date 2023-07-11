@@ -29,7 +29,7 @@ FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 COPY --from=planner /opt/zebrad/recipe.json recipe.json
 
-# Install zebra build deps
+# Install zebra build deps and Dockerfile deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     llvm \
@@ -37,6 +37,7 @@ RUN apt-get -qq update && \
     clang \
     ca-certificates \
     protobuf-compiler \
+    rsync \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -57,40 +58,41 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
+# TODO: just keep the backtrace, colorbt, rust_log, and cargo_home variables as those are the only needed at build time.
 # Build arguments and variables set to change how tests are run, tracelog levels,
 # and Network to be used (Mainnet or Testnet)
 #
 # We set defaults to all variables.
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE ${RUST_BACKTRACE:-0}
+ENV RUST_BACKTRACE=${RUST_BACKTRACE:-0}
 
 ARG RUST_LIB_BACKTRACE
-ENV RUST_LIB_BACKTRACE ${RUST_LIB_BACKTRACE:-0}
+ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-0}
 
 ARG COLORBT_SHOW_HIDDEN
-ENV COLORBT_SHOW_HIDDEN ${COLORBT_SHOW_HIDDEN:-0}
+ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-0}
 
 ARG RUST_LOG
-ENV RUST_LOG ${RUST_LOG:-info}
+ENV RUST_LOG=${RUST_LOG:-info}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
-ENV ZEBRA_SKIP_IPV6_TESTS ${ZEBRA_SKIP_IPV6_TESTS:-1}
+ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
 # Build zebrad with these features
 # Keep these in sync with:
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
-ARG FEATURES="sentry"
+ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 # Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
-ENV ENTRYPOINT_FEATURES "$TEST_FEATURES $FEATURES"
+ENV ENTRYPOINT_FEATURES="$TEST_FEATURES $FEATURES"
 
 # Use default network value if none is provided
 ARG NETWORK
-ENV NETWORK ${NETWORK:-Mainnet}
+ENV NETWORK=${NETWORK:-Mainnet}
 
-ENV CARGO_HOME /opt/zebrad/.cargo/
+ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
 # In this stage we build tests (without running then)
 #
@@ -102,15 +104,28 @@ FROM deps AS tests
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd /usr/local/bin
 
+# cargo uses timestamps for its cache, so they need to be in this order:
+# unmodified source files < previous build cache < modified source files
+COPY . .
+
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
+# over the top of the original source files,
 # and build it to cache all possible sentry and test dependencies.
 #
-# This is the caching Docker layer for Rust!
+# This is the caching Docker layer for Rust tests!
+# It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
 #
-# TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
+# TODO: add --locked when cargo-chef supports it
+RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
 
-COPY . .
+# Undo the source file changes made by cargo-chef.
+# rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
+# This makes sure the fake empty binaries created by cargo-chef are rebuilt.
+COPY --from=planner /opt/zebrad zebra-original
+RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
+RUN rm -r zebra-original
+
+# Build Zebra test binaries, but don't run them
 RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
@@ -127,10 +142,21 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
-RUN cargo chef cook --release --features "${FEATURES}" --recipe-path recipe.json
 
 COPY . .
-# Build zebra
+
+# This is the caching layer for Rust zebrad builds.
+# It creates a fake empty zebrad binary, see above for details.
+#
+# TODO: add --locked when cargo-chef supports it
+RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
+
+# Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
+COPY --from=planner /opt/zebrad zebra-original
+RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
+RUN rm -r zebra-original
+
+# Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
 COPY ./docker/runtime-entrypoint.sh /
@@ -152,45 +178,10 @@ RUN apt-get update && \
 # Config settings
 
 ARG NETWORK
-ENV NETWORK ${NETWORK:-Mainnet}
-
-# Set this to enable the RPC port
-ARG RPC_PORT
-ENV RPC_PORT ${RPC_PORT}
-
-# Set this to log to a file, if not set, logs to standard output
-ARG LOG_FILE
-ENV LOG_FILE ${LOG_FILE}
+ENV NETWORK=${NETWORK:-Mainnet}
 
 # Expose configured ports
-
-EXPOSE 8233 18233 $RPC_PORT
-
-# Config location
-
-# Use a configurable dir and file for the zebrad configuration file
-ARG ZEBRA_CONF_DIR
-ENV ZEBRA_CONF_DIR ${ZEBRA_CONF_DIR:-/etc/zebra}
-
-ARG ZEBRA_CONF_FILE
-ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE:-zebrad.toml}
-
-ARG ZEBRA_CONF_PATH
-ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH:-$ZEBRA_CONF_DIR/$ZEBRA_CONF_FILE}
-
-# Other settings
-
-ARG SHORT_SHA
-ENV SHORT_SHA ${SHORT_SHA}
-
-# Set this to send sentry reports when Zebra crashes
-ARG SENTRY_DSN
-ENV SENTRY_DSN ${SENTRY_DSN}
-
-# Create a default config file based on the Docker build arguments,
-# and report the available zebrad arguments.
-# (--help is used as a dummy command.)
-RUN /runtime-entrypoint.sh --help
+EXPOSE 8233 18233
 
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it

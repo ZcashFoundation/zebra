@@ -6,6 +6,122 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
+## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-XX-XX
+
+### Breaking Changes
+
+- Zebra now detects subcommand name typos on the command-line. If you want to give Zebra a list of tracing filters, use `zebrad start --filters debug,...` ([#7056](https://github.com/ZcashFoundation/zebra/pull/7056))
+
+
+## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-07-03
+
+Zebra's first patch release fixes multiple peer connection security issues and panics. It also significantly reduces Zebra's CPU usage. We recommend that all users upgrade to Zebra 1.0.1 or later.
+
+As of this release, Zebra requires Rust 1.70 to build. macOS builds are no longer officially supported by the Zebra team.
+
+If you're running `zebrad` in a terminal, you'll see a new Zebra welcome message.
+
+Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Zebra limits each IP address to 1 peer connection, to prevent denial of service attacks. This can be changed using the `network.max_connections_per_ip` config. ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980), [#6993](https://github.com/ZcashFoundation/zebra/pull/6993), [#7013](https://github.com/ZcashFoundation/zebra/pull/7013)).
+  Thank you to @dimxy from komodo for reporting this bug, and the Ziggurat team for demonstrating
+  its impact on testnet.
+- Zebra uses new APIs in Rust 1.70 to prevent concurrency bugs that could cause hangs or panics
+  ([#7032](https://github.com/ZcashFoundation/zebra/pull/7032)).
+
+### Support Changes
+
+These platforms are no longer supported by the Zebra team:
+- macOS has been moved from tier 2 to [tier 3 support](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/supported-platforms.md#tier-3) ([#6965](https://github.com/ZcashFoundation/zebra/pull/6965)). We disabled our regular macOS builds because Rust 1.70 [causes crashes during shutdown on macOS x86_64 (#6812)](https://github.com/ZcashFoundation/zebra/issues/6812). Zebra's state uses database transactions, so it should not be corrupted by the crash.
+
+### Security
+
+- Use Arc::into\_inner() to avoid potential hangs or panics ([#7032](https://github.com/ZcashFoundation/zebra/pull/7032))
+- Replace openssl with rustls in tests and experimental features ([#7047](https://github.com/ZcashFoundation/zebra/pull/7047))
+
+#### Network Security
+
+- Fix long delays in accepting inbound handshakes, and delays in async operations throughout Zebra. ([#7103](https://github.com/ZcashFoundation/zebra/pull/7103)). Thank you to the Ziggurat Team for reporting this bug.
+- Limit each IP address to 1 peer connection, to prevent denial of service attacks. ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980), [#6993](https://github.com/ZcashFoundation/zebra/pull/6993))
+- Close new peer connections from the same IP and port, rather than replacing the older connection ([#6980](https://github.com/ZcashFoundation/zebra/pull/6980))
+- Reduce inbound service overloads and add a timeout ([#6950](https://github.com/ZcashFoundation/zebra/pull/6950))
+- Stop panicking when handling inbound connection handshakes ([#6984](https://github.com/ZcashFoundation/zebra/pull/6984))
+- Stop panicking on shutdown in the syncer and network ([#7104](https://github.com/ZcashFoundation/zebra/pull/7104))
+
+### Added
+
+- Make the maximum number of connections per IP configurable ([#7013](https://github.com/ZcashFoundation/zebra/pull/7013))
+- Make it easier to modify Zebra's config inside the Docker image ([#7045](https://github.com/ZcashFoundation/zebra/pull/7045))
+- Print a Zebra logo and welcome text if stderr is terminal ([#6945](https://github.com/ZcashFoundation/zebra/pull/6945), [#7075](https://github.com/ZcashFoundation/zebra/pull/7075), [#7095](https://github.com/ZcashFoundation/zebra/pull/7095), [#7102](https://github.com/ZcashFoundation/zebra/pull/7102))
+
+### Changed
+
+- Move macOS to tier 3 support ([#6965](https://github.com/ZcashFoundation/zebra/pull/6965))
+- Install from crates.io in the README, rather than a git release tag ([#6977](https://github.com/ZcashFoundation/zebra/pull/6977))
+- Add extra timeout logging to peer TCP connections ([#6969](https://github.com/ZcashFoundation/zebra/pull/6969))
+
+### Fixed
+
+- Stop overwriting custom user configs inside Zebra's Docker image ([#7045](https://github.com/ZcashFoundation/zebra/pull/7045))
+- Stop Zebra using 100% CPU even when idle ([#7103](https://github.com/ZcashFoundation/zebra/pull/7103)), thank you to james_katz for reporting this bug
+- Avoid potential hangs in the `tokio` async runtime ([#7094](https://github.com/ZcashFoundation/zebra/pull/7094))
+- Replace or add RPC content type header to support `zcashd` RPC examples ([#6885](https://github.com/ZcashFoundation/zebra/pull/6885))
+- Make `zebra-network` licensing clearer ([#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
+
+#### Configuration
+
+- Ignore error from loading config if running the 'generate' or 'download' commands ([#7014](https://github.com/ZcashFoundation/zebra/pull/7014))
+- Apply force\_color to panic logs ([#6997](https://github.com/ZcashFoundation/zebra/pull/6997))
+
+#### Logging & Error Handling
+
+- Log a zebra-network task cancel on shutdown, rather than panicking ([#7078](https://github.com/ZcashFoundation/zebra/pull/7078))
+- Fix incorrect function spans in some logs ([#6923](https://github.com/ZcashFoundation/zebra/pull/6923), [#6995](https://github.com/ZcashFoundation/zebra/pull/6995))
+- Replace a state validation chain length assertion with a NotReadyToBeCommitted error ([#7072](https://github.com/ZcashFoundation/zebra/pull/7072))
+
+#### Experimental Feature Fixes
+
+- Add an elasticsearch feature to block serialize to fix experimental build failures ([#6709](https://github.com/ZcashFoundation/zebra/pull/6709))
+- Prevent progress bar from panicking by disabling limits that are never reached ([#6940](https://github.com/ZcashFoundation/zebra/pull/6940))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @dconnolly, @dimxy from komodo, james_katz, @oxarbitrage, @teor2345, @upbqdn, and the Ziggurat team.
+
+
+## [Zebra 1.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0) - 2023-06-14
+
+This is our 1.0.0 stable release.
+
+This release also fixes a panic at startup when parsing the app version, [publishes `zebrad` to crates.io](https://crates.io/crates/zebrad), and [publishes to Docker Hub under the `latest` tag](https://hub.docker.com/r/zfnd/zebra/tags).
+
+Please report bugs to [the Zebra GitHub repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=)
+
+### Security
+
+- Avoid potential concurrency bugs in outbound handshakes ([#6869](https://github.com/ZcashFoundation/zebra/pull/6869))
+
+### Changed
+
+- Publish to [crates.io](https://crates.io/crates/zebrad) ([#6908](https://github.com/ZcashFoundation/zebra/pull/6908))
+- Rename tower-batch to tower-batch-control ([#6907](https://github.com/ZcashFoundation/zebra/pull/6907))
+- Upgrade to ed25519-zebra 4.0.0 ([#6881](https://github.com/ZcashFoundation/zebra/pull/6881))
+
+### Fixed
+
+- Stop panicking at startup when parsing the app version ([#6888](https://github.com/ZcashFoundation/zebra/pull/6888))
+- Avoid a race condition in testing modified JoinSplits ([#6921](https://github.com/ZcashFoundation/zebra/pull/6921))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@dconnolly, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn
+
+
 ## [Zebra 1.0.0-rc.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.9) - 2023-06-07
 
 This release continues to address audit findings. It fixes multiple network protocol and RPC bugs,

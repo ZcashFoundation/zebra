@@ -280,7 +280,7 @@ where
             check::miner_fees_are_valid(&block, network, block_miner_fees)?;
 
             // Finally, submit the block for contextual verification.
-            let new_outputs = Arc::try_unwrap(known_utxos)
+            let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
             let prepared_block = zs::SemanticallyVerifiedBlock {

@@ -15,14 +15,14 @@ use crate::{BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
 #[cfg(test)]
 mod tests;
 
-/// A queued finalized block, and its corresponding [`Result`] channel.
-pub type QueuedFinalized = (
+/// A queued checkpoint verified block, and its corresponding [`Result`] channel.
+pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
 
-/// A queued non-finalized block, and its corresponding [`Result`] channel.
-pub type QueuedNonFinalized = (
+/// A queued semantically verified block, and its corresponding [`Result`] channel.
+pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
@@ -31,7 +31,7 @@ pub type QueuedNonFinalized = (
 #[derive(Debug, Default)]
 pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedNonFinalized>,
+    blocks: HashMap<block::Hash, QueuedSemanticallyVerified>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
@@ -47,7 +47,7 @@ impl QueuedBlocks {
     ///
     /// - if a block with the same `block::Hash` has already been queued.
     #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
-    pub fn queue(&mut self, new: QueuedNonFinalized) {
+    pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
@@ -86,7 +86,10 @@ impl QueuedBlocks {
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
     #[instrument(skip(self), fields(%parent_hash))]
-    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedNonFinalized> {
+    pub fn dequeue_children(
+        &mut self,
+        parent_hash: block::Hash,
+    ) -> Vec<QueuedSemanticallyVerified> {
         let queued_children = self
             .by_parent
             .remove(&parent_hash)
@@ -176,7 +179,7 @@ impl QueuedBlocks {
     }
 
     /// Return the queued block if it has already been registered
-    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedNonFinalized> {
+    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedSemanticallyVerified> {
         self.blocks.get_mut(hash)
     }
 
@@ -208,7 +211,7 @@ impl QueuedBlocks {
     /// Returns all key-value pairs of blocks as an iterator.
     ///
     /// Doesn't update the metrics, because it is only used when the state is being dropped.
-    pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedNonFinalized> {
+    pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedSemanticallyVerified> {
         self.known_utxos.clear();
         self.known_utxos.shrink_to_fit();
         self.by_parent.clear();
@@ -261,10 +264,10 @@ impl SentHashes {
         self.update_metrics_for_block(block.height);
     }
 
-    /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
+    /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a
     /// block or UTXO is available in the state.
     ///
-    /// Used for finalized blocks close to the final checkpoint, so non-finalized blocks can look up
+    /// Used for checkpoint verified blocks close to the final checkpoint, so the semantic block verifier can look up
     /// their UTXOs.
     ///
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
@@ -276,8 +279,9 @@ impl SentHashes {
         let outpoints = block
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
-                self.known_utxos.insert(*outpoint, utxo.clone());
+            .map(|(outpoint, ordered_utxo)| {
+                self.known_utxos
+                    .insert(*outpoint, ordered_utxo.utxo.clone());
                 outpoint
             })
             .cloned()

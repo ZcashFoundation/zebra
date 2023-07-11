@@ -1,9 +1,18 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.25"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
+
+readme = "../README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["asynchronous", "cryptography::cryptocurrencies"]
 
 [features]
 default = []
@@ -31,20 +40,20 @@ bellman = "0.14.0"
 bls12_381 = "0.8.0"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"
-rand = { version = "0.8.5", package = "rand" }
+rand = "0.8.5"
 rayon = "1.7.0"
 
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 displaydoc = "0.2.4"
 lazy_static = "1.4.0"
 once_cell = "1.18.0"
-serde = { version = "1.0.163", features = ["serde_derive"] }
+serde = { version = "1.0.168", features = ["serde_derive"] }
 
 futures = "0.3.28"
 futures-util = "0.3.28"
-metrics = "0.21.0"
-thiserror = "1.0.40"
-tokio = { version = "1.28.2", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+metrics = "0.21.1"
+thiserror = "1.0.43"
+tokio = { version = "1.29.1", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
@@ -53,13 +62,13 @@ orchard = "0.4.0"
 
 zcash_proofs = { version = "0.11.0", features = ["local-prover", "multicore", "download-params"] }
 
-tower-fallback = { path = "../tower-fallback/" }
-tower-batch = { path = "../tower-batch/" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.3" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.3" }
 
-zebra-script = { path = "../zebra-script" }
-zebra-state = { path = "../zebra-state" }
-zebra-node-services = { path = "../zebra-node-services" }
-zebra-chain = { path = "../zebra-chain" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.27" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
@@ -80,7 +89,7 @@ proptest = "1.2.0"
 proptest-derive = "0.3.0"
 spandoc = "0.2.2"
 
-tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.17"
 

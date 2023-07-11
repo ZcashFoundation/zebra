@@ -67,6 +67,23 @@ pub const INBOUND_PEER_LIMIT_MULTIPLIER: usize = 5;
 /// See [`INBOUND_PEER_LIMIT_MULTIPLIER`] for details.
 pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 
+/// The default maximum number of peer connections Zebra will keep for a given IP address
+/// before it drops any additional peer connections with that IP.
+///
+/// This will be used as `Config.max_connections_per_ip` if no valid value is provided.
+///
+/// Note: Zebra will currently avoid initiating outbound connections where it
+///       has recently had a successful handshake with any address
+///       on that IP. Zebra will not initiate more than 1 outbound connection
+///       to an IP based on the default configuration, but it will accept more inbound
+///       connections to an IP.
+pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
+
+/// The default peerset target size.
+///
+/// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
+pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
+
 /// The buffer size for the peer set.
 ///
 /// This should be greater than 1 to avoid sender contention, but also reasonably
@@ -83,7 +100,11 @@ pub const PEERSET_BUFFER_SIZE: usize = 3;
 /// and receiving a response from a remote peer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The timeout for handshakes when connecting to new peers.
+/// The timeout for connections and handshakes when connecting to new peers.
+///
+/// Outbound TCP connections must complete within this timeout,
+/// then the handshake messages get an additional `HANDSHAKE_TIMEOUT` to complete.
+/// (Inbound TCP accepts can't have a timeout, because they are handled by the OS.)
 ///
 /// This timeout should remain small, because it helps stop slow peers getting
 /// into the peer set. This is particularly important for network-constrained
@@ -349,7 +370,7 @@ pub const MIN_OVERLOAD_DROP_PROBABILITY: f32 = 0.05;
 
 /// The maximum probability of dropping a peer connection when it receives an
 /// [`Overloaded`](crate::PeerError::Overloaded) error.
-pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.95;
+pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed},
+    fmt::HexDebug,
     primitives::{ed25519, ZkSnarkProof},
     sprout::{self, JoinSplit, Nullifier},
 };
@@ -16,7 +17,7 @@ use crate::{
 /// description with the required signature data, so that an
 /// `Option<JoinSplitData>` correctly models the presence or absence of any
 /// JoinSplit data.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitData<P: ZkSnarkProof> {
     /// The first JoinSplit description in the transaction,
     /// using proofs of type `P`.
@@ -46,6 +47,17 @@ pub struct JoinSplitData<P: ZkSnarkProof> {
     pub pub_key: ed25519::VerificationKeyBytes,
     /// The JoinSplit signature, denoted as `joinSplitSig` in the spec.
     pub sig: ed25519::Signature,
+}
+
+impl<P: ZkSnarkProof> fmt::Debug for JoinSplitData<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JoinSplitData")
+            .field("first", &self.first)
+            .field("rest", &self.rest)
+            .field("pub_key", &self.pub_key)
+            .field("sig", &HexDebug(&self.sig.to_bytes()))
+            .finish()
+    }
 }
 
 impl<P: ZkSnarkProof> fmt::Display for JoinSplitData<P> {

@@ -6,9 +6,12 @@ name: CD
 #
 # Since the different event types each use a different Managed Instance Group or instance,
 # we can run different event types concurrently.
+#
+# For pull requests, we only run the tests from this workflow, and don't do any deployments.
+# So an in-progress pull request gets cancelled, just like other tests.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   workflow_dispatch:
@@ -18,6 +21,7 @@ on:
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
       log_file:
+        default: ''
         description: 'Log to a file path rather than standard output'
       no_cache:
         description: 'Disable the Docker cache for this build'
@@ -25,12 +29,50 @@ on:
         type: boolean
         default: false
 
-  push:
-    branches:
-      - main
+  # Temporarily disabled to reduce network load, see #6894.
+  #push:
+  #  branches:
+  #    - main
+  #  paths:
+  #    # code and tests
+  #    - '**/*.rs'
+  #    # hard-coded checkpoints and proptest regressions
+  #    - '**/*.txt'
+  #    # dependencies
+  #    - '**/Cargo.toml'
+  #    - '**/Cargo.lock'
+  #    # configuration files
+  #    - '.cargo/config.toml'
+  #    - '**/clippy.toml'
+  #    # workflow definitions
+  #    - 'docker/**'
+  #    - '.dockerignore'
+  #    - '.github/workflows/continous-delivery.yml'
+  #    - '.github/workflows/build-docker-image.yml'
+
+  # Only runs the Docker image tests, doesn't deploy any instances
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/continous-delivery.yml'
+      - '.github/workflows/find-cached-disks.yml'
+
   release:
     types:
       - published
+
 
 jobs:
   # If a release was made we want to extract the first part of the semver from the
@@ -81,7 +123,7 @@ jobs:
   # Test that Zebra works using the default config with the latest Zebra version,
   # and test reconfiguring the docker image for testnet.
   test-configuration-file:
-    name: Test Zebra default Docker config file
+    name: Test Zebra CD Docker config file
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
@@ -129,7 +171,8 @@ jobs:
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Test.*estimated progress to chain tip.*Genesis'
+          -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
+          -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop testnet-conf-tests
           # get the exit status from docker
           EXIT_STATUS=$( \
@@ -174,7 +217,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
 
@@ -211,15 +254,18 @@ jobs:
       - name: Create instance template for ${{ matrix.network }}
         run: |
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
+          --boot-disk-size 300GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --user-output-enabled \
-          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true \
+          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --container-stdin \
+          --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
@@ -273,7 +319,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
 
@@ -314,14 +360,13 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --user-output-enabled \
-          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true \
+          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file || vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
-          --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
+          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \

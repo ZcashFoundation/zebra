@@ -459,15 +459,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
         let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
-                assert!(
-                    matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {peer_result:?}\n\
-                     {peer_count} previous peers succeeded",
-                );
-                peer_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -521,15 +513,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
         let peer_change_result = peerset_rx.try_next();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_change_result)) => {
-                assert!(
-                    matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {peer_change_result:?}\n\
-                     {peer_change_count} previous peers succeeded",
-                );
-                peer_change_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_change_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -631,15 +615,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
         let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
-                assert!(
-                    matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {peer_result:?}\n\
-                     {peer_count} previous peers succeeded",
-                );
-                peer_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -694,15 +670,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
         let peer_change_result = peerset_rx.try_next();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_change_result)) => {
-                assert!(
-                    matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {peer_change_result:?}\n\
-                     {peer_change_count} previous peers succeeded",
-                );
-                peer_change_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_change_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -834,15 +802,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
         let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
-                assert!(
-                    matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {peer_result:?}\n\
-                     {peer_count} previous peers succeeded",
-                );
-                peer_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -900,15 +860,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
         let peer_change_result = peerset_rx.try_next();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_change_result)) => {
-                assert!(
-                    matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {peer_change_result:?}\n\
-                     {peer_change_count} previous peers succeeded",
-                );
-                peer_change_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_change_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -1019,15 +971,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
         let peer_result = peerset_rx.try_next();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_result)) => {
-                assert!(
-                    matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {peer_result:?}\n\
-                     {peer_count} previous peers succeeded",
-                );
-                peer_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -1085,15 +1029,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
         let peer_change_result = peerset_rx.try_next();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(peer_change_result)) => {
-                assert!(
-                    matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {peer_change_result:?}\n\
-                     {peer_change_count} previous peers succeeded",
-                );
-                peer_change_count += 1;
-            }
-
+            Ok(Some(_peer_change)) => peer_change_count += 1,
             // The channel is closed and there are no messages left in the channel.
             Ok(None) => break,
             // The channel is still open, but there are no messages left in the channel.
@@ -1158,7 +1094,8 @@ async fn add_initial_peers_is_rate_limited() {
 
     let elapsed = Instant::now() - before;
 
-    assert_eq!(connections.len(), PEER_COUNT);
+    // Errors are ignored, so we don't expect any peers here
+    assert_eq!(connections.len(), 0);
     // Make sure the rate limiting worked by checking if it took long enough
     assert!(
         elapsed
@@ -1516,7 +1453,7 @@ async fn init_with_peer_limit<S>(
     default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     // This test might fail on machines with no configured IPv4 addresses
@@ -1572,7 +1509,12 @@ where
     }
 
     // Manually initialize an address book without a timestamp tracker.
-    let mut address_book = AddressBook::new(config.listen_addr, config.network, Span::current());
+    let mut address_book = AddressBook::new(
+        config.listen_addr,
+        config.network,
+        config.max_connections_per_ip,
+        Span::current(),
+    );
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -1673,6 +1615,7 @@ where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone
         + Send
+        + Sync
         + 'static,
     S::Future: Send + 'static,
 {

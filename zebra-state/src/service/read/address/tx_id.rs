@@ -276,8 +276,5 @@ fn apply_tx_id_changes(
 ) -> BTreeMap<TransactionLocation, transaction::Hash> {
     // Correctness: compensate for inconsistent tx IDs finalized blocks across multiple addresses,
     // by combining them with overlapping non-finalized block tx IDs.
-    finalized_tx_ids
-        .into_iter()
-        .chain(chain_tx_ids.into_iter())
-        .collect()
+    finalized_tx_ids.into_iter().chain(chain_tx_ids).collect()
 }

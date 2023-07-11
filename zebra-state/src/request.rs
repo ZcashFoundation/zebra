@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::RangeInclusive,
+    ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
@@ -162,6 +162,17 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
 }
 
+/// A block ready to be committed directly to the finalized state with
+/// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
+///
+/// This is exposed for use in checkpointing.
+///
+/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
+/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
+/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
 
@@ -211,36 +222,6 @@ pub struct ContextuallyVerifiedBlock {
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
 
-/// A block ready to be committed directly to the finalized state with
-/// no checks.
-///
-/// This is exposed for use in checkpointing.
-///
-/// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
-/// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
-/// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock {
-    /// The block to commit to the state.
-    pub block: Arc<Block>,
-    /// The hash of the block.
-    pub hash: block::Hash,
-    /// The height of the block.
-    pub height: block::Height,
-    /// New transparent outputs created in this block, indexed by
-    /// [`OutPoint`](transparent::OutPoint).
-    ///
-    /// Note: although these transparent outputs are newly created, they may not
-    /// be unspent, since a later transaction in a block can spend outputs of an
-    /// earlier transaction.
-    ///
-    /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
-    /// A precomputed list of the hashes of the transactions in this block,
-    /// in the same order as `block.transactions`.
-    pub transaction_hashes: Arc<[transaction::Hash]>,
-}
-
 /// Wraps note commitment trees and the history tree together.
 pub struct Treestate {
     /// Note commitment trees.
@@ -273,37 +254,63 @@ impl Treestate {
 /// Zebra's non-finalized state passes this `struct` over to the finalized state
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
-/// database and recompute the new one.
-pub struct ContextuallyVerifiedBlockWithTrees {
+/// database and recompute a new one.
+pub struct SemanticallyVerifiedBlockWithTrees {
     /// A block ready to be committed.
-    pub checkpoint_verified: CheckpointVerifiedBlock,
+    pub verified: SemanticallyVerifiedBlock,
     /// The tresstate associated with the block.
-    pub treestate: Option<Treestate>,
+    pub treestate: Treestate,
 }
 
-impl ContextuallyVerifiedBlockWithTrees {
-    pub fn new(block: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
-        let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+/// Contains a block ready to be committed.
+///
+/// Zebra's state service passes this `enum` over to the finalized state
+/// when committing a block.
+pub enum FinalizableBlock {
+    Checkpoint {
+        checkpoint_verified: CheckpointVerifiedBlock,
+    },
+    Contextual {
+        contextually_verified: ContextuallyVerifiedBlock,
+        treestate: Treestate,
+    },
+}
 
-        Self {
-            checkpoint_verified,
-            treestate: Some(treestate),
+impl FinalizableBlock {
+    /// Create a new [`FinalizableBlock`] given a [`ContextuallyVerifiedBlock`].
+    pub fn new(contextually_verified: ContextuallyVerifiedBlock, treestate: Treestate) -> Self {
+        Self::Contextual {
+            contextually_verified,
+            treestate,
+        }
+    }
+
+    #[cfg(test)]
+    /// Extract a [`Block`] from a [`FinalizableBlock`] variant.
+    pub fn inner_block(&self) -> Arc<Block> {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => checkpoint_verified.block.clone(),
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => contextually_verified.block.clone(),
         }
     }
 }
 
-impl From<Arc<Block>> for ContextuallyVerifiedBlockWithTrees {
+impl From<CheckpointVerifiedBlock> for FinalizableBlock {
+    fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
+        Self::Checkpoint {
+            checkpoint_verified,
+        }
+    }
+}
+
+impl From<Arc<Block>> for FinalizableBlock {
     fn from(block: Arc<Block>) -> Self {
         Self::from(CheckpointVerifiedBlock::from(block))
-    }
-}
-
-impl From<CheckpointVerifiedBlock> for ContextuallyVerifiedBlockWithTrees {
-    fn from(block: CheckpointVerifiedBlock) -> Self {
-        Self {
-            checkpoint_verified: block,
-            treestate: None,
-        }
     }
 }
 
@@ -358,6 +365,24 @@ impl ContextuallyVerifiedBlock {
     }
 }
 
+impl SemanticallyVerifiedBlock {
+    fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
+        let height = block
+            .coinbase_height()
+            .expect("coinbase height was already checked");
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+
+        SemanticallyVerifiedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        }
+    }
+}
+
 impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
@@ -365,19 +390,7 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        let height = block
-            .coinbase_height()
-            .expect("coinbase height was already checked");
-        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_outputs(&block, &transaction_hashes);
-
-        Self {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-        }
+        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
     }
 }
 
@@ -389,7 +402,15 @@ impl From<Arc<Block>> for CheckpointVerifiedBlock {
     }
 }
 
-impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
+impl From<Arc<Block>> for SemanticallyVerifiedBlock {
+    fn from(block: Arc<Block>) -> Self {
+        let hash = block.hash();
+
+        SemanticallyVerifiedBlock::with_hash(block, hash)
+    }
+}
+
+impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
         let ContextuallyVerifiedBlock {
             block,
@@ -405,9 +426,28 @@ impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
             block,
             hash,
             height,
-            new_outputs: utxos_from_ordered_utxos(new_outputs),
+            new_outputs,
             transaction_hashes,
         }
+    }
+}
+
+impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
+    fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
+        checkpoint_verified.0
+    }
+}
+
+impl Deref for CheckpointVerifiedBlock {
+    type Target = SemanticallyVerifiedBlock;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for CheckpointVerifiedBlock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -415,12 +455,11 @@ impl From<ContextuallyVerifiedBlock> for CheckpointVerifiedBlock {
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
-    /// Performs contextual validation of the given block, committing it to the
-    /// state if successful.
+    /// Performs contextual validation of the given semantically verified block,
+    /// committing it to the state if successful.
     ///
-    /// It is the caller's responsibility to perform semantic validation. This
-    /// request can be made out-of-order; the state service will queue it until
-    /// its parent is ready.
+    /// This request can be made out-of-order; the state service will queue it
+    /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or an error if the block fails contextual
@@ -438,12 +477,12 @@ pub enum Request {
     /// documentation for details.
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
-    /// Commit a checkpointed block to the state, skipping most block validation.
+    /// Commit a checkpointed block to the state, skipping most but not all
+    /// contextual validation.
     ///
-    /// This is exposed for use in checkpointing, which produces finalized
-    /// blocks. It is the caller's responsibility to ensure that the block is
-    /// semantically valid and final. This request can be made out-of-order;
-    /// the state service will queue it until its parent is ready.
+    /// This is exposed for use in checkpointing, which produces checkpoint vefified
+    /// blocks. This request can be made out-of-order; the state service will queue
+    /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
     /// block, or an error.
@@ -455,8 +494,9 @@ pub enum Request {
     ///
     /// # Note
     ///
-    /// Finalized and non-finalized blocks are an internal Zebra implementation detail.
-    /// There is no difference between these blocks on the network, or in Zebra's
+    /// [`SemanticallyVerifiedBlock`], [`ContextuallyVerifiedBlock`] and
+    /// [`CheckpointVerifiedBlock`] are an internal Zebra implementation detail.
+    /// There is no difference between these blocks on the Zcash network, or in Zebra's
     /// network or syncer implementations.
     ///
     /// # Consensus

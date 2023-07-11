@@ -1,0 +1,50 @@
+[package]
+name = "tower-batch-control"
+version = "0.2.41-beta.3"
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
+description = "Tower middleware for batch request processing"
+# # Legal
+#
+# This licence is deliberately different to the rest of Zebra.
+#
+# This code was modified from a 2019 version of:
+# https://github.com/tower-rs/tower/tree/master/tower/src/buffer
+license = "MIT"
+repository = "https://github.com/ZcashFoundation/zebra"
+edition = "2021"
+
+# TODO: decide if we want to use the Zebra readme and home page
+#readme = "../README.md"
+#homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["tower", "batch"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["algorithms", "asynchronous"]
+
+[dependencies]
+futures = "0.3.28"
+futures-core = "0.3.28"
+pin-project = "1.1.2"
+rayon = "1.7.0"
+tokio = { version = "1.29.1", features = ["time", "sync", "tracing", "macros"] }
+tokio-util = "0.7.8"
+tower = { version = "0.4.13", features = ["util", "buffer"] }
+tracing = "0.1.37"
+tracing-futures = "0.2.5"
+
+[dev-dependencies]
+color-eyre = "0.6.2"
+# This is a transitive dependency via color-eyre.
+# Enable a feature that makes tinyvec compile much faster.
+tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
+
+ed25519-zebra = "4.0.0"
+rand = "0.8.5"
+
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
+tokio-test = "0.4.2"
+tower-fallback = { path = "../tower-fallback/" }
+tower-test = "0.4.0"
+
+zebra-consensus = { path = "../zebra-consensus/" }
+zebra-test = { path = "../zebra-test/" }

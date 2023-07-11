@@ -16,6 +16,7 @@
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
+- [User support](#user-support)
 - [Security](#security)
 - [License](#license)
 
@@ -54,10 +55,10 @@ section in the Zebra book for system requirements.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.9
+docker run zfnd/zebra:latest
 ```
 
-For more information, read our [Docker documentation](book/src/user/docker.md).
+For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Building Zebra
 
@@ -66,15 +67,16 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [pkg-config](http://pkgconf.org/), and a C++ compiler.
 
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
-supported or tested. Note that Zebra's code currently uses features introduced
-in Rust 1.68, or any later stable release.
+supported or tested. Any Zebra release can start depending on new features in the
+latest stable Rust.
 
-Every few weeks, we release a [new Zebra
-version](https://github.com/ZcashFoundation/zebra/releases).
+Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
 
 Below are quick summaries for installing the dependencies on your machine.
 
-<details><summary><h4>General instructions for installing dependencies</h4></summary>
+<details>
+
+<summary><h4>General instructions for installing dependencies</h4></summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
 
@@ -88,7 +90,9 @@ Below are quick summaries for installing the dependencies on your machine.
 
 </details>
 
-<details><summary><h4>Dependencies on Arch</h4></summary>
+<details>
+
+<summary><h4>Dependencies on Arch</h4></summary>
 
 ```sh
 sudo pacman -S rust clang pkgconf
@@ -98,10 +102,10 @@ Note that the package `clang` includes `libclang` as well as the C++ compiler.
 
 </details>
 
-Once the dependencies are in place, you can build Zebra
+Once the dependencies are in place, you can build and install Zebra:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.9 zebrad
+cargo install --locked zebrad
 ```
 
 You can start Zebra by
@@ -110,8 +114,8 @@ You can start Zebra by
 zebrad start
 ```
 
-See the [Running Zebra](https://zebra.zfnd.org/user/run.html) section in the
-book for more details.
+See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
+sections in the book for more details.
 
 #### Optional Features
 
@@ -164,8 +168,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 ## Future Work
 
-The Zebra team is currently working towards an audited stable release.
-
 We will continue to add new features as part of future network upgrades, and in response to community feedback.
 
 ## Documentation
@@ -177,6 +179,12 @@ documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
 
+## User support
+
+For bug reports please [open a bug report ticket in the Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=%5BUser+reported+bug%5D%3A+).
+
+Alternatively by chat, [Join the Zcash Foundation Discord Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support channel.
+
 ## Security
 
 Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
@@ -187,3 +195,7 @@ Zebra is distributed under the terms of both the MIT license
 and the Apache License (Version 2.0).
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+
+Some Zebra crates are distributed under the [MIT license only](LICENSE-MIT),
+because some of their code was originally from MIT-licensed projects.
+See each crate's directory for details.

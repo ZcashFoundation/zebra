@@ -1,0 +1,5 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_sprout_trees
+---
+{}

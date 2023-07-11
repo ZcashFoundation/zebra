@@ -183,14 +183,15 @@ impl CheckpointVerifiedBlock {
         height: block::Height,
     ) -> Self {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_outputs_with_height(&block, height, &transaction_hashes);
+        let new_outputs =
+            transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
-        Self {
+        Self(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        }
+        })
     }
 }

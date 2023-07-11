@@ -273,7 +273,7 @@ pub struct GetBlockTemplateRpcImpl<
     latest_chain_tip: Tip,
 
     /// The chain verifier, used for submitting blocks.
-    router_verifier: BlockVerifierRouter,
+    block_verifier_router: BlockVerifierRouter,
 
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
@@ -319,7 +319,7 @@ where
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        router_verifier: BlockVerifierRouter,
+        block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
@@ -358,7 +358,7 @@ where
             mempool,
             state,
             latest_chain_tip,
-            router_verifier,
+            block_verifier_router,
             sync_status,
             address_book,
         }
@@ -454,7 +454,7 @@ where
             .and_then(get_block_template::JsonParameters::block_proposal_data)
         {
             return validate_block_proposal(
-                self.router_verifier.clone(),
+                self.block_verifier_router.clone(),
                 block_proposal_bytes,
                 network,
                 latest_chain_tip,
@@ -521,15 +521,15 @@ where
                 //
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
-                let Some(mempool_txs) =
-                    fetch_mempool_transactions(mempool.clone(), tip_hash)
-                        .await?
-                        // If the mempool and state responses are out of sync:
-                        // - if we are not long polling, omit mempool transactions from the template,
-                        // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
-                        .or_else(|| client_long_poll_id.is_none().then(Vec::new)) else {
-                            continue;
-                        };
+                let Some(mempool_txs) = fetch_mempool_transactions(mempool.clone(), tip_hash)
+                    .await?
+                    // If the mempool and state responses are out of sync:
+                    // - if we are not long polling, omit mempool transactions from the template,
+                    // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
+                    .or_else(|| client_long_poll_id.is_none().then(Vec::new))
+                else {
+                    continue;
+                };
 
                 // - Long poll ID calculation
                 let server_long_poll_id = LongPollInput::new(
@@ -737,7 +737,7 @@ where
         HexData(block_bytes): HexData,
         _parameters: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
-        let mut router_verifier = self.router_verifier.clone();
+        let mut block_verifier_router = self.block_verifier_router.clone();
 
         async move {
             let block: Block = match block_bytes.zcash_deserialize_into() {
@@ -755,7 +755,7 @@ where
                 .unwrap_or_else(|| "invalid coinbase height".to_string());
             let block_hash = block.hash();
 
-            let router_verifier_response = router_verifier
+            let block_verifier_router_response = block_verifier_router
                 .ready()
                 .await
                 .map_err(|error| Error {
@@ -766,7 +766,7 @@ where
                 .call(zebra_consensus::Request::Commit(Arc::new(block)))
                 .await;
 
-            let chain_error = match router_verifier_response {
+            let chain_error = match block_verifier_router_response {
                 // Currently, this match arm returns `null` (Accepted) for blocks committed
                 // to any chain, but Accepted is only for blocks in the best chain.
                 //

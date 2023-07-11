@@ -23,8 +23,8 @@ use std::{
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
-    request::ContextuallyVerifiedBlockWithTrees,
-    service::{check, QueuedFinalized},
+    request::{FinalizableBlock, SemanticallyVerifiedBlockWithTrees, Treestate},
+    service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
 
@@ -167,7 +167,7 @@ impl FinalizedState {
     /// order.
     pub fn commit_finalized(
         &mut self,
-        ordered_block: QueuedFinalized,
+        ordered_block: QueuedCheckpointVerified,
     ) -> Result<CheckpointVerifiedBlock, BoxError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
@@ -225,53 +225,25 @@ impl FinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
-        contextually_verified_with_trees: ContextuallyVerifiedBlockWithTrees,
+        finalizable_block: FinalizableBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized = contextually_verified_with_trees.checkpoint_verified;
-        let committed_tip_hash = self.db.finalized_tip_hash();
-        let committed_tip_height = self.db.finalized_tip_height();
+        let (height, hash, finalized) = match finalizable_block {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => {
+                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
+                // treestate of the finalized tip from the database and update it for the block
+                // being committed, assuming the retrieved treestate is the parent block's
+                // treestate. Later on, this function proves this assumption by asserting that the
+                // finalized tip is the parent block of the block being committed.
 
-        // Assert that callers (including unit tests) get the chain order correct
-        if self.db.is_empty() {
-            assert_eq!(
-                committed_tip_hash, finalized.block.header.previous_block_hash,
-                "the first block added to an empty state must be a genesis block, source: {source}",
-            );
-            assert_eq!(
-                block::Height(0),
-                finalized.height,
-                "cannot commit genesis: invalid height, source: {source}",
-            );
-        } else {
-            assert_eq!(
-                committed_tip_height.expect("state must have a genesis block committed") + 1,
-                Some(finalized.height),
-                "committed block height must be 1 more than the finalized tip height, source: {source}",
-            );
-
-            assert_eq!(
-                committed_tip_hash, finalized.block.header.previous_block_hash,
-                "committed block must be a child of the finalized tip, source: {source}",
-            );
-        }
-
-        let (history_tree, note_commitment_trees) = match contextually_verified_with_trees.treestate
-        {
-            // If the treestate associated with the block was supplied, use it
-            // without recomputing it.
-            Some(ref treestate) => (
-                treestate.history_tree.clone(),
-                treestate.note_commitment_trees.clone(),
-            ),
-            // If the treestate was not supplied, retrieve a previous treestate
-            // from the database, and update it for the block being committed.
-            None => {
+                let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
                 let mut note_commitment_trees = self.db.note_commitment_trees();
 
                 // Update the note commitment trees.
-                note_commitment_trees.update_trees_parallel(&finalized.block)?;
+                note_commitment_trees.update_trees_parallel(&block)?;
 
                 // Check the block commitment if the history tree was not
                 // supplied by the non-finalized state. Note that we don't do
@@ -291,7 +263,7 @@ impl FinalizedState {
                 // TODO: run this CPU-intensive cryptography in a parallel rayon
                 // thread, if it shows up in profiles
                 check::block_commitment_is_valid_for_chain_history(
-                    finalized.block.clone(),
+                    block.clone(),
                     self.network,
                     &history_tree,
                 )?;
@@ -303,30 +275,64 @@ impl FinalizedState {
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut.push(
-                    self.network(),
-                    finalized.block.clone(),
-                    sapling_root,
-                    orchard_root,
-                )?;
+                history_tree_mut.push(self.network(), block.clone(), sapling_root, orchard_root)?;
 
-                (history_tree, note_commitment_trees)
+                (
+                    checkpoint_verified.height,
+                    checkpoint_verified.hash,
+                    SemanticallyVerifiedBlockWithTrees {
+                        verified: checkpoint_verified.0,
+                        treestate: Treestate {
+                            note_commitment_trees,
+                            history_tree,
+                        },
+                    },
+                )
             }
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                treestate,
+            } => (
+                contextually_verified.height,
+                contextually_verified.hash,
+                SemanticallyVerifiedBlockWithTrees {
+                    verified: contextually_verified.into(),
+                    treestate,
+                },
+            ),
         };
 
-        let finalized_height = finalized.height;
-        let finalized_hash = finalized.hash;
+        let committed_tip_hash = self.db.finalized_tip_hash();
+        let committed_tip_height = self.db.finalized_tip_height();
+
+        // Assert that callers (including unit tests) get the chain order correct
+        if self.db.is_empty() {
+            assert_eq!(
+                committed_tip_hash, finalized.verified.block.header.previous_block_hash,
+                "the first block added to an empty state must be a genesis block, source: {source}",
+            );
+            assert_eq!(
+                block::Height(0),
+                height,
+                "cannot commit genesis: invalid height, source: {source}",
+            );
+        } else {
+            assert_eq!(
+                committed_tip_height.expect("state must have a genesis block committed") + 1,
+                Some(height),
+                "committed block height must be 1 more than the finalized tip height, source: {source}",
+            );
+
+            assert_eq!(
+                committed_tip_hash, finalized.verified.block.header.previous_block_hash,
+                "committed block must be a child of the finalized tip, source: {source}",
+            );
+        }
 
         #[cfg(feature = "elasticsearch")]
-        let finalized_block = finalized.block.clone();
+        let finalized_block = finalized.verified.block.clone();
 
-        let result = self.db.write_block(
-            finalized,
-            history_tree,
-            note_commitment_trees,
-            self.network,
-            source,
-        );
+        let result = self.db.write_block(finalized, self.network, source);
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
@@ -334,10 +340,10 @@ impl FinalizedState {
             self.elasticsearch(&finalized_block);
 
             // TODO: move the stop height check to the syncer (#3442)
-            if self.is_at_stop_height(finalized_height) {
+            if self.is_at_stop_height(height) {
                 tracing::info!(
-                    height = ?finalized_height,
-                    hash = ?finalized_hash,
+                    ?height,
+                    ?hash,
                     block_source = ?source,
                     "stopping at configured height, flushing database to disk"
                 );

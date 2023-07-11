@@ -782,7 +782,9 @@ async fn state_error_converted_correctly() {
         "expected matching state and transaction errors"
     );
 
-    let TransactionError::ValidateContextError(propagated_validate_context_error) = transaction_error else {
+    let TransactionError::ValidateContextError(propagated_validate_context_error) =
+        transaction_error
+    else {
         panic!("should be a ValidateContextError variant");
     };
 
@@ -2153,7 +2155,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
             })
             .await;
 
-        if result == expected_error || i >= 10 {
+        if result == expected_error || i >= 100 {
             break result;
         }
 

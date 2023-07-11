@@ -29,6 +29,7 @@ async fn rpc_getinfo() {
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "/Zebra:RPC test/",
         Mainnet,
         false,
         true,
@@ -72,6 +73,7 @@ async fn rpc_getblock() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -224,6 +226,7 @@ async fn rpc_getblock_parse_error() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -265,6 +268,7 @@ async fn rpc_getblock_missing_error() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -334,6 +338,7 @@ async fn rpc_getbestblockhash() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -378,6 +383,7 @@ async fn rpc_getrawtransaction() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -451,7 +457,12 @@ async fn rpc_getrawtransaction() {
             }
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
-            let GetRawTransaction::Object { hex, height, confirmations } = response.expect("We should have a GetRawTransaction struct") else {
+            let GetRawTransaction::Object {
+                hex,
+                height,
+                confirmations,
+            } = response.expect("We should have a GetRawTransaction struct")
+            else {
                 unreachable!("Should return a Raw enum")
             };
 
@@ -539,6 +550,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -683,6 +695,7 @@ async fn rpc_getaddresstxids_response_with(
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        "RPC test",
         network,
         false,
         true,
@@ -734,6 +747,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
 
     let rpc = RpcImpl::new(
         "RPC test",
+        "RPC test",
         Mainnet,
         false,
         true,
@@ -781,6 +795,7 @@ async fn rpc_getaddressutxos_response() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let rpc = RpcImpl::new(
+        "RPC test",
         "RPC test",
         Mainnet,
         false,
@@ -830,7 +845,7 @@ async fn rpc_getblockcount() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        router_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -849,7 +864,7 @@ async fn rpc_getblockcount() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        router_verifier,
+        block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -880,7 +895,7 @@ async fn rpc_getblockcount_empty_state() {
         zebra_state::init_test_services(Mainnet);
 
     let (
-        router_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -899,7 +914,7 @@ async fn rpc_getblockcount_empty_state() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        router_verifier,
+        block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -932,7 +947,7 @@ async fn rpc_getpeerinfo() {
         zebra_state::init_test_services(Mainnet);
 
     let (
-        router_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -965,7 +980,7 @@ async fn rpc_getpeerinfo() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        router_verifier,
+        block_verifier_router,
         MockSyncStatus::default(),
         mock_address_book,
     );
@@ -1007,7 +1022,7 @@ async fn rpc_getblockhash() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        router_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -1026,7 +1041,7 @@ async fn rpc_getblockhash() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(router_verifier),
+        tower::ServiceBuilder::new().service(block_verifier_router),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -1195,7 +1210,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let read_state = MockService::build().for_unit_tests();
-    let router_verifier = MockService::build().for_unit_tests();
+    let block_verifier_router = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -1236,7 +1251,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        router_verifier,
+        block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );
@@ -1281,10 +1296,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     assert_eq!(
         get_block_template.capabilities,
@@ -1446,10 +1462,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     // mempool transactions should be omitted if the tip hash in the GetChainInfo response from the state
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
@@ -1481,7 +1498,7 @@ async fn rpc_submitblock_errors() {
 
     // Init RPCs
     let (
-        router_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -1500,7 +1517,7 @@ async fn rpc_submitblock_errors() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        router_verifier,
+        block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
     );
@@ -1648,7 +1665,7 @@ async fn rpc_getdifficulty() {
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let read_state = MockService::build().for_unit_tests();
-    let router_verifier = MockService::build().for_unit_tests();
+    let block_verifier_router = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -1683,7 +1700,7 @@ async fn rpc_getdifficulty() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        router_verifier,
+        block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );

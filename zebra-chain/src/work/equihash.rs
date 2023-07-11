@@ -87,9 +87,7 @@ impl Copy for Solution {}
 
 impl Clone for Solution {
     fn clone(&self) -> Self {
-        let mut bytes = [0; SOLUTION_SIZE];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 
