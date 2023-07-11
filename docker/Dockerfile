@@ -84,9 +84,9 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
-ENV ENTRYPOINT_FEATURES="$TEST_FEATURES $FEATURES"
+ENV TEST_FEATURES="$TEST_FEATURES $FEATURES"
 
 # Use default network value if none is provided
 ARG NETWORK
@@ -116,7 +116,7 @@ COPY . .
 # It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
 #
 # TODO: add --locked when cargo-chef supports it
-RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
+RUN cargo chef cook --tests --release --features "${TEST_FEATURES}" --workspace --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef.
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
@@ -126,7 +126,7 @@ RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
 # Build Zebra test binaries, but don't run them
-RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
+RUN cargo test --locked --release --features "${TEST_FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
