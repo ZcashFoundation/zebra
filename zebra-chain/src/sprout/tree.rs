@@ -20,8 +20,6 @@ use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
-
 mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
@@ -131,20 +129,6 @@ impl From<&Root> for [u8; 32] {
     }
 }
 
-impl ZcashSerialize for Root {
-    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        writer.write_all(&<[u8; 32]>::from(*self)[..])?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Root {
-    fn zcash_deserialize<R: std::io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(Self::from(reader.read_32_bytes()?))
-    }
-}
-
 /// A node of the Sprout note commitment tree.
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct Node([u8; 32]);
@@ -152,27 +136,6 @@ struct Node([u8; 32]);
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
-    }
-}
-
-/// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
-///
-/// Zebra stores Sapling note commitment trees as [`Frontier`][1]s while the
-/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
-/// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
-///
-/// [1]: bridgetree::Frontier
-/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [3]: incrementalmerkletree::frontier::CommitmentTree
-impl zcash_primitives::merkle_tree::HashSer for Node {
-    fn read<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
-        let mut node = [0u8; 32];
-        reader.read_exact(&mut node)?;
-        Ok(Self(node))
-    }
-
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        writer.write_all(self.0.as_ref())
     }
 }
 
