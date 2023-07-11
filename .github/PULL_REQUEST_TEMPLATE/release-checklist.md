@@ -68,7 +68,7 @@ Zebra follows [semantic versioning](https://semver.org). Semantic versions look 
 
 Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
 - Mainnet Network Upgrades are `major` releases
-- significant new features, large changes, deprecations, and removals are `minor` releases
+- significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
 - otherwise, it is a `patch` release
 
 Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
