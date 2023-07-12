@@ -56,8 +56,13 @@ impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
 impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
     fn from(frontier: Frontier<Node, MERKLE_DEPTH>) -> Self {
         if let Some(frontier_data) = frontier.value() {
-            // We don't have information to build the `Right` side of the `LegacyLeaf` so we just put what we have into the left.
-            let leaf = LegacyLeaf::Left(*frontier_data.leaf());
+            let leaf_from_frontier = *frontier_data.leaf();
+            let mut leaf = LegacyLeaf::Left(leaf_from_frontier);
+            let mut ommers = frontier_data.ommers().to_vec();
+            if frontier_data.position().is_odd() {
+                let left = ommers.remove(0);
+                leaf = LegacyLeaf::Right(left, leaf_from_frontier);
+            }
             LegacyFrontier {
                 frontier: Some(LegacyNonEmptyFrontier {
                     position: LegacyPosition(u64::from(frontier_data.position()) as usize),
