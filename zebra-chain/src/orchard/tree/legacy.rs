@@ -31,7 +31,6 @@ impl From<LegacyNoteCommitmentTree> for NoteCommitmentTree {
     }
 }
 
-///
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Frontier")]
 struct LegacyFrontier<H, const DEPTH: u8> {
@@ -58,7 +57,7 @@ impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
         if let Some(frontier_data) = frontier.value() {
             let mut leaf = LegacyLeaf::Left(*frontier_data.leaf());
             if frontier_data.position().is_odd() {
-                // TODO: This capture whats happening in `orchard_note_commitment_tree_serialization_pow2`
+                // TODO: This capture what's happening in `orchard_note_commitment_tree_serialization_pow2`
                 // but i don't know how to `Node::combine` to make the legacy leaf in thgis case.
                 leaf = LegacyLeaf::Left(*frontier_data.leaf());
             }
