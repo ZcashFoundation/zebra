@@ -31,9 +31,10 @@ impl From<LegacyNoteCommitmentTree> for NoteCommitmentTree {
     }
 }
 
+///
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Frontier")]
-struct LegacyFrontier<H, const DEPTH: u8> {
+pub struct LegacyFrontier<H, const DEPTH: u8> {
     frontier: Option<LegacyNonEmptyFrontier<H>>,
 }
 

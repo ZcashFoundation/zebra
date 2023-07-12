@@ -31,7 +31,7 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
-mod legacy;
+pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
 /// The type that is used to update the note commitment tree.

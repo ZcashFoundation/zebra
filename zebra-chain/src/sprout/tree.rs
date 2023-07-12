@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
-mod legacy;
+pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -131,7 +131,7 @@ impl From<&Root> for [u8; 32] {
 
 /// A node of the Sprout note commitment tree.
 #[derive(Clone, Copy, Eq, PartialEq)]
-struct Node([u8; 32]);
+pub struct Node([u8; 32]);
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
