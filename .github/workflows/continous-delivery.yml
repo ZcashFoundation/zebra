@@ -120,8 +120,7 @@ jobs:
       zebra_skip_ipv6_tests: '1'
       rust_log: info
 
-  # Test that Zebra works using the default config with the latest Zebra version,
-  # and test reconfiguring the docker image for testnet.
+  # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
     name: Test Zebra CD Docker config file
     timeout-minutes: 15
@@ -160,6 +159,20 @@ jobs:
           exit 0
           fi
           exit "$EXIT_STATUS"
+
+  # Test reconfiguring the docker image for testnet.
+  test-configuration-file-testnet:
+    name: Test testnet Zebra CD Docker config file
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.3.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
       # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config

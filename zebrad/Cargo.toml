@@ -159,7 +159,7 @@ humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
 semver = "1.0.17"
-serde = { version = "1.0.166", features = ["serde_derive"] }
+serde = { version = "1.0.168", features = ["serde_derive"] }
 toml = "0.7.6"
 
 futures = "0.3.28"
@@ -173,7 +173,7 @@ color-eyre = { version = "0.6.2", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.41"
+thiserror = "1.0.43"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"
