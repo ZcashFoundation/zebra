@@ -282,7 +282,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root(self.inner.root().0);
+                let root = self.recalculate_root();
                 *write_root = Some(root);
                 root
             }
@@ -296,6 +296,11 @@ impl NoteCommitmentTree {
             .cached_root
             .read()
             .expect("a thread that previously held exclusive lock access panicked")
+    }
+
+    /// Calculates and returns the current root of the tree, ignoring any caching.
+    pub fn recalculate_root(&self) -> Root {
+        Root(self.inner.root().0)
     }
 
     /// Returns a hash of the Sprout note commitment tree root.

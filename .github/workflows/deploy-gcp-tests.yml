@@ -575,13 +575,91 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
+
+  # check the logs of the test we just launched for zebrad startup messages
+  #
+  # this step makes sure `zebrad` is running, and configured for `inputs.network`.
+  logs-startup:
+    name: Check startup for ${{ inputs.test_id }}
+    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.5.3
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.1.1
+
+      # Show all the logs since the container launched,
+      # following until we see zebrad startup messages.
+      #
+      # This check limits the number of log lines, so tests running on the wrong network don't
+      # run until the job timeout. If Zebra does a complete recompile, there are a few hundred log
+      # lines before the startup logs. So that's what we use here.
+      #
+      # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
+      # Errors in the tests are caught by the final test status job.
+      - name: Check startup logs for ${{ inputs.test_id }}
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ vars.GCP_ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command \
+          "\
+          sudo docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          head -700 | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          -e 'Zcash network: ${{ inputs.network }}' \
+          "
+
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
   #
   # If `inputs.is_long_test` is `false`, this job is skipped.
   logs-heartwood:
     name: Log ${{ inputs.test_id }} test (heartwood)
-    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
-    needs: [ launch-with-cached-state, launch-without-cached-state ]
+    needs: [ logs-startup ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
@@ -624,12 +702,6 @@ jobs:
 
       # Show all the logs since the container launched,
       # following until Canopy activation (or the test finishes)
-      #
-      # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
-      #
-      # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \

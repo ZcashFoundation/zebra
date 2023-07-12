@@ -11,34 +11,33 @@ autolabeler:
       - '/secur/i'
     title:
       - '/secur/i'
-  - label: 'C-removed'
-    branch:
-      - '/remov/i'
-    title:
-      - '/remov/i'
+      - '/crash/i'
+      - '/destr/i'
+      - '/unsafe/i'
   - label: 'C-deprecated'
     branch:
       - '/deprecat/i'
     title:
       - '/deprecat/i'
+  - label: 'extra-reviews'
+    branch:
+      - '/remov/i'
+      - '/deprecat/i'
+    title:
+      - '/remov/i'
+      - '/deprecat/i'
+      - '/crash/i'
+      - '/destr/i'
+      - '/unsafe/i'
   - label: 'C-feature'
     branch:
-      - '/add/i'
       - '/feat/i'
     title:
-      - '/add/i'
       - '/feat/i'
-  - label: 'C-enhancement'
-    branch:
-      - '/chang/i'
-    title:
-      - '/chang/i'
   - label: 'C-bug'
     branch:
-      - '/fix/i'
       - '/bug/i'
     title:
-      - '/fix/i'
       - '/bug/i'
   # Changes that are almost always trivial for users
   - label: 'C-trivial'
@@ -46,16 +45,24 @@ autolabeler:
       - '/clean/i'
       - '/chore/i'
       - '/clippy/i'
+      - '/test/i'
     title:
       - '/clean/i'
       - '/chore/i'
       - '/clippy/i'
+      - '/test/i'
+      - '/(ci)/i'
+      - '/(cd)/i'
+      - '/job/i'
+      - '/patch/i'
+      - '/actions/i'
     files:
       # Regular changes that don't need to go in the CHANGELOG
       - 'CHANGELOG.md'
       - 'zebra-consensus/src/checkpoint/*-checkpoints.txt'
       # Developer-only changes
       - '.gitignore'
+      - '.dockerignore'
       # Test-only changes
       - 'zebra-test'
       - '.cargo/config.toml'
@@ -80,8 +87,7 @@ categories:
     labels:
       - 'C-security'
       # Other labels that are usually security issues
-      - 'I-bad-code'
-      - 'I-bad-data'
+      - 'I-invalid-data'
       - 'I-consensus'
       - 'I-crash'
       - 'I-destructive'
@@ -90,11 +96,10 @@ categories:
       - 'I-privacy'
       - 'I-remote-node-overload'
       - 'I-unbounded-growth'
-      - 'I-unsound'
+      - 'I-memory-safety'
   - title: 'Removed'
     labels:
       - 'C-removal'
-      - 'C-breaking'
   - title: 'Deprecated'
     labels:
       - 'C-deprecation'
@@ -164,9 +169,9 @@ template: |
   ### Breaking Changes
   
   This release has the following breaking changes:
-  - *TODO*: Check the `Removed` section for any breaking changes
+  - *TODO*: Check the `Removed` and `Deprecated` sections for any breaking changes
   - *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
-    
+  
   $CHANGES
   
   ### Contributors

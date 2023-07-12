@@ -37,7 +37,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v37.0.5
+        uses: tj-actions/changed-files@v37.1.0
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v37.0.5
+        uses: tj-actions/changed-files@v37.1.0
         with:
           files: |
             .github/workflows/*.yml
@@ -178,10 +178,13 @@ jobs:
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
       - uses: actions/checkout@v3.5.3
-      - uses: reviewdog/action-actionlint@v1.37.1
+      - name: actionlint
+        uses: reviewdog/action-actionlint@v1.37.1
         with:
           level: warning
           fail_on_error: false
+      - name: validate-dependabot
+        uses: marocchino/validate-dependabot@v2.1.0
 
   codespell:
     runs-on: ubuntu-latest
