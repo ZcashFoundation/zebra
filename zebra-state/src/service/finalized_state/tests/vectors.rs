@@ -4,20 +4,48 @@
 //! We don't need to check empty trees, because the database format snapshot tests
 //! use empty trees.
 
-use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::FromHex;
 use rand::random;
 
-use zebra_chain::{orchard, sapling, sprout};
+use halo2::pasta::{group::ff::PrimeField, pallas};
+
+use zebra_chain::{
+    orchard::tree::NoteCommitmentTree as OrchardNoteCommitmentTree,
+    sapling::tree::NoteCommitmentTree as SaplingNoteCommitmentTree,
+    sprout::{
+        tree::NoteCommitmentTree as SproutNoteCommitmentTree,
+        NoteCommitment as SproutNoteCommitment,
+    },
+};
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
+
+// Currently, these tests check these structs are equal:
+//  * commitments -> tree struct
+//  * commitments -> tree struct -> serialize -> deserialize -> tree struct
+// And these serialized formats are equal:
+//  * fixed serialized test vector
+//  * commitments -> tree struct -> serialize
+//  * commitments -> tree struct -> serialize -> deserialize -> tree struct -> serialize
+//
+// TODO: apply these tests to the new tree structs, and update the serialization format
+//       (keeping the tests for the old format is optional, because the tests below cover it)
+//
+// TODO: test that old and new serializations produce the same format:
+// Tree roots built from the same commitments should match:
+//   * commitments -> old tree struct -> new tree struct -> un-cached root
+//   * commitments -> new tree struct -> un-cached root
+// Even when serialized and deserialized:
+//   * commitments -> old tree struct -> old serialize -> old deserialize -> old tree struct ->  new tree struct -> un-cached root
+//   * commitments -> new tree struct -> new serialize -> new deserialize -> new tree struct -> un-cached root
+//   * commitments -> new tree struct -> un-cached root
 
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sprout::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SproutNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sprout/tests/test_vectors.rs
     let hex_commitments = [
@@ -29,7 +57,7 @@ fn sprout_note_commitment_tree_serialization() {
     for (idx, cm_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_hex).unwrap();
 
-        let cm = sprout::NoteCommitment::from(bytes);
+        let cm = SproutNoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -48,7 +76,7 @@ fn sprout_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SproutNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -67,7 +95,7 @@ fn sprout_note_commitment_tree_serialization() {
 fn sprout_note_commitment_tree_serialization_one() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sprout::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SproutNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sprout/tests/test_vectors.rs
     let hex_commitments = ["836045484077cf6390184ea7cd48b460e2d0f22b2293b69633bb152314a692fb"];
@@ -75,7 +103,7 @@ fn sprout_note_commitment_tree_serialization_one() {
     for (idx, cm_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_hex).unwrap();
 
-        let cm = sprout::NoteCommitment::from(bytes);
+        let cm = SproutNoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -94,7 +122,7 @@ fn sprout_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SproutNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -117,7 +145,7 @@ fn sprout_note_commitment_tree_serialization_one() {
 fn sprout_note_commitment_tree_serialization_pow2() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sprout::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SproutNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sprout/tests/test_vectors.rs
     let hex_commitments = [
@@ -130,7 +158,7 @@ fn sprout_note_commitment_tree_serialization_pow2() {
     for (idx, cm_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_hex).unwrap();
 
-        let cm = sprout::NoteCommitment::from(bytes);
+        let cm = SproutNoteCommitment::from(bytes);
         incremental_tree.append(cm).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -149,7 +177,7 @@ fn sprout_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sprout::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SproutNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -168,7 +196,7 @@ fn sprout_note_commitment_tree_serialization_pow2() {
 fn sapling_note_commitment_tree_serialization() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sapling::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SaplingNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sapling/tests/test_vectors.rs
     let hex_commitments = [
@@ -199,7 +227,7 @@ fn sapling_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SaplingNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -218,7 +246,7 @@ fn sapling_note_commitment_tree_serialization() {
 fn sapling_note_commitment_tree_serialization_one() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sapling::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SaplingNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sapling/tests/test_vectors.rs
     let hex_commitments = ["225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b11458"];
@@ -245,7 +273,7 @@ fn sapling_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SaplingNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -268,7 +296,7 @@ fn sapling_note_commitment_tree_serialization_one() {
 fn sapling_note_commitment_tree_serialization_pow2() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = sapling::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = SaplingNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/sapling/tests/test_vectors.rs
     let hex_commitments = [
@@ -304,7 +332,7 @@ fn sapling_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = sapling::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = SaplingNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -323,7 +351,7 @@ fn sapling_note_commitment_tree_serialization_pow2() {
 fn orchard_note_commitment_tree_serialization() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = orchard::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = OrchardNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/orchard/tests/tree.rs
     let commitments = [
@@ -364,7 +392,7 @@ fn orchard_note_commitment_tree_serialization() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = OrchardNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -383,7 +411,7 @@ fn orchard_note_commitment_tree_serialization() {
 fn orchard_note_commitment_tree_serialization_one() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = orchard::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = OrchardNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/orchard/tests/tree.rs
     let commitments = [[
@@ -412,7 +440,7 @@ fn orchard_note_commitment_tree_serialization_one() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = OrchardNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
@@ -435,7 +463,7 @@ fn orchard_note_commitment_tree_serialization_one() {
 fn orchard_note_commitment_tree_serialization_pow2() {
     let _init_guard = zebra_test::init();
 
-    let mut incremental_tree = orchard::tree::NoteCommitmentTree::default();
+    let mut incremental_tree = OrchardNoteCommitmentTree::default();
 
     // Some commitments from zebra-chain/src/orchard/tests/tree.rs
     let commitments = [
@@ -471,7 +499,7 @@ fn orchard_note_commitment_tree_serialization_pow2() {
     let serialized_tree = incremental_tree.as_bytes();
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
-    let deserialized_tree = orchard::tree::NoteCommitmentTree::from_bytes(&serialized_tree);
+    let deserialized_tree = OrchardNoteCommitmentTree::from_bytes(&serialized_tree);
 
     // This check isn't enough to show that the entire struct is the same, because it just compares
     // the cached serialized/deserialized roots. (NoteCommitmentTree::eq() also just compares
