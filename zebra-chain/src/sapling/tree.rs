@@ -348,7 +348,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root::try_from(self.inner.root().0).unwrap();
+                let root = self.recalculate_root();
                 *write_root = Some(root);
                 root
             }
@@ -362,6 +362,11 @@ impl NoteCommitmentTree {
             .cached_root
             .read()
             .expect("a thread that previously held exclusive lock access panicked")
+    }
+
+    /// Calculates and returns the current root of the tree, ignoring any caching.
+    pub fn recalculate_root(&self) -> Root {
+        Root::try_from(self.inner.root().0).unwrap()
     }
 
     /// Gets the Jubjub-based Pedersen hash of root node of this merkle tree of
