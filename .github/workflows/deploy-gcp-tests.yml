@@ -1808,7 +1808,7 @@ jobs:
           elif [[ "$INITIAL_DISK_DB_VERSION" = "new" ]]; then
               DB_VERSION_SUMMARY="$RUNNING_DB_VERSION in new database"
           else
-              DB_VERSION_SUMMARY="$INITIAL_DISK_DB_VERSION upgrading to $RUNNING_DB_VERSION"
+              DB_VERSION_SUMMARY="$INITIAL_DISK_DB_VERSION changing to $RUNNING_DB_VERSION"
           fi
 
           echo "Summarised database versions from logs: $DB_VERSION_SUMMARY"
