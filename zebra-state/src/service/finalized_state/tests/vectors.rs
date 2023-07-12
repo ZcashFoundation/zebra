@@ -22,11 +22,11 @@ use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 // Currently, these tests check these structs are equal:
 //  * commitments -> tree struct
-//  * commitments -> tree struct -> seralize -> deserialize -> tree struct
+//  * commitments -> tree struct -> serialize -> deserialize -> tree struct
 // And these serialized formats are equal:
 //  * fixed serialized test vector
-//  * commitments -> tree struct -> seralize
-//  * commitments -> tree struct -> seralize -> deserialize -> tree struct -> serialize
+//  * commitments -> tree struct -> serialize
+//  * commitments -> tree struct -> serialize -> deserialize -> tree struct -> serialize
 //
 // TODO: apply these tests to the new tree structs, and update the serialization format
 //       (keeping the tests for the old format is optional, because the tests below cover it)
