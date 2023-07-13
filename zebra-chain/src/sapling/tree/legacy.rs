@@ -8,8 +8,9 @@ use super::{Node, NoteCommitmentTree, Root, MERKLE_DEPTH};
 ///
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "NoteCommitmentTree")]
+#[allow(missing_docs)]
 pub struct LegacyNoteCommitmentTree {
-    inner: LegacyFrontier<Node, MERKLE_DEPTH>,
+    pub inner: LegacyFrontier<Node, MERKLE_DEPTH>,
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
@@ -34,8 +35,9 @@ impl From<LegacyNoteCommitmentTree> for NoteCommitmentTree {
 ///
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Frontier")]
+#[allow(missing_docs)]
 pub struct LegacyFrontier<H, const DEPTH: u8> {
-    frontier: Option<LegacyNonEmptyFrontier<H>>,
+    pub frontier: Option<LegacyNonEmptyFrontier<H>>,
 }
 
 impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
@@ -88,20 +90,23 @@ impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "NonEmptyFrontier")]
-struct LegacyNonEmptyFrontier<H> {
-    position: LegacyPosition,
-    leaf: LegacyLeaf<H>,
-    ommers: Vec<H>,
+#[allow(missing_docs)]
+pub struct LegacyNonEmptyFrontier<H> {
+    pub position: LegacyPosition,
+    pub leaf: LegacyLeaf<H>,
+    pub ommers: Vec<H>,
 }
 
 /// A set of leaves of a Merkle tree.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Leaf")]
-enum LegacyLeaf<A> {
+#[allow(missing_docs)]
+pub enum LegacyLeaf<A> {
     Left(A),
     Right(A, A),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
-struct LegacyPosition(usize);
+#[allow(missing_docs)]
+pub struct LegacyPosition(pub usize);

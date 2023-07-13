@@ -23,7 +23,8 @@ use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_primitives::merkle_tree;
+use zcash_encoding::{Optional, Vector};
+use zcash_primitives::merkle_tree::HashSer;
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
@@ -32,7 +33,7 @@ use crate::serialization::{
 };
 
 pub mod legacy;
-use legacy::LegacyNoteCommitmentTree;
+use legacy::{LegacyLeaf, LegacyNoteCommitmentTree};
 
 /// The type that is used to update the note commitment tree.
 ///
@@ -162,7 +163,7 @@ impl ZcashDeserialize for Root {
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
 #[derive(Copy, Clone, Eq, PartialEq)]
-struct Node([u8; 32]);
+pub struct Node([u8; 32]);
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -179,7 +180,7 @@ impl fmt::Debug for Node {
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
 /// [3]: incrementalmerkletree::frontier::CommitmentTree
-impl merkle_tree::HashSer for Node {
+impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
         reader.read_exact(&mut node)?;
@@ -473,6 +474,9 @@ impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
         let mut serialized_tree = vec![];
 
+        //
+        let legacy_tree = LegacyNoteCommitmentTree::from(tree.clone());
+
         // Convert the note commitment tree represented as a frontier into the
         // format compatible with `zcashd`.
         //
@@ -486,21 +490,22 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // sparse formats for Sapling.
         //
         // [1]: <https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125>
-        if let Some(frontier) = tree.inner.value() {
-            // TODO: `Leaf` types do not exist anymore, see what to do here.
-            //let (left_leaf, right_leaf) = match frontier.leaf() {
-            //    Leaf::Left(left_value) => (Some(left_value), None),
-            //    Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
-            //};
+        if let Some(frontier) = legacy_tree.inner.frontier {
+            let (left_leaf, right_leaf) = match frontier.leaf {
+                LegacyLeaf::Left(left_value) => (Some(left_value), None),
+                LegacyLeaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
+            };
 
             // Ommers are siblings of parent nodes along the branch from the
             // most recent leaf to the root of the tree.
-            let mut ommers_iter = frontier.ommers().iter();
+            let mut ommers_iter = frontier.ommers.iter();
 
             // Set bits in the binary representation of the position indicate
             // the presence of ommers along the branch from the most recent leaf
             // node to the root of the tree, except for the lowest bit.
-            let mut position: u64 = frontier.position().into();
+            let mut position: u64 = (frontier.position.0)
+                .try_into()
+                .expect("old usize position always fit in u64");
 
             // The lowest bit does not indicate the presence of any ommers. We
             // clear it so that we can test if there are no set bits left in
@@ -537,7 +542,6 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             }
 
             // Serialize the converted note commitment tree.
-            /*
             Optional::write(&mut serialized_tree, left_leaf, |tree, leaf| {
                 leaf.write(tree)
             })
@@ -552,9 +556,6 @@ impl From<&NoteCommitmentTree> for SerializedTree {
                 Optional::write(tree, *parent, |tree, parent| parent.write(tree))
             })
             .expect("Parent nodes in a note commitment tree should be serializable");
-            */
-            merkle_tree::write_frontier_v1(&mut serialized_tree, &tree.inner)
-                .expect("should always work?");
         }
 
         Self(serialized_tree)
