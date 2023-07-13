@@ -14,7 +14,7 @@ mod tests;
 #[derive(Debug)]
 /// Stores IPs of recently attempted inbound connections.
 pub struct RecentByIp {
-    /// The list of IPs in increasing connection time order.
+    /// The list of IPs in decreasing connection age order.
     pub by_time: VecDeque<(IpAddr, Instant)>,
 
     /// Stores IPs for recently attempted inbound connections.
