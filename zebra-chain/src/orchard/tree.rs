@@ -23,7 +23,8 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_primitives::merkle_tree;
+use zcash_encoding::{Optional, Vector};
+use zcash_primitives::merkle_tree::HashSer;
 
 use super::sinsemilla::*;
 
@@ -168,7 +169,7 @@ impl ZcashDeserialize for Root {
 
 /// A node of the Orchard Incremental Note Commitment Tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct Node(pallas::Base);
+pub struct Node(pallas::Base);
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
@@ -179,7 +180,7 @@ struct Node(pallas::Base);
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
 /// [3]: incrementalmerkletree::frontier::CommitmentTree
-impl merkle_tree::HashSer for Node {
+impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
@@ -381,22 +382,6 @@ impl NoteCommitmentTree {
             .map_or(0, |x| u64::from(x.position()) + 1)
     }
 
-    /// Get raw bytes given a [`NoteCommitmentTree`].
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-
-        let _ = merkle_tree::write_frontier_v1(&mut buf, &self.inner);
-
-        if let Some(cached_root) = self.cached_root() {
-            buf.append(
-                &mut Root::zcash_serialize_to_vec(&cached_root)
-                    .expect("if we have a root then it should be serialaizable"),
-            );
-        };
-
-        buf
-    }
-
     /// Checks if the tree roots and inner data structures of `self` and `other` are equal.
     ///
     /// # Panics
@@ -492,6 +477,8 @@ pub struct SerializedTree(Vec<u8>);
 
 impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
+        let mut serialized_tree = vec![];
+
         // Skip the serialization of empty trees.
         //
         // Note: This ensures compatibility with `zcashd` in the
@@ -499,10 +486,17 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         //
         // [1]: https://zcash.github.io/rpc/z_gettreestate.html
         if tree.inner == bridgetree::Frontier::empty() {
-            return Self(vec![]);
+            return Self(serialized_tree);
         }
 
-        Self(tree.to_bytes())
+        // Convert the note commitment tree from
+        // [`Frontier`](bridgetree::Frontier) to
+        // [`CommitmentTree`](merkle_tree::CommitmentTree).
+        let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&tree.inner);
+
+        write_commitment_tree(tree, &mut serialized_tree)
+            .expect("note commitment tree should be serializable");
+        Self(serialized_tree)
     }
 }
 
@@ -519,4 +513,16 @@ impl AsRef<[u8]> for SerializedTree {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
+}
+
+/// Serializes a `CommitmentTree` as an array of bytes.
+pub fn write_commitment_tree<W: io::Write>(
+    commitment_tree: incrementalmerkletree::frontier::CommitmentTree<Node, MERKLE_DEPTH>,
+    mut writer: W,
+) -> io::Result<()> {
+    Optional::write(&mut writer, *commitment_tree.left(), |w, n| n.write(w))?;
+    Optional::write(&mut writer, *commitment_tree.right(), |w, n| n.write(w))?;
+    Vector::write(&mut writer, &commitment_tree.parents(), |w, e| {
+        Optional::write(w, *e, |w, n| n.write(w))
+    })
 }

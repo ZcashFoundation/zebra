@@ -1,5 +1,4 @@
-//!
-//!
+//! Orchard serialization legacy code.
 
 use incrementalmerkletree::{frontier::Frontier, Position};
 
@@ -8,8 +7,9 @@ use super::{Node, NoteCommitmentTree, Root, MERKLE_DEPTH};
 ///
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "NoteCommitmentTree")]
+#[allow(missing_docs)]
 pub struct LegacyNoteCommitmentTree {
-    inner: LegacyFrontier<Node, MERKLE_DEPTH>,
+    pub inner: LegacyFrontier<Node, MERKLE_DEPTH>,
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 

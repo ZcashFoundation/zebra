@@ -1,5 +1,4 @@
-//!
-//!
+//! Sapling serialization legacy code.
 
 use incrementalmerkletree::{frontier::Frontier, Position};
 
