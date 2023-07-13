@@ -27,26 +27,6 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
-// Currently, these tests check these structs are equal:
-//  * commitments -> tree struct
-//  * commitments -> tree struct -> serialize -> deserialize -> tree struct
-// And these serialized formats are equal:
-//  * fixed serialized test vector
-//  * commitments -> tree struct -> serialize
-//  * commitments -> tree struct -> serialize -> deserialize -> tree struct -> serialize
-//
-// TODO: apply these tests to the new tree structs, and update the serialization format
-//       (keeping the tests for the old format is optional, because the tests below cover it)
-//
-// TODO: test that old and new serializations produce the same format:
-// Tree roots built from the same commitments should match:
-//   * commitments -> old tree struct -> new tree struct -> un-cached root
-//   * commitments -> new tree struct -> un-cached root
-// Even when serialized and deserialized:
-//   * commitments -> old tree struct -> old serialize -> old deserialize -> old tree struct ->  new tree struct -> un-cached root
-//   * commitments -> new tree struct -> new serialize -> new deserialize -> new tree struct -> un-cached root
-//   * commitments -> new tree struct -> un-cached root
-
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {
