@@ -5,7 +5,7 @@ use regex::Regex;
 
 // For doc comment links
 #[allow(unused_imports)]
-use crate::config::{database_format_version_in_code, database_format_version_on_disk};
+use crate::config::{self, Config};
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
@@ -37,9 +37,9 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 /// - we previously added compatibility code, and
 /// - it's available in all supported Zebra versions.
 ///
-/// Use [`database_format_version_in_code()`] or [`database_format_version_on_disk()`]
-/// to get the full semantic format version.
-pub const DATABASE_FORMAT_VERSION: u64 = 25;
+/// Use [`config::database_format_version_in_code()`] or
+/// [`config::database_format_version_on_disk()`] to get the full semantic format version.
+pub(crate) const DATABASE_FORMAT_VERSION: u64 = 25;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -48,14 +48,16 @@ pub const DATABASE_FORMAT_VERSION: u64 = 25;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-pub const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
-pub const DATABASE_FORMAT_PATCH_VERSION: u64 = 1;
+pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 2;
 
 /// The name of the file containing the minor and patch database versions.
-pub const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
+///
+/// Use [`Config::version_file_path()`] to get the path to this file.
+pub(crate) const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.

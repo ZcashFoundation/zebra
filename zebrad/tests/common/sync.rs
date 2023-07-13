@@ -5,10 +5,7 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
@@ -19,7 +16,6 @@ use zebrad::{components::sync, config::ZebradConfig};
 use zebra_test::{args, prelude::*};
 
 use super::{
-    cached_state::copy_state_directory,
     config::{persistent_test_config, testdir},
     launch::ZebradTestDirExt,
 };
@@ -339,30 +335,6 @@ pub fn check_sync_logs_until(
     zebrad.expect_stdout_line_matches(stop_regex)?;
 
     Ok(zebrad)
-}
-
-/// Runs a zebrad instance to synchronize the chain to the network tip.
-///
-/// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
-/// is returned afterwards, containing the fully synchronized chain state.
-#[allow(dead_code)]
-#[tracing::instrument]
-pub async fn copy_state_and_perform_full_sync(
-    network: Network,
-    partial_sync_path: &Path,
-) -> Result<TempDir> {
-    let fully_synced_path = copy_state_directory(network, &partial_sync_path).await?;
-
-    sync_until(
-        Height::MAX,
-        network,
-        SYNC_FINISHED_REGEX,
-        FINISH_PARTIAL_SYNC_TIMEOUT,
-        fully_synced_path,
-        MempoolBehavior::ShouldAutomaticallyActivate,
-        true,
-        false,
-    )
 }
 
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.

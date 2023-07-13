@@ -540,7 +540,9 @@ impl<T> TestChild<T> {
         // Read unread child output.
         //
         // This checks for failure logs, and prevents some test hangs and deadlocks.
-        if self.child.is_some() || self.stdout.is_some() {
+        //
+        // TODO: this could block if stderr is full and stdout is waiting for stderr to be read.
+        if self.stdout.is_some() {
             let wrote_lines =
                 self.wait_for_stdout_line(format!("\n{} Child Stdout:", self.command_path));
 
@@ -552,7 +554,7 @@ impl<T> TestChild<T> {
             }
         }
 
-        if self.child.is_some() || self.stderr.is_some() {
+        if self.stderr.is_some() {
             let wrote_lines =
                 self.wait_for_stderr_line(format!("\n{} Child Stderr:", self.command_path));
 
@@ -564,6 +566,56 @@ impl<T> TestChild<T> {
         }
 
         kill_result
+    }
+
+    /// Kill the process, and return all its remaining standard output and standard error output.
+    ///
+    /// If `ignore_exited` is `true`, log "can't kill an exited process" errors,
+    /// rather than returning them.
+    ///
+    /// Returns `Ok(output)`, or an error if the kill failed.
+    pub fn kill_and_return_output(&mut self, ignore_exited: bool) -> Result<String> {
+        self.apply_failure_regexes_to_outputs();
+
+        // Prevent a hang when consuming output,
+        // by making sure the child's output actually finishes.
+        let kill_result = self.kill(ignore_exited);
+
+        // Read unread child output.
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+
+        // This also checks for failure logs, and prevents some test hangs and deadlocks.
+        loop {
+            let mut remaining_output = false;
+
+            if let Some(stdout) = self.stdout.as_mut() {
+                if let Some(line) =
+                    Self::wait_and_return_output_line(stdout, self.bypass_test_capture)
+                {
+                    stdout_buf.push_str(&line);
+                    remaining_output = true;
+                }
+            }
+
+            if let Some(stderr) = self.stderr.as_mut() {
+                if let Some(line) =
+                    Self::wait_and_return_output_line(stderr, self.bypass_test_capture)
+                {
+                    stderr_buf.push_str(&line);
+                    remaining_output = true;
+                }
+            }
+
+            if !remaining_output {
+                break;
+            }
+        }
+
+        let mut output = stdout_buf;
+        output.push_str(&stderr_buf);
+
+        kill_result.map(|()| output)
     }
 
     /// Waits until a line of standard output is available, then consumes it.
@@ -632,15 +684,40 @@ impl<T> TestChild<T> {
         false
     }
 
+    /// Waits until a line of `output` is available, then returns it.
+    ///
+    /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
+    /// Always writes the line to the test logs.
+    ///
+    /// Returns `true` if a line was available,
+    /// or `false` if the standard output has finished.
+    #[allow(clippy::unwrap_in_result)]
+    fn wait_and_return_output_line(
+        mut output: impl Iterator<Item = std::io::Result<String>>,
+        bypass_test_capture: bool,
+    ) -> Option<String> {
+        if let Some(line_result) = output.next() {
+            let line_result = line_result.expect("failure reading test process logs");
+
+            Self::write_to_test_logs(&line_result, bypass_test_capture);
+
+            return Some(line_result);
+        }
+
+        None
+    }
+
     /// Waits for the child process to exit, then returns its output.
+    ///
+    /// # Correctness
     ///
     /// The other test child output methods take one or both outputs,
     /// making them unavailable to this method.
     ///
     /// Ignores any configured timeouts.
     ///
-    /// Returns an error if the child has already been taken,
-    /// or both outputs have already been taken.
+    /// Returns an error if the child has already been taken.
+    /// TODO: return an error if both outputs have already been taken.
     #[spandoc::spandoc]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
         let child = match self.child.take() {
@@ -708,6 +785,8 @@ impl<T> TestChild<T> {
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
+    //
+    // TODO: these methods could block if stderr is full and stdout is waiting for stderr to be read
     #[instrument(skip(self))]
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<String>
@@ -1292,6 +1371,11 @@ impl<T> TestOutput<T> {
     #[cfg(unix)]
     fn was_killed(&self) -> bool {
         self.output.status.signal() == Some(9)
+    }
+
+    /// Takes the generic `dir` parameter out of this `TestOutput`.
+    pub fn take_dir(&mut self) -> Option<T> {
+        self.dir.take()
     }
 }
 

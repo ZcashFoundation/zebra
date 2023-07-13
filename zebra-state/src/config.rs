@@ -175,6 +175,7 @@ impl Default for Config {
 }
 
 // Cleaning up old database versions
+// TODO: put this in a different module?
 
 /// Spawns a task that checks if there are old database folders,
 /// and deletes them from the filesystem.
@@ -292,6 +293,8 @@ fn parse_version_number(dir_name: &str) -> Option<u64> {
         .and_then(|version| version.parse().ok())
 }
 
+// TODO: move these to the format upgrade module
+
 /// Returns the full semantic version of the currently running database format code.
 ///
 /// This is the version implemented by the Zebra code that's currently running,
@@ -336,28 +339,39 @@ pub fn database_format_version_on_disk(
     )))
 }
 
-/// Writes the currently running semantic database version to the on-disk database.
+/// Writes `changed_version` to the on-disk database after the format is changed.
+/// (Or a new database is created.)
 ///
 /// # Correctness
 ///
-/// This should only be called after all running format upgrades are complete.
+/// This should only be called:
+/// - after each format upgrade is complete,
+/// - when creating a new database, or
+/// - when an older Zebra version opens a newer database.
 ///
 /// # Concurrency
 ///
 /// This must only be called while RocksDB has an open database for `config`.
 /// Otherwise, multiple Zebra processes could write the version at the same time,
 /// corrupting the file.
+///
+/// # Panics
+///
+/// If the major versions do not match. (The format is incompatible.)
 pub fn write_database_format_version_to_disk(
+    changed_version: &Version,
     config: &Config,
     network: Network,
 ) -> Result<(), BoxError> {
     let version_path = config.version_file_path(network);
 
     // The major version is already in the directory path.
-    let version = format!(
-        "{}.{}",
-        DATABASE_FORMAT_MINOR_VERSION, DATABASE_FORMAT_PATCH_VERSION
+    assert_eq!(
+        changed_version.major, DATABASE_FORMAT_VERSION,
+        "tried to do in-place database format change to an incompatible version"
     );
+
+    let version = format!("{}.{}", changed_version.minor, changed_version.patch);
 
     // # Concurrency
     //

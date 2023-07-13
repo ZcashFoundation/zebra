@@ -7,11 +7,10 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constants must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, HashMap},
     fmt::Debug,
     ops::RangeBounds,
@@ -25,10 +24,6 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    config::{
-        database_format_version_in_code, database_format_version_on_disk,
-        write_database_format_version_to_disk,
-    },
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -528,35 +523,6 @@ impl DiskDb {
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
 
-        let running_version = database_format_version_in_code();
-        let disk_version = database_format_version_on_disk(config, network)
-            .expect("unable to read database format version file");
-
-        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
-            // TODO: if the on-disk format is older, actually run the upgrade task after the
-            //       database has been opened (#6642)
-            Some(Ordering::Less) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open older database format: launching upgrade task"
-            ),
-            // TODO: if the on-disk format is newer, downgrade the version after the
-            //       database has been opened (#6642)
-            Some(Ordering::Greater) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open newer database format: data should be compatible"
-            ),
-            Some(Ordering::Equal) => info!(
-                ?running_version,
-                "trying to open compatible database format"
-            ),
-            None => info!(
-                ?running_version,
-                "creating new database with the current format"
-            ),
-        }
-
         let db_options = DiskDb::options();
 
         // When opening the database in read/write mode, all column families must be opened.
@@ -589,27 +555,6 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
-
-                // Now we've checked that the database format is up-to-date,
-                // mark it as updated on disk.
-                //
-                // # Concurrency
-                //
-                // The version must only be updated while RocksDB is holding the database
-                // directory lock. This prevents multiple Zebra instances corrupting the version
-                // file.
-                //
-                // # TODO
-                //
-                // - only update the version at the end of the format upgrade task (#6642)
-                // - add a note to the format upgrade task code to update the version constants
-                //   whenever the format changes
-                // - add a test that the format upgrade runs exactly once when:
-                //   1. if an older cached state format is opened, the format is upgraded,
-                //      then if Zebra is launched again the format is not upgraded
-                //   2. if the current cached state format is opened, the format is not upgraded
-                write_database_format_version_to_disk(config, network)
-                    .expect("unable to write database format version file to disk");
 
                 db
             }
@@ -809,6 +754,19 @@ impl DiskDb {
 
     // Cleanup methods
 
+    /// Returns the number of shared instances of this database.
+    ///
+    /// # Concurrency
+    ///
+    /// The actual number of owners can be higher or lower than the returned value,
+    /// because databases can simultaneously be cloned or dropped in other threads.
+    ///
+    /// However, if the number of owners is 1, and the caller has exclusive access,
+    /// the count can't increase unless that caller clones the database.
+    pub(crate) fn shared_database_owners(&self) -> usize {
+        Arc::strong_count(&self.db) + Arc::weak_count(&self.db)
+    }
+
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// If `force` is true, clean up regardless of any shared references.
@@ -829,9 +787,8 @@ impl DiskDb {
         // instance. If they do, they must drop it before:
         // - shutting down database threads, or
         // - deleting database files.
-        let shared_database_owners = Arc::strong_count(&self.db) + Arc::weak_count(&self.db);
 
-        if shared_database_owners > 1 {
+        if self.shared_database_owners() > 1 {
             let path = self.path();
 
             let mut ephemeral_note = "";

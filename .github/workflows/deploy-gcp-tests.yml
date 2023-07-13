@@ -79,7 +79,12 @@ on:
       saves_to_disk:
         required: true
         type: boolean
-        description: 'Does the test create a new cached state disk?'
+        description: 'Can this test create new or updated cached state disks?'
+      force_save_to_disk:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force this test to create a new or updated cached state disk'
       app_name:
         required: false
         type: string
@@ -1702,7 +1707,7 @@ jobs:
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
-    if: ${{ !cancelled() && !failure() && inputs.saves_to_disk }}
+    if: ${{ !cancelled() && !failure() && (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -1791,6 +1796,96 @@ jobs:
           echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> "$GITHUB_ENV"
           echo "TIME_SUFFIX=$TIME_SUFFIX" >> "$GITHUB_ENV"
 
+      # Get the full initial and running database versions from the test logs.
+      # These versions are used as part of the disk description and labels.
+      #
+      # If these versions are missing from the logs, the job fails.
+      #
+      # Typically, the database versions are around line 20 in the logs..
+      # But we check the first 1000 log lines, just in case the test harness recompiles all the
+      # dependencies before running the test. (This can happen if the cache is invalid.)
+      #
+      # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
+      # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
+      - name: Get database versions from logs
+        run: |
+          INITIAL_DISK_DB_VERSION=""
+          RUNNING_DB_VERSION=""
+          DB_VERSION_SUMMARY=""
+
+          DOCKER_LOGS=$( \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ vars.GCP_ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command=" \
+          sudo docker logs ${{ inputs.test_id }} | head -1000 \
+          ")
+
+          # either a semantic version or "creating new database"
+          INITIAL_DISK_DB_VERSION=$( \
+          echo "$DOCKER_LOGS" | \
+          grep --extended-regexp --only-matching 'initial disk state version: [0-9a-z\.]+' | \
+          grep --extended-regexp --only-matching '[0-9a-z\.]+' | \
+          tail -1 || \
+          [[ $? == 1 ]] \
+          )
+
+          if [[ -z "$INITIAL_DISK_DB_VERSION" ]]; then
+              echo "Checked logs:"
+              echo ""
+              echo "$DOCKER_LOGS"
+              echo ""
+              echo "Missing initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
+              # Fail the tests, because Zebra didn't log the initial disk database version,
+              # or the regex in this step is wrong.
+              false
+          fi
+
+          if [[ "$INITIAL_DISK_DB_VERSION" = "creating.new.database" ]]; then
+              INITIAL_DISK_DB_VERSION="new"
+          else
+              INITIAL_DISK_DB_VERSION="v${INITIAL_DISK_DB_VERSION//./-}"
+          fi
+
+          echo "Found initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
+          echo "INITIAL_DISK_DB_VERSION=$INITIAL_DISK_DB_VERSION" >> "$GITHUB_ENV"
+
+          RUNNING_DB_VERSION=$( \
+          echo "$DOCKER_LOGS" | \
+          grep --extended-regexp --only-matching 'running state version: [0-9\.]+' | \
+          grep --extended-regexp --only-matching '[0-9\.]+' | \
+          tail -1 || \
+          [[ $? == 1 ]] \
+          )
+
+          if [[ -z "$RUNNING_DB_VERSION" ]]; then
+              echo "Checked logs:"
+              echo ""
+              echo "$DOCKER_LOGS"
+              echo ""
+              echo "Missing running database version in logs: $RUNNING_DB_VERSION"
+              # Fail the tests, because Zebra didn't log the running database version,
+              # or the regex in this step is wrong.
+              false
+          fi
+
+          RUNNING_DB_VERSION="v${RUNNING_DB_VERSION//./-}"
+          echo "Found running database version in logs: $RUNNING_DB_VERSION"
+          echo "RUNNING_DB_VERSION=$RUNNING_DB_VERSION" >> "$GITHUB_ENV"
+
+          if [[ "$INITIAL_DISK_DB_VERSION" = "$RUNNING_DB_VERSION" ]]; then
+              DB_VERSION_SUMMARY="$RUNNING_DB_VERSION"
+          elif [[ "$INITIAL_DISK_DB_VERSION" = "new" ]]; then
+              DB_VERSION_SUMMARY="$RUNNING_DB_VERSION in new database"
+          else
+              DB_VERSION_SUMMARY="$INITIAL_DISK_DB_VERSION changing to $RUNNING_DB_VERSION"
+          fi
+
+          echo "Summarised database versions from logs: $DB_VERSION_SUMMARY"
+          echo "DB_VERSION_SUMMARY=$DB_VERSION_SUMMARY" >> "$GITHUB_ENV"
+
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
       #
@@ -1800,7 +1895,7 @@ jobs:
       #
       # If the sync height is missing from the logs, the job fails.
       #
-      # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable.
+      # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
         run: |
           SYNC_HEIGHT=""
@@ -1818,12 +1913,16 @@ jobs:
           SYNC_HEIGHT=$( \
           echo "$DOCKER_LOGS" | \
           grep --extended-regexp --only-matching '${{ inputs.height_grep_text }}[0-9]+' | \
-          grep --extended-regexp --only-matching  '[0-9]+' | \
+          grep --extended-regexp --only-matching '[0-9]+' | \
           tail -1 || \
           [[ $? == 1 ]] \
           )
 
           if [[ -z "$SYNC_HEIGHT" ]]; then
+              echo "Checked logs:"
+              echo ""
+              echo "$DOCKER_LOGS"
+              echo ""
               echo "Missing sync height in logs: $SYNC_HEIGHT"
               # Fail the tests, because Zebra and lightwalletd didn't log their sync heights,
               # or the CI workflow sync height regex is wrong.
@@ -1885,15 +1984,15 @@ jobs:
       - name: Create image from state disk
         run: |
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
-          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]]; then
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${{ inputs.force_save_to_disk }}" == "true" ]]; then
              gcloud compute images create \
               "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
-              --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT"
           fi
