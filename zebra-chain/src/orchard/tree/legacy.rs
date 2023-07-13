@@ -4,7 +4,6 @@ use incrementalmerkletree::{frontier::Frontier, Position};
 
 use super::{Node, NoteCommitmentTree, Root, MERKLE_DEPTH};
 
-///
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "NoteCommitmentTree")]
 #[allow(missing_docs)]
@@ -23,17 +22,17 @@ impl From<NoteCommitmentTree> for LegacyNoteCommitmentTree {
 }
 
 impl From<LegacyNoteCommitmentTree> for NoteCommitmentTree {
-    fn from(nct: LegacyNoteCommitmentTree) -> Self {
+    fn from(legacy_nct: LegacyNoteCommitmentTree) -> Self {
         NoteCommitmentTree {
-            inner: nct.inner.into(),
-            cached_root: nct.cached_root,
+            inner: legacy_nct.inner.into(),
+            cached_root: legacy_nct.cached_root,
         }
     }
 }
 
-///
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Frontier")]
+#[allow(missing_docs)]
 pub struct LegacyFrontier<H, const DEPTH: u8> {
     frontier: Option<LegacyNonEmptyFrontier<H>>,
 }
@@ -42,7 +41,10 @@ impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
     fn from(legacy_frontier: LegacyFrontier<Node, MERKLE_DEPTH>) -> Self {
         if let Some(legacy_frontier_data) = legacy_frontier.frontier {
             let mut ommers = legacy_frontier_data.ommers;
-            let position = Position::from(legacy_frontier_data.position.0 as u64);
+            let position = Position::from(
+                u64::try_from(legacy_frontier_data.position.0)
+                    .expect("old `usize` always fits in `u64`"),
+            );
             let leaf = match legacy_frontier_data.leaf {
                 LegacyLeaf::Left(a) => a,
                 LegacyLeaf::Right(a, b) => {
@@ -68,7 +70,8 @@ impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
             let leaf_from_frontier = *frontier_data.leaf();
             let mut leaf = LegacyLeaf::Left(leaf_from_frontier);
             let mut ommers = frontier_data.ommers().to_vec();
-            let position = u64::from(frontier_data.position()) as usize;
+            let position = usize::try_from(u64::from(frontier_data.position()))
+                .expect("new position should fit in a `usize`");
             if frontier_data.position().is_odd() {
                 let left = ommers.remove(0);
                 leaf = LegacyLeaf::Right(left, leaf_from_frontier);

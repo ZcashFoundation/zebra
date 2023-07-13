@@ -516,7 +516,7 @@ impl AsRef<[u8]> for SerializedTree {
 }
 
 /// Serializes a `CommitmentTree` as an array of bytes.
-pub fn write_commitment_tree<W: io::Write>(
+fn write_commitment_tree<W: io::Write>(
     commitment_tree: incrementalmerkletree::frontier::CommitmentTree<Node, MERKLE_DEPTH>,
     mut writer: W,
 ) -> io::Result<()> {
