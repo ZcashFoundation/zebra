@@ -48,9 +48,9 @@ impl RecentByIp {
     }
 
     /// Prunes outdated entries, checks if there's a recently attempted inbound connection with
-    /// this IP, and adds the entry to `by_time` if it wasn't already in `by_ip`.
+    /// this IP, and adds the entry to `by_time`, and `by_ip` if needed.
     ///
-    /// Returns true if there was a recently attempted inbound connection.
+    /// Returns true if the recently attempted inbound connection count is past the configured limit.
     pub fn is_past_limit_or_add(&mut self, ip: IpAddr) -> bool {
         let now = Instant::now();
         if self.by_ip.contains_key(&ip) {
