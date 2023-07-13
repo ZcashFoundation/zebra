@@ -1,3 +1,5 @@
+//! Fixed test vectors for recent IP limits.
+
 use std::time::Duration;
 
 use crate::peer_set::initialize::recent_by_ip::RecentByIp;
