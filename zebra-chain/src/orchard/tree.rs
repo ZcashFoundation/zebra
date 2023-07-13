@@ -522,7 +522,7 @@ pub fn write_commitment_tree<W: io::Write>(
 ) -> io::Result<()> {
     Optional::write(&mut writer, *commitment_tree.left(), |w, n| n.write(w))?;
     Optional::write(&mut writer, *commitment_tree.right(), |w, n| n.write(w))?;
-    Vector::write(&mut writer, &commitment_tree.parents(), |w, e| {
+    Vector::write(&mut writer, commitment_tree.parents(), |w, e| {
         Optional::write(w, *e, |w, n| n.write(w))
     })
 }
