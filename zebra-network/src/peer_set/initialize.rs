@@ -615,6 +615,9 @@ where
                 // Too many open inbound connections or pending handshakes already.
                 // Close the connection.
                 std::mem::drop(tcp_stream);
+                // Allow invalid connections to be cleared quickly,
+                // but still put a limit on our CPU and network usage from failed connections.
+                tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
                 continue;
             }
 
