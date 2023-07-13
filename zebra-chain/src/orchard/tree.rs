@@ -175,7 +175,7 @@ pub struct Node(pallas::Base);
 ///
 /// Zebra stores Orchard note commitment trees as [`Frontier`][1]s while the
 /// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
-/// [`merkle_tree::HashSer`] for [`Node`]s allows the conversion.
+/// [`HashSer`] for [`Node`]s allows the conversion.
 ///
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
