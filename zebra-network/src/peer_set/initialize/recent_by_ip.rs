@@ -1,8 +1,8 @@
 //! A set of IPs from recent connection attempts.
 
 use std::{
-    collections::{HashMap, VecDeque},
-    net::IpAddr,
+    collections::{BTreeSet, HashMap},
+    net::{IpAddr, Ipv4Addr},
     time::{Duration, Instant},
 };
 
@@ -14,8 +14,13 @@ mod tests;
 #[derive(Debug)]
 /// Stores IPs of recently attempted inbound connections.
 pub struct RecentByIp {
-    /// The list of IPs in decreasing connection age order.
-    pub by_time: VecDeque<(IpAddr, Instant)>,
+    /// The list of IPs in increasing connection start time (decreasing connection age) order.
+    ///
+    /// Since we wait `MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL` between connections,
+    /// these times should be unique. If times are not unique due to an OS bug, their
+    /// corresponding IPs would be replaced. To avoid that, we use a BTreeSet instead of a
+    /// BTreeMap, and increase the count regardless of whether there is an existing entry or not.
+    pub by_time: BTreeSet<(Instant, IpAddr)>,
 
     /// Stores IPs for recently attempted inbound connections.
     pub by_ip: HashMap<IpAddr, usize>,
@@ -60,7 +65,7 @@ impl RecentByIp {
             true
         } else {
             *count += 1;
-            self.by_time.push_back((ip, now));
+            self.by_time.insert((now, ip));
             false
         }
     }
@@ -74,13 +79,12 @@ impl RecentByIp {
         // which is unexpected, but stops this list growing without limit.
         // After the handshake, the peer set will remove any duplicate connections over the limit.
         let age_limit = now - self.time_limit;
+        // This is the lowest IP address among all IpAddr.
+        let dummy_ip = Ipv4Addr::UNSPECIFIED.into();
 
-        // `by_time` must be sorted for this to work.
-        let split_off_idx = self.by_time.partition_point(|&(_, time)| time <= age_limit);
+        let updated_by_time = self.by_time.split_off(&(age_limit, dummy_ip));
 
-        let updated_by_time = self.by_time.split_off(split_off_idx);
-
-        for (ip, _) in &self.by_time {
+        for (_, ip) in &self.by_time {
             if let Some(count) = self.by_ip.get_mut(ip) {
                 *count -= 1;
                 if *count == 0 {
