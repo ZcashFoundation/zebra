@@ -417,6 +417,14 @@ fn sprout_checks(incremental_tree: SproutNoteCommitmentTree, expected_serialized
         deserialized_legacy_tree_as_new.recalculate_root()
     );
 
+    // Check reclaculated and cached roots are the same
+    assert_eq!(
+        incremental_tree.recalculate_root(),
+        incremental_tree
+            .cached_root()
+            .expect("cached root was serialized")
+    );
+
     // Double-check that the internal format is the same by re-serializing the tree.
     let re_serialized_tree = deserialized_tree.as_bytes();
     let re_serialized_legacy_tree = deserialized_legacy_tree_as_new.as_bytes();
@@ -459,6 +467,14 @@ fn sapling_checks(incremental_tree: SaplingNoteCommitmentTree, expected_serializ
         deserialized_legacy_tree_as_new.recalculate_root()
     );
 
+    // Check reclaculated and cached roots are the same
+    assert_eq!(
+        incremental_tree.recalculate_root(),
+        incremental_tree
+            .cached_root()
+            .expect("cached root was serialized")
+    );
+
     // Double-check that the internal format is the same by re-serializing the tree.
     let re_serialized_tree = deserialized_tree.as_bytes();
     let re_serialized_legacy_tree = deserialized_legacy_tree_as_new.as_bytes();
@@ -499,6 +515,14 @@ fn orchard_checks(incremental_tree: OrchardNoteCommitmentTree, expected_serializ
     assert_eq!(
         incremental_tree.recalculate_root(),
         deserialized_legacy_tree_as_new.recalculate_root()
+    );
+
+    // Check reclaculated and cached roots are the same
+    assert_eq!(
+        incremental_tree.recalculate_root(),
+        incremental_tree
+            .cached_root()
+            .expect("cached root was serialized")
     );
 
     // Double-check that the internal format is the same by re-serializing the tree.
