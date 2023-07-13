@@ -67,10 +67,16 @@ impl RecentByIp {
 
     /// Prunes entries older than `time_limit`, decrementing or removing their counts in `by_ip`.
     fn prune_by_time(&mut self, now: Instant) {
+        // Currently saturates to zero:
+        // <https://doc.rust-lang.org/std/time/struct.Instant.html#monotonicity>
+        //
+        // This discards the whole structure if the time limit is very large,
+        // which is unexpected, but stops this list growing without limit.
+        // After the handshake, the peer set will remove any duplicate connections over the limit.
+        let age_limit = now - self.time_limit;
+
         // `by_time` must be sorted for this to work.
-        let split_off_idx = self
-            .by_time
-            .partition_point(|&(_, time)| now.saturating_duration_since(time) > self.time_limit);
+        let split_off_idx = self.by_time.partition_point(|&(_, time)| time <= age_limit);
 
         let updated_by_time = self.by_time.split_off(split_off_idx);
 
