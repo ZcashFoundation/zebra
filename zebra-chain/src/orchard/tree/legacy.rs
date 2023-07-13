@@ -31,19 +31,29 @@ impl From<LegacyNoteCommitmentTree> for NoteCommitmentTree {
     }
 }
 
+///
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "Frontier")]
-struct LegacyFrontier<H, const DEPTH: u8> {
+pub struct LegacyFrontier<H, const DEPTH: u8> {
     frontier: Option<LegacyNonEmptyFrontier<H>>,
 }
 
 impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
     fn from(legacy_frontier: LegacyFrontier<Node, MERKLE_DEPTH>) -> Self {
         if let Some(legacy_frontier_data) = legacy_frontier.frontier {
+            let mut ommers = legacy_frontier_data.ommers;
+            let position = Position::from(legacy_frontier_data.position.0 as u64);
+            let leaf = match legacy_frontier_data.leaf {
+                LegacyLeaf::Left(a) => a,
+                LegacyLeaf::Right(a, b) => {
+                    ommers.insert(0, a);
+                    b
+                }
+            };
             Frontier::from_parts(
-                Position::from(legacy_frontier_data.position.0 as u64),
-                *legacy_frontier_data.leaf.value(),
-                legacy_frontier_data.ommers,
+                position,
+                leaf,
+                ommers,
             )
             .expect("We should be able to construct a frontier from parts given legacy frontier is not empty")
         } else {
@@ -58,15 +68,16 @@ impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
             let leaf_from_frontier = *frontier_data.leaf();
             let mut leaf = LegacyLeaf::Left(leaf_from_frontier);
             let mut ommers = frontier_data.ommers().to_vec();
+            let position = u64::from(frontier_data.position()) as usize;
             if frontier_data.position().is_odd() {
                 let left = ommers.remove(0);
                 leaf = LegacyLeaf::Right(left, leaf_from_frontier);
             }
             LegacyFrontier {
                 frontier: Some(LegacyNonEmptyFrontier {
-                    position: LegacyPosition(u64::from(frontier_data.position()) as usize),
+                    position: LegacyPosition(position),
                     leaf,
-                    ommers: frontier_data.ommers().to_vec(),
+                    ommers: ommers.to_vec(),
                 }),
             }
         } else {
@@ -89,16 +100,6 @@ struct LegacyNonEmptyFrontier<H> {
 enum LegacyLeaf<A> {
     Left(A),
     Right(A, A),
-}
-
-impl<A> LegacyLeaf<A> {
-    ///
-    pub fn value(&self) -> &A {
-        match self {
-            LegacyLeaf::Left(a) => a,
-            LegacyLeaf::Right(_, a) => a,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
