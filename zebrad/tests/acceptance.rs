@@ -136,6 +136,7 @@
 //! ```
 
 use std::{
+    cmp::Ordering,
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
@@ -146,6 +147,7 @@ use color_eyre::{
     eyre::{eyre, Result, WrapErr},
     Help,
 };
+use semver::Version;
 
 use zebra_chain::{
     block::{self, Height},
@@ -153,7 +155,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::constants::LOCK_FILE_ERROR;
+use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
@@ -166,8 +168,8 @@ use common::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
     launch::{
-        spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, EXTENDED_LAUNCH_DELAY,
-        LAUNCH_DELAY,
+        spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY,
     },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
@@ -2089,7 +2091,7 @@ fn zebra_state_conflict() -> Result<()> {
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
-            zebra_state::constants::DATABASE_FORMAT_VERSION
+            zebra_state::database_format_version_in_code().major,
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(
@@ -2381,6 +2383,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 
     Ok(())
 }
+
 /// Test `zebra-checkpoints` on mainnet.
 ///
 /// If you want to run this test individually, see the module documentation.
@@ -2402,4 +2405,200 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 #[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Testnet).await
+}
+
+/// Check that new states are created with the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
+#[tokio::test]
+async fn new_state_format() -> Result<()> {
+    for network in [Mainnet, Testnet] {
+        state_format_test("new_state_format_test", network, 2, None).await?;
+    }
+
+    Ok(())
+}
+
+/// Check that outdated states are updated to the current state format version,
+/// and that restarting `zebrad` doesn't change the updated format version.
+///
+/// TODO: test partial updates, once we have some updates that take a while.
+///       (or just add a delay during tests)
+#[tokio::test]
+async fn update_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = 0;
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test("update_state_format_test", network, 3, Some(&fake_version)).await?;
+    }
+
+    Ok(())
+}
+
+/// Check that newer state formats are downgraded to the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
+///
+/// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
+#[tokio::test]
+async fn downgrade_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = u16::MAX.into();
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test(
+            "downgrade_state_format_test",
+            network,
+            3,
+            Some(&fake_version),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Test state format changes, see calling tests for details.
+async fn state_format_test(
+    base_test_name: &str,
+    network: Network,
+    reopen_count: usize,
+    fake_version: Option<&Version>,
+) -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let test_name = &format!("{base_test_name}/new");
+
+    // # Create a new state and check it has the current version
+
+    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, None, false)?;
+
+    // Skip the test unless it has the required state and environmental variables.
+    let Some(mut zebrad) = zebrad else {
+        return Ok(());
+    };
+
+    tracing::info!(?network, "running {test_name} using zebrad");
+
+    zebrad.expect_stdout_line_matches("creating new database with the current format")?;
+    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+
+    // Give Zebra enough time to actually write the database to disk.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let logs = zebrad.kill_and_return_output(false)?;
+
+    assert!(
+        !logs.contains("marked database format as upgraded"),
+        "unexpected format upgrade in logs:\n\
+         {logs}"
+    );
+    assert!(
+        !logs.contains("marked database format as downgraded"),
+        "unexpected format downgrade in logs:\n\
+         {logs}"
+    );
+
+    let output = zebrad.wait_with_output()?;
+    let mut output = output.assert_failure()?;
+
+    let mut dir = output
+        .take_dir()
+        .expect("dir should not already have been taken");
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    // # Apply the fake version if needed
+    let mut expect_older_version = false;
+    let mut expect_newer_version = false;
+
+    if let Some(fake_version) = fake_version {
+        let test_name = &format!("{base_test_name}/apply_fake_version/{fake_version}");
+        tracing::info!(?network, "running {test_name} using zebra-state");
+
+        let mut config = UseAnyState
+            .zebrad_config(test_name, false, Some(dir.path()))
+            .expect("already checked config")?;
+        config.network.network = network;
+
+        zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
+            .expect("can't write fake database version to disk");
+
+        // Give zebra_state enough time to actually write the database version to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let running_version = database_format_version_in_code();
+
+        match fake_version.cmp(&running_version) {
+            Ordering::Less => expect_older_version = true,
+            Ordering::Equal => {}
+            Ordering::Greater => expect_newer_version = true,
+        }
+    }
+
+    // # Reopen that state and check the version hasn't changed
+
+    for reopened in 0..reopen_count {
+        let test_name = &format!("{base_test_name}/reopen/{reopened}");
+
+        if reopened > 0 {
+            expect_older_version = false;
+            expect_newer_version = false;
+        }
+
+        let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
+            .expect("unexpectedly missing required state or env vars");
+
+        tracing::info!(?network, "running {test_name} using zebrad");
+
+        if expect_older_version {
+            zebrad.expect_stdout_line_matches("trying to open older database format")?;
+            zebrad.expect_stdout_line_matches("marked database format as upgraded")?;
+            zebrad.expect_stdout_line_matches("database is fully upgraded")?;
+        } else if expect_newer_version {
+            zebrad.expect_stdout_line_matches("trying to open newer database format")?;
+            zebrad.expect_stdout_line_matches("marked database format as downgraded")?;
+        } else {
+            zebrad.expect_stdout_line_matches("trying to open current database format")?;
+            zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+        }
+
+        // Give Zebra enough time to actually write the database to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let logs = zebrad.kill_and_return_output(false)?;
+
+        if !expect_older_version {
+            assert!(
+                !logs.contains("marked database format as upgraded"),
+                "unexpected format upgrade in logs:\n\
+                 {logs}"
+            );
+        }
+
+        if !expect_newer_version {
+            assert!(
+                !logs.contains("marked database format as downgraded"),
+                "unexpected format downgrade in logs:\n\
+                 {logs}"
+            );
+        }
+
+        let output = zebrad.wait_with_output()?;
+        let mut output = output.assert_failure()?;
+
+        dir = output
+            .take_dir()
+            .expect("dir should not already have been taken");
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    }
+    Ok(())
 }

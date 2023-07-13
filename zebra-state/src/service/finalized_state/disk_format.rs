@@ -11,6 +11,7 @@ pub mod block;
 pub mod chain;
 pub mod shielded;
 pub mod transparent;
+pub mod upgrade;
 
 #[cfg(test)]
 mod tests;
