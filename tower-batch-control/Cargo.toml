@@ -38,7 +38,7 @@ color-eyre = "0.6.2"
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-ed25519-zebra = "4.0.0"
+ed25519-zebra = "4.0.1"
 rand = "0.8.5"
 
 tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
