@@ -16,7 +16,6 @@
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-ARG NETWORK="Mainnet"
 
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
@@ -135,9 +134,6 @@ COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
 # Entrypoint environment variables
-ARG NETWORK
-ENV NETWORK=${NETWORK}
-
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
@@ -185,9 +181,6 @@ RUN apt-get update && \
     ca-certificates
 
 # Config settings for zebrad
-ARG NETWORK
-ENV NETWORK=${NETWORK}
-
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
