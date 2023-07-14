@@ -420,7 +420,7 @@ fn sprout_checks(incremental_tree: SproutNoteCommitmentTree, expected_serialized
     // Check reclaculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
-        incremental_tree
+        deserialized_tree
             .cached_root()
             .expect("cached root was serialized")
     );
@@ -470,7 +470,7 @@ fn sapling_checks(incremental_tree: SaplingNoteCommitmentTree, expected_serializ
     // Check reclaculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
-        incremental_tree
+        deserialized_tree
             .cached_root()
             .expect("cached root was serialized")
     );
@@ -520,7 +520,7 @@ fn orchard_checks(incremental_tree: OrchardNoteCommitmentTree, expected_serializ
     // Check reclaculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
-        incremental_tree
+        deserialized_tree
             .cached_root()
             .expect("cached root was serialized")
     );
