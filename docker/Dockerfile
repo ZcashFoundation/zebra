@@ -102,11 +102,11 @@ COPY . .
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
-# Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
 ARG FEATURES
 ARG TEST_FEATURES
-ARG ENTRYPOINT_FEATURES "${FEATURES} ${TEST_FEATURES}"
+ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
