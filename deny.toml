@@ -82,6 +82,12 @@ skip-tree = [
     # wait for metrics-exporter-prometheus to upgrade
     { name = "hashbrown", version = "=0.13.2" },
 
+    # wait for zebra-chain to upgrade
+    { name = "secp256k1", version = "=0.21.3" },
+
+    # wait for zebra-chain to upgrade `secp256k1`
+    { name = "secp256k1-sys", version = "=0.4.2" },
+
     # ECC crates
 
     # wait for zcash_primitives to remove duplicated dependencies
