@@ -1,9 +1,21 @@
 //! Orchard serialization legacy code.
+//!
+//! We create a [`LegacyNoteCommitmentTree`] which is a copy of [`NoteCommitmentTree`] but where serialization and
+//! deserialization can be derived.
+//! To do this we create a [`LegacyFrontier`] which is a legacy `Frontier` structure that can be found in [1],
+//! In order to make [`LegacyFrontier`] serializable we also have our own versions of `NonEmptyFrontier` ([`LegacyNonEmptyFrontier`]),
+//! `Leaf`([`LegacyLeaf`]) and `Position`([`LegacyPosition`]) that can be found in [1] or [2].
+//!
+//! Conversions methods to/from [`LegacyNoteCommitmentTree`] to/from [`NoteCommitmentTree`] are defined also in this file.
+//!
+//! [1]: https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/bridgetree.rs
+//! [2]: https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/lib.rs
 
 use incrementalmerkletree::{frontier::Frontier, Position};
 
 use super::{Node, NoteCommitmentTree, Root, MERKLE_DEPTH};
 
+/// A legacy version of [`NoteCommitmentTree`].
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "NoteCommitmentTree")]
 #[allow(missing_docs)]
