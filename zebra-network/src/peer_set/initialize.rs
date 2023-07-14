@@ -51,6 +51,8 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+mod recent_by_ip;
+
 /// A successful outbound peer connection attempt or inbound connection handshake.
 ///
 /// The [`Handshake`](peer::Handshake) service returns a [`Result`]. Only successful connections
@@ -576,6 +578,9 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
+    let mut recent_inbound_connections =
+        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
+
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
@@ -605,10 +610,14 @@ where
 
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()
+                || recent_inbound_connections.is_past_limit_or_add(addr.ip())
             {
                 // Too many open inbound connections or pending handshakes already.
                 // Close the connection.
                 std::mem::drop(tcp_stream);
+                // Allow invalid connections to be cleared quickly,
+                // but still put a limit on our CPU and network usage from failed connections.
+                tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
                 continue;
             }
 
