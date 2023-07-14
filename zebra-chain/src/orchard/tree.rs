@@ -23,8 +23,7 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_encoding::{Optional, Vector};
-use zcash_primitives::merkle_tree::HashSer;
+use zcash_primitives::merkle_tree::{write_commitment_tree, HashSer};
 
 use super::sinsemilla::*;
 
@@ -494,7 +493,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
         let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&tree.inner);
 
-        write_commitment_tree(tree, &mut serialized_tree)
+        write_commitment_tree(&tree, &mut serialized_tree)
             .expect("note commitment tree should be serializable");
         Self(serialized_tree)
     }
@@ -513,16 +512,4 @@ impl AsRef<[u8]> for SerializedTree {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
-}
-
-/// Serializes a `CommitmentTree` as an array of bytes.
-fn write_commitment_tree<W: io::Write>(
-    commitment_tree: incrementalmerkletree::frontier::CommitmentTree<Node, MERKLE_DEPTH>,
-    mut writer: W,
-) -> io::Result<()> {
-    Optional::write(&mut writer, *commitment_tree.left(), |w, n| n.write(w))?;
-    Optional::write(&mut writer, *commitment_tree.right(), |w, n| n.write(w))?;
-    Vector::write(&mut writer, commitment_tree.parents(), |w, e| {
-        Optional::write(w, *e, |w, n| n.write(w))
-    })
 }
