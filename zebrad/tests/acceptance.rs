@@ -121,8 +121,8 @@
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
 //! ```console
-//! GENERATE_CHECKPOINTS_MAINNET=1 TEST_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
-//! GENERATE_CHECKPOINTS_TESTNET=1 TEST_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! GENERATE_CHECKPOINTS_MAINNET=1 ENTRYPOINT_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! GENERATE_CHECKPOINTS_TESTNET=1 ENTRYPOINT_FEATURES=zebra-checkpoints ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state docker/entrypoint.sh
 //! ```
 //!
 //! ## Disk Space for Testing
