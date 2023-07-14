@@ -15,7 +15,7 @@
 # Keep these in sync with:
 # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
 ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="${FEATURES} lightwalletd-grpc-tests zebra-checkpoints"
+ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG NETWORK="Mainnet"
 
 # This stage implements cargo-chef for docker layer caching
@@ -105,7 +105,9 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
 # Use TEST_FEATURES to override the specific features used to run tests in entrypoint.sh,
 # separately from the test and production image builds.
+ARG FEATURES
 ARG TEST_FEATURES
+ARG ENTRYPOINT_FEATURES "${FEATURES} ${TEST_FEATURES}"
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -115,7 +117,7 @@ ARG TEST_FEATURES
 # It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
 #
 # TODO: add --locked when cargo-chef supports it
-RUN cargo chef cook --tests --release --features "${TEST_FEATURES}" --workspace --recipe-path recipe.json
+RUN cargo chef cook --tests --release --features "${ENTRYPOINT_FEATURES}" --workspace --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef.
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
@@ -125,7 +127,7 @@ RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
 # Build Zebra test binaries, but don't run them
-RUN cargo test --locked --release --features "${TEST_FEATURES}" --workspace --no-run
+RUN cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
@@ -136,7 +138,7 @@ RUN chmod u+x /entrypoint.sh
 ARG NETWORK
 ENV NETWORK=${NETWORK}
 
-ENV TEST_FEATURES=${TEST_FEATURES}
+ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT [ "/entrypoint.sh" ]
