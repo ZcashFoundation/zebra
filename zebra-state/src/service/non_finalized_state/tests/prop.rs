@@ -460,7 +460,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
                                .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
     |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
       .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
-          let next_height = chain[valid_count - 1].height;
+          let next_height = chain[valid_count].height;
           (
               Just(chain),
               Just(valid_count),
