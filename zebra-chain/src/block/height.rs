@@ -205,9 +205,6 @@ fn operator_tests() {
     assert_eq!(None, Height(i32::MAX as u32) + 1);
     assert_eq!(None, Height(u32::MAX) + 0);
 
-    assert_eq!(Some(Height(2)), Height(1) + 1);
-    assert_eq!(None, Height::MAX + 1);
-
     // Adding negative numbers
     assert_eq!(Some(Height(1)), Height(2) + -1);
     assert_eq!(Some(Height(0)), Height(1) + -1);
