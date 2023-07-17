@@ -45,6 +45,7 @@ impl<T> WaitForPanics for Arc<JoinHandle<T>> {
     /// panicked. Otherwise, returns the thread's return value.
     ///
     /// If this is not the final `Arc`, drops the handle and immediately returns `None`.
+    #[track_caller]
     fn wait_for_panics(self) -> Self::Output {
         // If we are the last Arc with a reference to this handle,
         // we can wait for it and propagate any panics.
@@ -69,6 +70,7 @@ impl<T> CheckForPanics for &mut Option<Arc<JoinHandle<T>>> {
     /// panicked. Otherwise, returns the thread's return value.
     ///
     /// If the thread has not finished, or this is not the final `Arc`, returns `None`.
+    #[track_caller]
     fn check_for_panics(self) -> Self::Output {
         let handle = self.take()?;
 
@@ -92,6 +94,7 @@ impl<T> WaitForPanics for &mut Option<Arc<JoinHandle<T>>> {
     /// panicked. Otherwise, returns the thread's return value.
     ///
     /// If this is not the final `Arc`, drops the handle and returns `None`.
+    #[track_caller]
     fn wait_for_panics(self) -> Self::Output {
         // This is more readable as an expanded statement.
         #[allow(clippy::manual_map)]
