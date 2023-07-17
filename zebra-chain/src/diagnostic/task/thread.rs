@@ -70,9 +70,7 @@ impl<T> CheckForPanics for &mut Option<Arc<JoinHandle<T>>> {
     ///
     /// If the thread has not finished, or this is not the final `Arc`, returns `None`.
     fn check_for_panics(self) -> Self::Output {
-        let Some(handle) = self.take() else {
-            return None;
-        };
+        let handle = self.take()?;
 
         if handle.is_finished() {
             // This is the same as calling `self.wait_for_panics()`, but we can't do that,
@@ -95,13 +93,9 @@ impl<T> WaitForPanics for &mut Option<Arc<JoinHandle<T>>> {
     ///
     /// If this is not the final `Arc`, drops the handle and returns `None`.
     fn wait_for_panics(self) -> Self::Output {
-        let Some(handle) = self.take() else {
-            return None;
-        };
-
         // This is more readable as an expanded statement.
         #[allow(clippy::manual_map)]
-        if let Some(output) = handle.wait_for_panics() {
+        if let Some(output) = self.take()?.wait_for_panics() {
             Some(output)
         } else {
             // Some other task has a reference, so we should give up ours to let them use it.
