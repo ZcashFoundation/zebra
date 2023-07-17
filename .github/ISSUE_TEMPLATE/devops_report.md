@@ -12,7 +12,7 @@ body:
       Thank you for taking the time to report a bug in Zebra!
 
       Please fill out the sections below to help us reproduce and fix the bug.
-      If you have a question, please ask on [Discord](https://discord.gg/na6mU7m) or [GitHub Discussions](
+      If you have a question, please ask on [Discord](https://discord.gg/fP2JGmhm) or [GitHub Discussions](https://github.com/ZcashFoundation/zebra/discussions)
 - type: textarea
 id: description
 attributes:
