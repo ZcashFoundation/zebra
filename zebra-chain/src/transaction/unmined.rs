@@ -32,6 +32,9 @@ use UnminedTxId::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use rand::Rng;
+
 // Documentation-only
 #[allow(unused_imports)]
 use crate::block::MAX_BLOCK_BYTES;
@@ -453,20 +456,20 @@ impl VerifiedUnminedTx {
         cost
     }
 
-    ///
+    /// When deriving `Arbitrary` for `VerifiedUnminedTx` action fields can be generated
+    /// that are against consensus rules. This function prevent those issues by generating
+    /// new conventional and unpaid actions where rules are considered.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn fix_arbitrary_generated_action_overflows(&mut self) -> Self {
-        use rand::Rng;
-
         let mut rng = rand::thread_rng();
 
-        //
+        // The number of actions can't be greater than 2^16.
         let conventional_actions = rng.gen_range(0..2 ^ 16);
 
-        //
+        // The number of unpaid actions can't be greater than `BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT`.
         let mut unpaid_actions = rng.gen_range(0..zip317::BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT);
 
-        //
+        // The number of unpaid actions can't be greater than the actions of the transaction.
         if unpaid_actions > conventional_actions {
             unpaid_actions = conventional_actions;
         }
