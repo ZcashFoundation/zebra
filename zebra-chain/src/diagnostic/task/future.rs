@@ -85,29 +85,9 @@ where
     #[track_caller]
     fn panic_on_early_termination(self) -> Self::UnwrappedOutput {
         async move {
-            let join_error = match self.await {
-                Ok(task_output) => return task_output,
-                Err(join_error) => join_error,
-            };
-
-            match join_error.try_into_panic() {
-                Ok(panic_payload) => panic::resume_unwind(panic_payload),
-
-                // We can ignore this error by making the future wait forever.
-                // Waiting forever is only correct when Zebra is shutting down,
-                // otherwise it could lead to hangs.
-                Err(task_cancelled) if is_shutting_down() => {
-                    debug!(
-                        ?task_cancelled,
-                        "ignoring cancelled task because Zebra is shutting down"
-                    );
-
-                    future::pending().await
-                }
-
-                Err(task_cancelled) => {
-                    panic!("task cancelled during normal Zebra operation: {task_cancelled:?}");
-                }
+            match self.await.check_for_panics() {
+                Ok(task_output) => task_output,
+                Err(_expected_cancel_error) => future::pending().await,
             }
         }
         .boxed()
