@@ -131,11 +131,8 @@ jobs:
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
       no_cache: ${{ inputs.no_cache || false }}
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       rust_backtrace: full
       rust_lib_backtrace: full
-      colorbt_show_hidden: '1'
-      zebra_skip_ipv6_tests: '1'
       rust_log: info
 
   # zebrad tests without cached state
