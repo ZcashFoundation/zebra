@@ -7,8 +7,9 @@ set -e
 # exit if any command in a pipeline fails
 set -o pipefail
 
-# TODO: expand this section if needed (#4363)
+: "${NETWORK:=Mainnet}"
 echo "Test variables:"
+echo "NETWORK=$NETWORK"
 echo "ZEBRA_TEST_LIGHTWALLETD=$ZEBRA_TEST_LIGHTWALLETD"
 echo "Hard-coded Zebra full sync directory: /zebrad-cache"
 echo "ZEBRA_CACHED_STATE_DIR=$ZEBRA_CACHED_STATE_DIR"

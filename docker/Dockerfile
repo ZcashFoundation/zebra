@@ -8,6 +8,15 @@
 # - release: builds release binary
 # - runtime: is our runtime environment
 #
+# We first set default values for build arguments used across the stages.
+# Each stage must define the build arguments (ARGs) it uses.
+#
+# Build zebrad with these features
+# Keep these in sync with:
+# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L37
+ARG FEATURES="default-release-binaries"
+ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
+
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
@@ -58,39 +67,20 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# TODO: just keep the backtrace, colorbt, rust_log, and cargo_home variables as those are the only needed at build time.
-# Build arguments and variables set to change how tests are run, tracelog levels,
-# and Network to be used (Mainnet or Testnet)
+# Build arguments and variables set for tracelog levels and debug information
 #
 # We set defaults to all variables.
 ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE=${RUST_BACKTRACE:-0}
+ENV RUST_BACKTRACE=${RUST_BACKTRACE:-1}
 
 ARG RUST_LIB_BACKTRACE
-ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-0}
+ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-1}
 
 ARG COLORBT_SHOW_HIDDEN
-ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-0}
+ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
-ARG RUST_LOG
-ENV RUST_LOG=${RUST_LOG:-info}
-
-# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS
-ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
-
-# Build zebrad with these features
-# Keep these in sync with:
-# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L42
-ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
-# separately from the test and production image builds.
-ENV ENTRYPOINT_FEATURES="$TEST_FEATURES $FEATURES"
-
-# Use default network value if none is provided
-ARG NETWORK
-ENV NETWORK=${NETWORK:-Mainnet}
+ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA:-unknown}
 
 ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
@@ -108,6 +98,16 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # unmodified source files < previous build cache < modified source files
 COPY . .
 
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
+
+# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
+# separately from the test and production image builds.
+ARG FEATURES
+ARG TEST_FEATURES
+ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
+
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
 # and build it to cache all possible sentry and test dependencies.
@@ -116,7 +116,7 @@ COPY . .
 # It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
 #
 # TODO: add --locked when cargo-chef supports it
-RUN cargo chef cook --tests --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --recipe-path recipe.json
+RUN cargo chef cook --tests --release --features "${ENTRYPOINT_FEATURES}" --workspace --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef.
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
@@ -126,12 +126,15 @@ RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
 # Build Zebra test binaries, but don't run them
-RUN cargo test --locked --release --features "${TEST_FEATURES} ${FEATURES}" --workspace --no-run
+RUN cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
+
+# Entrypoint environment variables
+ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT [ "/entrypoint.sh" ]
@@ -144,6 +147,8 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 FROM deps AS release
 
 COPY . .
+
+ARG FEATURES
 
 # This is the caching layer for Rust zebrad builds.
 # It creates a fake empty zebrad binary, see above for details.
@@ -175,10 +180,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
 
-# Config settings
-
-ARG NETWORK
-ENV NETWORK=${NETWORK:-Mainnet}
+# Config settings for zebrad
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # Expose configured ports
 EXPOSE 8233 18233
