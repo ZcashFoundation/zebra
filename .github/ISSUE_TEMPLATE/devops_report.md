@@ -1,5 +1,4 @@
 ---
-
 name: ":octocat: DevOps Report"
 description: Issues related to the Zebra build, test, or release process.
 title: "(short issue description)"
