@@ -24,7 +24,7 @@ body:
   attributes:
     label: Expected Behavior
     description: |
-    What did you expect to happen?
+     What did you expect to happen?
   validations:
     required: true
 - type: textarea
@@ -32,10 +32,10 @@ body:
   attributes:
     label: Current Behavior
     description: |
-    What actually happened?
+     What actually happened?
 
-    Please include full errors, uncaught exceptions, stack traces, and relevant logs.
-    Links to the faulty logs in GitHub Actions or other places are also welcomed.
+     Please include full errors, uncaught exceptions, stack traces, and relevant logs.
+     Links to the faulty logs in GitHub Actions or other places are also welcomed.
   validations:
     required: true
 - type: textarea
@@ -43,7 +43,7 @@ body:
   attributes:
     label: Possible Solution
     description: |
-    Suggest a fix/reason for the bug
+     Suggest a fix/reason for the bug
   validations:
     required: false
 - type: textarea
@@ -51,7 +51,7 @@ body:
   attributes:
     label: Additional Information/Context
     description: |
-    Anything else that might be relevant for troubleshooting this bug. Providing context helps us come up with a solution that is most useful for the community.
+     Anything else that might be relevant for troubleshooting this bug. Providing context helps us come up with a solution that is most useful for the community.
   validations:
     required: false
 - type: input
