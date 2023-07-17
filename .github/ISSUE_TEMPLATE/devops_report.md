@@ -1,4 +1,5 @@
 ---
+
 name: ":octocat: DevOps Report"
 description: Issues related to the Zebra build, test, or release process.
 title: "(short issue description)"
@@ -67,4 +68,3 @@ attributes:
     label: Is this happening on the main branch?
 validations:
     required: true
----
