@@ -663,11 +663,19 @@ impl Chain {
             .map(|(_height, tree)| tree.clone())
     }
 
-    /// Add the Sapling `tree` to the tree and anchor indexes at `height`.
+    /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
+    ///
     /// - the height of a new block that has just been added to the chain tip, or
-    /// - the finalized tip height: the height of the parent of the first block of a new chain.
+    /// - the finalized tip height—the height of the parent of the first block of a new chain.
+    ///
+    /// Stores only the first tree in each identical series of trees.
+    ///
+    /// # Panics
+    ///
+    /// - If there's a tree already stored at `height`.
+    /// - If there's an anchor already stored at `height`.
     fn add_sapling_tree_and_anchor(
         &mut self,
         height: Height,
@@ -701,12 +709,18 @@ impl Chain {
         self.sapling_anchors.insert(anchor);
     }
 
-    /// Remove the Sapling tree and anchor indexes at `height`.
+    /// Removes the Sapling tree and anchor indexes at `height`.
     ///
     /// `height` can be at two different [`RevertPosition`]s in the chain:
-    /// - a tip block above a chain fork: only that height is removed, or
-    /// - a root block: all trees and anchors below that height are removed,
-    ///   including temporary finalized tip trees.
+    ///
+    /// - a tip block above a chain fork—only the tree and anchor at that height are removed, or
+    /// - a root block—all trees and anchors at and below that height are removed, including
+    ///   temporary finalized tip trees.
+    ///
+    ///   # Panics
+    ///
+    ///  - If the anchor being removed is not present.
+    ///  - If there is no tree at `height`.
     fn remove_sapling_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
         let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
             (
