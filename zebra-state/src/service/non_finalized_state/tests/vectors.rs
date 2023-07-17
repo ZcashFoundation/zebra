@@ -67,7 +67,7 @@ fn construct_many() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
     let initial_height = block
         .coinbase_height()
-        .expect("Block 434873 should have its height in its coibase tx.");
+        .expect("Block 434873 should have its height in its coinbase tx.");
     let mut blocks = vec![];
 
     while blocks.len() < 100 {
