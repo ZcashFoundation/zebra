@@ -13,7 +13,7 @@ use super::{CheckForPanics, WaitForPanics};
 impl<T> CheckForPanics for thread::Result<T> {
     type Output = T;
 
-    /// Waits for the thread to finish, then panics if the thread panicked.
+    /// Panics if the thread panicked.
     ///
     /// Threads can't be cancelled except by using a panic, so there are no thread errors here.
     #[track_caller]
