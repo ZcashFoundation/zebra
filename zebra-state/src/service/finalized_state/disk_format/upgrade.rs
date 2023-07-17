@@ -2,7 +2,6 @@
 
 use std::{
     cmp::Ordering,
-    panic,
     sync::{mpsc, Arc},
     thread::{self, JoinHandle},
 };
@@ -10,7 +9,11 @@ use std::{
 use semver::Version;
 use tracing::Span;
 
-use zebra_chain::{block::Height, diagnostic::task::PanicOnTermination, parameters::Network};
+use zebra_chain::{
+    block::Height,
+    diagnostic::task::{CheckForPanics, WaitForPanics},
+    parameters::Network,
+};
 
 use DbFormatChange::*;
 
@@ -482,42 +485,16 @@ impl DbFormatChangeThreadHandle {
     ///
     /// This method should be called regularly, so that panics are detected as soon as possible.
     pub fn check_for_panics(&mut self) {
-        let update_task = self.update_task.take();
-
-        if let Some(update_task) = update_task {
-            if update_task.is_finished() {
-                // We use into_inner() because it guarantees that exactly one of the tasks
-                // gets the JoinHandle. try_unwrap() lets us keep the JoinHandle, but it can also
-                // miss panics.
-                if let Some(update_task) = Arc::into_inner(update_task) {
-                    // We are the last handle with a reference to this task,
-                    // so we can propagate any panics
-                    if let Err(thread_panic) = update_task.join() {
-                        panic::resume_unwind(thread_panic);
-                    }
-                }
-            } else {
-                // It hasn't finished, so we need to put it back
-                self.update_task = Some(update_task);
-            }
-        }
+        self.update_task.check_for_panics();
     }
 
     /// Wait for the spawned thread to finish. If it exited with a panic, resume that panic.
     ///
+    /// Exits early if the thread has other outstanding handles.
+    ///
     /// This method should be called during shutdown.
     pub fn wait_for_panics(&mut self) {
-        if let Some(update_task) = self.update_task.take() {
-            // We use into_inner() because it guarantees that exactly one of the tasks
-            // gets the JoinHandle. See the comments in check_for_panics().
-            if let Some(update_task) = Arc::into_inner(update_task) {
-                // We are the last handle with a reference to this task,
-                // so we can propagate any panics
-                if let Err(thread_panic) = update_task.join() {
-                    panic::resume_unwind(thread_panic);
-                }
-            }
-        }
+        self.update_task.wait_for_panics();
     }
 }
 
