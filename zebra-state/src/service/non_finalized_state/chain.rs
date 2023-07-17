@@ -513,7 +513,7 @@ impl Chain {
     /// - the height of a new block that has just been added to the chain tip, or
     /// - the finalized tip height—the height of the parent of the first block of a new chain.
     ///
-    /// Stores only the first tree in each identical series of trees.
+    /// Stores only the first tree in each series of identical trees.
     ///
     /// # Panics
     ///
@@ -670,7 +670,7 @@ impl Chain {
     /// - the height of a new block that has just been added to the chain tip, or
     /// - the finalized tip height—the height of the parent of the first block of a new chain.
     ///
-    /// Stores only the first tree in each identical series of trees.
+    /// Stores only the first tree in each series of identical trees.
     ///
     /// # Panics
     ///
@@ -819,7 +819,7 @@ impl Chain {
     /// - the height of a new block that has just been added to the chain tip, or
     /// - the finalized tip height—the height of the parent of the first block of a new chain.
     ///
-    /// Stores only the first tree in each identical series of trees.
+    /// Stores only the first tree in each series of identical trees.
     ///
     /// # Panics
     ///
