@@ -111,7 +111,7 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
+        transactions in vec(any::<VerifiedUnminedTx>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
         // Use as cost limit the costs of all transactions except one
@@ -960,43 +960,47 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_TX_COUNT)
-            .prop_flat_map(|transactions| {
-                let indices_to_remove =
-                    vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
-                        removal_markers
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(_, should_remove)| *should_remove)
-                            .map(|(index, _)| index)
-                            .collect::<HashSet<usize>>()
-                    });
+        vec(
+            any::<VerifiedUnminedTx>()
+                .prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()),
+            1..MEMPOOL_TX_COUNT,
+        )
+        .prop_flat_map(|transactions| {
+            let indices_to_remove =
+                vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
+                    removal_markers
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, should_remove)| *should_remove)
+                        .map(|(index, _)| index)
+                        .collect::<HashSet<usize>>()
+                });
 
-                (Just(transactions), indices_to_remove)
-            })
-            .prop_flat_map(|(transactions, indices_to_remove)| {
-                let wtx_ids_to_remove: HashSet<_> = indices_to_remove
-                    .iter()
-                    .map(|&index| transactions[index].transaction.id)
-                    .collect();
+            (Just(transactions), indices_to_remove)
+        })
+        .prop_flat_map(|(transactions, indices_to_remove)| {
+            let wtx_ids_to_remove: HashSet<_> = indices_to_remove
+                .iter()
+                .map(|&index| transactions[index].transaction.id)
+                .collect();
 
-                let mined_ids_to_remove: HashSet<transaction::Hash> = wtx_ids_to_remove
-                    .iter()
-                    .map(|unmined_id| unmined_id.mined_id())
-                    .collect();
+            let mined_ids_to_remove: HashSet<transaction::Hash> = wtx_ids_to_remove
+                .iter()
+                .map(|unmined_id| unmined_id.mined_id())
+                .collect();
 
-                prop_oneof![
-                    Just(RejectAndRemoveSameEffects {
-                        transactions: transactions.clone().into(),
-                        mined_ids_to_remove: mined_ids_to_remove.into(),
-                    }),
-                    Just(RemoveExact {
-                        transactions: transactions.into(),
-                        wtx_ids_to_remove: wtx_ids_to_remove.into(),
-                    }),
-                ]
-            })
-            .boxed()
+            prop_oneof![
+                Just(RejectAndRemoveSameEffects {
+                    transactions: transactions.clone().into(),
+                    mined_ids_to_remove: mined_ids_to_remove.into(),
+                }),
+                Just(RemoveExact {
+                    transactions: transactions.into(),
+                    wtx_ids_to_remove: wtx_ids_to_remove.into(),
+                }),
+            ]
+        })
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

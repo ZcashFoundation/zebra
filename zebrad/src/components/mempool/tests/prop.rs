@@ -52,7 +52,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_single_chain_reset(
         network in any::<Network>(),
-        transaction in any::<DisplayToDebug<VerifiedUnminedTx>>(),
+        transaction in any::<VerifiedUnminedTx>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()),
         chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -74,7 +74,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction.0)
+                .insert(transaction)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -102,7 +102,7 @@ proptest! {
     fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
-        mut transactions in vec(any::<DisplayToDebug<VerifiedUnminedTx>>(), 0..CHAIN_LENGTH),
+        mut transactions in vec(any::<VerifiedUnminedTx>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()), 0..CHAIN_LENGTH),
         fake_chain_tips in vec(any::<DisplayToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -148,7 +148,7 @@ proptest! {
                 // Insert the dummy transaction into the mempool.
                 mempool
                     .storage()
-                    .insert(transaction.0.clone())
+                    .insert(transaction.clone())
                     .expect("Inserting a transaction should succeed");
 
                 // Set the new chain tip.
@@ -184,7 +184,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_if_syncer_falls_behind(
         network in any::<Network>(),
-        transaction in any::<VerifiedUnminedTx>(),
+        transaction in any::<VerifiedUnminedTx>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 

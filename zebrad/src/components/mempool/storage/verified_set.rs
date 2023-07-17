@@ -309,6 +309,8 @@ impl VerifiedSet {
         let mut size_with_weight_gt3 = 0;
 
         for entry in self.full_transactions() {
+            dbg!(&entry);
+            //dbg!(&entry.unpaid_actions);
             paid_actions += entry.conventional_actions - entry.unpaid_actions;
 
             if entry.fee_weight_ratio > 3.0 {

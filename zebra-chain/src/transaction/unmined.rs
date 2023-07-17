@@ -452,4 +452,20 @@ impl VerifiedUnminedTx {
 
         cost
     }
+
+    ///
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn fix_arbitrary_generated_action_overflows(&mut self) -> Self {
+        use rand::Rng;
+
+        let mut rng = rand::thread_rng();
+
+        let conventional_actions = rng.gen_range(10..10000);
+        let unpaid_actions = rng.gen_range(0..10);
+
+        self.conventional_actions = conventional_actions;
+        self.unpaid_actions = unpaid_actions;
+
+        self.clone()
+    }
 }
