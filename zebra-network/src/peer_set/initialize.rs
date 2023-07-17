@@ -32,7 +32,7 @@ use tower::{
 use tracing::Span;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForTermination};
+use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
 
 use crate::{
     address_book_updater::AddressBookUpdater,
@@ -206,7 +206,7 @@ where
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
-        .panic_on_early_termination()
+        .wait_for_panics()
         .await
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
@@ -343,7 +343,7 @@ where
                 }
                 .in_current_span(),
             )
-            .panic_on_early_termination()
+            .wait_for_panics()
         })
         .collect();
 
@@ -615,7 +615,7 @@ where
                 peerset_tx.clone(),
             )
             .await?
-            .panic_on_early_termination();
+            .wait_for_panics();
 
             handshakes.push(handshake_task);
 
@@ -903,7 +903,7 @@ where
                     }
                     .in_current_span(),
                 )
-                .panic_on_early_termination();
+                .wait_for_panics();
 
                 handshakes.push(handshake_or_crawl_handle);
             }
@@ -924,7 +924,7 @@ where
                     }
                     .in_current_span(),
                 )
-                .panic_on_early_termination();
+                .wait_for_panics();
 
                 handshakes.push(crawl_handle);
             }
@@ -1100,7 +1100,7 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
     let updated_addr = tokio::task::spawn_blocking(move || {
         span.in_scope(|| address_book.lock().unwrap().update(addr))
     })
-    .panic_on_early_termination()
+    .wait_for_panics()
     .await;
 
     assert_eq!(

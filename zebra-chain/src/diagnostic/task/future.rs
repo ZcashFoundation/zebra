@@ -9,7 +9,7 @@ use tokio::task::{JoinError, JoinHandle};
 
 use crate::shutdown::is_shutting_down;
 
-use super::{CheckForPanics, WaitForTermination};
+use super::{CheckForPanics, WaitForPanics};
 
 /// This is the return type of the [`JoinHandle`] future.
 impl<T> CheckForPanics for Result<T, JoinError> {
@@ -59,13 +59,11 @@ impl CheckForPanics for JoinError {
     }
 }
 
-impl<T> WaitForTermination for JoinHandle<T>
+impl<T> WaitForPanics for JoinHandle<T>
 where
     T: Send + 'static,
 {
-    type UnwrappedOutput = BoxFuture<'static, T>;
-
-    type ResultOutput = BoxFuture<'static, Result<T, JoinError>>;
+    type Output = BoxFuture<'static, T>;
 
     /// Returns a future which waits for `self` to finish, then checks if its output is:
     /// - a panic payload: resume that panic,
@@ -83,53 +81,11 @@ where
     /// If `self` contains an expected termination, and we're shutting down anyway.
     /// Futures hang by returning `Pending` and not setting a waker, so this uses minimal resources.
     #[track_caller]
-    fn panic_on_early_termination(self) -> Self::UnwrappedOutput {
+    fn wait_for_panics(self) -> Self::Output {
         async move {
             match self.await.check_for_panics() {
                 Ok(task_output) => task_output,
                 Err(_expected_cancel_error) => future::pending().await,
-            }
-        }
-        .boxed()
-    }
-
-    /// Returns a future which waits for `self` to finish, then checks if its output is:
-    /// - a panic payload: resume that panic,
-    /// - an unexpected termination: return that error,
-    /// - an expected termination: return the provided `expected_termination_value`.
-    ///
-    /// Otherwise, returns the task return value of `self`.
-    ///
-    /// # Panics
-    ///
-    /// If `self` contains a panic payload.
-    #[track_caller]
-    fn error_on_early_termination<D>(self, expected_termination_value: D) -> Self::ResultOutput
-    where
-        D: Into<Self::ResultOutput> + Send + 'static,
-    {
-        async move {
-            let task_result = self.await;
-
-            let Err(join_error) = task_result else {
-                // Always `Ok`
-                return task_result;
-            };
-
-            match join_error.try_into_panic() {
-                Ok(panic_payload) => panic::resume_unwind(panic_payload),
-
-                // Substitute the default value
-                Err(task_cancelled) if is_shutting_down() => {
-                    debug!(
-                        ?task_cancelled,
-                        "ignoring cancelled task because Zebra is shutting down"
-                    );
-
-                    expected_termination_value.into().await
-                }
-
-                Err(task_cancelled) => Err(task_cancelled),
             }
         }
         .boxed()

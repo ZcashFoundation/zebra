@@ -2,9 +2,13 @@
 //! - task handles
 //! - errors and panics
 
-use std::{panic, thread};
+use std::{
+    panic,
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
-use super::{CheckForPanics, WaitForTermination};
+use super::{CheckForPanics, WaitForPanics};
 
 impl<T> CheckForPanics for thread::Result<T> {
     type Output = T;
@@ -24,25 +28,12 @@ impl<T> CheckForPanics for thread::Result<T> {
     }
 }
 
-impl<T> WaitForTermination for thread::JoinHandle<T> {
-    type UnwrappedOutput = T;
-
-    type ResultOutput = thread::Result<T>;
+impl<T> WaitForPanics for JoinHandle<T> {
+    type Output = T;
 
     /// Waits for the thread to finish, then panics if the thread panicked.
     #[track_caller]
-    fn panic_on_early_termination(self) -> Self::UnwrappedOutput {
+    fn wait_for_panics(self) -> Self::Output {
         self.join().check_for_panics()
-    }
-
-    /// Waits for the thread to finish, then panics if the thread panicked.
-    ///
-    /// Threads can't be cancelled except by using a panic, so the returned result is always `Ok`.
-    #[track_caller]
-    fn error_on_early_termination<D>(self, _expected_termination_value: D) -> Self::ResultOutput
-    where
-        D: Into<Self::ResultOutput> + 'static,
-    {
-        Ok(self.panic_on_early_termination())
     }
 }

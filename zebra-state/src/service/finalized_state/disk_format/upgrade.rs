@@ -10,7 +10,7 @@ use std::{
 use semver::Version;
 use tracing::Span;
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{block::Height, diagnostic::task::PanicOnTermination, parameters::Network};
 
 use DbFormatChange::*;
 
