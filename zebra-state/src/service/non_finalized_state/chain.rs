@@ -657,7 +657,10 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.sapling_trees_by_height.get(&height).cloned()
+        self.sapling_trees_by_height
+            .range(..=height)
+            .next_back()
+            .map(|(_height, tree)| tree.clone())
     }
 
     /// Add the Sapling `tree` to the tree and anchor indexes at `height`.
