@@ -190,7 +190,7 @@ fn fetch_sprout_final_treestates(
 /// treestate of any prior `JoinSplit` _within the same transaction_.
 ///
 /// This method searches for anchors in the supplied `sprout_final_treestates`
-/// (which must be populated with all treestates pointed to in the `prepared` block;
+/// (which must be populated with all treestates pointed to in the `semantically_verified` block;
 /// see [`fetch_sprout_final_treestates()`]); or in the interstitial
 /// treestates which are computed on the fly in this function.
 #[tracing::instrument(skip(sprout_final_treestates, transaction))]
@@ -322,20 +322,23 @@ fn sprout_anchors_refer_to_treestates(
 pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Arc<Chain>,
-    prepared: &SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    prepared.block.transactions.iter().enumerate().try_for_each(
-        |(tx_index_in_block, transaction)| {
+    semantically_verified
+        .block
+        .transactions
+        .iter()
+        .enumerate()
+        .try_for_each(|(tx_index_in_block, transaction)| {
             sapling_orchard_anchors_refer_to_final_treestates(
                 finalized_state,
                 Some(parent_chain),
                 transaction,
-                prepared.transaction_hashes[tx_index_in_block],
+                semantically_verified.transaction_hashes[tx_index_in_block],
                 Some(tx_index_in_block),
-                Some(prepared.height),
+                Some(semantically_verified.height),
             )
-        },
-    )
+        })
 }
 
 /// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`SemanticallyVerifiedBlock`].
@@ -353,18 +356,20 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
 pub(crate) fn block_fetch_sprout_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Arc<Chain>,
-    prepared: &SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
 ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
     let mut sprout_final_treestates = HashMap::new();
 
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+    for (tx_index_in_block, transaction) in
+        semantically_verified.block.transactions.iter().enumerate()
+    {
         fetch_sprout_final_treestates(
             &mut sprout_final_treestates,
             finalized_state,
             Some(parent_chain),
             transaction,
             Some(tx_index_in_block),
-            Some(prepared.height),
+            Some(semantically_verified.height),
         );
     }
 
@@ -381,7 +386,7 @@ pub(crate) fn block_fetch_sprout_final_treestates(
 /// treestate of any prior `JoinSplit` _within the same transaction_.
 ///
 /// This method searches for anchors in the supplied `sprout_final_treestates`
-/// (which must be populated with all treestates pointed to in the `prepared` block;
+/// (which must be populated with all treestates pointed to in the `semantically_verified` block;
 /// see [`fetch_sprout_final_treestates()`]); or in the interstitial
 /// treestates which are computed on the fly in this function.
 #[tracing::instrument(skip(sprout_final_treestates, block, transaction_hashes))]

@@ -1,13 +1,17 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.26"
+version = "1.0.0-beta.27"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
 #
 # This licence is deliberately different to the rest of Zebra.
 #
-# zebra-network/src/peer_set/set.rs was modified from a 2019 version of:
+# Some code in:
+# zebra-network/src/peer_set/set.rs
+# zebra-network/src/peer_set/unready_service.rs
+# zebra-network/src/peer_set/initialize.rs
+# was modified from a 2019 version of:
 # https://github.com/tower-rs/tower/tree/master/tower/src/balance/p2c/service.rs
 license = "MIT"
 repository = "https://github.com/ZcashFoundation/zebra"
@@ -36,33 +40,33 @@ progress-bar = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.2.1"
+bitflags = "2.3.3"
 byteorder = "1.4.3"
 bytes = "1.4.0"
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
-indexmap = { version = "1.9.3", features = ["serde"] }
-itertools = "0.10.5"
+indexmap = { version = "2.0.0", features = ["serde"] }
+itertools = "0.11.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.45"
 ordered-map = "0.4.2"
-pin-project = "1.1.0"
-rand = { version = "0.8.5", package = "rand" }
+pin-project = "1.1.2"
+rand = "0.8.5"
 rayon = "1.7.0"
-regex = "1.8.4"
-serde = { version = "1.0.164", features = ["serde_derive"] }
+regex = "1.9.1"
+serde = { version = "1.0.168", features = ["serde_derive"] }
 tempfile = "3.5.0"
-thiserror = "1.0.40"
+thiserror = "1.0.43"
 
 futures = "0.3.28"
-tokio = { version = "1.28.2", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.29.1", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "time"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.21.0"
+metrics = "0.21.1"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.37"
@@ -79,15 +83,15 @@ howudoin = { version = "0.1.2", optional = true }
 proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.26" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
 
 [dev-dependencies]
 proptest = "1.2.0"
 proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.28.2", features = ["full", "tracing", "test-util"] }
-toml = "0.7.4"
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
+toml = "0.7.6"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

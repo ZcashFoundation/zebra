@@ -4,11 +4,11 @@
 //! speed up the initial chain sync for Zebra. This list is distributed
 //! with Zebra.
 //!
-//! The checkpoint verifier queues pending blocks.  Once there is a
+//! The checkpoint verifier queues pending blocks. Once there is a
 //! chain from the previous checkpoint to a target checkpoint, it
 //! verifies all the blocks in that chain, and sends accepted blocks to
-//! the state service as finalized chain state, skipping contextual
-//! verification checks.
+//! the state service as finalized chain state, skipping the majority of
+//! contextual verification checks.
 //!
 //! Verification starts at the first checkpoint, which is the genesis
 //! block for the configured network.
@@ -265,10 +265,11 @@ where
         let (sender, receiver) = mpsc::channel();
 
         #[cfg(feature = "progress-bar")]
-        let queued_blocks_bar = howudoin::new().label("Queued Checkpoint Blocks");
+        let queued_blocks_bar = howudoin::new_root().label("Checkpoint Queue Height");
 
         #[cfg(feature = "progress-bar")]
-        let verified_checkpoint_bar = howudoin::new().label("Verified Checkpoints");
+        let verified_checkpoint_bar =
+            howudoin::new_with_parent(queued_blocks_bar.id()).label("Verified Checkpoints");
 
         let verifier = CheckpointVerifier {
             checkpoint_list,

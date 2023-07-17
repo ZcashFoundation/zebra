@@ -41,7 +41,7 @@ impl FakeChainHelper for Arc<Block> {
             _ => panic!("block must have a coinbase height to create a child"),
         }
 
-        child.transactions.push(tx);
+        child.transactions.insert(0, tx);
         Arc::make_mut(&mut child.header).previous_block_hash = parent_hash;
 
         Arc::new(child)

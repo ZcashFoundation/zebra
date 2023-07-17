@@ -41,11 +41,10 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
-      # TODO: change this to `-experimental` when we release Zebra `1.0.0`
       tag_suffix: .experimental
       network: Testnet
       rpc_port: '18232'
-      features: "sentry getblocktemplate-rpcs"
+      features: "default-release-binaries getblocktemplate-rpcs"
       test_features: ""
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'

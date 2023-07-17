@@ -64,6 +64,26 @@ impl ZebradCmd {
         }
     }
 
+    /// Returns true if this command shows the Zebra intro logo and text.
+    ///
+    /// For example, `Start` acts as a Zcash node.
+    pub(crate) fn uses_intro(&self) -> bool {
+        // List all the commands, so new commands have to make a choice here
+        match self {
+            // Commands that need an intro
+            Start(_) => true,
+
+            // Utility commands
+            CopyState(_) | Download(_) | Generate(_) | TipHeight(_) => false,
+        }
+    }
+
+    /// Returns true if this command should ignore errors when
+    /// attempting to load a config file.
+    pub(crate) fn should_ignore_load_config_error(&self) -> bool {
+        matches!(self, ZebradCmd::Generate(_) | ZebradCmd::Download(_))
+    }
+
     /// Returns the default log level for this command, based on the `verbose` command line flag.
     ///
     /// Some commands need to be quiet by default.

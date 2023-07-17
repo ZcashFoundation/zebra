@@ -7,7 +7,7 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
 
 use crate::common::{
-    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     test_type::TestType,
 };
 
@@ -21,7 +21,7 @@ pub(crate) async fn run() -> Result<()> {
     let network = Network::Mainnet;
 
     // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, true) {
         return Ok(());
     }
 
@@ -29,7 +29,7 @@ pub(crate) async fn run() -> Result<()> {
 
     let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, true)?
-            .expect("Already checked zebra state path with can_spawn_zebrad_for_rpc");
+            .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 
     let rpc_address = zebra_rpc_address.expect("getpeerinfo test must have RPC port");
 

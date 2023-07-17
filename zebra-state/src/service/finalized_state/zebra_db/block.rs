@@ -19,9 +19,7 @@ use itertools::Itertools;
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
-    history_tree::HistoryTree,
     orchard,
-    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
@@ -31,6 +29,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -38,9 +37,8 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        CheckpointVerifiedBlock,
     },
-    BoxError, HashOrHeight,
+    BoxError, HashOrHeight, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -282,15 +280,12 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: CheckpointVerifiedBlock,
-        history_tree: Arc<HistoryTree>,
-        note_commitment_trees: NoteCommitmentTrees,
+        finalized: SemanticallyVerifiedBlockWithTrees,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized_hash = finalized.hash;
-
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .verified
             .transaction_hashes
             .iter()
             .enumerate()
@@ -303,12 +298,13 @@ impl ZebraDb {
         //       simplify the spent_utxos location lookup code,
         //       and remove the extra new_outputs_by_out_loc argument
         let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
+            .verified
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
+            .map(|(outpoint, ordered_utxo)| {
                 (
-                    lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
-                    utxo.clone(),
+                    lookup_out_loc(finalized.verified.height, outpoint, &tx_hash_indexes),
+                    ordered_utxo.utxo.clone(),
                 )
             })
             .collect();
@@ -316,6 +312,7 @@ impl ZebraDb {
         // Get a list of the spent UTXOs, before we delete any from the database
         let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
             finalized
+                .verified
                 .block
                 .transactions
                 .iter()
@@ -327,11 +324,17 @@ impl ZebraDb {
                         // Some utxos are spent in the same block, so they will be in
                         // `tx_hash_indexes` and `new_outputs`
                         self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                            lookup_out_loc(finalized.verified.height, &outpoint, &tx_hash_indexes)
                         }),
                         self.utxo(&outpoint)
                             .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                            .or_else(|| {
+                                finalized
+                                    .verified
+                                    .new_outputs
+                                    .get(&outpoint)
+                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                            })
                             .expect("already checked UTXO was in state or block"),
                     )
                 })
@@ -350,7 +353,13 @@ impl ZebraDb {
         // Get the transparent addresses with changed balances/UTXOs
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
-            .chain(finalized.new_outputs.values())
+            .chain(
+                finalized
+                    .verified
+                    .new_outputs
+                    .values()
+                    .map(|ordered_utxo| &ordered_utxo.utxo),
+            )
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
             .collect();
@@ -367,13 +376,11 @@ impl ZebraDb {
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
             &self.db,
-            finalized,
+            &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
-            history_tree,
-            note_commitment_trees,
             self.finalized_value_pool(),
         )?;
 
@@ -381,7 +388,7 @@ impl ZebraDb {
 
         tracing::trace!(?source, "committed block from");
 
-        Ok(finalized_hash)
+        Ok(finalized.verified.hash)
     }
 }
 
@@ -420,25 +427,16 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
-        finalized: CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
-        history_tree: Arc<HistoryTree>,
-        note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let CheckpointVerifiedBlock {
-            block,
-            hash,
-            height,
-            ..
-        } = &finalized;
-
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
-        self.prepare_block_header_and_transaction_data_batch(db, &finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, &finalized.verified)?;
 
         // # Consensus
         //
@@ -449,28 +447,37 @@ impl DiskWriteBatch {
         //
         // By returning early, Zebra commits the genesis block and transaction data,
         // but it ignores the genesis UTXO and value pool updates.
-        if self.prepare_genesis_batch(db, &finalized) {
+        if self.prepare_genesis_batch(db, &finalized.verified) {
             return Ok(());
         }
 
         // Commit transaction indexes
         self.prepare_transparent_transaction_batch(
             db,
-            &finalized,
+            &finalized.verified,
             &new_outputs_by_out_loc,
             &spent_utxos_by_outpoint,
             &spent_utxos_by_out_loc,
             address_balances,
         )?;
-        self.prepare_shielded_transaction_batch(db, &finalized)?;
+        self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
+        self.prepare_note_commitment_batch(db, finalized)?;
 
         // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(db, &finalized, spent_utxos_by_outpoint, value_pool)?;
+        self.prepare_chain_value_pools_batch(
+            db,
+            &finalized.verified,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
-        block_precommit_metrics(block, *hash, *height);
+        block_precommit_metrics(
+            &finalized.verified.block,
+            finalized.verified.hash,
+            finalized.verified.height,
+        );
 
         Ok(())
     }
@@ -485,7 +492,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
@@ -497,7 +504,7 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let CheckpointVerifiedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -544,9 +551,9 @@ impl DiskWriteBatch {
     pub fn prepare_genesis_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &CheckpointVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> bool {
-        let CheckpointVerifiedBlock { block, .. } = finalized;
+        let SemanticallyVerifiedBlock { block, .. } = finalized;
 
         if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
             self.prepare_genesis_note_commitment_tree_batch(db, finalized);

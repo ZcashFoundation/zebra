@@ -876,6 +876,10 @@ where
         let relay = self.relay;
         let minimum_peer_version = self.minimum_peer_version.clone();
 
+        // # Security
+        //
+        // `zebra_network::init()` implements a connection timeout on this future.
+        // Any code outside this future does not have a timeout.
         let fut = async move {
             debug!(
                 addr = ?connected_addr,
@@ -1156,7 +1160,7 @@ pub(crate) async fn register_inventory_status(
                     let _ = inv_collector
                         .send(InventoryChange::new_available(*advertised, transient_addr));
                 }
-                [advertised @ ..] => {
+                advertised => {
                     let advertised = advertised
                         .iter()
                         .filter(|advertised| advertised.unmined_tx_id().is_some());

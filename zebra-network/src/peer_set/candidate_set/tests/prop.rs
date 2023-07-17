@@ -8,15 +8,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use proptest::{collection::vec, prelude::*};
+use proptest::{
+    collection::{hash_map, vec},
+    prelude::*,
+};
 use tokio::time::{sleep, timeout};
 use tracing::Span;
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
-    constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
+    canonical_peer_addr,
+    constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
+    protocol::types::PeerServices,
     AddressBook, BoxError, Request, Response,
 };
 
@@ -67,7 +72,7 @@ proptest! {
         });
 
         // Since the address book is empty, there won't be any available peers
-        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, Span::none());
+        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
@@ -94,18 +99,22 @@ proptest! {
     /// Test that new outbound peer connections are rate-limited.
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
-        peers in vec(MetaAddrChange::ready_outbound_strategy(), TEST_ADDRESSES),
+        peers in hash_map(MetaAddrChange::ready_outbound_strategy_ip(), MetaAddrChange::ready_outbound_strategy_port(), TEST_ADDRESSES),
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
+        let peers = peers.into_iter().map(|(ip, port)| {
+            MetaAddr::new_alternate(canonical_peer_addr(SocketAddr::new(ip, port)), &PeerServices::NODE_NETWORK)
+        }).collect::<Vec<_>>();
+
         let peer_service = tower::service_fn(|_| async {
             unreachable!("Mock peer service is never used");
         });
 
-        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, Span::none());
+        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);

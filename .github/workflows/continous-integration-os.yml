@@ -107,7 +107,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
 
 
-      - uses: Swatinem/rust-cache@v2.4.0
+      - uses: Swatinem/rust-cache@v2.5.1
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -242,7 +242,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-      - uses: Swatinem/rust-cache@v2.4.0
+      - uses: Swatinem/rust-cache@v2.5.1
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -261,8 +261,8 @@ jobs:
         # We don't need to check `--no-default-features` here, because (except in very rare cases):
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
-        features: ['', '--all-features']
-      # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
+        features: ['', '--features default-release-binaries', '--all-features']
+      # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 
     # Prevent sudden announcement of a new advisory from failing ci:
@@ -274,12 +274,14 @@ jobs:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.3.0
 
-      # The --all-features job is the only job that gives accurate "skip tree root was not found" warnings.
-      # In other jobs, we expect some of these warnings, due to disabled features.
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          command: check ${{ matrix.checks }}
+          # --all-features spuriously activates openssl, but we want to ban that dependency in
+          # all of zebrad's production features for security reasons. But the --all-features job is
+          # the only job that gives accurate "skip tree root was not found" warnings.
+          # In other jobs, we expect some of these warnings, due to disabled features.
+          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
 
   unused-deps:

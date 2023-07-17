@@ -16,7 +16,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyVerifiedBlock, ContextuallyVerifiedBlockWithTrees},
+    request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -36,6 +36,8 @@ pub(crate) use chain::Chain;
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
+    // Chain Data
+    //
     /// Verified, non-finalized chains, in ascending work order.
     ///
     /// The best chain is [`NonFinalizedState::best_chain()`], or `chain_iter().next()`.
@@ -43,6 +45,8 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    // Configuration
+    //
     /// The configured Zcash network.
     pub network: Network,
 
@@ -174,7 +178,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> ContextuallyVerifiedBlockWithTrees {
+    pub fn finalize(&mut self) -> FinalizableBlock {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -226,7 +230,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        ContextuallyVerifiedBlockWithTrees::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -399,6 +403,8 @@ impl NonFinalizedState {
             // Pushing a block onto a Chain can launch additional parallel batches.
             // TODO: should we pass _scope into Chain::push()?
             scope.spawn_fifo(|_scope| {
+                // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                // https://github.com/rust-lang/rust/issues/93610
                 let new_chain = Arc::try_unwrap(new_chain)
                     .unwrap_or_else(|shared_chain| (*shared_chain).clone());
                 chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
@@ -651,7 +657,7 @@ impl NonFinalizedState {
 
             // Update the chain count bar
             if self.chain_count_bar.is_none() {
-                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+                self.chain_count_bar = Some(howudoin::new_root().label("Chain Forks"));
             }
 
             let chain_count_bar = self
@@ -675,9 +681,11 @@ impl NonFinalizedState {
             match self.chain_count().cmp(&prev_length_bars) {
                 Greater => self
                     .chain_fork_length_bars
-                    .resize_with(self.chain_count(), howudoin::new),
+                    .resize_with(self.chain_count(), || {
+                        howudoin::new_with_parent(chain_count_bar.id())
+                    }),
                 Less => {
-                    let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                    let redundant_bars = self.chain_fork_length_bars.split_off(self.chain_count());
                     for bar in redundant_bars {
                         bar.close();
                     }
@@ -706,19 +714,24 @@ impl NonFinalizedState {
                 //     zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
                 // ));
 
-                // display work as bits
-                let mut desc = format!(
-                    "Work {:.1} bits",
-                    chain.partial_cumulative_work.difficulty_bits_for_display(),
-                );
+                // TODO: store work in the finalized state for each height (#7109),
+                //       and show the full chain work here, like `zcashd` (#7110)
+                //
+                // For now, we don't show any work here, see the deleted code in PR #7087.
+                let mut desc = String::new();
 
                 if let Some(recent_fork_height) = chain.recent_fork_height() {
                     let recent_fork_length = chain
                         .recent_fork_length()
                         .expect("just checked recent fork height");
 
+                    let mut plural = "s";
+                    if recent_fork_length == 1 {
+                        plural = "";
+                    }
+
                     desc.push_str(&format!(
-                        " at {recent_fork_height:?} + {recent_fork_length} blocks"
+                        " at {recent_fork_height:?} + {recent_fork_length} block{plural}"
                     ));
                 }
 

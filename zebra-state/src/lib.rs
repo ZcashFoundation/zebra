@@ -29,7 +29,10 @@ mod service;
 #[cfg(test)]
 mod tests;
 
-pub use config::{check_and_delete_old_databases, Config};
+pub use config::{
+    check_and_delete_old_databases, database_format_version_in_code,
+    database_format_version_on_disk, Config,
+};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{
     BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
@@ -56,5 +59,8 @@ pub use service::{
     finalized_state::{DiskWriteBatch, WriteDisk, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services, ReadStateService,
 };
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use config::write_database_format_version_to_disk;
 
 pub(crate) use request::ContextuallyVerifiedBlock;

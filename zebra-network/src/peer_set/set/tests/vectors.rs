@@ -1,6 +1,6 @@
 //! Fixed test vectors for the peer set.
 
-use std::{iter, time::Duration};
+use std::{cmp::max, iter, time::Duration};
 
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
@@ -12,6 +12,7 @@ use zebra_chain::{
 
 use super::{PeerSetBuilder, PeerVersions};
 use crate::{
+    constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientRequest, MinimumPeerVersion},
     peer_set::inventory_registry::InventoryStatus,
     protocol::external::{types::Version, InventoryHash},
@@ -144,6 +145,7 @@ fn peer_set_ready_multiple_connections() {
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(3, DEFAULT_MAX_CONNS_PER_IP))
             .build();
 
         // Get peerset ready
@@ -171,6 +173,55 @@ fn peer_set_ready_multiple_connections() {
         // Peer set hangs when no more connections are present
         let peer_ready = peer_set.ready();
         assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
+    });
+}
+
+#[test]
+fn peer_set_rejects_connections_past_per_ip_limit() {
+    const NUM_PEER_VERSIONS: usize = crate::constants::DEFAULT_MAX_CONNS_PER_IP + 1;
+
+    // Use three peers with the same version
+    let peer_version = Version::min_specified_for_upgrade(Network::Mainnet, NetworkUpgrade::Nu5);
+    let peer_versions = PeerVersions {
+        peer_versions: [peer_version; NUM_PEER_VERSIONS].into_iter().collect(),
+    };
+
+    // Start the runtime
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // Pause the runtime's timer so that it advances automatically.
+    //
+    // CORRECTNESS: This test does not depend on external resources that could really timeout, like
+    // real network connections.
+    tokio::time::pause();
+
+    // Get peers and client handles of them
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+
+    // Make sure we have the right number of peers
+    assert_eq!(handles.len(), NUM_PEER_VERSIONS);
+
+    runtime.block_on(async move {
+        // Build a peerset
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .build();
+
+        // Get peerset ready
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        // Check we have the right amount of ready services
+        assert_eq!(
+            peer_ready.ready_services.len(),
+            crate::constants::DEFAULT_MAX_CONNS_PER_IP
+        );
     });
 }
 
@@ -208,6 +259,7 @@ fn peer_set_route_inv_empty_registry() {
         let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
             .build();
 
         // Get peerset ready
@@ -290,6 +342,7 @@ fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
         let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
             .build();
 
         // Advertise some inventory
@@ -397,6 +450,7 @@ fn peer_set_route_inv_missing_registry_order(missing_first: bool) {
         let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
             .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
             .build();
 
         // Mark some inventory as missing

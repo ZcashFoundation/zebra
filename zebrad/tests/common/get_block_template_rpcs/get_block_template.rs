@@ -21,7 +21,7 @@ use zebra_rpc::methods::get_block_template_rpcs::{
 };
 
 use crate::common::{
-    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
 };
@@ -66,7 +66,7 @@ pub(crate) async fn run() -> Result<()> {
     let network = Network::Mainnet;
 
     // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, true) {
         return Ok(());
     }
 

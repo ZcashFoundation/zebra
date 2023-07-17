@@ -92,6 +92,10 @@ where
         let connected_addr = ConnectedAddr::new_outbound_direct(addr);
         let connector_span = info_span!("connector", peer = ?connected_addr);
 
+        // # Security
+        //
+        // `zebra_network::init()` implements a connection timeout on this future.
+        // Any code outside this future does not have a timeout.
         async move {
             let tcp_stream = TcpStream::connect(*addr).await?;
             let client = hs

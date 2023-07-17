@@ -7,10 +7,16 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
+//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constants must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{cmp::Ordering, fmt::Debug, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    ops::RangeBounds,
+    path::Path,
+    sync::Arc,
+};
 
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
@@ -18,10 +24,6 @@ use rlimit::increase_nofile_limit;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    config::{
-        database_format_version_in_code, database_format_version_on_disk,
-        write_database_format_version_to_disk,
-    },
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -146,6 +148,7 @@ impl WriteDisk for DiskWriteBatch {
 /// defined format
 //
 // TODO: just implement these methods directly on DiskDb
+//       move this trait, its methods, and support methods to another module
 pub trait ReadDisk {
     /// Returns true if a rocksdb column family `cf` does not contain any entries.
     fn zs_is_empty<C>(&self, cf: &C) -> bool
@@ -202,6 +205,26 @@ pub trait ReadDisk {
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk;
+
+    /// Returns the keys and values in `cf` in `range`, in an ordered `BTreeMap`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Ord,
+        V: FromDisk,
+        R: RangeBounds<K>;
+
+    /// Returns the keys and values in `cf` in `range`, in an unordered `HashMap`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Eq + std::hash::Hash,
+        V: FromDisk,
+        R: RangeBounds<K>;
 }
 
 impl PartialEq for DiskDb {
@@ -342,6 +365,26 @@ impl ReadDisk for DiskDb {
             })
             .expect("unexpected database failure")
     }
+
+    fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Ord,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        self.zs_range_iter(cf, range).collect()
+    }
+
+    fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk + Eq + std::hash::Hash,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        self.zs_range_iter(cf, range).collect()
+    }
 }
 
 impl DiskWriteBatch {
@@ -366,6 +409,58 @@ impl DiskWriteBatch {
 }
 
 impl DiskDb {
+    /// Returns an iterator over the items in `cf` in `range`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        use std::ops::Bound::{self, *};
+
+        // Replace with map() when it stabilises:
+        // https://github.com/rust-lang/rust/issues/86026
+        let map_to_vec = |bound: Bound<&K>| -> Bound<Vec<u8>> {
+            match bound {
+                Unbounded => Unbounded,
+                Included(x) => Included(x.as_bytes().as_ref().to_vec()),
+                Excluded(x) => Excluded(x.as_bytes().as_ref().to_vec()),
+            }
+        };
+
+        let start_bound = map_to_vec(range.start_bound());
+        let end_bound = map_to_vec(range.end_bound());
+        let range = (start_bound.clone(), end_bound);
+
+        let start_bound_vec =
+            if let Included(ref start_bound) | Excluded(ref start_bound) = start_bound {
+                start_bound.clone()
+            } else {
+                // Actually unused
+                Vec::new()
+            };
+
+        let start_mode = if matches!(start_bound, Unbounded) {
+            // Unbounded iterators start at the first item
+            rocksdb::IteratorMode::Start
+        } else {
+            rocksdb::IteratorMode::From(start_bound_vec.as_slice(), rocksdb::Direction::Forward)
+        };
+
+        // Reading multiple items from iterators has caused database hangs,
+        // in previous RocksDB versions
+        self.db
+            .iterator_cf(cf, start_mode)
+            .map(|result| result.expect("unexpected database failure"))
+            .map(|(key, value)| (key.to_vec(), value))
+            // Handle Excluded start and the end bound
+            .filter(move |(key, _value)| range.contains(key))
+            .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
+    }
+
     /// The ideal open file limit for Zebra
     const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
 
@@ -428,35 +523,6 @@ impl DiskDb {
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
 
-        let running_version = database_format_version_in_code();
-        let disk_version = database_format_version_on_disk(config, network)
-            .expect("unable to read database format version file");
-
-        match disk_version.as_ref().map(|disk| disk.cmp(&running_version)) {
-            // TODO: if the on-disk format is older, actually run the upgrade task after the
-            //       database has been opened (#6642)
-            Some(Ordering::Less) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open older database format: launching upgrade task"
-            ),
-            // TODO: if the on-disk format is newer, downgrade the version after the
-            //       database has been opened (#6642)
-            Some(Ordering::Greater) => info!(
-                ?running_version,
-                ?disk_version,
-                "trying to open newer database format: data should be compatible"
-            ),
-            Some(Ordering::Equal) => info!(
-                ?running_version,
-                "trying to open compatible database format"
-            ),
-            None => info!(
-                ?running_version,
-                "creating new database with the current format"
-            ),
-        }
-
         let db_options = DiskDb::options();
 
         // When opening the database in read/write mode, all column families must be opened.
@@ -489,27 +555,6 @@ impl DiskDb {
                 };
 
                 db.assert_default_cf_is_empty();
-
-                // Now we've checked that the database format is up-to-date,
-                // mark it as updated on disk.
-                //
-                // # Concurrency
-                //
-                // The version must only be updated while RocksDB is holding the database
-                // directory lock. This prevents multiple Zebra instances corrupting the version
-                // file.
-                //
-                // # TODO
-                //
-                // - only update the version at the end of the format upgrade task (#6642)
-                // - add a note to the format upgrade task code to update the version constants
-                //   whenever the format changes
-                // - add a test that the format upgrade runs exactly once when:
-                //   1. if an older cached state format is opened, the format is upgraded,
-                //      then if Zebra is launched again the format is not upgraded
-                //   2. if the current cached state format is opened, the format is not upgraded
-                write_database_format_version_to_disk(config, network)
-                    .expect("unable to write database format version file to disk");
 
                 db
             }
@@ -709,6 +754,19 @@ impl DiskDb {
 
     // Cleanup methods
 
+    /// Returns the number of shared instances of this database.
+    ///
+    /// # Concurrency
+    ///
+    /// The actual number of owners can be higher or lower than the returned value,
+    /// because databases can simultaneously be cloned or dropped in other threads.
+    ///
+    /// However, if the number of owners is 1, and the caller has exclusive access,
+    /// the count can't increase unless that caller clones the database.
+    pub(crate) fn shared_database_owners(&self) -> usize {
+        Arc::strong_count(&self.db) + Arc::weak_count(&self.db)
+    }
+
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// If `force` is true, clean up regardless of any shared references.
@@ -729,9 +787,8 @@ impl DiskDb {
         // instance. If they do, they must drop it before:
         // - shutting down database threads, or
         // - deleting database files.
-        let shared_database_owners = Arc::strong_count(&self.db) + Arc::weak_count(&self.db);
 
-        if shared_database_owners > 1 {
+        if self.shared_database_owners() > 1 {
             let path = self.path();
 
             let mut ephemeral_note = "";

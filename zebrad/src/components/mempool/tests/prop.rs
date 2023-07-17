@@ -11,7 +11,7 @@ use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     block::{self, Block},
-    fmt::DisplayToDebug,
+    fmt::{DisplayToDebug, TypeNameToDebug},
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::VerifiedUnminedTx,
@@ -102,8 +102,8 @@ proptest! {
     fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
-        mut transactions in vec(any::<VerifiedUnminedTx>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()), 0..CHAIN_LENGTH),
-        fake_chain_tips in vec(any::<DisplayToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
+        mut transactions in vec(any::<DisplayToDebug<VerifiedUnminedTx>>().prop_map(|mut tx| tx.fix_arbitrary_generated_action_overflows()), 0..CHAIN_LENGTH),
+        fake_chain_tips in vec(any::<TypeNameToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 

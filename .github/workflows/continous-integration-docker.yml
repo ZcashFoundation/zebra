@@ -35,6 +35,11 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
+      force_save_to_disk:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force tests to always create a cached state disk, if they already create disks'
       no_cache:
         description: 'Disable the Docker cache for this build'
         required: false
@@ -80,10 +85,11 @@ on:
       - '**/clippy.toml'
       # workflow definitions
       - 'docker/**'
+      - '.dockerignore'
       - '.github/workflows/continous-integration-docker.yml'
       - '.github/workflows/deploy-gcp-tests.yml'
-      - '.github/workflows/build-docker-image.yml'
       - '.github/workflows/find-cached-disks.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 jobs:
   # to also run a job on Mergify head branches,
@@ -133,6 +139,9 @@ jobs:
       rust_log: info
 
   # zebrad tests without cached state
+
+  # TODO: make the non-cached-state tests use:
+  # network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Run all the zebra tests, including tests that are ignored by default.
   # Skips tests that need a cached state disk or a lightwalletd binary.
@@ -308,6 +317,9 @@ jobs:
         env:
           ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
 
+  # END TODO: make the non-cached-state tests use:
+  # network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
   # zebrad cached checkpoint state tests
 
   # Regenerate mandatory checkpoint Zebra cached state disks.
@@ -327,8 +339,10 @@ jobs:
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
     secrets: inherit
@@ -355,6 +369,7 @@ jobs:
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
       test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
@@ -390,6 +405,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
@@ -426,9 +442,11 @@ jobs:
       test_id: update-to-tip
       test_description: Test syncing to tip with a Zebra tip state
       test_variables: '-e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -501,6 +519,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
@@ -544,6 +563,7 @@ jobs:
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
@@ -571,11 +591,13 @@ jobs:
       test_id: lwd-full-sync
       test_description: Test lightwalletd full sync
       test_variables: '-e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      # This test runs for (just) longer than 6 hours, so it needs multiple jobs
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
@@ -609,6 +631,7 @@ jobs:
       test_id: lwd-update-sync
       test_description: Test lightwalletd update sync with both states
       test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       needs_lwd_state: true
       # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
@@ -641,6 +664,7 @@ jobs:
       test_id: fully-synced-rpc
       test_description: Test lightwalletd RPC with a Zebra tip state
       test_variables: '-e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
@@ -666,6 +690,7 @@ jobs:
       test_id: lwd-send-transactions
       test_description: Test sending transactions via lightwalletd
       test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -693,6 +718,7 @@ jobs:
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
       test_variables: '-e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -724,6 +750,7 @@ jobs:
       test_id: get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
       test_variables: '-e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
@@ -750,6 +777,7 @@ jobs:
       test_id: submit-block
       test_description: Test submitting blocks via Zebra's rpc server
       test_variables: '-e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
