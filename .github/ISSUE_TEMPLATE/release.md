@@ -1,5 +1,5 @@
 ---
-name: 'Zebra Release'
+name: ":rocket: Zebra Release"
 about: 'Zebra team use only'
 title: 'Publish next Zebra release: (version)'
 labels: 'A-release, C-trivial, P-Medium :zap:'
