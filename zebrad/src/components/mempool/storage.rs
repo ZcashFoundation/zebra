@@ -215,7 +215,6 @@ impl Storage {
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(tx_id);
         if let Err(rejection_error) = self.verified.insert(tx) {
-            dbg!("error here?");
             tracing::debug!(
                 ?tx_id,
                 ?rejection_error,

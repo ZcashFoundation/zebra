@@ -460,8 +460,16 @@ impl VerifiedUnminedTx {
 
         let mut rng = rand::thread_rng();
 
-        let conventional_actions = rng.gen_range(10..10000);
-        let unpaid_actions = rng.gen_range(0..10);
+        //
+        let conventional_actions = rng.gen_range(0..2 ^ 16);
+
+        //
+        let mut unpaid_actions = rng.gen_range(0..zip317::BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT);
+
+        //
+        if unpaid_actions > conventional_actions {
+            unpaid_actions = conventional_actions;
+        }
 
         self.conventional_actions = conventional_actions;
         self.unpaid_actions = unpaid_actions;
