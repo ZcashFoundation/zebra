@@ -23,8 +23,7 @@ use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::broadcast,
-    task::JoinError,
-    time::{error::Elapsed, sleep, Instant},
+    time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
 use tower::{
@@ -33,11 +32,11 @@ use tower::{
 use tracing::Span;
 use tracing_futures::Instrument;
 
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForTermination};
 
 use crate::{
     address_book_updater::AddressBookUpdater,
-    constants::{self, HANDSHAKE_TIMEOUT},
+    constants,
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
@@ -207,18 +206,8 @@ where
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
+        .panic_on_early_termination()
         .await
-        .unwrap_or_else(|e @ JoinError { .. }| {
-            if e.is_panic() {
-                panic!("panic in initial peer connections task: {e:?}");
-            } else {
-                info!(
-                    "task error during initial peer connections: {e:?},\
-                     is Zebra shutting down?"
-                );
-                Err(e.into())
-            }
-        })
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
@@ -354,22 +343,11 @@ where
                 }
                 .in_current_span(),
             )
+            .panic_on_early_termination()
         })
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
-        let handshake_result = handshake_result.unwrap_or_else(|e @ JoinError { .. }| {
-            if e.is_panic() {
-                panic!("panic in initial peer connection: {e:?}");
-            } else {
-                info!(
-                    "task error during initial peer connection: {e:?},\
-                     is Zebra shutting down?"
-                );
-                // Fake the address, it doesn't matter because we're shutting down anyway
-                Err((PeerSocketAddr::unspecified(), e.into()))
-            }
-        });
         match handshake_result {
             Ok(change) => {
                 handshake_success_total += 1;
@@ -637,36 +615,9 @@ where
                 peerset_tx.clone(),
             )
             .await?
-            .map(|res| match res {
-                Ok(()) => (),
-                Err(e @ JoinError { .. }) => {
-                    if e.is_panic() {
-                        panic!("panic during inbound handshaking: {e:?}");
-                    } else {
-                        info!(
-                            "task error during inbound handshaking: {e:?}, is Zebra shutting down?"
-                        )
-                    }
-                }
-            });
+            .panic_on_early_termination();
 
-            let handshake_timeout = tokio::time::timeout(
-                // Only trigger this timeout if the inner handshake timeout fails
-                HANDSHAKE_TIMEOUT + Duration::from_millis(500),
-                handshake_task,
-            )
-            .map(|res| match res {
-                Ok(()) => (),
-                Err(_e @ Elapsed { .. }) => {
-                    info!(
-                        "timeout in spawned accept_inbound_handshake() task: \
-                         inner task should have timed out already"
-                    );
-                }
-            });
-
-            // This timeout helps locate inbound peer connection hangs, see #6763 for details.
-            handshakes.push(Box::pin(handshake_timeout));
+            handshakes.push(handshake_task);
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
@@ -918,80 +869,64 @@ where
 
                 // Spawn each handshake or crawl into an independent task, so handshakes can make
                 // progress while crawls are running.
-                let handshake_or_crawl_handle = tokio::spawn(async move {
-                    // Try to get the next available peer for a handshake.
-                    //
-                    // candidates.next() has a short timeout, and briefly holds the address
-                    // book lock, so it shouldn't hang.
-                    //
-                    // Hold the lock for as short a time as possible.
-                    let candidate = { candidates.lock().await.next().await };
+                let handshake_or_crawl_handle = tokio::spawn(
+                    async move {
+                        // Try to get the next available peer for a handshake.
+                        //
+                        // candidates.next() has a short timeout, and briefly holds the address
+                        // book lock, so it shouldn't hang.
+                        //
+                        // Hold the lock for as short a time as possible.
+                        let candidate = { candidates.lock().await.next().await };
 
-                    if let Some(candidate) = candidate {
-                        // we don't need to spawn here, because there's nothing running concurrently
-                        dial(
-                            candidate,
-                            outbound_connector,
-                            outbound_connection_tracker,
-                            peerset_tx,
-                            address_book,
-                            demand_tx,
-                        )
-                        .await?;
+                        if let Some(candidate) = candidate {
+                            // we don't need to spawn here, because there's nothing running concurrently
+                            dial(
+                                candidate,
+                                outbound_connector,
+                                outbound_connection_tracker,
+                                peerset_tx,
+                                address_book,
+                                demand_tx,
+                            )
+                            .await?;
 
-                        Ok(HandshakeFinished)
-                    } else {
-                        // There weren't any peers, so try to get more peers.
-                        debug!("demand for peers but no available candidates");
-
-                        crawl(candidates, demand_tx).await?;
-
-                        Ok(DemandCrawlFinished)
-                    }
-                }.in_current_span())
-                .map(|res| match res {
-                    Ok(crawler_action) => crawler_action,
-                    Err(e @ JoinError {..}) => {
-                        if e.is_panic() {
-                            panic!("panic during outbound handshake: {e:?}");
+                            Ok(HandshakeFinished)
                         } else {
-                            info!("task error during outbound handshake: {e:?}, is Zebra shutting down?")
-                        }
-                        // Just fake it
-                        Ok(HandshakeFinished)
-                    }
-                });
+                            // There weren't any peers, so try to get more peers.
+                            debug!("demand for peers but no available candidates");
 
-                handshakes.push(Box::pin(handshake_or_crawl_handle));
+                            crawl(candidates, demand_tx).await?;
+
+                            Ok(DemandCrawlFinished)
+                        }
+                    }
+                    .in_current_span(),
+                )
+                .panic_on_early_termination();
+
+                handshakes.push(handshake_or_crawl_handle);
             }
             Ok(TimerCrawl { tick }) => {
                 let candidates = candidates.clone();
                 let demand_tx = demand_tx.clone();
 
-                let crawl_handle = tokio::spawn(async move {
-                    debug!(
-                        ?tick,
-                        "crawling for more peers in response to the crawl timer"
-                    );
+                let crawl_handle = tokio::spawn(
+                    async move {
+                        debug!(
+                            ?tick,
+                            "crawling for more peers in response to the crawl timer"
+                        );
 
-                    crawl(candidates, demand_tx).await?;
+                        crawl(candidates, demand_tx).await?;
 
-                    Ok(TimerCrawlFinished)
-                }.in_current_span())
-                .map(move |res| match res {
-                    Ok(crawler_action) => crawler_action,
-                    Err(e @ JoinError {..}) => {
-                        if e.is_panic() {
-                            panic!("panic during outbound TimerCrawl: {tick:?} {e:?}");
-                        } else {
-                            info!("task error during outbound TimerCrawl: {e:?}, is Zebra shutting down?")
-                        }
-                        // Just fake it
                         Ok(TimerCrawlFinished)
                     }
-                });
+                    .in_current_span(),
+                )
+                .panic_on_early_termination();
 
-                handshakes.push(Box::pin(crawl_handle));
+                handshakes.push(crawl_handle);
             }
 
             // Completed spawned tasks
@@ -1162,27 +1097,16 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
     //
     // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
     let span = Span::current();
-    let task_result = tokio::task::spawn_blocking(move || {
+    let updated_addr = tokio::task::spawn_blocking(move || {
         span.in_scope(|| address_book.lock().unwrap().update(addr))
     })
+    .panic_on_early_termination()
     .await;
 
-    match task_result {
-        Ok(updated_addr) => assert_eq!(
-            updated_addr.map(|addr| addr.addr()),
-            Some(addr.addr()),
-            "incorrect address updated by address book: \
-             original: {addr:?}, updated: {updated_addr:?}"
-        ),
-        Err(e @ JoinError { .. }) => {
-            if e.is_panic() {
-                panic!("panic in peer failure address book update task: {e:?}");
-            } else {
-                info!(
-                    "task error during peer failure address book update task: {e:?},\
-                     is Zebra shutting down?"
-                )
-            }
-        }
-    }
+    assert_eq!(
+        updated_addr.map(|addr| addr.addr()),
+        Some(addr.addr()),
+        "incorrect address updated by address book: \
+         original: {addr:?}, updated: {updated_addr:?}"
+    );
 }
