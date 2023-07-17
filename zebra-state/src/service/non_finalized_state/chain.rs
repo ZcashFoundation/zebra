@@ -676,11 +676,20 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sapling tree");
 
-        assert_eq!(
-            self.sapling_trees_by_height.insert(height, tree),
-            None,
-            "incorrect overwrite of sapling tree: trees must be reverted then inserted",
-        );
+        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        if height.is_min()
+            || self
+                .sapling_tree(height.previous().into())
+                .map_or(true, |prev_tree| prev_tree != tree)
+        {
+            assert_eq!(
+                self.sapling_trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of sapling tree: trees must be reverted then inserted",
+            );
+        }
+
+        // Store the root.
         assert_eq!(
             self.sapling_anchors_by_height.insert(height, anchor),
             None,
@@ -699,17 +708,22 @@ impl Chain {
     /// - a root block: all trees and anchors below that height are removed,
     ///   including temporary finalized tip trees.
     fn remove_sapling_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
-            // Remove all trees and anchors at or below the removed block.
-            // This makes sure the temporary trees from finalized tip forks are removed.
-            self.sapling_anchors_by_height
-                .keys()
-                .cloned()
-                .filter(|index_height| *index_height <= height)
-                .collect()
+        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
+            (
+                // Remove all trees and anchors at or below the removed block.
+                // This makes sure the temporary trees from finalized tip forks are removed.
+                self.sapling_anchors_by_height
+                    .keys()
+                    .cloned()
+                    .filter(|index_height| *index_height <= height)
+                    .collect(),
+                // Cache the highest (rightmost) tree before its removal.
+                self.sapling_tree(height.into()),
+            )
         } else {
             // Just remove the reverted tip trees and anchors.
-            vec![height]
+            // We don't need to cache the highest (rightmost) tree.
+            (vec![height], None)
         };
 
         for height in &removed_heights {
@@ -717,9 +731,8 @@ impl Chain {
                 .sapling_anchors_by_height
                 .remove(height)
                 .expect("Sapling anchor must be present if block was added to chain");
-            self.sapling_trees_by_height
-                .remove(height)
-                .expect("Sapling note commitment tree must be present if block was added to chain");
+
+            self.sapling_trees_by_height.remove(height);
 
             trace!(?height, ?position, ?anchor, "removing sapling tree");
 
@@ -729,6 +742,26 @@ impl Chain {
                 self.sapling_anchors.remove(&anchor),
                 "Sapling anchor must be present if block was added to chain"
             );
+        }
+
+        // # Invariant
+        //
+        // The height following after the removed heights in a non-empty non-finalized state must
+        // always have its tree.
+        //
+        // The loop above can violate the invariant, and if `position` is [`RevertPosition::Root`],
+        // it will always violate the invariant. We restore the invariant by storing the highest
+        // (rightmost) removed tree just above `height` if there is no tree at that height.
+        if !self.is_empty() && height < self.non_finalized_tip_height() {
+            let next_height = height.next();
+
+            if self.sapling_trees_by_height.get(&next_height).is_none() {
+                // TODO: Use `try_insert` once it stabilises.
+                self.sapling_trees_by_height.insert(
+                    next_height,
+                    highest_removed_tree.expect("There should be a cached removed tree."),
+                );
+            }
         }
     }
 
