@@ -3,7 +3,6 @@ name: ":octocat: DevOps Report"
 description: Issues related to the Zebra build, test, or release process.
 title: "(short issue description)"
 labels: [A-devops, C-bug, S-needs-triage]
-assignees: []
 body:
 
 - type: markdown
@@ -14,56 +13,56 @@ body:
       Please fill out the sections below to help us reproduce and fix the bug.
       If you have a question, please ask on [Discord](https://discord.gg/fP2JGmhm) or [GitHub Discussions](https://github.com/ZcashFoundation/zebra/discussions)
 - type: textarea
-id: description
-attributes:
+  id: description
+  attributes:
     label: Describe the issue or request
     description: What is the problem? A clear and concise description of the bug.
-validations:
+  validations:
     required: true
 - type: textarea
-id: expected
-attributes:
+  id: expected
+  attributes:
     label: Expected Behavior
     description: |
     What did you expect to happen?
-validations:
+  validations:
     required: true
 - type: textarea
-id: current
-attributes:
+  id: current
+  attributes:
     label: Current Behavior
     description: |
     What actually happened?
 
     Please include full errors, uncaught exceptions, stack traces, and relevant logs.
     Links to the faulty logs in GitHub Actions or other places are also welcomed.
-validations:
+  validations:
     required: true
 - type: textarea
-id: solution
-attributes:
+  id: solution
+  attributes:
     label: Possible Solution
     description: |
     Suggest a fix/reason for the bug
-validations:
+  validations:
     required: false
 - type: textarea
-id: context
-attributes:
+  id: context
+  attributes:
     label: Additional Information/Context
     description: |
     Anything else that might be relevant for troubleshooting this bug. Providing context helps us come up with a solution that is most useful for the community.
-validations:
+  validations:
     required: false
 - type: input
-id: on-prs
-attributes:
+  id: on-prs
+  attributes:
     label: Is this happening on PRs?
-validations:
+  validations:
     required: true
 - type: input
-id: on-main
-attributes:
+  id: on-main
+  attributes:
     label: Is this happening on the main branch?
-validations:
+  validations:
     required: true
