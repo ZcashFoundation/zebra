@@ -286,9 +286,109 @@ impl VerifiedSet {
     }
 
     fn update_metrics(&mut self) {
+        // Track the sum of unpaid actions within each transaction (as they are subject to the
+        // unpaid action limit). Transactions that have weight >= 1 have no unpaid actions by
+        // definition.
+        let mut unpaid_actions_with_weight_lt20pct = 0;
+        let mut unpaid_actions_with_weight_lt40pct = 0;
+        let mut unpaid_actions_with_weight_lt60pct = 0;
+        let mut unpaid_actions_with_weight_lt80pct = 0;
+        let mut unpaid_actions_with_weight_lt1 = 0;
+
+        // Track the total number of paid actions across all transactions in the mempool. This
+        // added to the bucketed unpaid actions above is equal to the total number of conventional
+        // actions in the mempool.
+        let mut paid_actions = 0;
+
+        // Track the sum of transaction sizes (the metric by which they are mainly limited) across
+        // several buckets.
+        let mut size_with_weight_lt1 = 0;
+        let mut size_with_weight_eq1 = 0;
+        let mut size_with_weight_gt1 = 0;
+        let mut size_with_weight_gt2 = 0;
+        let mut size_with_weight_gt3 = 0;
+
+        for entry in self.full_transactions() {
+            paid_actions += entry.conventional_actions - entry.unpaid_actions;
+
+            if entry.fee_weight_ratio > 3.0 {
+                size_with_weight_gt3 += entry.transaction.size;
+            } else if entry.fee_weight_ratio > 2.0 {
+                size_with_weight_gt2 += entry.transaction.size;
+            } else if entry.fee_weight_ratio > 1.0 {
+                size_with_weight_gt1 += entry.transaction.size;
+            } else if entry.fee_weight_ratio == 1.0 {
+                size_with_weight_eq1 += entry.transaction.size;
+            } else {
+                size_with_weight_lt1 += entry.transaction.size;
+                if entry.fee_weight_ratio < 0.2 {
+                    unpaid_actions_with_weight_lt20pct += entry.unpaid_actions;
+                } else if entry.fee_weight_ratio < 0.4 {
+                    unpaid_actions_with_weight_lt40pct += entry.unpaid_actions;
+                } else if entry.fee_weight_ratio < 0.6 {
+                    unpaid_actions_with_weight_lt60pct += entry.unpaid_actions;
+                } else if entry.fee_weight_ratio < 0.8 {
+                    unpaid_actions_with_weight_lt80pct += entry.unpaid_actions;
+                } else {
+                    unpaid_actions_with_weight_lt1 += entry.unpaid_actions;
+                }
+            }
+        }
+
+        metrics::gauge!(
+            "zcash.mempool.actions.unpaid",
+            unpaid_actions_with_weight_lt20pct as f64,
+            "bk" => "< 0.2",
+        );
+        metrics::gauge!(
+            "zcash.mempool.actions.unpaid",
+            unpaid_actions_with_weight_lt40pct as f64,
+            "bk" => "< 0.4",
+        );
+        metrics::gauge!(
+            "zcash.mempool.actions.unpaid",
+            unpaid_actions_with_weight_lt60pct as f64,
+            "bk" => "< 0.6",
+        );
+        metrics::gauge!(
+            "zcash.mempool.actions.unpaid",
+            unpaid_actions_with_weight_lt80pct as f64,
+            "bk" => "< 0.8",
+        );
+        metrics::gauge!(
+            "zcash.mempool.actions.unpaid",
+            unpaid_actions_with_weight_lt1 as f64,
+            "bk" => "< 1",
+        );
+        metrics::gauge!("zcash.mempool.actions.paid", paid_actions as f64);
         metrics::gauge!(
             "zcash.mempool.size.transactions",
             self.transaction_count() as f64,
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.weighted",
+            size_with_weight_lt1 as f64,
+            "bk" => "< 1",
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.weighted",
+            size_with_weight_eq1 as f64,
+            "bk" => "1",
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.weighted",
+            size_with_weight_gt1 as f64,
+            "bk" => "> 1",
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.weighted",
+            size_with_weight_gt2 as f64,
+            "bk" => "> 2",
+        );
+        metrics::gauge!(
+            "zcash.mempool.size.weighted",
+            size_with_weight_gt3 as f64,
+            "bk" => "> 3",
         );
         metrics::gauge!(
             "zcash.mempool.size.bytes",
