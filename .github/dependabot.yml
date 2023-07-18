@@ -5,6 +5,7 @@ updates:
     # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
       interval: weekly
+      day: monday
       timezone: America/New_York
     # Limit dependabot to 2 PRs per reviewer, but assume one reviewer is busy or away
     open-pull-requests-limit: 8
@@ -120,7 +121,6 @@ updates:
         jsonrpc:
           patterns:
             - "jsonrpc*"
-            - "serde_json"
         rand:
           patterns:
             - "rand*"
@@ -135,6 +135,7 @@ updates:
     schedule:
       # tj-actions/changed-files often updates daily, which is too much for us
       interval: weekly
+      day: wednesday
       timezone: America/New_York
     open-pull-requests-limit: 6
     labels:

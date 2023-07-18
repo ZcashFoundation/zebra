@@ -68,7 +68,7 @@ endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
 fi
 
-if [[ "${RPC_PORT}" ]]; then
+if [[ -n "${RPC_PORT}" ]]; then
 cat <<EOF >> "${ZEBRA_CONF_PATH}"
 [rpc]
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"

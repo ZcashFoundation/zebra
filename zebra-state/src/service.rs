@@ -43,7 +43,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
-    diagnostic::CodeTimer,
+    diagnostic::{task::WaitForPanics, CodeTimer},
     parameters::{Network, NetworkUpgrade},
 };
 
@@ -1209,8 +1209,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Tip(tip))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1231,8 +1230,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Depth(depth))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Depth"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1255,10 +1253,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BestChainNextMedianTimePast(median_time_past?))
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::BestChainNextMedianTimePast")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the get_block (raw) RPC and the StateService.
@@ -1283,8 +1278,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Block(block))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_raw_transaction RPC and the StateService.
@@ -1302,8 +1296,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Transaction(response))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the getblock (verbose) RPC.
@@ -1332,10 +1325,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::TransactionIdsForBlock")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::UnspentBestChainUtxo(outpoint) => {
@@ -1359,8 +1349,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::UnspentBestChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Manually used by the StateService to implement part of AwaitUtxo.
@@ -1381,8 +1370,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::AnyChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::AnyChainUtxo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1405,8 +1393,7 @@ impl Service<ReadRequest> for ReadStateService {
                         ))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BlockLocator"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1433,8 +1420,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHashes(block_hashes))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHashes"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1466,8 +1452,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHeaders(block_headers))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHeaders"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::SaplingTree(hash_or_height) => {
@@ -1491,8 +1476,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::SaplingTree(sapling_tree))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::SaplingTree"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::OrchardTree(hash_or_height) => {
@@ -1516,8 +1500,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::OrchardTree(orchard_tree))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::OrchardTree"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_balance RPC.
@@ -1542,8 +1525,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::AddressBalance(balance))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::AddressBalance"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_tx_ids RPC.
@@ -1576,10 +1558,7 @@ impl Service<ReadRequest> for ReadStateService {
                         tx_ids.map(ReadResponse::AddressesTransactionIds)
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::TransactionIdsByAddresses")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_utxos RPC.
@@ -1605,8 +1584,7 @@ impl Service<ReadRequest> for ReadStateService {
                         utxos.map(ReadResponse::AddressUtxos)
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
@@ -1639,11 +1617,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                     })
                 })
-                .map(|join_result| {
-                    join_result
-                        .expect("panic in ReadRequest::CheckBestChainTipNullifiersAndAnchors")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the get_block and get_block_hash RPCs.
@@ -1672,8 +1646,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHash(hash))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by get_block_template RPC.
@@ -1712,8 +1685,7 @@ impl Service<ReadRequest> for ReadStateService {
                         get_block_template_info.map(ReadResponse::ChainInfo)
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
@@ -1766,8 +1738,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::SolutionRate(solution_rate))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::SolutionRate"))
-                .boxed()
+                .wait_for_panics()
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1815,10 +1786,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::ValidBlockProposal)
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::CheckBlockProposalValidity")
-                })
-                .boxed()
+                .wait_for_panics()
             }
         }
     }
