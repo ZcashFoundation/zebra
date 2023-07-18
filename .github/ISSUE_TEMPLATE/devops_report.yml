@@ -25,7 +25,7 @@ body:
       description: |
         What did you expect to happen?
     validations:
-      required: true
+      required: false
   - type: textarea
     id: current
     attributes:
@@ -36,7 +36,7 @@ body:
         Please include full errors, uncaught exceptions, stack traces, and relevant logs.
         Links to the faulty logs in GitHub Actions or other places are also welcomed.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: solution
     attributes:
@@ -58,10 +58,10 @@ body:
     attributes:
       label: Is this happening on PRs?
     validations:
-      required: true
+      required: false
   - type: input
     id: on-main
     attributes:
       label: Is this happening on the main branch?
     validations:
-      required: true
+      required: false
