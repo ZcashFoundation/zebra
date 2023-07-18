@@ -1,4 +1,4 @@
-name: Bug report
+name: ":bug: Bug report"
 description: Create a report to help us improve
 title: '[User reported bug]: '
 labels: C-bug, S-needs-triage
