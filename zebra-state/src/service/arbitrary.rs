@@ -173,7 +173,10 @@ impl Strategy for PreparedChain {
         }
 
         let chain = chain.clone().expect("should be generated");
-        let count = (1..chain.1.len()).new_tree(runner)?;
+        // The generated chain should contain at least two blocks:
+        // 1. the zeroth genesis block, and
+        // 2. a first block.
+        let count = (2..chain.1.len()).new_tree(runner)?;
         Ok(PreparedChainTree {
             chain: chain.1,
             count,
