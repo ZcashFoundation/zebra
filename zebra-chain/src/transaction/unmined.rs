@@ -32,9 +32,6 @@ use UnminedTxId::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use rand::Rng;
-
 // Documentation-only
 #[allow(unused_imports)]
 use crate::block::MAX_BLOCK_BYTES;
