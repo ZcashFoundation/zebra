@@ -1,5 +1,5 @@
 ---
-name: Usability Testing Plan
+name: ":clipboard: Usability Testing Plan"
 about: Create a Usability Testing Plan
 title: 'Usability Testing Plan'
 labels: C-research
