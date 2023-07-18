@@ -328,7 +328,6 @@ impl From<&Arc<Transaction>> for UnminedTx {
 //
 // This struct can't be `Eq`, because it contains a `f32`.
 #[derive(Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct VerifiedUnminedTx {
     /// The unmined transaction.
     pub transaction: UnminedTx,
@@ -454,29 +453,5 @@ impl VerifiedUnminedTx {
         }
 
         cost
-    }
-
-    /// When deriving `Arbitrary` for `VerifiedUnminedTx` action fields can be generated
-    /// that are against consensus rules. This function prevent those issues by generating
-    /// new conventional and unpaid actions where rules are considered.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn fix_arbitrary_generated_action_overflows(&mut self) -> Self {
-        let mut rng = rand::thread_rng();
-
-        // The number of actions can't be greater than 2^16.
-        let conventional_actions = rng.gen_range(0..2 ^ 16);
-
-        // The number of unpaid actions can't be greater than `BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT`.
-        let mut unpaid_actions = rng.gen_range(0..zip317::BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT);
-
-        // The number of unpaid actions can't be greater than the actions of the transaction.
-        if unpaid_actions > conventional_actions {
-            unpaid_actions = conventional_actions;
-        }
-
-        self.conventional_actions = conventional_actions;
-        self.unpaid_actions = unpaid_actions;
-
-        self.clone()
     }
 }
