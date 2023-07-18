@@ -500,14 +500,25 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.sprout_trees_by_height.get(&height).cloned()
+        self.sprout_trees_by_height
+            .range(..=height)
+            .next_back()
+            .map(|(_height, tree)| tree.clone())
     }
 
-    /// Add the Sprout `tree` to the tree and anchor indexes at `height`.
+    /// Adds the Sprout `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
+    ///
     /// - the height of a new block that has just been added to the chain tip, or
-    /// - the finalized tip height: the height of the parent of the first block of a new chain.
+    /// - the finalized tip height—the height of the parent of the first block of a new chain.
+    ///
+    /// Stores only the first tree in each series of identical trees.
+    ///
+    /// # Panics
+    ///
+    /// - If there's a tree already stored at `height`.
+    /// - If there's an anchor already stored at `height`.
     fn add_sprout_tree_and_anchor(
         &mut self,
         height: Height,
@@ -521,11 +532,20 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sprout tree");
 
-        assert_eq!(
-            self.sprout_trees_by_height.insert(height, tree.clone()),
-            None,
-            "incorrect overwrite of sprout tree: trees must be reverted then inserted",
-        );
+        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        if height.is_min()
+            || self
+                .sprout_tree(height.previous().into())
+                .map_or(true, |prev_tree| prev_tree != tree)
+        {
+            assert_eq!(
+                self.sprout_trees_by_height.insert(height, tree.clone()),
+                None,
+                "incorrect overwrite of sprout tree: trees must be reverted then inserted",
+            );
+        }
+
+        // Store the root.
         assert_eq!(
             self.sprout_anchors_by_height.insert(height, anchor),
             None,
@@ -538,24 +558,35 @@ impl Chain {
         self.sprout_trees_by_anchor.insert(anchor, tree);
     }
 
-    /// Remove the Sprout tree and anchor indexes at `height`.
+    /// Removes the Sprout tree and anchor indexes at `height`.
     ///
     /// `height` can be at two different [`RevertPosition`]s in the chain:
-    /// - a tip block above a chain fork: only that height is removed, or
-    /// - a root block: all trees and anchors below that height are removed,
-    ///   including temporary finalized tip trees.
+    ///
+    /// - a tip block above a chain fork—only the tree and anchor at that height are removed, or
+    /// - a root block—all trees and anchors at and below that height are removed, including
+    ///   temporary finalized tip trees.
+    ///
+    ///   # Panics
+    ///
+    ///  - If the anchor being removed is not present.
+    ///  - If there is no tree at `height`.
     fn remove_sprout_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
-            // Remove all trees and anchors at or below the removed block.
-            // This makes sure the temporary trees from finalized tip forks are removed.
-            self.sprout_anchors_by_height
-                .keys()
-                .cloned()
-                .filter(|index_height| *index_height <= height)
-                .collect()
+        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
+            (
+                // Remove all trees and anchors at or below the removed block.
+                // This makes sure the temporary trees from finalized tip forks are removed.
+                self.sprout_anchors_by_height
+                    .keys()
+                    .cloned()
+                    .filter(|index_height| *index_height <= height)
+                    .collect(),
+                // Cache the highest (rightmost) tree before its removal.
+                self.sprout_tree(height.into()),
+            )
         } else {
             // Just remove the reverted tip trees and anchors.
-            vec![height]
+            // We don't need to cache the highest (rightmost) tree.
+            (vec![height], None)
         };
 
         for height in &removed_heights {
@@ -563,9 +594,8 @@ impl Chain {
                 .sprout_anchors_by_height
                 .remove(height)
                 .expect("Sprout anchor must be present if block was added to chain");
-            self.sprout_trees_by_height
-                .remove(height)
-                .expect("Sprout note commitment tree must be present if block was added to chain");
+
+            self.sprout_trees_by_height.remove(height);
 
             trace!(?height, ?position, ?anchor, "removing sprout tree");
 
@@ -577,6 +607,26 @@ impl Chain {
             );
             if !self.sprout_anchors.contains(&anchor) {
                 self.sprout_trees_by_anchor.remove(&anchor);
+            }
+        }
+
+        // # Invariant
+        //
+        // The height following after the removed heights in a non-empty non-finalized state must
+        // always have its tree.
+        //
+        // The loop above can violate the invariant, and if `position` is [`RevertPosition::Root`],
+        // it will always violate the invariant. We restore the invariant by storing the highest
+        // (rightmost) removed tree just above `height` if there is no tree at that height.
+        if !self.is_empty() && height < self.non_finalized_tip_height() {
+            let next_height = height.next();
+
+            if self.sprout_trees_by_height.get(&next_height).is_none() {
+                // TODO: Use `try_insert` once it stabilises.
+                self.sprout_trees_by_height.insert(
+                    next_height,
+                    highest_removed_tree.expect("There should be a cached removed tree."),
+                );
             }
         }
     }
@@ -607,14 +657,25 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.sapling_trees_by_height.get(&height).cloned()
+        self.sapling_trees_by_height
+            .range(..=height)
+            .next_back()
+            .map(|(_height, tree)| tree.clone())
     }
 
-    /// Add the Sapling `tree` to the tree and anchor indexes at `height`.
+    /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
+    ///
     /// - the height of a new block that has just been added to the chain tip, or
-    /// - the finalized tip height: the height of the parent of the first block of a new chain.
+    /// - the finalized tip height—the height of the parent of the first block of a new chain.
+    ///
+    /// Stores only the first tree in each series of identical trees.
+    ///
+    /// # Panics
+    ///
+    /// - If there's a tree already stored at `height`.
+    /// - If there's an anchor already stored at `height`.
     fn add_sapling_tree_and_anchor(
         &mut self,
         height: Height,
@@ -623,11 +684,20 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sapling tree");
 
-        assert_eq!(
-            self.sapling_trees_by_height.insert(height, tree),
-            None,
-            "incorrect overwrite of sapling tree: trees must be reverted then inserted",
-        );
+        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        if height.is_min()
+            || self
+                .sapling_tree(height.previous().into())
+                .map_or(true, |prev_tree| prev_tree != tree)
+        {
+            assert_eq!(
+                self.sapling_trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of sapling tree: trees must be reverted then inserted",
+            );
+        }
+
+        // Store the root.
         assert_eq!(
             self.sapling_anchors_by_height.insert(height, anchor),
             None,
@@ -639,24 +709,35 @@ impl Chain {
         self.sapling_anchors.insert(anchor);
     }
 
-    /// Remove the Sapling tree and anchor indexes at `height`.
+    /// Removes the Sapling tree and anchor indexes at `height`.
     ///
     /// `height` can be at two different [`RevertPosition`]s in the chain:
-    /// - a tip block above a chain fork: only that height is removed, or
-    /// - a root block: all trees and anchors below that height are removed,
-    ///   including temporary finalized tip trees.
+    ///
+    /// - a tip block above a chain fork—only the tree and anchor at that height are removed, or
+    /// - a root block—all trees and anchors at and below that height are removed, including
+    ///   temporary finalized tip trees.
+    ///
+    ///   # Panics
+    ///
+    ///  - If the anchor being removed is not present.
+    ///  - If there is no tree at `height`.
     fn remove_sapling_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
-            // Remove all trees and anchors at or below the removed block.
-            // This makes sure the temporary trees from finalized tip forks are removed.
-            self.sapling_anchors_by_height
-                .keys()
-                .cloned()
-                .filter(|index_height| *index_height <= height)
-                .collect()
+        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
+            (
+                // Remove all trees and anchors at or below the removed block.
+                // This makes sure the temporary trees from finalized tip forks are removed.
+                self.sapling_anchors_by_height
+                    .keys()
+                    .cloned()
+                    .filter(|index_height| *index_height <= height)
+                    .collect(),
+                // Cache the highest (rightmost) tree before its removal.
+                self.sapling_tree(height.into()),
+            )
         } else {
             // Just remove the reverted tip trees and anchors.
-            vec![height]
+            // We don't need to cache the highest (rightmost) tree.
+            (vec![height], None)
         };
 
         for height in &removed_heights {
@@ -664,9 +745,8 @@ impl Chain {
                 .sapling_anchors_by_height
                 .remove(height)
                 .expect("Sapling anchor must be present if block was added to chain");
-            self.sapling_trees_by_height
-                .remove(height)
-                .expect("Sapling note commitment tree must be present if block was added to chain");
+
+            self.sapling_trees_by_height.remove(height);
 
             trace!(?height, ?position, ?anchor, "removing sapling tree");
 
@@ -676,6 +756,26 @@ impl Chain {
                 self.sapling_anchors.remove(&anchor),
                 "Sapling anchor must be present if block was added to chain"
             );
+        }
+
+        // # Invariant
+        //
+        // The height following after the removed heights in a non-empty non-finalized state must
+        // always have its tree.
+        //
+        // The loop above can violate the invariant, and if `position` is [`RevertPosition::Root`],
+        // it will always violate the invariant. We restore the invariant by storing the highest
+        // (rightmost) removed tree just above `height` if there is no tree at that height.
+        if !self.is_empty() && height < self.non_finalized_tip_height() {
+            let next_height = height.next();
+
+            if self.sapling_trees_by_height.get(&next_height).is_none() {
+                // TODO: Use `try_insert` once it stabilises.
+                self.sapling_trees_by_height.insert(
+                    next_height,
+                    highest_removed_tree.expect("There should be a cached removed tree."),
+                );
+            }
         }
     }
 
@@ -706,14 +806,25 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.orchard_trees_by_height.get(&height).cloned()
+        self.orchard_trees_by_height
+            .range(..=height)
+            .next_back()
+            .map(|(_height, tree)| tree.clone())
     }
 
-    /// Add the Orchard `tree` to the tree and anchor indexes at `height`.
+    /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
+    ///
     /// - the height of a new block that has just been added to the chain tip, or
-    /// - the finalized tip height: the height of the parent of the first block of a new chain.
+    /// - the finalized tip height—the height of the parent of the first block of a new chain.
+    ///
+    /// Stores only the first tree in each series of identical trees.
+    ///
+    /// # Panics
+    ///
+    /// - If there's a tree already stored at `height`.
+    /// - If there's an anchor already stored at `height`.
     fn add_orchard_tree_and_anchor(
         &mut self,
         height: Height,
@@ -727,11 +838,20 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding orchard tree");
 
-        assert_eq!(
-            self.orchard_trees_by_height.insert(height, tree),
-            None,
-            "incorrect overwrite of orchard tree: trees must be reverted then inserted",
-        );
+        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        if height.is_min()
+            || self
+                .orchard_tree(height.previous().into())
+                .map_or(true, |prev_tree| prev_tree != tree)
+        {
+            assert_eq!(
+                self.orchard_trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of orchard tree: trees must be reverted then inserted",
+            );
+        }
+
+        // Store the root.
         assert_eq!(
             self.orchard_anchors_by_height.insert(height, anchor),
             None,
@@ -743,24 +863,35 @@ impl Chain {
         self.orchard_anchors.insert(anchor);
     }
 
-    /// Remove the Orchard tree and anchor indexes at `height`.
+    /// Removes the Orchard tree and anchor indexes at `height`.
     ///
     /// `height` can be at two different [`RevertPosition`]s in the chain:
-    /// - a tip block above a chain fork: only that height is removed, or
-    /// - a root block: all trees and anchors below that height are removed,
-    ///   including temporary finalized tip trees.
+    ///
+    /// - a tip block above a chain fork—only the tree and anchor at that height are removed, or
+    /// - a root block—all trees and anchors at and below that height are removed, including
+    ///   temporary finalized tip trees.
+    ///
+    ///   # Panics
+    ///
+    ///  - If the anchor being removed is not present.
+    ///  - If there is no tree at `height`.
     fn remove_orchard_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
-            // Remove all trees and anchors at or below the removed block.
-            // This makes sure the temporary trees from finalized tip forks are removed.
-            self.orchard_anchors_by_height
-                .keys()
-                .cloned()
-                .filter(|index_height| *index_height <= height)
-                .collect()
+        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
+            (
+                // Remove all trees and anchors at or below the removed block.
+                // This makes sure the temporary trees from finalized tip forks are removed.
+                self.orchard_anchors_by_height
+                    .keys()
+                    .cloned()
+                    .filter(|index_height| *index_height <= height)
+                    .collect(),
+                // Cache the highest (rightmost) tree before its removal.
+                self.orchard_tree(height.into()),
+            )
         } else {
             // Just remove the reverted tip trees and anchors.
-            vec![height]
+            // We don't need to cache the highest (rightmost) tree.
+            (vec![height], None)
         };
 
         for height in &removed_heights {
@@ -768,9 +899,8 @@ impl Chain {
                 .orchard_anchors_by_height
                 .remove(height)
                 .expect("Orchard anchor must be present if block was added to chain");
-            self.orchard_trees_by_height
-                .remove(height)
-                .expect("Orchard note commitment tree must be present if block was added to chain");
+
+            self.orchard_trees_by_height.remove(height);
 
             trace!(?height, ?position, ?anchor, "removing orchard tree");
 
@@ -780,6 +910,26 @@ impl Chain {
                 self.orchard_anchors.remove(&anchor),
                 "Orchard anchor must be present if block was added to chain"
             );
+        }
+
+        // # Invariant
+        //
+        // The height following after the removed heights in a non-empty non-finalized state must
+        // always have its tree.
+        //
+        // The loop above can violate the invariant, and if `position` is [`RevertPosition::Root`],
+        // it will always violate the invariant. We restore the invariant by storing the highest
+        // (rightmost) removed tree just above `height` if there is no tree at that height.
+        if !self.is_empty() && height < self.non_finalized_tip_height() {
+            let next_height = height.next();
+
+            if self.orchard_trees_by_height.get(&next_height).is_none() {
+                // TODO: Use `try_insert` once it stabilises.
+                self.orchard_trees_by_height.insert(
+                    next_height,
+                    highest_removed_tree.expect("There should be a cached removed tree."),
+                );
+            }
         }
     }
 

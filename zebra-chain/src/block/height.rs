@@ -65,6 +65,29 @@ impl Height {
     /// previous to Nu5 and in non-coinbase transactions from Nu5 activation
     /// height and above.
     pub const MAX_EXPIRY_HEIGHT: Height = Height(499_999_999);
+
+    /// Returns the next [`Height`].
+    ///
+    /// # Panics
+    ///
+    /// - If the current height is at its maximum.
+    pub fn next(self) -> Self {
+        (self + 1).expect("Height should not be at its maximum.")
+    }
+
+    /// Returns the previous [`Height`].
+    ///
+    /// # Panics
+    ///
+    /// - If the current height is at its minimum.
+    pub fn previous(self) -> Self {
+        (self - 1).expect("Height should not be at its minimum.")
+    }
+
+    /// Returns `true` if the [`Height`] is at its minimum.
+    pub fn is_min(self) -> bool {
+        self == Self::MIN
+    }
 }
 
 /// A difference between two [`Height`]s, possibly negative.
