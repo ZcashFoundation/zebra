@@ -12,3 +12,9 @@ body:
 
         Zebra developers must discuss the details of this issue using secure channels.
         Please do not discuss this issue in public.
+  - type: textarea
+    id: issue
+    attributes:
+      label: Description
+      description: |
+        Any relevant information about the issue
