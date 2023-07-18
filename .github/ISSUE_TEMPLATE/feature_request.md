@@ -1,5 +1,5 @@
 ---
-name: Change request
+name: ":construction: Change request"
 about: Suggest a feature or change for this project
 title: ''
 labels: C-enhancement, S-needs-triage
