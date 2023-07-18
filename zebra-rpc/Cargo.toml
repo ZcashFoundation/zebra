@@ -51,7 +51,7 @@ jsonrpc-http-server = "18.0.0"
 num_cpus = "1.16.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.100", features = ["preserve_order"] }
+serde_json = { version = "1.0.103", features = ["preserve_order"] }
 indexmap = { version = "2.0.0", features = ["serde"] }
 
 tokio = { version = "1.29.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
@@ -60,7 +60,7 @@ tower = "0.4.13"
 tracing = "0.1.37"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.168", features = ["serde_derive"] }
+serde = { version = "1.0.171", features = ["serde_derive"] }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }
