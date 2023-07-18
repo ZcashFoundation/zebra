@@ -1,0 +1,57 @@
+---
+name: "🚧 Change request"
+description: Suggest a feature or change for this project
+title: 'feature: '
+labels: [C-enhancement, S-needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to suggest a feature or change for Zebra!
+
+        Please fill out the sections below to help us understand your request.
+        If you have a question, please ask on [Discord](https://discord.gg/fP2JGmhm) or [GitHub Discussions](https://github.com/ZcashFoundation/zebra/discussions)
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: |
+        Is your feature request related to a problem?
+        How does this change improve Zebra?
+    validations:
+      required: true
+  - type: textarea
+    id: specs
+    attributes:
+      label: Specifications
+      description: |
+        If this change is based on consensus rules, quote them, and link to the Zcash spec or ZIP: https://zips.z.cash/#nu5-zips
+        If this changes network behaviour, quote and link to the Bitcoin network reference: https://developer.bitcoin.org/reference/p2p_networking.html
+    validations:
+      required: false
+  - type: textarea
+    id: complexity
+    attributes:
+      label: Complex Code or Requirements
+      description: |
+        Does this PR change concurrency, unsafe code, or complex consensus rules?
+        If it does, explain how we will implement, review, and test it.
+    validations:
+      required: false
+  - type: textarea
+    id: tests
+    attributes:
+      label: Testing
+      description: |
+        How can we check that this change does what we want it to do?
+    validations:
+      required: false
+  - type: textarea
+    id: related
+    attributes:
+      label: Related Work
+      description: |
+        Is this change related to other features or tickets?
+    validations:
+      required: false
+
