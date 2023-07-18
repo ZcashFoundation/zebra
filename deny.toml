@@ -109,11 +109,6 @@ skip-tree = [
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
-    # Unused dependencies
-
-    # we don't support Windows at the moment (#3801)
-    { name = "windows-sys", version = "=0.42.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
