@@ -158,7 +158,7 @@ chrono = { version = "0.4.26", default-features = false, features = ["clock", "s
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
-semver = "1.0.17"
+semver = "1.0.18"
 serde = { version = "1.0.168", features = ["serde_derive"] }
 toml = "0.7.6"
 

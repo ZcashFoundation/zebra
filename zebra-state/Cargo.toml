@@ -56,7 +56,7 @@ mset = "0.1.1"
 regex = "1.9.1"
 rlimit = "0.10.0"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
-semver = "1.0.17"
+semver = "1.0.18"
 serde = { version = "1.0.168", features = ["serde_derive"] }
 tempfile = "3.5.0"
 thiserror = "1.0.43"
