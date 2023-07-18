@@ -7,8 +7,8 @@ updates:
       interval: weekly
       day: monday
       timezone: America/New_York
-    # Limit dependabot to 2 PRs per reviewer, but assume one reviewer is busy or away
-    open-pull-requests-limit: 8
+    # Limit dependabot to 1 PR per reviewer
+    open-pull-requests-limit: 6
     labels:
       - 'C-trivial'
       - 'A-rust'
@@ -128,7 +128,7 @@ updates:
       interval: weekly
       day: wednesday
       timezone: America/New_York
-    open-pull-requests-limit: 6
+    open-pull-requests-limit: 4
     labels:
       - 'C-trivial'
       - 'A-devops'
