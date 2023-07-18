@@ -1,6 +1,15 @@
-//! Tracing the execution time of functions.
-//!
-//! TODO: also trace polling time for futures, using a `Future` wrapper
+//! Diagnostic types and functions for Zebra:
+//! - code performance
+//! - task handling
+//! - errors and panics
+
+pub mod task;
+
+// Tracing the execution time of functions.
+//
+// TODO:
+// - move this to a `timing` submodule
+// - also trace polling time for futures, using a `Future` wrapper
 
 use std::time::{Duration, Instant};
 
