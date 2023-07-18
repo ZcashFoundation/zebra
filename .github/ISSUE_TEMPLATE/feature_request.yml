@@ -45,7 +45,7 @@ body:
       description: |
         How can we check that this change does what we want it to do?
     validations:
-      required: true
+      required: false
   - type: textarea
     id: related
     attributes:
@@ -53,5 +53,5 @@ body:
       description: |
         Is this change related to other features or tickets?
     validations:
-      required: true
+      required: false
 
