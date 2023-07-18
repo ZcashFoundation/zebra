@@ -14,7 +14,7 @@ impl Writer {
     /// Consume the Writer and produce the hash result.
     pub fn finish(self) -> [u8; 32] {
         let result1 = self.hash.finalize();
-        let result2 = Sha256::digest(&result1);
+        let result2 = Sha256::digest(result1);
         let mut buffer = [0u8; 32];
         buffer[0..32].copy_from_slice(&result2[0..32]);
         buffer
@@ -39,7 +39,7 @@ pub struct Checksum(pub [u8; 4]);
 impl<'a> From<&'a [u8]> for Checksum {
     fn from(bytes: &'a [u8]) -> Self {
         let hash1 = Sha256::digest(bytes);
-        let hash2 = Sha256::digest(&hash1);
+        let hash2 = Sha256::digest(hash1);
         let mut checksum = [0u8; 4];
         checksum[0..4].copy_from_slice(&hash2[0..4]);
         Self(checksum)
