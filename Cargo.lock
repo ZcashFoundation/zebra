@@ -401,6 +401,27 @@ dependencies = [
  "clang-sys",
  "lazy_static",
  "lazycell",
+ "peeking_take_while",
+ "prettyplease 0.2.10",
+ "proc-macro2 1.0.66",
+ "quote 1.0.31",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.26",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.66.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b84e06fc203107bfbad243f4aba2af864eb7db3b1cf46ea0a023b0b433d2a7"
+dependencies = [
+ "bitflags 2.3.3",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
  "log",
  "peeking_take_while",
  "prettyplease 0.2.10",
@@ -2318,7 +2339,7 @@ version = "0.11.0+8.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3386f101bcb4bd252d8e9d2fb41ec3b0862a15a62b478c355b2982efa469e3e"
 dependencies = [
- "bindgen",
+ "bindgen 0.65.1",
  "bzip2-sys",
  "cc",
  "glob",
@@ -5600,7 +5621,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c4f95043fd34d402b8d5debb0e54a28c2b84fc99591f5973b4999e9c5b01bfd"
 dependencies = [
  "bellman",
- "bindgen",
+ "bindgen 0.66.1",
  "blake2b_simd",
  "bls12_381",
  "bridgetree",
