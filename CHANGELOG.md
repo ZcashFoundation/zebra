@@ -7,9 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.1.0) - 2023-07-18
 
-Zebra now uses less memory after the final checkpoint by deduplicating note commitment trees in the non-finalized state.
 
-This release also adds new mempool metrics, fixes panics when cancelling tasks on shutdown, and improves the usability of Zebra's Docker images (particularly for mining).
+This release adds new mempool metrics, fixes panics when cancelling tasks on shutdown, detects subcommand name typos on the command-line, and improves the usability of Zebra's Docker images (particularly for mining).
 
 ### Breaking Changes
 
@@ -22,7 +21,7 @@ This release also adds new mempool metrics, fixes panics when cancelling tasks o
 
 ### Added
 
-- Metrics tracking mempool actions and size bucketed by weight ([#7019](https://github.com/ZcashFoundation/zebra/pull/7019))
+- Metrics tracking mempool actions and size bucketed by weight ([#7019](https://github.com/ZcashFoundation/zebra/pull/7019)) by @str4d
 - Legacy state format compatibility layer and version bumps for ECC dependencies to match `zcashd` 5.6.0 ([#7053](https://github.com/ZcashFoundation/zebra/pull/7053))
 - Framework for upcoming in-place database format upgrades ([#7031](https://github.com/ZcashFoundation/zebra/pull/7031))
 
@@ -38,7 +37,7 @@ This release also adds new mempool metrics, fixes panics when cancelling tasks o
 - Stop panicking on async task cancellation on shutdown in network and state futures ([#7219](https://github.com/ZcashFoundation/zebra/pull/7219))
 - Remove redundant startup logs, fix progress bar number, order, and wording ([#7087](https://github.com/ZcashFoundation/zebra/pull/7087))
 - Organize Docker `ENV` and `ARG` values based on their usage ([#7200](https://github.com/ZcashFoundation/zebra/pull/7200))
--  Avoid blocking threads by awaiting proof verification results from rayon in async context ([#6887](https://github.com/ZcashFoundation/zebra/pull/6887))
+- Avoid blocking threads by awaiting proof verification results from rayon in async context ([#6887](https://github.com/ZcashFoundation/zebra/pull/6887))
 
 
 ### Contributors
