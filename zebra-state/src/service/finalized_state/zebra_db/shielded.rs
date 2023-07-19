@@ -320,11 +320,16 @@ impl DiskWriteBatch {
             note_commitment_trees.sprout,
         );
 
-        self.zs_insert(
-            &sapling_note_commitment_tree_cf,
-            height,
-            note_commitment_trees.sapling,
-        );
+        // Store the Sapling tree only if it is not already present at the previous height.
+        if height.is_min()
+            || zebra_db.sapling_note_commitment_tree() != note_commitment_trees.sapling
+        {
+            self.zs_insert(
+                &sapling_note_commitment_tree_cf,
+                height,
+                note_commitment_trees.sapling,
+            );
+        }
 
         self.zs_insert(
             &orchard_note_commitment_tree_cf,
