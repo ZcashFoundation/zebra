@@ -147,19 +147,16 @@ impl ZebraDb {
         }))
     }
 
-    /// Returns the Sapling
-    /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_tree(
+    pub fn sapling_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&sapling_tree_handle, &height)
+        self.sapling_note_commitment_tree_by_height(&height)
     }
 
     /// Returns the Orchard
