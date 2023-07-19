@@ -60,11 +60,14 @@ skip-tree = [
     # wait for criterion to upgrade
     { name = "itertools", version = "=0.10.5" },
 
-    # wait for backtrace and multiple dependents to upgrade
-    { name = "miniz_oxide", version = "=0.6.2" },
-
     # wait for h2 and tower to upgrade
     { name = "indexmap", version = "=1.9.3" },
+
+    # wait for rocksdb to upgrade
+    { name = "bindgen", version = "=0.65.1" },
+
+    # wait for tempfile to upgrade
+    { name = "rustix", version = "=0.37.23" },
 
     # ZF crates
 
@@ -106,11 +109,6 @@ skip-tree = [
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
-    # Unused dependencies
-
-    # we don't support Windows at the moment (#3801)
-    { name = "windows-sys", version = "=0.42.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
