@@ -284,7 +284,7 @@ impl NonFinalizedState {
         let chain = Chain::new(
             self.network,
             finalized_tip_height,
-            finalized_state.sprout_note_commitment_tree(),
+            finalized_state.sprout_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),

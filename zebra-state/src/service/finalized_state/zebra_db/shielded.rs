@@ -70,7 +70,7 @@ impl ZebraDb {
 
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
+    pub fn sprout_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
@@ -88,7 +88,7 @@ impl ZebraDb {
     ///
     /// This is used for interstitial tree building, which is unique to Sprout.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sprout_note_commitment_tree_by_anchor(
+    pub fn sprout_tree_by_anchor(
         &self,
         sprout_anchor: &sprout::tree::Root,
     ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
@@ -103,7 +103,7 @@ impl ZebraDb {
     ///
     /// Calling this method can load a lot of data into RAM, and delay block commit transactions.
     #[allow(dead_code, clippy::unwrap_in_result)]
-    pub fn sprout_note_commitments_full_map(
+    pub fn sprout_trees_full_map(
         &self,
     ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
         let sprout_anchors_handle = self.db.cf_handle("sprout_anchors").unwrap();
@@ -203,7 +203,7 @@ impl ZebraDb {
     /// or the empty trees if the state is empty.
     pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
         NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree(),
+            sprout: self.sprout_tree(),
             sapling: self.sapling_note_commitment_tree(),
             orchard: self.orchard_note_commitment_tree(),
         }

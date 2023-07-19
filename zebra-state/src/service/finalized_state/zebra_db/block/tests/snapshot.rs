@@ -243,11 +243,11 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
         // Shielded
 
-        let stored_sprout_trees = state.sprout_note_commitments_full_map();
+        let stored_sprout_trees = state.sprout_trees_full_map();
         let mut stored_sapling_trees = Vec::new();
         let mut stored_orchard_trees = Vec::new();
 
-        let sprout_tree_at_tip = state.sprout_note_commitment_tree();
+        let sprout_tree_at_tip = state.sprout_tree();
         let sapling_tree_at_tip = state.sapling_note_commitment_tree();
         let orchard_tree_at_tip = state.orchard_note_commitment_tree();
 
