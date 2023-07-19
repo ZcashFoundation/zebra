@@ -156,7 +156,7 @@ impl ZebraDb {
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        self.sapling_note_commitment_tree_by_height(&height)
+        self.sapling_tree_by_height(&height)
     }
 
     /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by

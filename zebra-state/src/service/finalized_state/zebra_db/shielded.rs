@@ -114,20 +114,20 @@ impl ZebraDb {
 
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sapling_note_commitment_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
+    pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        self.sapling_note_commitment_tree_by_height(&height)
+        self.sapling_tree_by_height(&height)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
     /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_note_commitment_tree_by_height(
+    pub fn sapling_tree_by_height(
         &self,
         height: &Height,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
@@ -204,7 +204,7 @@ impl ZebraDb {
     pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
         NoteCommitmentTrees {
             sprout: self.sprout_tree(),
-            sapling: self.sapling_note_commitment_tree(),
+            sapling: self.sapling_tree(),
             orchard: self.orchard_note_commitment_tree(),
         }
     }
@@ -317,7 +317,7 @@ impl DiskWriteBatch {
         self.zs_insert(&sprout_tree_cf, height, trees.sprout);
 
         // Store the Sapling tree only if it is not already present at the previous height.
-        if height.is_min() || zebra_db.sapling_note_commitment_tree() != trees.sapling {
+        if height.is_min() || zebra_db.sapling_tree() != trees.sapling {
             self.zs_insert(&sapling_tree_cf, height, trees.sapling);
         }
 

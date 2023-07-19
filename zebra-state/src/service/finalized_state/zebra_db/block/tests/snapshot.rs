@@ -220,7 +220,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         //
         // We only store the sprout tree for the tip by height, so we can't check sprout here.
         let sapling_tree = state
-            .sapling_note_commitment_tree_by_height(&block::Height::MIN)
+            .sapling_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has a Sapling tree");
         let orchard_tree = state
             .orchard_note_commitment_tree_by_height(&block::Height::MIN)
@@ -248,7 +248,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         let mut stored_orchard_trees = Vec::new();
 
         let sprout_tree_at_tip = state.sprout_tree();
-        let sapling_tree_at_tip = state.sapling_note_commitment_tree();
+        let sapling_tree_at_tip = state.sapling_tree();
         let orchard_tree_at_tip = state.orchard_note_commitment_tree();
 
         // Test the history tree.
@@ -278,7 +278,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             //
             // TODO: test the rest of the shielded data (anchors, nullifiers)
             let sapling_tree_by_height = state
-                .sapling_note_commitment_tree_by_height(&query_height)
+                .sapling_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
             let orchard_tree_by_height = state
                 .orchard_note_commitment_tree_by_height(&query_height)
