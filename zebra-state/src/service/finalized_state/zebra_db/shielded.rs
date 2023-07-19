@@ -331,11 +331,16 @@ impl DiskWriteBatch {
             );
         }
 
-        self.zs_insert(
-            &orchard_note_commitment_tree_cf,
-            height,
-            note_commitment_trees.orchard,
-        );
+        // Store the Orchard tree only if it is not already present at the previous height.
+        if height.is_min()
+            || zebra_db.orchard_note_commitment_tree() != note_commitment_trees.orchard
+        {
+            self.zs_insert(
+                &orchard_note_commitment_tree_cf,
+                height,
+                note_commitment_trees.orchard,
+            );
+        }
 
         self.prepare_history_batch(db, finalized)
     }
