@@ -286,60 +286,44 @@ impl DiskWriteBatch {
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
 
-        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let sprout_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         let height = finalized.verified.height;
-        let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+        let trees = finalized.treestate.note_commitment_trees.clone();
 
         // Use the cached values that were previously calculated in parallel.
-        let sprout_root = note_commitment_trees.sprout.root();
-        let sapling_root = note_commitment_trees.sapling.root();
-        let orchard_root = note_commitment_trees.orchard.root();
+        let sprout_root = trees.sprout.root();
+        let sapling_root = trees.sapling.root();
+        let orchard_root = trees.orchard.root();
 
         // Index the new anchors.
         // Note: if the root hasn't changed, we write the same value again.
-        self.zs_insert(&sprout_anchors, sprout_root, &note_commitment_trees.sprout);
+        self.zs_insert(&sprout_anchors, sprout_root, &trees.sprout);
         self.zs_insert(&sapling_anchors, sapling_root, ());
         self.zs_insert(&orchard_anchors, orchard_root, ());
 
         // Delete the previously stored Sprout note commitment tree.
         let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
-            self.zs_delete(&sprout_note_commitment_tree_cf, h);
+            self.zs_delete(&sprout_tree_cf, h);
         }
 
         // TODO: if we ever need concurrent read-only access to the sprout tree,
         // store it by `()`, not height. Otherwise, the ReadStateService could
         // access a height that was just deleted by a concurrent StateService
         // write. This requires a database version update.
-        self.zs_insert(
-            &sprout_note_commitment_tree_cf,
-            height,
-            note_commitment_trees.sprout,
-        );
+        self.zs_insert(&sprout_tree_cf, height, trees.sprout);
 
         // Store the Sapling tree only if it is not already present at the previous height.
-        if height.is_min()
-            || zebra_db.sapling_note_commitment_tree() != note_commitment_trees.sapling
-        {
-            self.zs_insert(
-                &sapling_note_commitment_tree_cf,
-                height,
-                note_commitment_trees.sapling,
-            );
+        if height.is_min() || zebra_db.sapling_note_commitment_tree() != trees.sapling {
+            self.zs_insert(&sapling_tree_cf, height, trees.sapling);
         }
 
         // Store the Orchard tree only if it is not already present at the previous height.
-        if height.is_min()
-            || zebra_db.orchard_note_commitment_tree() != note_commitment_trees.orchard
-        {
-            self.zs_insert(
-                &orchard_note_commitment_tree_cf,
-                height,
-                note_commitment_trees.orchard,
-            );
+        if height.is_min() || zebra_db.orchard_note_commitment_tree() != trees.orchard {
+            self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 
         self.prepare_history_batch(db, finalized)
@@ -354,9 +338,9 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &SemanticallyVerifiedBlock,
     ) {
-        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let sprout_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         let SemanticallyVerifiedBlock { height, .. } = finalized;
 
@@ -365,17 +349,17 @@ impl DiskWriteBatch {
         // since the block validation will make sure only appropriate
         // transactions are allowed in a block.
         self.zs_insert(
-            &sprout_note_commitment_tree_cf,
+            &sprout_tree_cf,
             height,
             sprout::tree::NoteCommitmentTree::default(),
         );
         self.zs_insert(
-            &sapling_note_commitment_tree_cf,
+            &sapling_tree_cf,
             height,
             sapling::tree::NoteCommitmentTree::default(),
         );
         self.zs_insert(
-            &orchard_note_commitment_tree_cf,
+            &orchard_tree_cf,
             height,
             orchard::tree::NoteCommitmentTree::default(),
         );
