@@ -373,12 +373,30 @@ impl FinalizedState {
             let block_time = block.header.time.timestamp();
             let local_time = chrono::Utc::now().timestamp();
 
-            const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+            // Mainnet bulk size is small enough to avoid the elasticsearch 100mb content
+            // length limitation. MAX_BLOCK_BYTES = 2M. Each block count as 2 as we send
+            // them with a operation/header line. A value of 100 is 50 blocks.
+            const MAINNET_AWAY_FROM_TIP_BULK_SIZE: usize = 100;
+
+            // Testnet bulk size is larger as blocks are generally smaller in the testnet.
+            // A value of 800 is 400 blocks as we are not counting the operation line.
+            const TESTNET_AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+
+            // The number of blocks the bulk will have when we are in sync.
+            // A value of 2 means only 1 block as we want to insert them as soon as we get
+            // them for a real time experience. This is the same for mainnet and testnet.
             const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
+
+            // We consider in sync when the local time and the blockchain time difference is
+            // less than this number of seconds.
             const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
-            // If we are close to the tip index one block per bulk call.
-            let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
+            let mut blocks_size_to_dump = match self.network {
+                Network::Mainnet => MAINNET_AWAY_FROM_TIP_BULK_SIZE,
+                Network::Testnet => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
+            };
+
+            // If we are close to the tip, index one block per bulk call.
             if local_time - block_time < CLOSE_TO_TIP_SECONDS {
                 blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
             }
@@ -419,12 +437,12 @@ impl FinalizedState {
                     let response_body = response
                         .json::<serde_json::Value>()
                         .await
-                        .expect("ES response parsing to a json_body should never fail");
+                        .expect("ES response parsing error. Maybe we are sending more than 100 mb of data (`http.max_content_length`)");
                     let errors = response_body["errors"].as_bool().unwrap_or(true);
                     assert!(!errors, "{}", format!("ES error: {response_body}"));
                 });
 
-                // clean the block storage.
+                // Clean the block storage.
                 self.elastic_blocks.clear();
             }
         }
