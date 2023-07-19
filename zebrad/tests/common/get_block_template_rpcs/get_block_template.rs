@@ -106,7 +106,15 @@ pub(crate) async fn run() -> Result<()> {
         .await?;
 
     let is_response_success = getblocktemplate_response.status().is_success();
-    let response_text = getblocktemplate_response.text().await?;
+
+    let mut response_text = getblocktemplate_response.text().await?;
+    // This string can be extremely long in logs.
+    if response_text.len() > 1003 {
+        let end = response_text.len() - 500;
+        // Replace the middle bytes with "...", but leave 500 bytes on either side.
+        // The response text is ascii, so this replacement won't panic.
+        response_text.replace_range(500..=end, "...");
+    }
 
     tracing::info!(
         response_text,
