@@ -35,7 +35,7 @@ This means that:
   - if an older Zebra version opens the state, data can be written in an older format
 - the format must be valid before and after each database transaction or API call, because an upgrade can be cancelled at any time
   - multi-column family changes should made in database transactions
-  - if you are building new column family, disable state queries, then enabling them once it's done
+  - if you are building new column family, disable state queries, then enable them once it's done
   - if each database API call produces a valid format, transactions aren't needed
 
 If there is an upgrade failure, it can panic and tell the user to delete their cached state and re-launch Zebra.
