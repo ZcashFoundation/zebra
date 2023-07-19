@@ -275,7 +275,7 @@ impl DiskWriteBatch {
     ///
     /// - Propagates any errors from updating the history tree
     #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_note_commitment_batch(
+    pub fn prepare_trees_batch(
         &mut self,
         zebra_db: &ZebraDb,
         finalized: &SemanticallyVerifiedBlockWithTrees,

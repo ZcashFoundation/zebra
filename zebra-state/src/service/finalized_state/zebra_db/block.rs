@@ -463,7 +463,7 @@ impl DiskWriteBatch {
         )?;
         self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_note_commitment_batch(zebra_db, finalized)?;
+        self.prepare_trees_batch(zebra_db, finalized)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(
