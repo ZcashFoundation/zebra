@@ -159,20 +159,20 @@ impl ZebraDb {
 
     /// Returns the Orchard note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn orchard_note_commitment_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
+    pub fn orchard_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        self.orchard_note_commitment_tree_by_height(&height)
+        self.orchard_tree_by_height(&height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Orchard note commitment tree matching the given block height,
     /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_note_commitment_tree_by_height(
+    pub fn orchard_tree_by_height(
         &self,
         height: &Height,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
@@ -205,7 +205,7 @@ impl ZebraDb {
         NoteCommitmentTrees {
             sprout: self.sprout_tree(),
             sapling: self.sapling_tree(),
-            orchard: self.orchard_note_commitment_tree(),
+            orchard: self.orchard_tree(),
         }
     }
 }
@@ -322,7 +322,7 @@ impl DiskWriteBatch {
         }
 
         // Store the Orchard tree only if it is not already present at the previous height.
-        if height.is_min() || zebra_db.orchard_note_commitment_tree() != trees.orchard {
+        if height.is_min() || zebra_db.orchard_tree() != trees.orchard {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 

@@ -168,7 +168,7 @@ impl ZebraDb {
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        self.orchard_note_commitment_tree_by_height(&height)
+        self.orchard_tree_by_height(&height)
     }
 
     // Read tip block methods

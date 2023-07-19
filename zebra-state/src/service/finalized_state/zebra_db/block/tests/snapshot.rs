@@ -223,7 +223,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             .sapling_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has a Sapling tree");
         let orchard_tree = state
-            .orchard_note_commitment_tree_by_height(&block::Height::MIN)
+            .orchard_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has an Orchard tree");
 
         assert_eq!(*sapling_tree, sapling::tree::NoteCommitmentTree::default());
@@ -249,7 +249,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
         let sprout_tree_at_tip = state.sprout_tree();
         let sapling_tree_at_tip = state.sapling_tree();
-        let orchard_tree_at_tip = state.orchard_note_commitment_tree();
+        let orchard_tree_at_tip = state.orchard_tree();
 
         // Test the history tree.
         //
@@ -281,7 +281,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .sapling_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
             let orchard_tree_by_height = state
-                .orchard_note_commitment_tree_by_height(&query_height)
+                .orchard_tree_by_height(&query_height)
                 .expect("heights up to tip have Orchard trees");
 
             // We don't need to snapshot the heights,
