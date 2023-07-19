@@ -277,9 +277,11 @@ impl DiskWriteBatch {
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_note_commitment_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
+
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();

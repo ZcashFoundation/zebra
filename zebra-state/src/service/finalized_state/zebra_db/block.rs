@@ -375,7 +375,7 @@ impl ZebraDb {
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
-            &self.db,
+            self,
             &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
@@ -426,7 +426,7 @@ impl DiskWriteBatch {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -434,6 +434,7 @@ impl DiskWriteBatch {
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
         self.prepare_block_header_and_transaction_data_batch(db, &finalized.verified)?;
@@ -462,7 +463,7 @@ impl DiskWriteBatch {
         )?;
         self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_note_commitment_batch(db, finalized)?;
+        self.prepare_note_commitment_batch(zebra_db, finalized)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(
