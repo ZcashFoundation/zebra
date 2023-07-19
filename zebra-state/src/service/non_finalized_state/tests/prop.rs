@@ -53,7 +53,7 @@ fn push_genesis_chain() -> Result<()> {
 
             chain_values.insert(None, (None, only_chain.chain_value_pools.into()));
 
-            for block in chain.iter().take(count).cloned() {
+            for block in chain.iter().take(count).skip(1).cloned() {
                 let block =
                 ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                         block,
@@ -72,7 +72,7 @@ fn push_genesis_chain() -> Result<()> {
                 chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), only_chain.chain_value_pools.into()));
             }
 
-            prop_assert_eq!(only_chain.blocks.len(), count);
+            prop_assert_eq!(only_chain.blocks.len(), count - 1);
         });
 
     Ok(())
@@ -150,7 +150,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             empty_tree.clone(),
             ValueBalance::zero(),
         );
-        for block in chain.iter().take(fork_at_count).cloned() {
+        for block in chain.iter().take(fork_at_count).skip(1).cloned() {
             let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                 block,
                 partial_chain.unspent_utxos(),
@@ -170,14 +170,12 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             empty_tree,
             ValueBalance::zero(),
         );
+
         for block in chain.iter().cloned() {
             let block =
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
-            full_chain = full_chain
-                .push(block.clone())
-                .expect("full chain push is valid");
 
-            // Check some other properties of generated chains.
+            // Check some properties of the genesis block and don't push it to the chain.
             if block.height == block::Height(0) {
                 prop_assert_eq!(
                     block
@@ -188,11 +186,13 @@ fn forked_equals_pushed_genesis() -> Result<()> {
                         .filter_map(|i| i.outpoint())
                         .count(),
                     0,
-                    "unexpected transparent prevout input at height {:?}: \
-                            genesis transparent outputs must be ignored, \
-                            so there can not be any spends in the genesis block",
-                    block.height,
+                    "Unexpected transparent prevout input at height 0. Genesis transparent outputs \
+                        must be ignored, so there can not be any spends in the genesis block.",
                 );
+            } else {
+                full_chain = full_chain
+                    .push(block)
+                    .expect("full chain push is valid");
             }
         }
 
@@ -460,7 +460,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
                                .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
     |((chain, valid_count, network, mut bad_block) in (PreparedChain::default(), any::<bool>(), any::<bool>())
       .prop_flat_map(|((chain, valid_count, network, _history_tree), is_nu5, is_v5)| {
-          let next_height = chain[valid_count - 1].height;
+          let next_height = chain[valid_count].height;
           (
               Just(chain),
               Just(valid_count),
@@ -486,7 +486,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
         // use `valid_count` as the number of valid blocks before an invalid block
         let valid_tip_height = chain[valid_count - 1].height;
         let valid_tip_hash = chain[valid_count - 1].hash;
-        let mut chain = chain.iter().take(valid_count).cloned();
+        let mut chain = chain.iter().take(valid_count).skip(1).cloned();
 
         prop_assert!(state.eq_internal_state(&state));
 

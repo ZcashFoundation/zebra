@@ -1,0 +1,20 @@
+# Only allow releases from the main branch
+allow-branch = [ 'main' ]
+
+# TODO:
+# configure all zebra-* crates with a shared version,
+# and all tower-* crates with a different one:
+# https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#config-fields
+#shared-version = "TODO named groups"
+
+# Verify releases with release features
+#
+# TODO: add this feature to all crates
+#enable-features = [ 'default-release-binaries' ]
+
+# Don't do a git push or tag
+push = false
+tag = false
+
+# Owners for new crates
+owners = [ 'dconnolly', 'teor2345', 'zcashfoundation/owners' ]

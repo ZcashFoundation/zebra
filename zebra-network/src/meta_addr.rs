@@ -561,6 +561,17 @@ impl MetaAddr {
         }
     }
 
+    /// Returns true if any messages were recently sent to or received from this address.
+    pub fn was_recently_updated(
+        &self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> bool {
+        self.has_connection_recently_responded(chrono_now)
+            || self.was_connection_recently_attempted(instant_now)
+            || self.has_connection_recently_failed(instant_now)
+    }
+
     /// Is this address ready for a new outbound connection attempt?
     pub fn is_ready_for_connection_attempt(
         &self,
@@ -569,9 +580,7 @@ impl MetaAddr {
         network: Network,
     ) -> bool {
         self.last_known_info_is_valid_for_outbound(network)
-            && !self.has_connection_recently_responded(chrono_now)
-            && !self.was_connection_recently_attempted(instant_now)
-            && !self.has_connection_recently_failed(instant_now)
+            && !self.was_recently_updated(instant_now, chrono_now)
             && self.is_probably_reachable(chrono_now)
     }
 

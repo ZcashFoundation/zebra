@@ -30,24 +30,24 @@ use crate::service;
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
-#[tracing::instrument(skip(prepared, finalized_state))]
+#[tracing::instrument(skip(semantically_verified, finalized_state))]
 pub(crate) fn no_duplicates_in_finalized_chain(
-    prepared: &SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
     finalized_state: &ZebraDb,
 ) -> Result<(), ValidateContextError> {
-    for nullifier in prepared.block.sprout_nullifiers() {
+    for nullifier in semantically_verified.block.sprout_nullifiers() {
         if finalized_state.contains_sprout_nullifier(nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
-    for nullifier in prepared.block.sapling_nullifiers() {
+    for nullifier in semantically_verified.block.sapling_nullifiers() {
         if finalized_state.contains_sapling_nullifier(nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
-    for nullifier in prepared.block.orchard_nullifiers() {
+    for nullifier in semantically_verified.block.orchard_nullifiers() {
         if finalized_state.contains_orchard_nullifier(nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }

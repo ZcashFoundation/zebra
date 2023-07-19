@@ -30,7 +30,9 @@ use crate::{
 
 use itertools::Itertools;
 
-use super::{FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx};
+use super::{
+    FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx, VerifiedUnminedTx,
+};
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
 ///
@@ -780,6 +782,52 @@ impl Arbitrary for UnminedTx {
         any::<Transaction>().prop_map_into().boxed()
     }
 
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for VerifiedUnminedTx {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<UnminedTx>(),
+            any::<Amount<NonNegative>>(),
+            any::<u64>(),
+            any::<(u16, u16)>().prop_map(|(unpaid_actions, conventional_actions)| {
+                (
+                    unpaid_actions % conventional_actions.saturating_add(1),
+                    conventional_actions,
+                )
+            }),
+            any::<f32>(),
+        )
+            .prop_map(
+                |(
+                    transaction,
+                    miner_fee,
+                    legacy_sigop_count,
+                    (conventional_actions, mut unpaid_actions),
+                    fee_weight_ratio,
+                )| {
+                    if unpaid_actions > conventional_actions {
+                        unpaid_actions = conventional_actions;
+                    }
+
+                    let conventional_actions = conventional_actions as u32;
+                    let unpaid_actions = unpaid_actions as u32;
+
+                    Self {
+                        transaction,
+                        miner_fee,
+                        legacy_sigop_count,
+                        conventional_actions,
+                        unpaid_actions,
+                        fee_weight_ratio,
+                    }
+                },
+            )
+            .boxed()
+    }
     type Strategy = BoxedStrategy<Self>;
 }
 

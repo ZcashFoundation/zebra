@@ -14,22 +14,25 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     io,
-    ops::Deref,
     sync::Arc,
 };
 
 use bitvec::prelude::*;
+use bridgetree;
 use halo2::pasta::{group::ff::PrimeField, pallas};
-use incrementalmerkletree::{bridgetree, Frontier};
+use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_primitives::merkle_tree::{self, CommitmentTree};
+use zcash_primitives::merkle_tree::{write_commitment_tree, HashSer};
 
 use super::sinsemilla::*;
 
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
+
+pub mod legacy;
+use legacy::LegacyNoteCommitmentTree;
 
 /// The type that is used to update the note commitment tree.
 ///
@@ -165,18 +168,18 @@ impl ZcashDeserialize for Root {
 
 /// A node of the Orchard Incremental Note Commitment Tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct Node(pallas::Base);
+pub struct Node(pallas::Base);
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
 /// Zebra stores Orchard note commitment trees as [`Frontier`][1]s while the
 /// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
-/// [`merkle_tree::Hashable`] for [`Node`]s allows the conversion.
+/// [`HashSer`] for [`Node`]s allows the conversion.
 ///
 /// [1]: bridgetree::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [3]: merkle_tree::CommitmentTree
-impl merkle_tree::Hashable for Node {
+/// [3]: incrementalmerkletree::frontier::CommitmentTree
+impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
@@ -193,24 +196,9 @@ impl merkle_tree::Hashable for Node {
     fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.0.to_repr())
     }
-
-    fn combine(level: usize, a: &Self, b: &Self) -> Self {
-        let level = u8::try_from(level).expect("level must fit into u8");
-        let layer = MERKLE_DEPTH - 1 - level;
-        Self(merkle_crh_orchard(layer, a.0, b.0))
-    }
-
-    fn blank() -> Self {
-        Self(NoteCommitmentTree::uncommitted())
-    }
-
-    fn empty_root(level: usize) -> Self {
-        let layer_below = usize::from(MERKLE_DEPTH) - level;
-        Self(EMPTY_ROOTS[layer_below])
-    }
 }
 
-impl incrementalmerkletree::Hashable for Node {
+impl Hashable for Node {
     fn empty_leaf() -> Self {
         Self(NoteCommitmentTree::uncommitted())
     }
@@ -218,13 +206,13 @@ impl incrementalmerkletree::Hashable for Node {
     /// Combine two nodes to generate a new node in the given level.
     /// Level 0 is the layer above the leaves (layer 31).
     /// Level 31 is the root (layer 0).
-    fn combine(level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+    fn combine(level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
         let layer = MERKLE_DEPTH - 1 - u8::from(level);
         Self(merkle_crh_orchard(layer, a.0, b.0))
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
-    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+    fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
@@ -266,6 +254,8 @@ pub enum NoteCommitmentTreeError {
 
 /// Orchard Incremental Note Commitment Tree
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(into = "LegacyNoteCommitmentTree")]
+#[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
@@ -312,7 +302,7 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm_x: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(&cm_x.into()) {
+        if self.inner.append(cm_x.into()) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -330,14 +320,9 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        if let Some(root) = self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked")
-            .deref()
-        {
+        if let Some(root) = self.cached_root() {
             // Return cached root.
-            return *root;
+            return root;
         }
 
         // Get exclusive access, compute the root, and cache it.
@@ -351,11 +336,25 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root(self.inner.root().0);
+                let root = self.recalculate_root();
                 *write_root = Some(root);
                 root
             }
         }
+    }
+
+    /// Returns the current root of the tree, if it has already been cached.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn cached_root(&self) -> Option<Root> {
+        *self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked")
+    }
+
+    /// Calculates and returns the current root of the tree, ignoring any caching.
+    pub fn recalculate_root(&self) -> Root {
+        Root(self.inner.root().0)
     }
 
     /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
@@ -377,17 +376,37 @@ impl NoteCommitmentTree {
     ///
     /// For Orchard, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
-        self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+        self.inner
+            .value()
+            .map_or(0, |x| u64::from(x.position()) + 1)
+    }
+
+    /// Checks if the tree roots and inner data structures of `self` and `other` are equal.
+    ///
+    /// # Panics
+    ///
+    /// If they aren't equal, with a message explaining the differences.
+    ///
+    /// Only for use in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn assert_frontier_eq(&self, other: &Self) {
+        // It's technically ok for the cached root not to be preserved,
+        // but it can result in expensive cryptographic operations,
+        // so we fail the tests if it happens.
+        assert_eq!(self.cached_root(), other.cached_root());
+
+        // Check the data in the internal data structure
+        assert_eq!(self.inner, other.inner);
+
+        // Check the RPC serialization format (not the same as the Zebra database format)
+        assert_eq!(SerializedTree::from(self), SerializedTree::from(other));
     }
 }
 
 impl Clone for NoteCommitmentTree {
     /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
     fn clone(&self) -> Self {
-        let cached_root = *self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked");
+        let cached_root = self.cached_root();
 
         Self {
             inner: self.inner.clone(),
@@ -433,7 +452,7 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
 /// A serialized Orchard note commitment tree.
 ///
 /// The format of the serialized data is compatible with
-/// [`CommitmentTree`](merkle_tree::CommitmentTree) from `librustzcash` and not
+/// [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree) from `librustzcash` and not
 /// with [`Frontier`](bridgetree::Frontier) from the crate
 /// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
 /// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
@@ -442,7 +461,7 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
 /// The formats are semantically equivalent. The primary difference between them
 /// is that in [`Frontier`](bridgetree::Frontier), the vector of parents is
 /// dense (we know where the gaps are from the position of the leaf in the
-/// overall tree); whereas in [`CommitmentTree`](merkle_tree::CommitmentTree),
+/// overall tree); whereas in [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree),
 /// the vector of parent hashes is sparse with [`None`] values in the gaps.
 ///
 /// The sparse format, used in this implementation, allows representing invalid
@@ -472,8 +491,9 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // Convert the note commitment tree from
         // [`Frontier`](bridgetree::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
-        let tree = CommitmentTree::from_frontier(&tree.inner);
-        tree.write(&mut serialized_tree)
+        let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&tree.inner);
+
+        write_commitment_tree(&tree, &mut serialized_tree)
             .expect("note commitment tree should be serializable");
         Self(serialized_tree)
     }

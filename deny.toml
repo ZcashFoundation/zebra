@@ -60,35 +60,21 @@ skip-tree = [
     # wait for criterion to upgrade
     { name = "itertools", version = "=0.10.5" },
 
-    # wait for backtrace and multiple dependents to upgrade
-    { name = "miniz_oxide", version = "=0.6.2" },
-
     # wait for h2 and tower to upgrade
     { name = "indexmap", version = "=1.9.3" },
 
+    # wait for rocksdb to upgrade
+    { name = "bindgen", version = "=0.65.1" },
+
+    # wait for tempfile to upgrade
+    { name = "rustix", version = "=0.37.23" },
+
     # ZF crates
-
-    # wait for zcashd and zcash_script to upgrade
-    # https://github.com/ZcashFoundation/zcash_script/pulls
-    { name = "metrics", version = "=0.20.1" },
-    { name = "sha2", version = "=0.9.9" },
-
-    # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
-    # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/65
-    { name = "ahash", version = "=0.7.6" },
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
-    # wait for metrics-exporter-prometheus to upgrade
-    { name = "hashbrown", version = "=0.13.2" },
 
     # ECC crates
-
-    # wait for zcash_primitives to remove duplicated dependencies
-    { name = "block-buffer", version = "=0.9.0" },
-
-    # wait for zcash_address to upgrade
-    { name = "bs58", version = "=0.4.0" },
 
     # wait for minreq and zcash_proofs to upgrade
     { name = "rustls", version = "=0.20.8" },
@@ -119,18 +105,10 @@ skip-tree = [
     # upgrade abscissa (required dependency) and arti (optional dependency)
     { name = "semver", version = "=0.9.0" },
 
-    # wait for packed_simd_2 to upgrade
-    { name = "libm", version = "=0.1.4" },
-
     # Elasticsearch dependencies
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
-    # Unused dependencies
-
-    # we don't support Windows at the moment (#3801)
-    { name = "windows-sys", version = "=0.42.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

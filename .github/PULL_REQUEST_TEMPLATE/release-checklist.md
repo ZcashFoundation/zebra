@@ -55,6 +55,7 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
+- [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
 
 
 # Update Versions and End of Support
@@ -67,7 +68,7 @@ Zebra follows [semantic versioning](https://semver.org). Semantic versions look 
 
 Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
 - Mainnet Network Upgrades are `major` releases
-- significant new features, large changes, deprecations, and removals are `minor` releases
+- significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
 - otherwise, it is a `patch` release
 
 Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
@@ -76,19 +77,24 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 
 <details>
 
-<summary>If you're publishing crates for the first time:</summary>
+<summary>If you're publishing crates for the first time, click this triangle for extra steps</summary>
 
 - [ ] Install `cargo-release`: `cargo install cargo-release`
 - [ ] Make sure you are  an owner of the crate or [a member of the Zebra crates.io `owners` group on GitHub](https://github.com/orgs/ZcashFoundation/teams/owners)
 
 </details>
 
-- [ ] Update crate versions and do a release dry-run
-    - [ ] `cargo clean` (optional)
-    - [ ] `cargo release version --verbose --execute --workspace --exclude zebrad beta`
-    - [ ] `cargo release version --verbose --execute --package zebrad [ major | minor | patch ]`
-    - [ ] `cargo release publish --verbose --dry-run --workspace`
-- [ ] Commit the version changes to your release PR branch using `git`: `cargo release commit --verbose --execute --workspace`
+Check that the release will work:
+- [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
+
+```sh
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
+cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
+cargo release replace --verbose --execute --allow-branch '*' --package zebrad
+cargo release commit --verbose --execute --allow-branch '*'
+```
+
+Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode.
 
 ## Update End of Support
 
@@ -131,7 +137,6 @@ The end of support height is calculated from the current blockchain height:
 ## Test the Pre-Release
 
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
-      (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
 
 ## Publish Release
@@ -144,12 +149,13 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Run `cargo clean` in the zebra repo (optional)
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
-      `cargo install --locked --force --version 1.0.0 zebrad && ~/.cargo/bin/zebrad`
+      `cargo install --locked --force --version 1.minor.patch zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
+- [ ] Remove `do-not-merge` from the PRs you added it to
 
 ## Release Failures
 

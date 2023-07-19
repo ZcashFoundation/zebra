@@ -1160,7 +1160,7 @@ pub(crate) async fn register_inventory_status(
                     let _ = inv_collector
                         .send(InventoryChange::new_available(*advertised, transient_addr));
                 }
-                [advertised @ ..] => {
+                advertised => {
                     let advertised = advertised
                         .iter()
                         .filter(|advertised| advertised.unmined_tx_id().is_some());

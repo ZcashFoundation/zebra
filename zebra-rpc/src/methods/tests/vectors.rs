@@ -457,7 +457,12 @@ async fn rpc_getrawtransaction() {
             }
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
-            let GetRawTransaction::Object { hex, height, confirmations } = response.expect("We should have a GetRawTransaction struct") else {
+            let GetRawTransaction::Object {
+                hex,
+                height,
+                confirmations,
+            } = response.expect("We should have a GetRawTransaction struct")
+            else {
                 unreachable!("Should return a Raw enum")
             };
 
@@ -1180,7 +1185,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
         serialization::DateTime32,
-        transaction::VerifiedUnminedTx,
+        transaction::{zip317, VerifiedUnminedTx},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -1291,10 +1296,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     assert_eq!(
         get_block_template.capabilities,
@@ -1435,10 +1441,13 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         conventional_fee: 0.try_into().unwrap(),
     };
 
+    let conventional_actions = zip317::conventional_actions(&unmined_tx.transaction);
+
     let verified_unmined_tx = VerifiedUnminedTx {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
         legacy_sigop_count: 0,
+        conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
     };
@@ -1456,10 +1465,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     // mempool transactions should be omitted if the tip hash in the GetChainInfo response from the state
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.

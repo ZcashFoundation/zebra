@@ -1,0 +1,28 @@
+name: Release crates
+
+on:
+  # Only patch the Release PR test job
+  pull_request:
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints (and proptest regressions, which are not actually needed)
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # READMEs, which are shown on the crate page
+      - '**/README.md'
+      # workflow definitions
+      - '.github/workflows/release-crates.io.yml'
+
+
+jobs:
+  check-release:
+    name: Check crate release dry run
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No check required"'

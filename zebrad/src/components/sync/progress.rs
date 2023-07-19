@@ -152,8 +152,7 @@ pub async fn show_block_chain_progress(
             } else {
                 block_bar
                     .set_pos(current_height.0)
-                    .set_len(u64::from(estimated_height.0))
-                    .desc(network_upgrade.to_string());
+                    .set_len(u64::from(estimated_height.0));
             }
 
             // Skip logging and status updates if it isn't time for them yet.
@@ -217,7 +216,7 @@ pub async fn show_block_chain_progress(
 
                 // TODO: use add_warn(), but only add each warning once
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc("chain updates have stalled");
+                block_bar.desc(format!("{}: sync has stalled", network_upgrade));
             } else if is_syncer_stopped && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
                 // We've stopped syncing blocks, but we estimate we're a long way from the tip.
                 //
@@ -235,7 +234,10 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc("sync is very slow, or estimated tip is wrong");
+                block_bar.desc(format!(
+                    "{}: sync is very slow, or estimated tip is wrong",
+                    network_upgrade
+                ));
             } else if is_syncer_stopped && current_height <= after_checkpoint_height {
                 // We've stopped syncing blocks,
                 // but we're below the minimum height estimated from our checkpoints.
@@ -259,7 +261,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc("sync is very slow");
+                block_bar.desc(format!("{}: sync is very slow", network_upgrade));
             } else if is_syncer_stopped {
                 // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
                 // So we're mostly using gossiped blocks now.
@@ -273,7 +275,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: initial sync finished", network_upgrade));
+                block_bar.desc(format!("{}: waiting for next block", network_upgrade));
             } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
                 // We estimate we're near the tip, but we have been syncing lots of blocks recently.
                 // We might also be using some gossiped blocks.
@@ -288,7 +290,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: initial sync almost finished", network_upgrade));
+                block_bar.desc(format!("{}: finishing initial sync", network_upgrade));
             } else {
                 // We estimate we're far from the tip, and we've been syncing lots of blocks.
                 info!(
@@ -299,9 +301,14 @@ pub async fn show_block_chain_progress(
                     %time_since_last_state_block,
                     "estimated progress to chain tip",
                 );
+
+                #[cfg(feature = "progress-bar")]
+                block_bar.desc(format!("{}: syncing blocks", network_upgrade));
             }
         } else {
             let sync_percent = format!("{:.SYNC_PERCENT_FRAC_DIGITS$} %", 0.0f64,);
+            #[cfg(feature = "progress-bar")]
+            let network_upgrade = NetworkUpgrade::Genesis;
 
             if is_syncer_stopped {
                 // We've stopped syncing blocks,
@@ -315,7 +322,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc("can't download genesis block");
+                block_bar.desc(format!("{}: can't download genesis block", network_upgrade));
             } else {
                 // We're waiting for the genesis block to be committed to the state,
                 // before we can estimate the best chain tip.
@@ -326,7 +333,10 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc("waiting to download genesis block");
+                block_bar.desc(format!(
+                    "{}: waiting to download genesis block",
+                    network_upgrade
+                ));
             }
         }
 

@@ -65,6 +65,9 @@ fn construct_many() -> Result<()> {
 
     let mut block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+    let initial_height = block
+        .coinbase_height()
+        .expect("Block 434873 should have its height in its coinbase tx.");
     let mut blocks = vec![];
 
     while blocks.len() < 100 {
@@ -75,7 +78,7 @@ fn construct_many() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
-        Height(block.coinbase_height().unwrap().0 - 1),
+        (initial_height - 1).expect("Initial height should be at least 1."),
         Default::default(),
         Default::default(),
         Default::default(),

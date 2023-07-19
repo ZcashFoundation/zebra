@@ -8,7 +8,7 @@ use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
 use tracing::Span;
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{diagnostic::task::WaitForPanics, serialization::DateTime32};
 
 use crate::{
     constants, meta_addr::MetaAddrChange, peer_set::set::MorePeers, types::MetaAddr, AddressBook,
@@ -348,8 +348,8 @@ where
         tokio::task::spawn_blocking(move || {
             span.in_scope(|| address_book.lock().unwrap().extend(addrs))
         })
+        .wait_for_panics()
         .await
-        .expect("panic in new peers address book update task");
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -403,8 +403,8 @@ where
         // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
         let span = Span::current();
         let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
-            .await
-            .expect("panic in next peer address book task")?;
+            .wait_for_panics()
+            .await?;
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;

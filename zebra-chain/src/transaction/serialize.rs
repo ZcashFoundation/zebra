@@ -268,15 +268,15 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // Create shielded spends from deserialized parts
         let spends: Vec<_> = spend_prefixes
             .into_iter()
-            .zip(spend_proofs.into_iter())
-            .zip(spend_sigs.into_iter())
+            .zip(spend_proofs)
+            .zip(spend_sigs)
             .map(|((prefix, proof), sig)| Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig))
             .collect();
 
         // Create shielded outputs from deserialized parts
         let outputs = output_prefixes
             .into_iter()
-            .zip(output_proofs.into_iter())
+            .zip(output_proofs)
             .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
             .collect();
 
@@ -427,7 +427,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // Create the AuthorizedAction from deserialized parts
         let authorized_actions: Vec<orchard::AuthorizedAction> = actions
             .into_iter()
-            .zip(sigs.into_iter())
+            .zip(sigs)
             .map(|(action, spend_auth_sig)| {
                 orchard::AuthorizedAction::from_parts(action, spend_auth_sig)
             })

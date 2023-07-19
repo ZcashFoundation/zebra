@@ -133,7 +133,7 @@ pub fn conventional_fee_weight_ratio(
 /// as defined by [ZIP-317].
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
-fn conventional_actions(transaction: &Transaction) -> u32 {
+pub fn conventional_actions(transaction: &Transaction) -> u32 {
     let tx_in_total_size: usize = transaction
         .inputs()
         .iter()

@@ -43,7 +43,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
-    diagnostic::CodeTimer,
+    diagnostic::{task::WaitForPanics, CodeTimer},
     parameters::{Network, NetworkUpgrade},
 };
 
@@ -141,7 +141,7 @@ pub(crate) struct StateService {
     /// so they can be written to the [`FinalizedState`].
     ///
     /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest non-finalized block arrives.
+    /// and the lowest semantically verified block arrives.
     finalized_block_write_sender:
         Option<tokio::sync::mpsc::UnboundedSender<QueuedCheckpointVerified>>,
 
@@ -154,11 +154,6 @@ pub(crate) struct StateService {
     ///
     /// If `invalid_block_write_reset_receiver` gets a reset, this is:
     /// - the hash of the last valid committed block (the parent of the invalid block).
-    //
-    // TODO:
-    // - turn this into an IndexMap containing recent non-finalized block hashes and heights
-    //   (they are all potential tips)
-    // - remove block hashes once their heights are strictly less than the finalized tip
     finalized_block_write_last_sent_hash: block::Hash,
 
     /// A set of block hashes that have been sent to the block write task.
@@ -268,6 +263,7 @@ impl Drop for ReadStateService {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
 
+        // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
                 // We're the last database user, so we can tell it to shut down (blocking):
@@ -285,6 +281,7 @@ impl Drop for ReadStateService {
                 #[cfg(test)]
                 debug!("waiting for the block write task to finish");
 
+                // TODO: move this into a check_for_panics() method
                 if let Err(thread_panic) = block_write_task_handle.join() {
                     std::panic::resume_unwind(thread_panic);
                 } else {
@@ -348,9 +345,7 @@ impl StateService {
             .tip_block()
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
-        timer.finish(module_path!(), line!(), "fetching database tip");
 
-        let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
@@ -455,7 +450,7 @@ impl StateService {
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
 
-    /// Queue a finalized block for verification and storage in the finalized state.
+    /// Queue a checkpoint verified block for verification and storage in the finalized state.
     ///
     /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_to_finalized_state(
@@ -471,7 +466,7 @@ impl StateService {
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
-        // full verification of non-finalized blocks, even when it is in the channel.
+        // semantic block verification, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
             self.non_finalized_block_write_sent_hashes
                 .add_finalized(&checkpoint_verified)
@@ -481,32 +476,32 @@ impl StateService {
         let queued = (checkpoint_verified, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
-            // We're still committing finalized blocks
+            // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
                 .insert(queued_prev_hash, queued)
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    "dropping older finalized block: got newer duplicate block",
+                    "dropping older checkpoint verified block: got newer duplicate block",
                 );
             }
 
             self.drain_finalized_queue_and_commit();
         } else {
-            // We've finished committing finalized blocks, so drop any repeated queued blocks,
-            // and return an error.
+            // We've finished committing checkpoint verified blocks to the finalized state,
+            // so drop any repeated queued blocks, and return an error.
             //
             // TODO: track the latest sent height, and drop any blocks under that height
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
 
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -636,7 +631,7 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
-    /// Queue a non finalized block for verification and check if any queued
+    /// Queue a semantically verified block for contextual verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
     /// This function encodes the logic for [committing non-finalized blocks][1]
@@ -694,8 +689,8 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending finalized blocks when:
-        // - we've sent the finalized block for the last checkpoint, and
+        // We've finished sending checkpoint verified blocks when:
+        // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
         //
         // We detect the last checkpoint by looking for non-finalized blocks
@@ -709,13 +704,13 @@ impl StateService {
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing finalized blocks,
-            // and move on to committing non-finalized blocks.
+            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
+            // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.finalized_block_write_sender.take());
 
-            // We've finished committing finalized blocks, so drop any repeated queued blocks.
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
-                "already finished committing finalized blocks: dropped duplicate block, \
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
@@ -754,7 +749,7 @@ impl StateService {
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
     ///
-    /// The non-finalized block verifier needs access to UTXOs from finalized blocks
+    /// The semantic block verifier needs access to UTXOs from checkpoint verified blocks
     /// near the final checkpoint, so that it can verify blocks that spend those UTXOs.
     ///
     /// If it doesn't have the required UTXOs, some blocks will time out,
@@ -818,7 +813,7 @@ impl StateService {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
-            "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
+            "invalid semantically verified block height: the canopy checkpoint is mandatory, pre-canopy \
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
@@ -970,11 +965,16 @@ impl Service<Request> for StateService {
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
-                // A non-finalized block verification could have called AwaitUtxo
-                // before this finalized block arrived in the state.
-                // So we need to check for pending UTXOs here for non-finalized blocks,
-                // even though it is redundant for most finalized blocks.
-                // (Finalized blocks are verified using block hash checkpoints
+                // A semantic block verification could have called AwaitUtxo
+                // before this checkpoint verified block arrived in the state.
+                // So we need to check for pending UTXO requests sent by running
+                // semantic block verifications.
+                //
+                // This check is redundant for most checkpoint verified blocks,
+                // because semantic verification can only succeed near the final
+                // checkpoint, when all the UTXOs are available for the verifying block.
+                //
+                // (Checkpoint block UTXOs are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
                 self.pending_utxos
                     .check_against_ordered(&finalized.new_outputs);
@@ -1161,6 +1161,8 @@ impl Service<ReadRequest> for ReadStateService {
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
+        //
+        // TODO: move into a check_for_panics() method
         let block_write_task = self.block_write_task.take();
 
         if let Some(block_write_task) = block_write_task {
@@ -1176,6 +1178,8 @@ impl Service<ReadRequest> for ReadStateService {
                 self.block_write_task = Some(block_write_task);
             }
         }
+
+        self.db.check_for_panics();
 
         Poll::Ready(Ok(()))
     }
@@ -1205,8 +1209,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Tip(tip))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1227,8 +1230,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Depth(depth))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Depth"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1251,10 +1253,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BestChainNextMedianTimePast(median_time_past?))
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::BestChainNextMedianTimePast")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the get_block (raw) RPC and the StateService.
@@ -1279,8 +1278,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Block(block))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_raw_transaction RPC and the StateService.
@@ -1298,8 +1296,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Transaction(response))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the getblock (verbose) RPC.
@@ -1328,10 +1325,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::TransactionIdsForBlock")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::UnspentBestChainUtxo(outpoint) => {
@@ -1355,8 +1349,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::UnspentBestChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Manually used by the StateService to implement part of AwaitUtxo.
@@ -1377,8 +1370,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::AnyChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::AnyChainUtxo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1401,8 +1393,7 @@ impl Service<ReadRequest> for ReadStateService {
                         ))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BlockLocator"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1429,8 +1420,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHashes(block_hashes))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHashes"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the StateService.
@@ -1462,8 +1452,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHeaders(block_headers))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHeaders"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::SaplingTree(hash_or_height) => {
@@ -1487,8 +1476,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::SaplingTree(sapling_tree))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::SaplingTree"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::OrchardTree(hash_or_height) => {
@@ -1512,8 +1500,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::OrchardTree(orchard_tree))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::OrchardTree"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_balance RPC.
@@ -1538,8 +1525,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::AddressBalance(balance))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::AddressBalance"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_tx_ids RPC.
@@ -1572,10 +1558,7 @@ impl Service<ReadRequest> for ReadStateService {
                         tx_ids.map(ReadResponse::AddressesTransactionIds)
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::TransactionIdsByAddresses")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // For the get_address_utxos RPC.
@@ -1601,8 +1584,7 @@ impl Service<ReadRequest> for ReadStateService {
                         utxos.map(ReadResponse::AddressUtxos)
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
-                .boxed()
+                .wait_for_panics()
             }
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
@@ -1635,11 +1617,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                     })
                 })
-                .map(|join_result| {
-                    join_result
-                        .expect("panic in ReadRequest::CheckBestChainTipNullifiersAndAnchors")
-                })
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by the get_block and get_block_hash RPCs.
@@ -1668,8 +1646,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHash(hash))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by get_block_template RPC.
@@ -1708,8 +1685,7 @@ impl Service<ReadRequest> for ReadStateService {
                         get_block_template_info.map(ReadResponse::ChainInfo)
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
-                .boxed()
+                .wait_for_panics()
             }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
@@ -1762,8 +1738,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::SolutionRate(solution_rate))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::SolutionRate"))
-                .boxed()
+                .wait_for_panics()
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1811,10 +1786,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::ValidBlockProposal)
                     })
                 })
-                .map(|join_result| {
-                    join_result.expect("panic in ReadRequest::CheckBlockProposalValidity")
-                })
-                .boxed()
+                .wait_for_panics()
             }
         }
     }

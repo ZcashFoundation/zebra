@@ -38,8 +38,8 @@ mod tests;
 
 pub(crate) use difficulty::AdjustedDifficulty;
 
-/// Check that the `prepared` block is contextually valid for `network`, based
-/// on the `finalized_tip_height` and `relevant_chain`.
+/// Check that the semantically verified block is contextually valid for `network`,
+/// based on the `finalized_tip_height` and `relevant_chain`.
 ///
 /// This function performs checks that require a small number of recent blocks,
 /// including previous hash, previous height, and block difficulty.
@@ -50,9 +50,9 @@ pub(crate) use difficulty::AdjustedDifficulty;
 /// # Panics
 ///
 /// If the state contains less than 28 ([`POW_ADJUSTMENT_BLOCK_SPAN`]) blocks.
-#[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
+#[tracing::instrument(skip(semantically_verified, finalized_tip_height, relevant_chain))]
 pub(crate) fn block_is_valid_for_recent_chain<C>(
-    prepared: &SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
     network: Network,
     finalized_tip_height: Option<block::Height>,
     relevant_chain: C,
@@ -64,7 +64,7 @@ where
 {
     let finalized_tip_height = finalized_tip_height
         .expect("finalized state must contain at least one block to do contextual validation");
-    check::block_is_not_orphaned(finalized_tip_height, prepared.height)?;
+    check::block_is_not_orphaned(finalized_tip_height, semantically_verified.height)?;
 
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
@@ -78,7 +78,7 @@ where
     let parent_height = parent_block
         .coinbase_height()
         .expect("valid blocks have a coinbase height");
-    check::height_one_more_than_parent_height(parent_height, prepared.height)?;
+    check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
 
     if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
         // skip this check during tests if we don't have enough blocks in the chain
@@ -107,9 +107,9 @@ where
         )
     });
     let difficulty_adjustment =
-        AdjustedDifficulty::new_from_block(&prepared.block, network, relevant_data);
+        AdjustedDifficulty::new_from_block(&semantically_verified.block, network, relevant_data);
     check::difficulty_threshold_and_time_are_valid(
-        prepared.block.header.difficulty_threshold,
+        semantically_verified.block.header.difficulty_threshold,
         difficulty_adjustment,
     )?;
 
@@ -375,23 +375,23 @@ where
 pub(crate) fn initial_contextual_validity(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
-    prepared: &SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,
         finalized_state,
-        prepared.block.header.previous_block_hash,
+        semantically_verified.block.header.previous_block_hash,
     );
 
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
-        prepared,
+        semantically_verified,
         non_finalized_state.network,
         finalized_state.finalized_tip_height(),
         relevant_chain,
     )?;
 
-    check::nullifier::no_duplicates_in_finalized_chain(prepared, finalized_state)?;
+    check::nullifier::no_duplicates_in_finalized_chain(semantically_verified, finalized_state)?;
 
     Ok(())
 }
