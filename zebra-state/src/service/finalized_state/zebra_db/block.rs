@@ -159,19 +159,16 @@ impl ZebraDb {
         self.sapling_note_commitment_tree_by_height(&height)
     }
 
-    /// Returns the Orchard
-    /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_tree(
+    pub fn orchard_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&orchard_tree_handle, &height)
+        self.orchard_note_commitment_tree_by_height(&height)
     }
 
     // Read tip block methods
