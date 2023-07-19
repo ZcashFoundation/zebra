@@ -1,6 +1,59 @@
-# Upgrading the State Database
+# Zebra Cached State Database Implementation
+
+## Upgrading the State Database
+
+For most state upgrades, we want to modify the database format of the existing database. If we
+change the major database version, every user needs to re-download and re-verify all the blocks,
+which can take days.
+
+### In-Place Upgrade Goals
+
+- avoid a full download and rebuild of the state
+- the previous state format must be able to be loaded by the new state
+  - this is checked the first time CI runs on a PR with a new state version.
+    After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
+    again. If CI fails on the first run, any cached states with that version should be deleted.
+- previous zebra versions should be able to load the new format
+  - this is checked by other PRs running using the upgraded cached state, but only if a Rust PR
+    runs after the new PR's CI finishes, but before it merges
+- best-effort loading of older supported states by newer Zebra versions
+- best-effort compatibility between newer states and older supported Zebra versions
+
+### Design Constraints
+[design]: #design
+
+Upgrades run concurrently with state verification and RPC requests.
+
+This means that:
+- the state must be able to read the old and new formats
+  - it can't panic if the data is missing
+  - it can't give incorrect results, because that can affect verification or wallets
+  - it can return an error
+  - it can only return an `Option` if the caller handles it correctly
+- multiple upgrades must produce a valid state format
+  - if Zebra is restarted, the format upgrade will run multiple times
+  - if an older Zebra version opens the state, data can be written in an older format
+- the format must be valid before and after each database transaction or API call, because an upgrade can be cancelled at any time
+  - multi-column family changes should made in database transactions
+  - if you are building new column family, disable state queries, then enabling them once it's done
+  - if each database API call produces a valid format, transactions aren't needed
+
+If there is an upgrade failure, it can panic and tell the user to delete their cached state and re-launch Zebra.
+
+### Implementation Steps
+
+- [ ] update the [database format](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#current) in the Zebra docs
+- [ ] increment the state minor version
+- [ ] write the new format in the block write task
+- [ ] update older formats in the format upgrade task
+- [ ] test that the new format works when creating a new state, and updating an older state
+
+See the [upgrade design docs](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design) for more details.
+
+These steps can be copied into tickets.
 
 ## Current State Database Format
+[current]: #current
 
 rocksdb provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
 a distinct "tree". Keys are sorted using lexographic order (`[u8].sorted()`) on byte strings, so
