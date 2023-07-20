@@ -218,6 +218,9 @@ impl DbFormatChange {
     ///
     /// If `cancel_receiver` gets a message, or its sender is dropped,
     /// the format change stops running early.
+    ///
+    /// See the format upgrade design docs for more details:
+    /// <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design>
     //
     // New format upgrades must be added to the *end* of this method.
     fn apply_format_upgrade(
@@ -259,8 +262,6 @@ impl DbFormatChange {
         };
 
         // Example format change.
-        //
-        // TODO: link to format upgrade instructions doc here
 
         // Check if we need to do this upgrade.
         let database_format_add_format_change_task =
