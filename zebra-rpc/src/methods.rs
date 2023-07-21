@@ -744,11 +744,68 @@ where
                 //        this needs a new state request for the height -> hash index
                 let height = hash_or_height.height();
 
+                // Sapling trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let sapling_note_commitment_tree_count = match response {
+                    zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
+                    zebra_state::ReadResponse::SaplingTree(None) => 0,
+                    _ => unreachable!("unmatched response to a SaplingTree request"),
+                };
+
+                // Orchard trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let orchard_note_commitment_tree_count = match response {
+                    zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
+                    zebra_state::ReadResponse::OrchardTree(None) => 0,
+                    _ => unreachable!("unmatched response to a OrchardTree request"),
+                };
+
+                let sapling = SaplingTrees {
+                    size: sapling_note_commitment_tree_count,
+                };
+
+                let orchard = OrchardTrees {
+                    size: orchard_note_commitment_tree_count,
+                };
+
+                let trees = GetBlockTrees { sapling, orchard };
+
                 Ok(GetBlock::Object {
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
                     tx,
+                    trees,
                 })
             } else {
                 Err(Error {
@@ -1362,6 +1419,9 @@ pub enum GetBlock {
         //
         // TODO: use a typed Vec<transaction::Hash> here
         tx: Vec<String>,
+
+        ///
+        trees: GetBlockTrees,
     },
 }
 
@@ -1373,6 +1433,39 @@ pub enum GetBlock {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
+
+///
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GetBlockTrees {
+    #[serde(skip_serializing_if = "SaplingTrees::is_empty")]
+    sapling: SaplingTrees,
+    #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
+    orchard: OrchardTrees,
+}
+
+///
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SaplingTrees {
+    size: u64,
+}
+
+impl SaplingTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
+
+///
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct OrchardTrees {
+    size: u64,
+}
+
+impl OrchardTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
 
 /// Response to a `z_gettreestate` RPC request.
 ///
