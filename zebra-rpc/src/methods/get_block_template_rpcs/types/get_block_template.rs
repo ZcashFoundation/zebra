@@ -1,6 +1,8 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method in the
 //! default 'template' mode. See [`ProposalResponse`] for the output in 'proposal' mode.
 
+use std::fmt;
+
 use zebra_chain::{
     amount,
     block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
@@ -34,7 +36,7 @@ pub use parameters::{GetBlockTemplateCapability, GetBlockTemplateRequestMode, Js
 pub use proposal::{proposal_block_from_template, ProposalResponse};
 
 /// A serialized `getblocktemplate` RPC response in template mode.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
@@ -165,6 +167,43 @@ pub struct GetBlockTemplate {
     #[serde(default)]
     #[serde(rename = "submitold")]
     pub submit_old: Option<bool>,
+}
+
+impl fmt::Debug for GetBlockTemplate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // A block with a lot of transactions can be extremely long in logs.
+        let mut transactions_truncated = self.transactions.clone();
+        if self.transactions.len() > 4 {
+            // Remove transaction 3 onwards, but leave the last transaction
+            let end = self.transactions.len() - 2;
+            transactions_truncated.splice(3..=end, Vec::new());
+        }
+
+        f.debug_struct("GetBlockTemplate")
+            .field("capabilities", &self.capabilities)
+            .field("version", &self.version)
+            .field("previous_block_hash", &self.previous_block_hash)
+            .field("block_commitments_hash", &self.block_commitments_hash)
+            .field("light_client_root_hash", &self.light_client_root_hash)
+            .field("final_sapling_root_hash", &self.final_sapling_root_hash)
+            .field("default_roots", &self.default_roots)
+            .field("transaction_count", &self.transactions.len())
+            .field("transactions", &transactions_truncated)
+            .field("coinbase_txn", &self.coinbase_txn)
+            .field("long_poll_id", &self.long_poll_id)
+            .field("target", &self.target)
+            .field("min_time", &self.min_time)
+            .field("mutable", &self.mutable)
+            .field("nonce_range", &self.nonce_range)
+            .field("sigop_limit", &self.sigop_limit)
+            .field("size_limit", &self.size_limit)
+            .field("cur_time", &self.cur_time)
+            .field("bits", &self.bits)
+            .field("height", &self.height)
+            .field("max_time", &self.max_time)
+            .field("submit_old", &self.submit_old)
+            .finish()
+    }
 }
 
 impl GetBlockTemplate {
