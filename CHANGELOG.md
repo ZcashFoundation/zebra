@@ -5,12 +5,45 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.1.0) - 2023-07-18
 
-## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-XX-XX
+
+This release adds new mempool metrics, fixes panics when cancelling tasks on shutdown, detects subcommand name typos on the command-line, and improves the usability of Zebra's Docker images (particularly for mining).
 
 ### Breaking Changes
 
 - Zebra now detects subcommand name typos on the command-line. If you want to give Zebra a list of tracing filters, use `zebrad start --filters debug,...` ([#7056](https://github.com/ZcashFoundation/zebra/pull/7056))
+
+### Security
+
+- Avoid initiating outbound handshakes with IPs for which Zebra already has an active peer ([#7029](https://github.com/ZcashFoundation/zebra/pull/7029))
+- Rate-limit inbound connections per IP ([#7041](https://github.com/ZcashFoundation/zebra/pull/7041))
+
+### Added
+
+- Metrics tracking mempool actions and size bucketed by weight ([#7019](https://github.com/ZcashFoundation/zebra/pull/7019)) by @str4d
+- Legacy state format compatibility layer and version bumps for ECC dependencies to match `zcashd` 5.6.0 ([#7053](https://github.com/ZcashFoundation/zebra/pull/7053))
+- Framework for upcoming in-place database format upgrades ([#7031](https://github.com/ZcashFoundation/zebra/pull/7031))
+
+
+### Changed
+
+- Deduplicate note commitment trees in non-finalized state ([#7218](https://github.com/ZcashFoundation/zebra/pull/7218), [#7239](https://github.com/ZcashFoundation/zebra/pull/7239))
+
+### Fixed
+
+- Enable miners running Zebra with Docker to set their address for mining rewards ([#7178](https://github.com/ZcashFoundation/zebra/pull/7178))
+- Use default RPC port when running Zebra with Docker ([#7177](https://github.com/ZcashFoundation/zebra/pull/7177), [#7162](https://github.com/ZcashFoundation/zebra/pull/7162))
+- Stop panicking on async task cancellation on shutdown in network and state futures ([#7219](https://github.com/ZcashFoundation/zebra/pull/7219))
+- Remove redundant startup logs, fix progress bar number, order, and wording ([#7087](https://github.com/ZcashFoundation/zebra/pull/7087))
+- Organize Docker `ENV` and `ARG` values based on their usage ([#7200](https://github.com/ZcashFoundation/zebra/pull/7200))
+- Avoid blocking threads by awaiting proof verification results from rayon in async context ([#6887](https://github.com/ZcashFoundation/zebra/pull/6887))
+
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @mpguerra, @oxarbitrage, @str4d, @teor2345 and @upbqdn
 
 
 ## [Zebra 1.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.1) - 2023-07-03

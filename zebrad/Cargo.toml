@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -142,15 +142,15 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.27" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.27" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.27" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.28" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.28" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.28" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.28" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.28" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.27", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.28", optional = true }
 
 abscissa_core = "0.7.0"
 clap = { version = "4.3.15", features = ["cargo"] }
