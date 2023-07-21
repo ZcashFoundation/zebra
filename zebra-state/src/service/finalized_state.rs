@@ -374,9 +374,10 @@ impl FinalizedState {
             let local_time = chrono::Utc::now().timestamp();
 
             // Mainnet bulk size is small enough to avoid the elasticsearch 100mb content
-            // length limitation. MAX_BLOCK_BYTES = 2M. Each block count as 2 as we send
-            // them with a operation/header line. A value of 100 is 50 blocks.
-            const MAINNET_AWAY_FROM_TIP_BULK_SIZE: usize = 100;
+            // length limitation. MAX_BLOCK_BYTES = 2MB but each block use around 4.1 MB of JSON.
+            // Each block count as 2 as we send them with a operation/header line. A value of 48
+            // is 24 blocks.
+            const MAINNET_AWAY_FROM_TIP_BULK_SIZE: usize = 48;
 
             // Testnet bulk size is larger as blocks are generally smaller in the testnet.
             // A value of 800 is 400 blocks as we are not counting the operation line.
