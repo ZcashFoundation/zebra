@@ -140,7 +140,7 @@ pub fn write_blocks_from_channels(
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 ) {
     let mut last_zebra_mined_log_height = None;
-    let mut prev_note_commitment_trees = None;
+    let mut prev_finalized_note_commitment_trees = None;
 
     // Write all the finalized blocks sent by the state,
     // until the state closes the finalized block channel's sender.
@@ -179,10 +179,12 @@ pub fn write_blocks_from_channels(
         }
 
         // Try committing the block
-        match finalized_state.commit_finalized(ordered_block, prev_note_commitment_trees.take()) {
+        match finalized_state
+            .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+        {
             Ok((finalized, note_commitment_trees)) => {
                 let tip_block = ChainTipBlock::from(finalized);
-                prev_note_commitment_trees = Some(note_commitment_trees);
+                prev_finalized_note_commitment_trees = Some(note_commitment_trees);
 
                 log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
 
@@ -291,8 +293,8 @@ pub fn write_blocks_from_channels(
         while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
             let contextually_verified_with_trees = non_finalized_state.finalize();
-            prev_note_commitment_trees = finalized_state
-                        .commit_finalized_direct(contextually_verified_with_trees, prev_note_commitment_trees.take(), "commit contextually-verified request")
+            prev_finalized_note_commitment_trees = finalized_state
+                        .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         ).1.into();

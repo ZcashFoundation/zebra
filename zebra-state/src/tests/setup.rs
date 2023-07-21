@@ -107,7 +107,7 @@ pub(crate) fn new_state_with_mainnet_genesis(
 
     let genesis = CheckpointVerifiedBlock::from(genesis);
     finalized_state
-        .commit_finalized_direct(genesis.clone().into(), "test")
+        .commit_finalized_direct(genesis.clone().into(), None, "test")
         .expect("unexpected invalid genesis block test vector");
 
     assert_eq!(
