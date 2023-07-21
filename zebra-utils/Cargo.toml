@@ -85,7 +85,8 @@ itertools = { version = "0.11.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { version = "1.9.1", optional = true }
-reqwest =  { version = "0.11.18", optional = true }
+# Avoid default openssl dependency to reduce the dependency tree and security alerts. 
+reqwest = { version = "0.11.18", default-features = false, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
 tokio = { version = "1.29.1", features = ["full"], optional = true }
