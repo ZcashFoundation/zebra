@@ -279,6 +279,7 @@ impl DiskWriteBatch {
         &mut self,
         zebra_db: &ZebraDb,
         finalized: &SemanticallyVerifiedBlockWithTrees,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
 
@@ -317,12 +318,21 @@ impl DiskWriteBatch {
         self.zs_insert(&sprout_tree_cf, height, trees.sprout);
 
         // Store the Sapling tree only if it is not already present at the previous height.
-        if height.is_min() || zebra_db.sapling_tree() != trees.sapling {
+        if height.is_min()
+            || prev_note_commitment_trees
+                .as_ref()
+                .map_or_else(|| zebra_db.sapling_tree(), |trees| trees.sapling.clone())
+                != trees.sapling
+        {
             self.zs_insert(&sapling_tree_cf, height, trees.sapling);
         }
 
         // Store the Orchard tree only if it is not already present at the previous height.
-        if height.is_min() || zebra_db.orchard_tree() != trees.orchard {
+        if height.is_min()
+            || prev_note_commitment_trees
+                .map_or_else(|| zebra_db.orchard_tree(), |trees| trees.orchard)
+                != trees.orchard
+        {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 
