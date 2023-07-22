@@ -1420,7 +1420,7 @@ pub enum GetBlock {
         // TODO: use a typed Vec<transaction::Hash> here
         tx: Vec<String>,
 
-        ///
+        /// Information about the note commitment trees.
         trees: GetBlockTrees,
     },
 }
@@ -1433,39 +1433,6 @@ pub enum GetBlock {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
-
-///
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBlockTrees {
-    #[serde(skip_serializing_if = "SaplingTrees::is_empty")]
-    sapling: SaplingTrees,
-    #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
-    orchard: OrchardTrees,
-}
-
-///
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct SaplingTrees {
-    size: u64,
-}
-
-impl SaplingTrees {
-    fn is_empty(&self) -> bool {
-        self.size == 0
-    }
-}
-
-///
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct OrchardTrees {
-    size: u64,
-}
-
-impl OrchardTrees {
-    fn is_empty(&self) -> bool {
-        self.size == 0
-    }
-}
 
 /// Response to a `z_gettreestate` RPC request.
 ///
@@ -1614,6 +1581,39 @@ impl GetRawTransaction {
         } else {
             GetRawTransaction::Raw(tx.into())
         }
+    }
+}
+
+/// Information about the sapling and orchard note commitment trees if any.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GetBlockTrees {
+    #[serde(skip_serializing_if = "SaplingTrees::is_empty")]
+    sapling: SaplingTrees,
+    #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
+    orchard: OrchardTrees,
+}
+
+/// Sapling note commitment tree information.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SaplingTrees {
+    size: u64,
+}
+
+impl SaplingTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
+
+/// Orchard note commitment tree information.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct OrchardTrees {
+    size: u64,
+}
+
+impl OrchardTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
     }
 }
 

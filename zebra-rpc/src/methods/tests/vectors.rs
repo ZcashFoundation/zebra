@@ -121,11 +121,9 @@ async fn rpc_getblock() {
         assert_eq!(get_block, expected_result);
     }
 
-    //
+    // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
-
     let orchard = OrchardTrees { size: 0 };
-
     let trees = GetBlockTrees { sapling, orchard };
 
     // Make height calls with verbosity=1 and check response
