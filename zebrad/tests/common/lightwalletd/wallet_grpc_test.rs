@@ -39,7 +39,7 @@ use color_eyre::eyre::Result;
 use zebra_chain::{
     block::Block,
     parameters::Network,
-    parameters::NetworkUpgrade::{self, Canopy},
+    parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
 
@@ -145,27 +145,43 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Canopy network upgrade
-    assert!(block_tip.height > Canopy.activation_height(network).unwrap().0 as u64);
+    // Get `Sapling` activation height.
+    let sapling_activation_height = Sapling.activation_height(network).unwrap().0 as u64;
 
-    // `lightwalletd` only supports post-Sapling blocks, so we begin at the
-    // Sapling activation height.
-    let sapling_activation_height = NetworkUpgrade::Sapling
-        .activation_height(network)
-        .unwrap()
-        .0 as u64;
+    // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Nu5 network upgrade
+    assert!(block_tip.height > Nu5.activation_height(network).unwrap().0 as u64);
 
-    // Call `GetBlock` with block 1 height
-    let block_one = rpc_client
+    // The first block in the mainnet thas has sapling and orchard information.
+    let block_with_trees = 1687107;
+
+    // Call `GetBlock` with `block_with_trees`.
+    let get_block_response = rpc_client
         .get_block(BlockId {
-            height: sapling_activation_height,
+            height: block_with_trees,
             hash: vec![],
         })
         .await?
         .into_inner();
 
-    // Make sure we got block 1 back
-    assert_eq!(block_one.height, sapling_activation_height);
+    // Make sure we got block `block_with_trees` back
+    assert_eq!(get_block_response.height, block_with_trees);
+
+    // Testing the `trees` field of `GetBlock`.
+    assert_eq!(
+        get_block_response
+            .chain_metadata
+            .clone()
+            .unwrap()
+            .sapling_commitment_tree_size,
+        1170439
+    );
+    assert_eq!(
+        get_block_response
+            .chain_metadata
+            .unwrap()
+            .orchard_commitment_tree_size,
+        2
+    );
 
     // Call `GetBlockRange` with the range starting at block 1 up to block 10
     let mut block_range = rpc_client
