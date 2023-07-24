@@ -12,7 +12,7 @@ dependencies = [
  "arc-swap",
  "backtrace",
  "canonical-path",
- "clap 4.3.16",
+ "clap 4.3.19",
  "color-eyre",
  "fs-err",
  "once_cell",
@@ -744,9 +744,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.16"
+version = "4.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74bb1b4028935821b2d6b439bba2e970bdcf740832732437ead910c632e30d7d"
+checksum = "5fd304a20bff958a57f04c4e96a2e7594cc4490a0e809cbd48bb6437edaa452d"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -755,9 +755,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.3.16"
+version = "4.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ae467cbb0111869b765e13882a1dbbd6cb52f58203d8b80c44f667d4dd19843"
+checksum = "01c6a3f08f1fe5662a35cfe393aec09c4df95f60ee93b7556505260f75eee9e1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -916,7 +916,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.16",
+ "clap 4.3.19",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -3541,9 +3541,9 @@ dependencies = [
 
 [[package]]
 name = "rlimit"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b5b8be0bc0ef630d24f8fa836b3a3463479b2343b29f9a8fa905c71a8c7b69b"
+checksum = "3560f70f30a0f16d11d01ed078a07740fe6b489667abc7c7b029155d9f21c3d8"
 dependencies = [
  "libc",
 ]
@@ -5750,7 +5750,7 @@ dependencies = [
  "abscissa_core",
  "atty",
  "chrono",
- "clap 4.3.16",
+ "clap 4.3.19",
  "color-eyre",
  "console-subscriber",
  "dirs",
