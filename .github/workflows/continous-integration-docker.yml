@@ -189,7 +189,7 @@ jobs:
       - name: Run zebrad tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker -e NETWORK run --name zebrad-tests --tty -e ${{ inputs.network || vars.ZCASH_NETWORK }} ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
+          docker run -e NETWORK run --name zebrad-tests --tty -e ${{ inputs.network || vars.ZCASH_NETWORK }} ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
