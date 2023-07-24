@@ -39,7 +39,6 @@ jobs:
       dockerfile_target: runtime
       image_name: zebra
       tag_suffix: .experimental
-      network: Testnet
       features: "default-release-binaries getblocktemplate-rpcs"
       rust_log: info
     # This step needs access to Docker Hub secrets to run successfully

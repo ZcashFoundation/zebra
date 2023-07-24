@@ -3,10 +3,6 @@ name: Build docker image
 on:
   workflow_call:
     inputs:
-      network:
-        required: false
-        type: string
-        default: Mainnet
       image_name:
         required: true
         type: string
@@ -146,7 +142,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NETWORK=${{ inputs.network }}
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             RUST_LOG=${{ inputs.rust_log }}
             FEATURES=${{ inputs.features }}
