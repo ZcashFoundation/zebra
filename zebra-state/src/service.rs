@@ -707,7 +707,8 @@ impl StateService {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.finalized_block_write_sender.take());
-            self.prune_by_height();
+            // Remove any checkpoint-verified block hashes from `block_write_sent_hashes`.
+            self.block_write_sent_hashes = SentHashes::default();
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
             self.block_write_sent_hashes.can_fork_chain_at_hashes = true;
 
@@ -729,27 +730,19 @@ impl StateService {
         if self.finalized_block_write_sender.is_none() {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
-            self.prune_by_height();
+
+            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
+                "Finalized state must have at least one block before committing non-finalized state",
+            );
+
+            self.non_finalized_state_queued_blocks
+                .prune_by_height(finalized_tip_height);
+
+            self.block_write_sent_hashes
+                .prune_by_height(finalized_tip_height);
         }
 
         rsp_rx
-    }
-
-    /// Prunes queued blocks and sent hashes up to the finalized tip height.
-    ///
-    /// # Panics
-    ///
-    /// If called when the finalized state has no blocks.
-    fn prune_by_height(&mut self) {
-        let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-            "Finalized state must have at least one block before committing non-finalized state",
-        );
-
-        self.non_finalized_state_queued_blocks
-            .prune_by_height(finalized_tip_height);
-
-        self.block_write_sent_hashes
-            .prune_by_height(finalized_tip_height);
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
