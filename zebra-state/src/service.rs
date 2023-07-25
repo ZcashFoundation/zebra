@@ -907,6 +907,14 @@ impl Service<Request> for StateService {
             } else {
                 tracing::debug!(len = ?old_len, ?tip, "no utxo requests needed pruning");
             }
+
+            if self.finalized_block_write_sender.is_some()
+                && self
+                    .non_finalized_state_queued_blocks
+                    .has_queued_children(self.finalized_block_write_last_sent_hash)
+            {
+                // TODO: process queue
+            }
         }
 
         poll
