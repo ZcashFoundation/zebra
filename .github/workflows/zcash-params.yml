@@ -42,5 +42,4 @@ jobs:
       no_cache: ${{ inputs.no_cache || false }}
       rust_backtrace: full
       rust_lib_backtrace: full
-      colorbt_show_hidden: '1'
       rust_log: info
