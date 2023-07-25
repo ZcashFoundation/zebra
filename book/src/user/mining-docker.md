@@ -9,7 +9,8 @@ operations. For example, executing
 docker run -e MINER_ADDRESS="t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc" -p 8232:8232 zfnd/zebra:v1.1.0.experimental
 ```
 
-will start a container on Mainnet and bind port 8232 on your Docker host.
+will start a container on Mainnet and bind port 8232 on your Docker host. If you
+want to start generating blocks, you need to let Zebra sync first.
 
 Note that you must pass the address for your mining rewards via the
 `MINER_ADDRESS` environment variable when you are starting the container, as we
