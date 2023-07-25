@@ -711,23 +711,20 @@ impl StateService {
             self.block_write_sent_hashes = SentHashes::default();
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
             self.block_write_sent_hashes.can_fork_chain_at_hashes = true;
-
+            // Send blocks from non-finalized queue
+            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
                 "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
         }
-
         // TODO: avoid a temporary verification failure that can happen
         //       if the first non-finalized block arrives before the last finalized block is committed
         //       (#5125)
-        if !self.can_fork_chain_at(&parent_hash) {
+        else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
-            return rsp_rx;
-        }
-
-        if self.finalized_block_write_sender.is_none() {
+        } else if self.finalized_block_write_sender.is_none() {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
 
