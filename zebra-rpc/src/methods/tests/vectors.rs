@@ -1194,7 +1194,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     use crate::methods::{
         get_block_template_rpcs::{
-            config::Config,
             constants::{
                 GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
                 GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
@@ -1220,7 +1219,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
 
-    let mining_config = Config {
+    let mining_config = crate::config::mining::Config {
         miner_address,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
@@ -1659,9 +1658,7 @@ async fn rpc_getdifficulty() {
 
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
-    use crate::methods::{
-        get_block_template_rpcs::config::Config, tests::utils::fake_history_tree,
-    };
+    use crate::{config::mining::Config, methods::tests::utils::fake_history_tree};
 
     let _init_guard = zebra_test::init();
 
