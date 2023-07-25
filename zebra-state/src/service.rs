@@ -158,7 +158,7 @@ pub(crate) struct StateService {
 
     /// A set of block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
-    block_write_sent_hashes: SentHashes,
+    non_finalized_block_write_sent_hashes: SentHashes,
 
     /// If an invalid block is sent on `finalized_block_write_sender`
     /// or `non_finalized_block_write_sender`,
@@ -405,7 +405,7 @@ impl StateService {
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
             finalized_block_write_sender: Some(finalized_block_write_sender),
             finalized_block_write_last_sent_hash,
-            block_write_sent_hashes: SentHashes::default(),
+            non_finalized_block_write_sent_hashes: SentHashes::default(),
             invalid_block_write_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
@@ -468,7 +468,7 @@ impl StateService {
         // If we're close to the final checkpoint, make the block's UTXOs available for
         // semantic block verification, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
-            self.block_write_sent_hashes
+            self.non_finalized_block_write_sent_hashes
                 .add_finalized(&checkpoint_verified)
         }
 
@@ -647,7 +647,7 @@ impl StateService {
         let parent_hash = semantically_verrified.block.header.previous_block_hash;
 
         if self
-            .block_write_sent_hashes
+            .non_finalized_block_write_sent_hashes
             .contains(&semantically_verrified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -707,10 +707,11 @@ impl StateService {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.finalized_block_write_sender.take());
-            // Remove any checkpoint-verified block hashes from `block_write_sent_hashes`.
-            self.block_write_sent_hashes = SentHashes::default();
+            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
+            self.non_finalized_block_write_sent_hashes = SentHashes::default();
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-            self.block_write_sent_hashes.can_fork_chain_at_hashes = true;
+            self.non_finalized_block_write_sent_hashes
+                .can_fork_chain_at_hashes = true;
             // Send blocks from non-finalized queue
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
@@ -735,7 +736,7 @@ impl StateService {
             self.non_finalized_state_queued_blocks
                 .prune_by_height(finalized_tip_height);
 
-            self.block_write_sent_hashes
+            self.non_finalized_block_write_sent_hashes
                 .prune_by_height(finalized_tip_height);
         }
 
@@ -744,7 +745,8 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.block_write_sent_hashes.can_fork_chain_at(hash)
+        self.non_finalized_block_write_sent_hashes
+            .can_fork_chain_at(hash)
             || &self.read_service.db.finalized_tip_hash() == hash
     }
 
@@ -775,7 +777,8 @@ impl StateService {
                 for queued_child in queued_children {
                     let (SemanticallyVerifiedBlock { hash, .. }, _) = queued_child;
 
-                    self.block_write_sent_hashes.add(&queued_child.0);
+                    self.non_finalized_block_write_sent_hashes
+                        .add(&queued_child.0);
                     let send_result = non_finalized_block_write_sender.send(queued_child);
 
                     if let Err(SendError(queued)) = send_result {
@@ -796,7 +799,7 @@ impl StateService {
                 }
             }
 
-            self.block_write_sent_hashes.finish_batch();
+            self.non_finalized_block_write_sent_hashes.finish_batch();
         };
     }
 
@@ -1030,7 +1033,7 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
-                if let Some(utxo) = self.block_write_sent_hashes.utxo(&outpoint) {
+                if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
