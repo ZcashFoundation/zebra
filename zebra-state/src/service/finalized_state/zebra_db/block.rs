@@ -20,6 +20,7 @@ use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
@@ -275,6 +276,7 @@ impl ZebraDb {
     pub(in super::super) fn write_block(
         &mut self,
         finalized: SemanticallyVerifiedBlockWithTrees,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -376,6 +378,7 @@ impl ZebraDb {
             spent_utxos_by_out_loc,
             address_balances,
             self.finalized_value_pool(),
+            prev_note_commitment_trees,
         )?;
 
         self.db.write(batch)?;
@@ -427,6 +430,7 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
         // Commit block and transaction data.
@@ -457,7 +461,7 @@ impl DiskWriteBatch {
         )?;
         self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_trees_batch(zebra_db, finalized)?;
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(
