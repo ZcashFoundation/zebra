@@ -719,11 +719,7 @@ impl StateService {
                 "already finished committing checkpoint verified blocks: dropped duplicate block, \
                  block is already committed to the state",
             );
-        }
-        // TODO: avoid a temporary verification failure that can happen
-        //       if the first non-finalized block arrives before the last finalized block is committed
-        //       (#5125)
-        else if !self.can_fork_chain_at(&parent_hash) {
+        } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.finalized_block_write_sender.is_none() {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
