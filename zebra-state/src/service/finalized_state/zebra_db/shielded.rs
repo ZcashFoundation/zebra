@@ -338,40 +338,4 @@ impl DiskWriteBatch {
 
         self.prepare_history_batch(db, finalized)
     }
-
-    /// Prepare a database batch containing the initial note commitment trees,
-    /// and return it (without actually writing anything).
-    ///
-    /// This method never returns an error.
-    pub fn prepare_genesis_note_commitment_tree_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
-    ) {
-        let sprout_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        let SemanticallyVerifiedBlock { height, .. } = finalized;
-
-        // Insert empty note commitment trees. Note that these can't be
-        // used too early (e.g. the Orchard tree before Nu5 activates)
-        // since the block validation will make sure only appropriate
-        // transactions are allowed in a block.
-        self.zs_insert(
-            &sprout_tree_cf,
-            height,
-            sprout::tree::NoteCommitmentTree::default(),
-        );
-        self.zs_insert(
-            &sapling_tree_cf,
-            height,
-            sapling::tree::NoteCommitmentTree::default(),
-        );
-        self.zs_insert(
-            &orchard_tree_cf,
-            height,
-            orchard::tree::NoteCommitmentTree::default(),
-        );
-    }
 }

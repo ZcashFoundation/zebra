@@ -24,6 +24,7 @@ use zebra_chain::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
+    sprout,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -537,12 +538,11 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// If `finalized.block` is a genesis block,
-    /// prepare a database batch that finishes initializing the database,
-    /// and return `true` (without actually writing anything).
+    /// If `finalized.block` is a genesis block, prepares a database batch that finishes
+    /// initializing the database, and returns `true` without actually writing anything.
     ///
-    /// Since the genesis block's transactions are skipped,
-    /// the returned genesis batch should be written to the database immediately.
+    /// Since the genesis block's transactions are skipped, the returned genesis batch should be
+    /// written to the database immediately.
     ///
     /// If `finalized.block` is not a genesis block, does nothing.
     ///
@@ -552,14 +552,33 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &SemanticallyVerifiedBlock,
     ) -> bool {
-        let SemanticallyVerifiedBlock { block, .. } = finalized;
+        if finalized.block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
+            let sprout_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
+            let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
+            let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-            self.prepare_genesis_note_commitment_tree_batch(db, finalized);
+            // Insert empty note commitment trees. Note that these can't be used too early (e.g. the
+            // Orchard tree before Nu5 activates) since the block validation will make sure only
+            // appropriate transactions are allowed in a block.
+            self.zs_insert(
+                &sprout_tree_cf,
+                finalized.height,
+                sprout::tree::NoteCommitmentTree::default(),
+            );
+            self.zs_insert(
+                &sapling_tree_cf,
+                finalized.height,
+                sapling::tree::NoteCommitmentTree::default(),
+            );
+            self.zs_insert(
+                &orchard_tree_cf,
+                finalized.height,
+                orchard::tree::NoteCommitmentTree::default(),
+            );
 
-            return true;
+            true
+        } else {
+            false
         }
-
-        false
     }
 }
