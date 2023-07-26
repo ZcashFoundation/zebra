@@ -52,7 +52,7 @@ pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
-pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 2;
+pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 
 /// The name of the file containing the minor and patch database versions.
 ///
