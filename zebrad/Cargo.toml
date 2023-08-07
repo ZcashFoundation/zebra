@@ -213,7 +213,7 @@ log = "0.4.19"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
-indicatif = { version = "0.17.5", optional = true }
+indicatif = { version = "0.17.6", optional = true }
 
 # test feature proptest-impl
 proptest = { version = "1.2.0", optional = true }
