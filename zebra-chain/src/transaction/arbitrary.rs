@@ -171,8 +171,18 @@ impl Transaction {
                         expiry_height,
                         inputs,
                         outputs,
-                        sapling_shielded_data,
-                        orchard_shielded_data,
+                        sapling_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            sapling_shielded_data
+                        },
+                        orchard_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            orchard_shielded_data
+                        },
                     }
                 },
             )
