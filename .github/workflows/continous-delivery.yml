@@ -114,10 +114,6 @@ jobs:
       dockerfile_target: runtime
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
-      # We hard-code Mainnet here, because the config is modified before running zebrad
-      network: 'Mainnet'
-      rust_backtrace: '1'
-      zebra_skip_ipv6_tests: '1'
       rust_log: info
 
   # Test that Zebra works using the default config with the latest Zebra version.
@@ -276,7 +272,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
@@ -377,7 +373,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }},SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \

@@ -131,11 +131,8 @@ jobs:
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
       no_cache: ${{ inputs.no_cache || false }}
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       rust_backtrace: full
       rust_lib_backtrace: full
-      colorbt_show_hidden: '1'
-      zebra_skip_ipv6_tests: '1'
       rust_log: info
 
   # zebrad tests without cached state
@@ -169,7 +166,9 @@ jobs:
       - name: Run zebrad tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --include-ignored
+          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --include-ignored
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # zebrad tests without cached state with `getblocktemplate-rpcs` feature
   #
@@ -190,7 +189,9 @@ jobs:
       - name: Run zebrad tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
+          docker run -e NETWORK --name zebrad-tests --tty -e ${{ inputs.network || vars.ZCASH_NETWORK }} ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Run state tests with fake activation heights.
   #
@@ -217,9 +218,10 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
+          docker run -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
   #
@@ -240,7 +242,9 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          docker run -e NETWORK --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   #
@@ -261,9 +265,10 @@ jobs:
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
+          docker run -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test that Zebra works using the default config with the latest Zebra version
   test-configuration-file:
@@ -284,11 +289,13 @@ jobs:
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
+          docker run -e NETWORK --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
           EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop default-conf-tests
           docker logs default-conf-tests
           exit "$EXIT_STATUS"
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test that Zebra works using the $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
@@ -309,13 +316,14 @@ jobs:
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
+          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
           EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
           docker stop variable-conf-tests
           docker logs variable-conf-tests
           exit "$EXIT_STATUS"
         env:
           ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # END TODO: make the non-cached-state tests use:
   # network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -338,8 +346,7 @@ jobs:
       app_name: zebrad
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
       needs_zebra_state: false
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
@@ -368,8 +375,7 @@ jobs:
       app_name: zebrad
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
-      test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
@@ -399,8 +405,7 @@ jobs:
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: '-e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
-      network: 'Mainnet'
+      test_variables: '-e NETWORK=Mainnet -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -441,8 +446,7 @@ jobs:
       app_name: zebrad
       test_id: update-to-tip
       test_description: Test syncing to tip with a Zebra tip state
-      test_variables: '-e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
@@ -476,8 +480,7 @@ jobs:
       test_id: generate-checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: '-e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: 'Mainnet'
+      test_variables: '-e NETWORK=Mainnet -e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       # test-update-sync updates the disk on every PR, so we don't need to do it here
       saves_to_disk: false
@@ -512,8 +515,7 @@ jobs:
       test_id: full-sync-to-tip-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
-      test_variables: '-e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
-      network: 'Testnet'
+      test_variables: '-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
       is_long_test: true
@@ -557,8 +559,7 @@ jobs:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
-      test_variables: '-e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: 'Testnet'
+      test_variables: '-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
@@ -591,8 +592,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-full-sync
       test_description: Test lightwalletd full sync
-      test_variables: '-e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -631,8 +631,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-update-sync
       test_description: Test lightwalletd update sync with both states
-      test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
       # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
@@ -664,8 +663,7 @@ jobs:
       app_name: lightwalletd
       test_id: fully-synced-rpc
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: '-e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
@@ -690,8 +688,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-send-transactions
       test_description: Test sending transactions via lightwalletd
-      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -718,8 +715,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: '-e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -750,8 +746,7 @@ jobs:
       app_name: zebrad
       test_id: get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
-      test_variables: '-e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
@@ -777,8 +772,7 @@ jobs:
       app_name: zebrad
       test_id: submit-block
       test_description: Test submitting blocks via Zebra's rpc server
-      test_variables: '-e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
