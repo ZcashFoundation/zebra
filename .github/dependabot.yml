@@ -7,8 +7,8 @@ updates:
       interval: weekly
       day: monday
       timezone: America/New_York
-    # Limit dependabot to 2 PRs per reviewer, but assume one reviewer is busy or away
-    open-pull-requests-limit: 8
+    # Limit dependabot to 1 PR per reviewer
+    open-pull-requests-limit: 6
     labels:
       - 'C-trivial'
       - 'A-rust'
@@ -30,60 +30,45 @@ updates:
         crypto:
           patterns:
             - "bellman"
-            - "redjubjub"
-            - "reddsa"
+            # reddsa, redjubjub
+            - "red*"
             - "jubjub"
             - "group"
             - "bls12_381"
             - "blake*"
             - "secp256k1"
             - "sha2"
-        ed25519-zebra:
-          patterns:
-            - "ed25519*"
-            - "curve25519*"
-            - "x25519*"
-        tokio:
+            - "*25519*"
+            - "rand*"
+        async:
           patterns:
             - "tokio*"
             - "console-subscriber"
-        tower:
-          patterns:
             - "tower*"
-        dirs:
-          patterns:
-            - "dirs*"
-            - "directories*"
-            - "tempfile"
-        grpc:
-          patterns:
-            - "prost*"
-            - "tonic*"
-        vergen:
-          patterns:
-            - "vergen"
-            - "git*"
-            - "libgit*"
-        http:
-          patterns:
             - "hyper*"
             - "h2"
             - "reqwest"
-        tracing:
+            - "futures*"
+            - "pin-project*"
+        log:
           patterns:
             - "tracing*"
             - "log"
-        error:
-          patterns:
             - "*eyre*"
             - "thiserror"
             - "displaydoc"
             - "spandoc"
             - "owo-colors"
-        once-cell:
+            - "sentry*"
+            - "metrics*"
+            - "inferno"
+        concurrency:
           patterns:
             - "once_cell"
             - "lazy_static"
+            - "rayon*"
+            - "crossbeam*"
+            - "num_cpus"
         progress-bar:
           patterns:
             - "indicatif"
@@ -93,43 +78,49 @@ updates:
             - "chrono*"
             - "time*"
             - "humantime*"
-        cli:
+        app:
           patterns:
             - "abscissa*"
             - "structopt*"
             - "clap*"
             - "atty*"
-        flamegraph:
-          patterns:
-            - "tracing-flame"
-            - "inferno"
-        serde:
+            - "semver*"
+            # dirs, directories, directories-next
+            - "dir*"
+            - "vergen"
+            - "*git*"
+            - "toml*"
+            - "rlimit"
+        formats:
           patterns:
             - "serde*"
-        futures:
-          patterns:
-            - "futures*"
-        sentry:
-          patterns:
-            - "sentry*"
-        metrics:
-          patterns:
-            - "metrics*"
-        bitflags:
+            - "jsonrpc*"
+            - "hex*"
+            - "regex"
+            - "byteorder"
+            - "bytes"
+            - "bincode"    
+        data-structures:
           patterns:
             - "bitflags*"
-        jsonrpc:
-          patterns:
-            - "jsonrpc*"
-        rand:
-          patterns:
-            - "rand*"
-        pin-project:
-          patterns:
-            - "pin-project*"
-        proptest:
+            - "bitvec"
+            - "indexmap"
+            - "num-integer"
+            - "primitive-types"
+            - "uint"
+            - "tinyvec"
+            - "itertools"
+            - "ordered-map"
+            - "mset"
+        test:
           patterns:
             - "proptest*"
+            - "insta"
+            - "prost*"
+            - "tonic*"
+            - "tempfile"
+            - "static_assertions"
+            - "criterion"
   - package-ecosystem: github-actions
     directory: '/'
     schedule:
@@ -137,7 +128,7 @@ updates:
       interval: weekly
       day: wednesday
       timezone: America/New_York
-    open-pull-requests-limit: 6
+    open-pull-requests-limit: 4
     labels:
       - 'C-trivial'
       - 'A-devops'

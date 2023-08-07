@@ -1751,7 +1751,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
+                        tracing::debug!("attempting to validate and commit block proposal onto a cloned non-finalized state");
                         let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
                         // The previous block of a valid proposal must be on the best chain tip.

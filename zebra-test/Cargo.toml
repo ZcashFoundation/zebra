@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.27"
+version = "1.0.0-beta.28"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Test harnesses and test vectors for Zebra"
 license = "MIT OR Apache-2.0"
@@ -36,11 +36,11 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 humantime = "2.1.0"
 owo-colors = "3.5.0"
 spandoc = "0.2.2"
-thiserror = "1.0.43"
+thiserror = "1.0.44"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing = "0.1.37"
 
 [dev-dependencies]
-tempfile = "3.5.0"
+tempfile = "3.7.0"

@@ -1023,8 +1023,17 @@ impl fmt::Display for SerializedTransaction {
 
 impl fmt::Debug for SerializedTransaction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // A transaction with a lot of transfers can be extremely long in logs.
+        let mut data_truncated = hex::encode(&self.bytes);
+        if data_truncated.len() > 1003 {
+            let end = data_truncated.len() - 500;
+            // Replace the middle bytes with "...", but leave 500 bytes on either side.
+            // The data is hex, so this replacement won't panic.
+            data_truncated.replace_range(500..=end, "...");
+        }
+
         f.debug_tuple("SerializedTransaction")
-            .field(&hex::encode(&self.bytes))
+            .field(&data_truncated)
             .finish()
     }
 }

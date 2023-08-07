@@ -3,9 +3,6 @@ name: Build docker image
 on:
   workflow_call:
     inputs:
-      network:
-        required: false
-        type: string
       image_name:
         required: true
         type: string
@@ -24,12 +21,6 @@ on:
       rust_lib_backtrace:
         required: false
         type: string
-      colorbt_show_hidden:
-        required: false
-        type: string
-      zebra_skip_ipv6_tests:
-        required: false
-        type: string
       rust_log:
         required: false
         type: string
@@ -43,9 +34,6 @@ on:
       test_features:
         required: false
         default: "lightwalletd-grpc-tests zebra-checkpoints"
-        type: string
-      rpc_port:
-        required: false
         type: string
       tag_suffix:
         required: false
@@ -154,16 +142,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NETWORK=${{ inputs.network }}
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            RUST_BACKTRACE=${{ inputs.rust_backtrace }}
-            RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
-            COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
-            ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
             RUST_LOG=${{ inputs.rust_log }}
             FEATURES=${{ inputs.features }}
             TEST_FEATURES=${{ inputs.test_features }}
-            RPC_PORT=${{ inputs.rpc_port }}
           push: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options

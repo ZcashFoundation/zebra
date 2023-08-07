@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.27"
+version = "1.0.0-beta.28"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
@@ -54,12 +54,12 @@ lazy_static = "1.4.0"
 metrics = "0.21.1"
 mset = "0.1.1"
 regex = "1.9.1"
-rlimit = "0.10.0"
+rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.18"
-serde = { version = "1.0.168", features = ["serde_derive"] }
-tempfile = "3.5.0"
-thiserror = "1.0.43"
+serde = { version = "1.0.175", features = ["serde_derive"] }
+tempfile = "3.7.0"
+thiserror = "1.0.44"
 
 rayon = "1.7.0"
 tokio = { version = "1.29.1", features = ["rt-multi-thread", "sync", "tracing"] }
@@ -71,13 +71,13 @@ tracing = "0.1.37"
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
 serde_json = { version = "1.0.100", package = "serde_json", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.27", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.28", optional = true }
 proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 

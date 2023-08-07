@@ -80,7 +80,9 @@ ARG COLORBT_SHOW_HIDDEN
 ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
 ARG SHORT_SHA
-ENV SHORT_SHA=${SHORT_SHA:-unknown}
+# If this is not set, it must be the empty string, so Zebra can try an alternative git commit source:
+# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ENV SHORT_SHA=${SHORT_SHA:-}
 
 ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
