@@ -197,7 +197,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
             .expect("test data deserializes");
 
         state
-            .commit_finalized_direct(block.into(), "snapshot tests")
+            .commit_finalized_direct(block.into(), None, "snapshot tests")
             .expect("test block is valid");
 
         let mut settings = insta::Settings::clone_current();
@@ -220,10 +220,10 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         //
         // We only store the sprout tree for the tip by height, so we can't check sprout here.
         let sapling_tree = state
-            .sapling_note_commitment_tree_by_height(&block::Height::MIN)
+            .sapling_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has a Sapling tree");
         let orchard_tree = state
-            .orchard_note_commitment_tree_by_height(&block::Height::MIN)
+            .orchard_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has an Orchard tree");
 
         assert_eq!(*sapling_tree, sapling::tree::NoteCommitmentTree::default());
@@ -243,13 +243,13 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
         // Shielded
 
-        let stored_sprout_trees = state.sprout_note_commitments_full_map();
+        let stored_sprout_trees = state.sprout_trees_full_map();
         let mut stored_sapling_trees = Vec::new();
         let mut stored_orchard_trees = Vec::new();
 
-        let sprout_tree_at_tip = state.sprout_note_commitment_tree();
-        let sapling_tree_at_tip = state.sapling_note_commitment_tree();
-        let orchard_tree_at_tip = state.orchard_note_commitment_tree();
+        let sprout_tree_at_tip = state.sprout_tree();
+        let sapling_tree_at_tip = state.sapling_tree();
+        let orchard_tree_at_tip = state.orchard_tree();
 
         // Test the history tree.
         //
@@ -278,10 +278,10 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             //
             // TODO: test the rest of the shielded data (anchors, nullifiers)
             let sapling_tree_by_height = state
-                .sapling_note_commitment_tree_by_height(&query_height)
+                .sapling_tree_by_height(&query_height)
                 .expect("heights up to tip have Sapling trees");
             let orchard_tree_by_height = state
-                .orchard_note_commitment_tree_by_height(&query_height)
+                .orchard_tree_by_height(&query_height)
                 .expect("heights up to tip have Orchard trees");
 
             // We don't need to snapshot the heights,
