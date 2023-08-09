@@ -560,6 +560,7 @@ jobs:
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
       test_variables: '-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: "Testnet"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
