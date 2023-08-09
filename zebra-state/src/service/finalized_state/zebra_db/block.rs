@@ -20,9 +20,11 @@ use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
+    sprout,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -147,34 +149,28 @@ impl ZebraDb {
         }))
     }
 
-    /// Returns the Sapling
-    /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_tree(
+    pub fn sapling_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&sapling_tree_handle, &height)
+        self.sapling_tree_by_height(&height)
     }
 
-    /// Returns the Orchard
-    /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_tree(
+    pub fn orchard_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&orchard_tree_handle, &height)
+        self.orchard_tree_by_height(&height)
     }
 
     // Read tip block methods
@@ -281,6 +277,7 @@ impl ZebraDb {
     pub(in super::super) fn write_block(
         &mut self,
         finalized: SemanticallyVerifiedBlockWithTrees,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -375,13 +372,14 @@ impl ZebraDb {
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
-            &self.db,
+            self,
             &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
             self.finalized_value_pool(),
+            prev_note_commitment_trees,
         )?;
 
         self.db.write(batch)?;
@@ -426,14 +424,16 @@ impl DiskWriteBatch {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
         self.prepare_block_header_and_transaction_data_batch(db, &finalized.verified)?;
@@ -447,7 +447,7 @@ impl DiskWriteBatch {
         //
         // By returning early, Zebra commits the genesis block and transaction data,
         // but it ignores the genesis UTXO and value pool updates.
-        if self.prepare_genesis_batch(db, &finalized.verified) {
+        if self.prepare_genesis_batch(db, finalized) {
             return Ok(());
         }
 
@@ -462,7 +462,7 @@ impl DiskWriteBatch {
         )?;
         self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_note_commitment_batch(db, finalized)?;
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(
@@ -538,29 +538,71 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// If `finalized.block` is a genesis block,
-    /// prepare a database batch that finishes initializing the database,
-    /// and return `true` (without actually writing anything).
+    /// If `finalized.block` is a genesis block, prepares a database batch that finishes
+    /// initializing the database, and returns `true` without actually writing anything.
     ///
-    /// Since the genesis block's transactions are skipped,
-    /// the returned genesis batch should be written to the database immediately.
+    /// Since the genesis block's transactions are skipped, the returned genesis batch should be
+    /// written to the database immediately.
     ///
     /// If `finalized.block` is not a genesis block, does nothing.
     ///
-    /// This method never returns an error.
+    /// # Panics
+    ///
+    /// If `finalized.block` is a genesis block, and a note commitment tree in `finalized` doesn't
+    /// match its corresponding empty tree.
     pub fn prepare_genesis_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> bool {
-        let SemanticallyVerifiedBlock { block, .. } = finalized;
+        if finalized.verified.block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.sprout,
+                sprout::tree::NoteCommitmentTree::default(),
+                "The Sprout tree in the finalized block must match the empty Sprout tree."
+            );
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.sapling,
+                sapling::tree::NoteCommitmentTree::default(),
+                "The Sapling tree in the finalized block must match the empty Sapling tree."
+            );
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.orchard,
+                orchard::tree::NoteCommitmentTree::default(),
+                "The Orchard tree in the finalized block must match the empty Orchard tree."
+            );
 
-        if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-            self.prepare_genesis_note_commitment_tree_batch(db, finalized);
+            // We want to store the trees of the genesis block together with their roots, and since
+            // the trees cache the roots after their computation, we trigger the computation.
+            //
+            // At the time of writing this comment, the roots are precomputed before this function
+            // is called, so the roots should already be cached.
+            finalized.treestate.note_commitment_trees.sprout.root();
+            finalized.treestate.note_commitment_trees.sapling.root();
+            finalized.treestate.note_commitment_trees.orchard.root();
 
-            return true;
+            // Insert the empty note commitment trees. Note that these can't be used too early
+            // (e.g. the Orchard tree before Nu5 activates) since the block validation will make
+            // sure only appropriate transactions are allowed in a block.
+            self.zs_insert(
+                &db.cf_handle("sprout_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.sprout.clone(),
+            );
+            self.zs_insert(
+                &db.cf_handle("sapling_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.sapling.clone(),
+            );
+            self.zs_insert(
+                &db.cf_handle("orchard_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.orchard.clone(),
+            );
+
+            true
+        } else {
+            false
         }
-
-        false
     }
 }
