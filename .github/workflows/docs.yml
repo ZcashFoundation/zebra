@@ -38,7 +38,10 @@ jobs:
     name: Build and Deploy Docs (+beta)
     timeout-minutes: 45
     runs-on: ubuntu-latest
-    environment: production
+    environment: docs
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
