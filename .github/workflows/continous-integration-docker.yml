@@ -153,7 +153,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -179,7 +179,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -208,7 +208,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -232,7 +232,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -255,7 +255,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -278,7 +278,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -305,7 +305,7 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
