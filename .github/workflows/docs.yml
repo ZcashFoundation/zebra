@@ -38,6 +38,7 @@ jobs:
     name: Build and Deploy Docs (+beta)
     timeout-minutes: 45
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
@@ -72,14 +73,28 @@ jobs:
         run: |
           mdbook build book/
 
-      - name: Deploy Zebra book to firebase
-        uses: w9jds/firebase-action@v12.4.0
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
         with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_PATH: book/
-          PROJECT_ID: zebra-book-b535f
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+
+      - name: Deploy Zebra book to firebase
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: live
+          projectId: ${{ vars.GCP_PROJECT }}
+          target: zebra-docs-book
+          entryPoint: ./book/
 
       - name: Build external docs
         run: |
@@ -89,12 +104,13 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy external docs to firebase
-        uses: w9jds/firebase-action@v12.4.0
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID: zebra-doc-external
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: live
+          target: zebra-docs-external
+          projectId: ${{ vars.GCP_PROJECT }}
 
       - name: Build internal docs
         run: |
@@ -103,9 +119,10 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy internal docs to firebase
-        uses: w9jds/firebase-action@v12.4.0
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID: zebra-doc-internal-e9fd4
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: live
+          target: zebra-docs-internal
+          projectId: ${{ vars.GCP_PROJECT }}
