@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
 
 use crate::{
     request::{FinalizableBlock, SemanticallyVerifiedBlockWithTrees, Treestate},
@@ -168,10 +168,12 @@ impl FinalizedState {
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedCheckpointVerified,
-    ) -> Result<CheckpointVerifiedBlock, BoxError> {
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), BoxError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
+            prev_note_commitment_trees,
             "commit checkpoint-verified request",
         );
 
@@ -202,10 +204,10 @@ impl FinalizedState {
         // and the block write task.
         let result = result.map_err(CloneError::from);
 
-        let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
+        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash).map_err(BoxError::from));
 
         result
-            .map(|_hash| checkpoint_verified)
+            .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
             .map_err(BoxError::from)
     }
 
@@ -226,9 +228,10 @@ impl FinalizedState {
     pub fn commit_finalized_direct(
         &mut self,
         finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
-    ) -> Result<block::Hash, BoxError> {
-        let (height, hash, finalized) = match finalizable_block {
+    ) -> Result<(block::Hash, NoteCommitmentTrees), BoxError> {
+        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
@@ -240,9 +243,11 @@ impl FinalizedState {
 
                 let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
-                let mut note_commitment_trees = self.db.note_commitment_trees();
+                let prev_note_commitment_trees =
+                    prev_note_commitment_trees.unwrap_or_else(|| self.db.note_commitment_trees());
 
                 // Update the note commitment trees.
+                let mut note_commitment_trees = prev_note_commitment_trees.clone();
                 note_commitment_trees.update_trees_parallel(&block)?;
 
                 // Check the block commitment if the history tree was not
@@ -287,6 +292,7 @@ impl FinalizedState {
                             history_tree,
                         },
                     },
+                    Some(prev_note_commitment_trees),
                 )
             }
             FinalizableBlock::Contextual {
@@ -299,6 +305,7 @@ impl FinalizedState {
                     verified: contextually_verified.into(),
                     treestate,
                 },
+                prev_note_commitment_trees,
             ),
         };
 
@@ -331,8 +338,11 @@ impl FinalizedState {
 
         #[cfg(feature = "elasticsearch")]
         let finalized_block = finalized.verified.block.clone();
+        let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
-        let result = self.db.write_block(finalized, self.network, source);
+        let result =
+            self.db
+                .write_block(finalized, prev_note_commitment_trees, self.network, source);
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
@@ -360,7 +370,7 @@ impl FinalizedState {
             }
         }
 
-        result
+        result.map(|hash| (hash, note_commitment_trees))
     }
 
     #[cfg(feature = "elasticsearch")]
@@ -373,12 +383,31 @@ impl FinalizedState {
             let block_time = block.header.time.timestamp();
             let local_time = chrono::Utc::now().timestamp();
 
-            const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+            // Mainnet bulk size is small enough to avoid the elasticsearch 100mb content
+            // length limitation. MAX_BLOCK_BYTES = 2MB but each block use around 4.1 MB of JSON.
+            // Each block count as 2 as we send them with a operation/header line. A value of 48
+            // is 24 blocks.
+            const MAINNET_AWAY_FROM_TIP_BULK_SIZE: usize = 48;
+
+            // Testnet bulk size is larger as blocks are generally smaller in the testnet.
+            // A value of 800 is 400 blocks as we are not counting the operation line.
+            const TESTNET_AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+
+            // The number of blocks the bulk will have when we are in sync.
+            // A value of 2 means only 1 block as we want to insert them as soon as we get
+            // them for a real time experience. This is the same for mainnet and testnet.
             const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
+
+            // We consider in sync when the local time and the blockchain time difference is
+            // less than this number of seconds.
             const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
-            // If we are close to the tip index one block per bulk call.
-            let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
+            let mut blocks_size_to_dump = match self.network {
+                Network::Mainnet => MAINNET_AWAY_FROM_TIP_BULK_SIZE,
+                Network::Testnet => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
+            };
+
+            // If we are close to the tip, index one block per bulk call.
             if local_time - block_time < CLOSE_TO_TIP_SECONDS {
                 blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
             }
@@ -419,12 +448,12 @@ impl FinalizedState {
                     let response_body = response
                         .json::<serde_json::Value>()
                         .await
-                        .expect("ES response parsing to a json_body should never fail");
+                        .expect("ES response parsing error. Maybe we are sending more than 100 mb of data (`http.max_content_length`)");
                     let errors = response_body["errors"].as_bool().unwrap_or(true);
                     assert!(!errors, "{}", format!("ES error: {response_body}"));
                 });
 
-                // clean the block storage.
+                // Clean the block storage.
                 self.elastic_blocks.clear();
             }
         }

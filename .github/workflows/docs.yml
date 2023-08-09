@@ -56,7 +56,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.5.1
+      - uses: Swatinem/rust-cache@v2.6.0
 
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v1.2.0

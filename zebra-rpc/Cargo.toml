@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.27"
+version = "1.0.0-beta.28"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -60,7 +60,7 @@ tower = "0.4.13"
 tracing = "0.1.37"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.168", features = ["serde_derive"] }
+serde = { version = "1.0.175", features = ["serde_derive"] }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }
@@ -70,19 +70,19 @@ zcash_address = { version = "0.3.0", optional = true }
 # Test-only feature proptest-impl
 proptest = { version = "1.2.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.27", features = ["json-conversion"] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.27" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.27" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.27" }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.27" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.27" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28", features = ["json-conversion"] }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.28" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.28" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.28" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.28" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.28" }
 
 [dev-dependencies]
 insta = { version = "1.31.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.2.0"
 
-thiserror = "1.0.43"
+thiserror = "1.0.44"
 tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

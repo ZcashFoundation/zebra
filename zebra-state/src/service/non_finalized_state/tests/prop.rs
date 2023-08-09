@@ -170,14 +170,12 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             empty_tree,
             ValueBalance::zero(),
         );
-        for block in chain.iter().skip(1).cloned() {
+
+        for block in chain.iter().cloned() {
             let block =
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
-            full_chain = full_chain
-                .push(block.clone())
-                .expect("full chain push is valid");
 
-            // Check some other properties of generated chains.
+            // Check some properties of the genesis block and don't push it to the chain.
             if block.height == block::Height(0) {
                 prop_assert_eq!(
                     block
@@ -188,11 +186,13 @@ fn forked_equals_pushed_genesis() -> Result<()> {
                         .filter_map(|i| i.outpoint())
                         .count(),
                     0,
-                    "unexpected transparent prevout input at height {:?}: \
-                            genesis transparent outputs must be ignored, \
-                            so there can not be any spends in the genesis block",
-                    block.height,
+                    "Unexpected transparent prevout input at height 0. Genesis transparent outputs \
+                        must be ignored, so there can not be any spends in the genesis block.",
                 );
+            } else {
+                full_chain = full_chain
+                    .push(block)
+                    .expect("full chain push is valid");
             }
         }
 

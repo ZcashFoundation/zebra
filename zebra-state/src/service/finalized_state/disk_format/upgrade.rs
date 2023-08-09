@@ -218,6 +218,9 @@ impl DbFormatChange {
     ///
     /// If `cancel_receiver` gets a message, or its sender is dropped,
     /// the format change stops running early.
+    ///
+    /// See the format upgrade design docs for more details:
+    /// <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design>
     //
     // New format upgrades must be added to the *end* of this method.
     fn apply_format_upgrade(
@@ -259,8 +262,6 @@ impl DbFormatChange {
         };
 
         // Example format change.
-        //
-        // TODO: link to format upgrade instructions doc here
 
         // Check if we need to do this upgrade.
         let database_format_add_format_change_task =
@@ -286,18 +287,18 @@ impl DbFormatChange {
 
                 upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
             }
-        }
 
-        // At the end of each format upgrade, the database is marked as upgraded to that version.
-        // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
-        // optimisation.
-        info!(
-            ?initial_tip_height,
-            ?newer_running_version,
-            ?older_disk_version,
-            "marking database as upgraded"
-        );
-        Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+            // At the end of each format upgrade, the database is marked as upgraded to that version.
+            // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
+            // optimisation.
+            info!(
+                ?initial_tip_height,
+                ?newer_running_version,
+                ?older_disk_version,
+                "marking database as upgraded"
+            );
+            Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+        }
 
         // End of example format change.
 

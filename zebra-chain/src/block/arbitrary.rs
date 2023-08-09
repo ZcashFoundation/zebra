@@ -349,7 +349,9 @@ impl Arbitrary for Block {
 
     fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
         let transactions_strategy =
-            (1..MAX_ARBITRARY_ITEMS).prop_flat_map(move |transaction_count| {
+            // Generate a random number transactions. A coinbase tx is always generated, so if
+            // `transaction_count` is zero, the block will contain only the coinbase tx.
+            (0..MAX_ARBITRARY_ITEMS).prop_flat_map(move |transaction_count| {
                 Transaction::vec_strategy(ledger_state, transaction_count)
             });
 

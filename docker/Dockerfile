@@ -80,7 +80,9 @@ ARG COLORBT_SHOW_HIDDEN
 ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
 ARG SHORT_SHA
-ENV SHORT_SHA=${SHORT_SHA:-unknown}
+# If this is not set, it must be the empty string, so Zebra can try an alternative git commit source:
+# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ENV SHORT_SHA=${SHORT_SHA:-}
 
 ENV CARGO_HOME="/opt/zebrad/.cargo/"
 
@@ -91,8 +93,8 @@ ENV CARGO_HOME="/opt/zebrad/.cargo/"
 FROM deps AS tests
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 # Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
-COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
-COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd /usr/local/bin
+COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/zcash-params:edge /root/.zcash-params /root/.zcash-params
+COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/lightwalletd:edge /opt/lightwalletd /usr/local/bin
 
 # cargo uses timestamps for its cache, so they need to be in this order:
 # unmodified source files < previous build cache < modified source files
@@ -174,7 +176,7 @@ RUN chmod u+x /runtime-entrypoint.sh
 FROM debian:bullseye-slim AS runtime
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
 COPY --from=release /runtime-entrypoint.sh /
-COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
+COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/zcash-params:edge /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
