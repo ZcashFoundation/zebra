@@ -38,7 +38,7 @@ where
     // in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
         .and_then(|chain| chain.as_ref().sapling_tree(hash_or_height))
-        .or_else(|| db.sapling_tree(hash_or_height))
+        .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
 }
 
 /// Returns the Orchard
@@ -59,7 +59,7 @@ where
     // in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
         .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height))
-        .or_else(|| db.orchard_tree(hash_or_height))
+        .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
