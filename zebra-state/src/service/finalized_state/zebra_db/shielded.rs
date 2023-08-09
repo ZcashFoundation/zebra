@@ -338,4 +338,22 @@ impl DiskWriteBatch {
 
         self.prepare_history_batch(db, finalized)
     }
+
+    /// Deletes the Sapling note commitment tree at the given [`Height`].
+    pub fn delete_sapling_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&sapling_tree_cf, height);
+    }
+
+    /// Deletes the Orchard note commitment tree at the given [`Height`].
+    pub fn delete_orchard_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&orchard_tree_cf, height);
+    }
 }
