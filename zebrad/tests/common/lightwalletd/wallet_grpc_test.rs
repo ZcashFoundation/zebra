@@ -166,6 +166,8 @@ pub async fn run() -> Result<()> {
     // Make sure we got block `block_with_trees` back
     assert_eq!(get_block_response.height, block_with_trees);
 
+    println!("{:?}", get_block_response.chain_metadata.clone());
+
     // Testing the `trees` field of `GetBlock`.
     assert_eq!(
         get_block_response
