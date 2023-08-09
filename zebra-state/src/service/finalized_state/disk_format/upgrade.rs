@@ -19,7 +19,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk, database_format_version_in_code,
-    database_format_version_on_disk, service::finalized_state::ZebraDb, Config,
+    database_format_version_on_disk, service::finalized_state::ZebraDb, Config, DiskWriteBatch,
 };
 
 /// The kind of database format change we're performing.
@@ -261,14 +261,17 @@ impl DbFormatChange {
             return;
         };
 
-        // Example format change.
+        // Start of a database upgrade task.
 
-        // Check if we need to do this upgrade.
-        let database_format_add_format_change_task =
-            Version::parse("25.0.2").expect("version constant is valid");
+        let version_for_pruning_trees =
+            Version::parse("25.1.0").expect("Hardcoded version string should be valid.");
 
-        if older_disk_version < database_format_add_format_change_task {
-            let mut upgrade_height = Height(0);
+        // Check if we need to prune the note commitment trees in the database.
+        if older_disk_version < version_for_pruning_trees {
+            let mut height = Height(0);
+            let mut prev_sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+            let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
+            height = height.next();
 
             // Go through every height from genesis to the tip of the old version.
             // If the state was downgraded, some heights might already be upgraded.
@@ -277,15 +280,35 @@ impl DbFormatChange {
             //
             // Keep upgrading until the initial database has been upgraded,
             // or this task is cancelled by a shutdown.
-            while upgrade_height <= initial_tip_height
+            while height <= initial_tip_height
                 && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
             {
-                // TODO: Do one format upgrade step here
-                //
-                // This fake step just shows how to access the database.
-                let _replace_me_ = upgrade_db.tip();
+                let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+                let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
-                upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
+                let mut batch = DiskWriteBatch::new(network);
+                let mut write_batch = false;
+
+                if prev_sapling_tree == sapling_tree {
+                    batch.delete_sapling_tree(&upgrade_db, &height);
+                    write_batch = true;
+                }
+
+                if prev_orchard_tree == orchard_tree {
+                    batch.delete_orchard_tree(&upgrade_db, &height);
+                    write_batch = true;
+                }
+
+                if write_batch {
+                    upgrade_db
+                        .write(batch)
+                        .expect("Deleting note commitment trees should always succeed.");
+                }
+
+                prev_orchard_tree = orchard_tree;
+                prev_sapling_tree = sapling_tree;
+
+                height = height.next();
             }
 
             // At the end of each format upgrade, the database is marked as upgraded to that version.
@@ -297,10 +320,10 @@ impl DbFormatChange {
                 ?older_disk_version,
                 "marking database as upgraded"
             );
-            Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
-        // End of example format change.
+        // End of a database upgrade task.
 
         // # New Upgrades Usually Go Here
         //
