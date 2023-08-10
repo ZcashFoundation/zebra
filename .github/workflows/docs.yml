@@ -92,7 +92,7 @@ jobs:
 
       - name: Build Zebra book
         run: |
-          mdbook build book --dest-dir target/book
+          mdbook build book --dest-dir $(pwd)/target/book
 
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
