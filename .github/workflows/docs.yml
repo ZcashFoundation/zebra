@@ -5,7 +5,7 @@ name: Docs
 # then queue the latest pending workflow, cancelling any workflows in between
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 on:
   workflow_dispatch:
