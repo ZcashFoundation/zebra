@@ -69,6 +69,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup mdBook
+        uses: jontze/action-mdbook@v2.2.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mdbook-version: '~0.4'
+          use-linkcheck: true
+          use-mermaid: true
+
+      - name: Build Zebra book
+        run: |
+          mdbook build book --dest-dir $(pwd)/target/book
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -81,18 +93,6 @@ jobs:
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
           echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
-
-      - name: Setup mdBook
-        uses: jontze/action-mdbook@v2.2.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          mdbook-version: '~0.4'
-          use-linkcheck: true
-          use-mermaid: true
-
-      - name: Build Zebra book
-        run: |
-          mdbook build book --dest-dir $(pwd)/target/book
 
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -119,19 +119,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
-
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
-      - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
-
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0
         with:
@@ -151,6 +138,19 @@ jobs:
           cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir target/external
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy external docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -177,19 +177,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
-
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
-      - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
-
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0
         with:
@@ -208,6 +195,19 @@ jobs:
           cargo doc --no-deps --workspace --all-features --document-private-items --target-dir target/internal
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy internal docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
