@@ -287,18 +287,18 @@ impl DbFormatChange {
 
                 upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
             }
-        }
 
-        // At the end of each format upgrade, the database is marked as upgraded to that version.
-        // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
-        // optimisation.
-        info!(
-            ?initial_tip_height,
-            ?newer_running_version,
-            ?older_disk_version,
-            "marking database as upgraded"
-        );
-        Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+            // At the end of each format upgrade, the database is marked as upgraded to that version.
+            // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
+            // optimisation.
+            info!(
+                ?initial_tip_height,
+                ?newer_running_version,
+                ?older_disk_version,
+                "marking database as upgraded"
+            );
+            Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
+        }
 
         // End of example format change.
 

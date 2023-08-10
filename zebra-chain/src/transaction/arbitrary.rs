@@ -109,20 +109,32 @@ impl Transaction {
             option::of(any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
         )
             .prop_map(
-                |(
+                move |(
                     inputs,
                     outputs,
                     lock_time,
                     expiry_height,
                     joinsplit_data,
                     sapling_shielded_data,
-                )| Transaction::V4 {
-                    inputs,
-                    outputs,
-                    lock_time,
-                    expiry_height,
-                    joinsplit_data,
-                    sapling_shielded_data,
+                )| {
+                    Transaction::V4 {
+                        inputs,
+                        outputs,
+                        lock_time,
+                        expiry_height,
+                        joinsplit_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any joinsplits.
+                            None
+                        } else {
+                            joinsplit_data
+                        },
+                        sapling_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            sapling_shielded_data
+                        },
+                    }
                 },
             )
             .boxed()
@@ -159,8 +171,18 @@ impl Transaction {
                         expiry_height,
                         inputs,
                         outputs,
-                        sapling_shielded_data,
-                        orchard_shielded_data,
+                        sapling_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            sapling_shielded_data
+                        },
+                        orchard_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            orchard_shielded_data
+                        },
                     }
                 },
             )

@@ -29,12 +29,13 @@ fn blocks_with_v5_transactions() -> Result<()> {
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
                 let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
-                let hash = state.commit_finalized_direct(
+                let (hash, _) = state.commit_finalized_direct(
                     checkpoint_verified.into(),
+                    None,
                     "blocks_with_v5_transactions test"
-                );
+                ).unwrap();
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
-                prop_assert_eq!(hash.unwrap(), block.hash);
+                prop_assert_eq!(hash, block.hash);
                 height = Height(height.0 + 1);
             }
     });
@@ -86,6 +87,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                             let checkpoint_verified = CheckpointVerifiedBlock::from(block);
                             state.commit_finalized_direct(
                                 checkpoint_verified.into(),
+                                None,
                                 "all_upgrades test"
                             ).expect_err("Must fail commitment check");
                             failure_count += 1;
@@ -93,8 +95,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                     _ => {},
                 }
                 let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
-                let hash = state.commit_finalized_direct(
+                let (hash, _) = state.commit_finalized_direct(
                     checkpoint_verified.into(),
+                    None,
                     "all_upgrades test"
                 ).unwrap();
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
