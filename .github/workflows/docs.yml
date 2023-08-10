@@ -4,7 +4,7 @@ name: Docs
 # already in process, won't get cancelled. Instead, we let the first to complete
 # then queue the latest pending workflow, cancelling any workflows in between
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 on:
