@@ -97,7 +97,6 @@ jobs:
           channelId: live
           projectId: ${{ vars.GCP_PROJECT }}
           target: zebra-docs-book
-          entryPoint: ./book/
 
       - name: Build external docs
         run: |
