@@ -2,7 +2,7 @@
   "hosting": [
     {
       "public": "target/external",
-      "target": "zebra-docs-external",
+      "target": "docs-external",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -24,7 +24,7 @@
     },
     {
       "public": "target/internal",
-      "target": "zebra-docs-internal",
+      "target": "docs-internal",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -46,7 +46,7 @@
     },
     {
       "public": "target/book",
-      "target": "zebra-docs-book",
+      "target": "docs-book",
       "ignore": [
         "firebase.json",
         "**/.*",
