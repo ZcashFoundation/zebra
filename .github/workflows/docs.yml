@@ -80,7 +80,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Setup mdBook
         uses: jontze/action-mdbook@v2.2.1
@@ -130,7 +130,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0
@@ -188,7 +188,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0

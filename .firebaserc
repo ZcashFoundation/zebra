@@ -1,0 +1,21 @@
+{
+  "projects": {
+    "default": "zfnd-prod-zebra"
+  },
+  "targets": {
+    "zfnd-prod-zebra": {
+      "hosting": {
+        "docs-book": [
+          "zebra-docs-book"
+        ],
+        "docs-external": [
+          "zebra-docs-external"
+        ],
+        "docs-internal": [
+          "zebra-docs-internal"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
