@@ -104,7 +104,7 @@ jobs:
 
   build-docs-external:
     name: Build and Deploy Zebra External Docs
-    timeout-minutes: 5
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     environment: docs
     permissions:
@@ -161,7 +161,7 @@ jobs:
 
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
-    timeout-minutes: 5
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     environment: docs
     permissions:
