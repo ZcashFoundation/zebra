@@ -61,6 +61,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+      pull-requests: write
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
@@ -109,6 +110,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+      pull-requests: write
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
@@ -165,6 +167,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+      pull-requests: write
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
