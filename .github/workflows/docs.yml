@@ -92,7 +92,8 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -150,7 +151,8 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy external docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -207,7 +209,8 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy internal docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
