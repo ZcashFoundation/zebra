@@ -79,7 +79,7 @@ jobs:
 
       - name: Build Zebra book
         run: |
-          mdbook build book --dest-dir $(pwd)/target/book
+          mdbook build book --dest-dir "$(pwd)"/target/book
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -92,7 +92,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -150,7 +150,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy external docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -207,7 +207,7 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
       - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "GCP_FIREBASE_SA=$(< ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy internal docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
