@@ -152,7 +152,7 @@ fn fetch_sprout_final_treestates(
 
         let input_tree = parent_chain
             .and_then(|chain| chain.sprout_trees_by_anchor.get(&joinsplit.anchor).cloned())
-            .or_else(|| finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor));
+            .or_else(|| finalized_state.sprout_tree_by_anchor(&joinsplit.anchor));
 
         if let Some(input_tree) = input_tree {
             sprout_final_treestates.insert(joinsplit.anchor, input_tree);

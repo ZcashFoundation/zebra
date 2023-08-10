@@ -7,7 +7,9 @@ expression: stored_sapling_trees
     inner: Frontier(
       frontier: None,
     ),
-    cached_root: None,
+    cached_root: Some(Root(Fq(
+      bytes: (251, 194, 244, 48, 12, 1, 240, 183, 130, 13, 0, 227, 52, 124, 141, 164, 238, 97, 70, 116, 55, 108, 188, 69, 53, 157, 170, 84, 249, 181, 73, 62),
+    ))),
   )),
   (Height(1), NoteCommitmentTree(
     inner: Frontier(
