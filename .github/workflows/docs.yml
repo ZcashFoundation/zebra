@@ -48,6 +48,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0
         with:
@@ -74,20 +87,7 @@ jobs:
 
       - name: Build Zebra book
         run: |
-          mdbook build book/
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
-
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
-      - run: |
-          echo "GCP_FIREBASE_SA=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | tr -d '\n')" >> $GITHUB_ENV
+          mdbook build book --dest-dir target/book
 
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
@@ -102,7 +102,7 @@ jobs:
       - name: Build external docs
         run: |
           # Exclude zebra-utils, it is not for library or app users
-          cargo doc --no-deps --workspace --all-features --exclude zebra-utils
+          cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir target/external
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
@@ -117,7 +117,7 @@ jobs:
 
       - name: Build internal docs
         run: |
-          cargo doc --no-deps --workspace --all-features --document-private-items
+          cargo doc --no-deps --workspace --all-features --document-private-items --target-dir target/internal
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
