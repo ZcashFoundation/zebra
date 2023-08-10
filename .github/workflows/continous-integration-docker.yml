@@ -516,6 +516,7 @@ jobs:
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: '-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
+      network: "Testnet"
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
       is_long_test: true
@@ -560,6 +561,7 @@ jobs:
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
       test_variables: '-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      network: "Testnet"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       # we don't have a test-update-sync-testnet job, so we need to update the disk here
