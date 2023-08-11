@@ -142,11 +142,6 @@ impl ZebraDb {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
-        //
-        // # Compatibility
-        //
-        // Allow older Zebra versions to read future database formats, after note commitment trees
-        // have been deduplicated. See ticket #6642 for details.
         let (_first_duplicate_height, tree) = self
             .db
             .zs_prev_key_value_back_from(&sapling_trees, height)
@@ -195,9 +190,7 @@ impl ZebraDb {
 
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        // # Compatibility
-        //
-        // Allow older Zebra versions to read future database formats. See ticket #6642 for details.
+        // If we know there must be a tree, search backwards for it.
         let (_first_duplicate_height, tree) = self
             .db
             .zs_prev_key_value_back_from(&orchard_trees, height)
