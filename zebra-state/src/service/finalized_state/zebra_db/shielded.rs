@@ -157,6 +157,15 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
+    /// Deletes the Sapling note commitment tree at the given [`Height`].
+    pub fn delete_sapling_tree(&self, height: &Height) {
+        let mut batch = DiskWriteBatch::new();
+        batch.delete_sapling_tree(self, height);
+        self.db
+            .write(batch)
+            .expect("Deleting a Sapling note commitment tree should always succeed.");
+    }
+
     /// Returns the Orchard note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn orchard_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
@@ -197,6 +206,15 @@ impl ZebraDb {
             );
 
         Some(Arc::new(tree))
+    }
+
+    /// Deletes the Sapling note commitment tree at the given [`Height`].
+    pub fn delete_orchard_tree(&self, height: &Height) {
+        let mut batch = DiskWriteBatch::new();
+        batch.delete_orchard_tree(self, height);
+        self.db
+            .write(batch)
+            .expect("Deleting an Orchard note commitment tree should always succeed.");
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
