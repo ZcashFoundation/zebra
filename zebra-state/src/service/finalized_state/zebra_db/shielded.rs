@@ -14,6 +14,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use rocksdb::AsColumnFamilyRef;
 use zebra_chain::{
     block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
     transaction::Transaction,
@@ -152,15 +153,6 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Deletes the Sapling note commitment tree at the given [`Height`].
-    pub fn delete_sapling_tree(&self, height: &Height) {
-        let mut batch = DiskWriteBatch::new();
-        batch.delete_sapling_tree(self, height);
-        self.db
-            .write(batch)
-            .expect("Deleting a Sapling note commitment tree should always succeed.");
-    }
-
     /// Returns the Orchard note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn orchard_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
@@ -199,15 +191,6 @@ impl ZebraDb {
             );
 
         Some(Arc::new(tree))
-    }
-
-    /// Deletes the Sapling note commitment tree at the given [`Height`].
-    pub fn delete_orchard_tree(&self, height: &Height) {
-        let mut batch = DiskWriteBatch::new();
-        batch.delete_orchard_tree(self, height);
-        self.db
-            .write(batch)
-            .expect("Deleting an Orchard note commitment tree should always succeed.");
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
@@ -351,20 +334,12 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the Sapling note commitment tree at the given [`Height`].
-    pub fn delete_sapling_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
-        let sapling_tree_cf = zebra_db
-            .db
-            .cf_handle("sapling_note_commitment_tree")
-            .unwrap();
-        self.zs_delete(&sapling_tree_cf, height);
+    pub fn delete_sapling_tree(&mut self, tree_cf: &impl AsColumnFamilyRef, height: &Height) {
+        self.zs_delete(tree_cf, height);
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].
-    pub fn delete_orchard_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
-        let orchard_tree_cf = zebra_db
-            .db
-            .cf_handle("orchard_note_commitment_tree")
-            .unwrap();
-        self.zs_delete(&orchard_tree_cf, height);
+    pub fn delete_orchard_tree(&mut self, tree_cf: &impl AsColumnFamilyRef, height: &Height) {
+        self.zs_delete(tree_cf, height);
     }
 }

@@ -18,8 +18,10 @@ use zebra_chain::{
 use DbFormatChange::*;
 
 use crate::{
-    config::write_database_format_version_to_disk, database_format_version_in_code,
-    database_format_version_on_disk, service::finalized_state::ZebraDb, Config,
+    config::write_database_format_version_to_disk,
+    database_format_version_in_code, database_format_version_on_disk,
+    service::finalized_state::{DiskWriteBatch, ZebraDb},
+    Config,
 };
 
 /// The kind of database format change we're performing.
@@ -271,6 +273,15 @@ impl DbFormatChange {
             let mut height = Height(0);
             let mut prev_sapling_tree = upgrade_db.sapling_tree_by_height(&height);
             let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
+            let sapling_cf = upgrade_db
+                .db
+                .cf_handle("sapling_note_commitment_tree")
+                .unwrap();
+            let orchard_cf = upgrade_db
+                .db
+                .cf_handle("orchard_note_commitment_tree")
+                .unwrap();
+
             height = height.next();
 
             // Go through every height from genesis to the tip of the old version. If the state was
@@ -285,25 +296,33 @@ impl DbFormatChange {
                     return;
                 }
 
-                let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
-                let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
+                let mut batch = DiskWriteBatch::new();
+                for _ in 0..1_000 {
+                    if height >= initial_tip_height {
+                        break;
+                    }
+                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+                    let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
-                if prev_sapling_tree == sapling_tree {
-                    upgrade_db.delete_sapling_tree(&height);
+                    if prev_sapling_tree == sapling_tree {
+                        batch.delete_sapling_tree(&sapling_cf, &height);
+                    }
+
+                    if prev_orchard_tree == orchard_tree {
+                        batch.delete_orchard_tree(&orchard_cf, &height);
+                    }
+
+                    prev_orchard_tree = orchard_tree;
+                    prev_sapling_tree = sapling_tree;
+
+                    height = height.next();
                 }
 
-                if prev_orchard_tree == orchard_tree {
-                    upgrade_db.delete_orchard_tree(&height);
-                }
+                upgrade_db
+                    .write_batch(batch)
+                    .expect("Deleting note commitment trees should always succeed.");
 
-                prev_orchard_tree = orchard_tree;
-                prev_sapling_tree = sapling_tree;
-
-                height = height.next();
-
-                if height.0 % 10_000 == 0 {
-                    warn!(?height, "Database database upgrade is at:");
-                }
+                warn!(?height, "Database upgrade is at:");
             }
 
             // At the end of each format upgrade, we mark the database as upgraded to that version.
