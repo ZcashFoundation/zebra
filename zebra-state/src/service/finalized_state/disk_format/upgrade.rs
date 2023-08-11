@@ -19,7 +19,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk, database_format_version_in_code,
-    database_format_version_on_disk, service::finalized_state::ZebraDb, Config, DiskWriteBatch,
+    database_format_version_on_disk, service::finalized_state::ZebraDb, Config,
 };
 
 /// The kind of database format change we're performing.
@@ -284,30 +284,6 @@ impl DbFormatChange {
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
-
-                let batch = DiskWriteBatch::new();
-
-                for _ in 0..1000 {
-                    if height >= initial_tip_height {
-                        break;
-                    }
-                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
-                    let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
-
-                    if prev_sapling_tree == sapling_tree {
-                        batch.delete_sapling_tree(&height);
-                    }
-
-                    if prev_orchard_tree == orchard_tree {
-                        batch.delete_orchard_tree(&height);
-                    }
-
-                    prev_orchard_tree = orchard_tree;
-                    prev_sapling_tree = sapling_tree;
-
-                    height = height.next();
-                }
-                upgrade_db.write(batch);
 
                 let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
                 let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
