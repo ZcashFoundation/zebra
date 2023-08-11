@@ -389,6 +389,11 @@ impl ZebraDb {
 
         Ok(finalized.verified.hash)
     }
+
+    /// Writes the given batch to the database.
+    pub(crate) fn write_batch(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
+        self.db.write(batch)
+    }
 }
 
 /// Lookup the output location for an outpoint.
