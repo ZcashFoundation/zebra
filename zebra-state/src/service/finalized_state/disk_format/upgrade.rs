@@ -273,54 +273,71 @@ impl DbFormatChange {
             let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
             height = height.next();
 
-            // Go through every height from genesis to the tip of the old version.
-            // If the state was downgraded, some heights might already be upgraded.
-            // (Since the upgraded format is added to the tip, the database can switch between
-            // lower and higher versions at any block.)
+            // Go through every height from genesis to the tip of the old version. If the state was
+            // downgraded, some heights might already be upgraded. (Since the upgraded format is
+            // added to the tip, the database can switch between lower and higher versions at any
+            // block.)
             //
-            // Keep upgrading until the initial database has been upgraded,
-            // or this task is cancelled by a shutdown.
-            while height <= initial_tip_height
-                && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
-            {
+            // Keep upgrading until the initial database has been upgraded.
+            while height <= initial_tip_height {
+                // Return early if the task is cancelled by a shutdown.
+                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    return;
+                }
+
+                let batch = DiskWriteBatch::new();
+
+                for _ in 0..1000 {
+                    if height >= initial_tip_height {
+                        break;
+                    }
+                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+                    let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
+
+                    if prev_sapling_tree == sapling_tree {
+                        batch.delete_sapling_tree(&height);
+                    }
+
+                    if prev_orchard_tree == orchard_tree {
+                        batch.delete_orchard_tree(&height);
+                    }
+
+                    prev_orchard_tree = orchard_tree;
+                    prev_sapling_tree = sapling_tree;
+
+                    height = height.next();
+                }
+                upgrade_db.write(batch);
+
                 let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
                 let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
-                let mut batch = DiskWriteBatch::new(network);
-                let mut write_batch = false;
-
                 if prev_sapling_tree == sapling_tree {
-                    batch.delete_sapling_tree(&upgrade_db, &height);
-                    write_batch = true;
+                    upgrade_db.delete_sapling_tree(&height);
                 }
 
                 if prev_orchard_tree == orchard_tree {
-                    batch.delete_orchard_tree(&upgrade_db, &height);
-                    write_batch = true;
-                }
-
-                if write_batch {
-                    upgrade_db
-                        .write(batch)
-                        .expect("Deleting note commitment trees should always succeed.");
+                    upgrade_db.delete_orchard_tree(&height);
                 }
 
                 prev_orchard_tree = orchard_tree;
                 prev_sapling_tree = sapling_tree;
 
                 height = height.next();
+
+                if height.0 % 10_000 == 0 {
+                    warn!(?height, "Database database upgrade is at:");
+                }
             }
 
-            // At the end of each format upgrade, the database is marked as upgraded to that version.
-            // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
-            // optimisation.
-            info!(
-                ?initial_tip_height,
-                ?newer_running_version,
-                ?older_disk_version,
-                "marking database as upgraded"
-            );
-            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
+            // At the end of each format upgrade, we mark the database as upgraded to that version.
+            // We don't mark the database if `height` didn't reach the `initial_tip_height` because
+            // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
+            // wouldn't be upgraded.
+            if height >= initial_tip_height {
+                info!(?newer_running_version, "Database has been upgraded to:");
+                Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
+            }
         }
 
         // End of a database upgrade task.
@@ -332,12 +349,6 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
-        info!(
-            ?initial_tip_height,
-            ?newer_running_version,
-            ?older_disk_version,
-            "database is fully upgraded"
-        );
     }
 
     /// Mark a newly created database with the current format version.
