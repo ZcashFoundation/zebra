@@ -368,11 +368,12 @@ impl ZebraDb {
                 .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
                 .collect();
 
-        let mut batch = DiskWriteBatch::new(network);
+        let mut batch = DiskWriteBatch::new();
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
             self,
+            network,
             &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
@@ -419,12 +420,11 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
-    //
-    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
         zebra_db: &ZebraDb,
+        network: Network,
         finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -454,6 +454,7 @@ impl DiskWriteBatch {
         // Commit transaction indexes
         self.prepare_transparent_transaction_batch(
             db,
+            network,
             &finalized.verified,
             &new_outputs_by_out_loc,
             &spent_utxos_by_outpoint,

@@ -94,12 +94,10 @@ pub struct DiskDb {
 //       (DiskDb can be cloned),
 //       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
+#[derive(Default)]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
-
-    /// The configured network.
-    network: Network,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
@@ -395,16 +393,10 @@ impl DiskWriteBatch {
     /// Each block must be written to the state inside a batch, so that:
     /// - concurrent `ReadStateService` queries don't see half-written blocks, and
     /// - if Zebra calls `exit`, panics, or crashes, half-written blocks are rolled back.
-    pub fn new(network: Network) -> Self {
+    pub fn new() -> Self {
         DiskWriteBatch {
             batch: rocksdb::WriteBatch::default(),
-            network,
         }
-    }
-
-    /// Returns the configured network for this write batch.
-    pub fn network(&self) -> Network {
-        self.network
     }
 }
 
