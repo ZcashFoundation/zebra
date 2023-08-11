@@ -42,6 +42,8 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_D
 
 pub(super) use zebra_db::ZebraDb;
 
+#[cfg(not(any(test, feature = "proptest-impl")))]
+pub(super) use disk_db::DiskWriteBatch;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_db::{DiskWriteBatch, WriteDisk};
 
