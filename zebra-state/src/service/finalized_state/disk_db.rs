@@ -420,7 +420,7 @@ impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
-    fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    pub fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
@@ -465,7 +465,7 @@ impl DiskDb {
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
             // Handle Excluded start and the end bound
-            .filter(move |(key, _value)| range.contains(key))
+            .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
     }
 

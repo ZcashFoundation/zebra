@@ -14,8 +14,6 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use itertools::Itertools;
-use rocksdb::AsColumnFamilyRef;
 use zebra_chain::{
     block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
     transaction::Transaction,
@@ -25,7 +23,6 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, IntoDisk},
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -128,39 +125,29 @@ impl ZebraDb {
 
     /// Returns the Orchard note commitment trees starting from the given block height up to the chain tip
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_tree_from_height<'a>(
-        &'a self,
-        height: &Height,
-    ) -> impl Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>> + 'a {
+    pub fn orchard_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<orchard::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db.iterator_cf(
-            &orchard_trees,
-            rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
-        )
+        self.db.zs_range_iter(&orchard_trees, range)
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
     /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_tree_from_height<'a>(
-        &'a self,
-        height: &Height,
-    ) -> impl Iterator<Item = Result<(Height, Arc<sapling::tree::NoteCommitmentTree>), rocksdb::Error>>
-           + 'a {
+    pub fn sapling_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<sapling::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db
-            .iterator_cf(
-                &sapling_trees,
-                rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
-            )
-            .filter_map_ok(|(key_bytes, value_bytes)| {
-                Some((
-                    Height::from_bytes(key_bytes),
-                    sapling::tree::NoteCommitmentTree::from_bytes(value_bytes).into(),
-                ))
-            })
+        self.db.zs_range_iter(&sapling_trees, range)
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
@@ -372,32 +359,38 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the Sapling note commitment tree at the given [`Height`].
-    pub fn delete_sapling_tree(&mut self, tree_cf: &impl AsColumnFamilyRef, height: &Height) {
-        self.zs_delete(tree_cf, height);
+    pub fn delete_sapling_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&sapling_tree_cf, height);
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].
-    pub fn delete_orchard_tree(&mut self, tree_cf: &impl AsColumnFamilyRef, height: &Height) {
-        self.zs_delete(tree_cf, height);
+    pub fn delete_orchard_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&orchard_tree_cf, height);
     }
 
     /// Deletes the range of Orchard note commitment trees at the given [`Height`]s.
-    pub fn delete_range_orchard_tree(
-        &mut self,
-        tree_cf: &impl AsColumnFamilyRef,
-        from: &Height,
-        to: &Height,
-    ) {
-        self.zs_delete_range(tree_cf, from, to);
+    pub fn delete_range_orchard_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+        self.zs_delete_range(&orchard_tree_cf, from, to);
     }
 
     /// Deletes the range of Sapling note commitment trees at the given [`Height`]s.
-    pub fn delete_range_sapling_tree(
-        &mut self,
-        tree_cf: &impl AsColumnFamilyRef,
-        from: &Height,
-        to: &Height,
-    ) {
-        self.zs_delete_range(tree_cf, from, to);
+    pub fn delete_range_sapling_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+        self.zs_delete_range(&sapling_tree_cf, from, to);
     }
 }

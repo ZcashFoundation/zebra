@@ -231,7 +231,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        _cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) {
         let Upgrade {
             newer_running_version,
@@ -270,124 +270,158 @@ impl DbFormatChange {
 
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
-            let mut height = Height(0);
-            let sapling_cf = upgrade_db
-                .db
-                .cf_handle("sapling_note_commitment_tree")
-                .unwrap();
-            let orchard_cf = upgrade_db
-                .db
-                .cf_handle("orchard_note_commitment_tree")
-                .unwrap();
-
+            // Get network upgrade heights
             let (&sapling_height, _) = NetworkUpgrade::activation_list(network)
                 .iter()
                 .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Sapling)
                 .expect("there should be sapling upgrade");
-
             let (&orchard_height, _) = NetworkUpgrade::activation_list(network)
                 .iter()
                 .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Nu5)
                 .expect("there should be Nu5 upgrade");
 
-            height = height.next();
-            let mut batch = DiskWriteBatch::new();
+            // Delete duplicates before sapling and orchard heights
+            let (mut prev_sapling_tree, mut prev_orchard_tree) = {
+                let height = Height(1);
+                let mut batch = DiskWriteBatch::new();
 
-            batch.delete_range_sapling_tree(&sapling_cf, &height, &sapling_height);
-            batch.delete_range_orchard_tree(&orchard_cf, &height, &orchard_height);
-            upgrade_db
-                .write_batch(batch)
-                .expect("Deleting note commitment trees should always succeed.");
+                batch.delete_range_sapling_tree(&upgrade_db, &height, &sapling_height);
+                batch.delete_range_orchard_tree(&upgrade_db, &height, &orchard_height);
+                upgrade_db
+                    .write_batch(batch)
+                    .expect("Deleting note commitment trees should always succeed.");
 
-            warn!(?sapling_height, "Database upgrade is at:");
+                warn!(?sapling_height, "Database upgrade is at:");
 
-            let prev_sapling_tree =
-                upgrade_db.sapling_tree_by_height(&(sapling_height - 1).expect("valid height"));
+                (
+                    upgrade_db.sapling_tree_by_height(&Height(0)),
+                    upgrade_db.orchard_tree_by_height(&Height(0)),
+                )
+            };
 
             // Create an unbounded channel for reading note commitment trees
             let (sapling_tree_tx, sapling_tree_rx) = mpsc::channel();
 
             // Set up task for reading sapling note commitment trees
-            {
-                let db = upgrade_db.clone();
-
-                tokio::spawn(async move {
-                    for (height, tree) in db.sapling_tree_from_height(&sapling_height).flatten() {
-                        let _ = sapling_tree_tx.send((height, tree));
-                    }
-                })
-            };
+            let db = upgrade_db.clone();
+            let sapling_read_task = tokio::spawn(async move {
+                for (height, tree) in
+                    db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
+                {
+                    let _ = sapling_tree_tx.send((height, tree));
+                }
+            });
 
             // Create an unbounded channel for duplicate sapling note commitment tree heights
-            let (dup_sapling_tree_height_tx, dup_sapling_tree_height_rx) = mpsc::channel();
+            let (unique_sapling_tree_height_tx, unique_sapling_tree_height_rx) = mpsc::channel();
 
             // Set up task for reading sapling note commitment trees
-            tokio::spawn(async move {
+            let sapling_compare_task = tokio::spawn(async move {
                 while let Ok((height, tree)) = sapling_tree_rx.recv() {
-                    if prev_sapling_tree == Some(tree) {
-                        let _ = dup_sapling_tree_height_tx.send(height);
+                    let tree = Some(tree);
+                    if prev_sapling_tree != tree {
+                        let _ = unique_sapling_tree_height_tx.send(height);
+                        prev_sapling_tree = tree;
                     }
                 }
             });
 
             // Set up task for deleting sapling note commitment trees
-            {
-                let _db = upgrade_db.clone();
+            let db = upgrade_db.clone();
+            let sapling_delete_task = tokio::spawn(async move {
+                let mut prev_height = sapling_height;
+                while let Ok(height) = unique_sapling_tree_height_rx.recv() {
+                    let delete_from = (prev_height + 1).expect("should be valid height");
+                    let delete_to = (height - 1).expect("should be a valid height");
+                    let num_entries = delete_to.0.checked_sub(delete_from.0);
 
-                tokio::spawn(async move {
-                    let _prev_height = Height(0);
-                    while let Ok(_height) = dup_sapling_tree_height_rx.recv() {
-                        // TODO: Delete range from prev height to this height
-                    }
-                })
-            };
-
-            let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
-
-            // Go through every height from genesis to the tip of the old version. If the state was
-            // downgraded, some heights might already be upgraded. (Since the upgraded format is
-            // added to the tip, the database can switch between lower and higher versions at any
-            // block.)
-            //
-            // Keep upgrading until the initial database has been upgraded.
-            while height <= initial_tip_height {
-                let mut batch = DiskWriteBatch::new();
-                for _ in 0..1_000 {
-                    // Return early if the task is cancelled by a shutdown.
-                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                        return;
+                    if num_entries.map_or(false, |n| n >= 1) {
+                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
+                        batch.delete_range_sapling_tree(&db, &delete_from, &delete_to);
+                        db.write_batch(batch)
+                            .expect("Deleting note commitment trees should always succeed.");
+                    } else if num_entries.map_or(false, |n| n == 0) {
+                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
+                        batch.delete_sapling_tree(&db, &height);
+                        db.write_batch(batch)
+                            .expect("Deleting note commitment trees should always succeed.");
                     }
 
-                    if height >= initial_tip_height {
-                        break;
-                    }
+                    prev_height = height;
 
-                    let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
-
-                    if orchard_tree.is_some() && prev_orchard_tree == orchard_tree {
-                        batch.delete_orchard_tree(&orchard_cf, &height);
-                    }
-
-                    prev_orchard_tree = orchard_tree;
-
-                    height = height.next();
+                    warn!(?height, "Database upgrade is at:");
                 }
+            });
 
-                upgrade_db
-                    .write_batch(batch)
-                    .expect("Deleting note commitment trees should always succeed.");
+            // Create an unbounded channel for reading note commitment trees
+            let (orchard_tree_tx, orchard_tree_rx) = mpsc::channel();
 
-                warn!(?height, "Database upgrade is at:");
-            }
+            // Set up task for reading orchard note commitment trees
+            let db = upgrade_db.clone();
+            let orchard_read_task = tokio::spawn(async move {
+                for (height, tree) in
+                    db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
+                {
+                    let _ = orchard_tree_tx.send((height, tree));
+                }
+            });
 
-            // At the end of each format upgrade, we mark the database as upgraded to that version.
-            // We don't mark the database if `height` didn't reach the `initial_tip_height` because
-            // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
-            // wouldn't be upgraded.
-            if height >= initial_tip_height {
+            // Create an unbounded channel for duplicate orchard note commitment tree heights
+            let (unique_orchard_tree_height_tx, unique_orchard_tree_height_rx) = mpsc::channel();
+
+            // Set up task for reading orchard note commitment trees
+            let orchard_compare_task = tokio::spawn(async move {
+                while let Ok((height, tree)) = orchard_tree_rx.recv() {
+                    let tree = Some(tree);
+                    if prev_orchard_tree != tree {
+                        let _ = unique_orchard_tree_height_tx.send(height);
+                        prev_orchard_tree = tree;
+                    }
+                }
+            });
+
+            // Set up task for deleting orchard note commitment trees
+            let db = upgrade_db;
+            let orchard_delete_task = tokio::spawn(async move {
+                let mut prev_height = orchard_height;
+                while let Ok(height) = unique_orchard_tree_height_rx.recv() {
+                    let delete_from = (prev_height + 1).expect("should be valid height");
+                    let delete_to = (height - 1).expect("should be a valid height");
+                    let num_entries = delete_to.0.checked_sub(delete_from.0);
+
+                    if num_entries.map_or(false, |n| n >= 1) {
+                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
+                        batch.delete_range_orchard_tree(&db, &delete_from, &delete_to);
+                        db.write_batch(batch)
+                            .expect("Deleting note commitment trees should always succeed.");
+                    } else if num_entries.map_or(false, |n| n == 0) {
+                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
+                        batch.delete_orchard_tree(&db, &height);
+                        db.write_batch(batch)
+                            .expect("Deleting note commitment trees should always succeed.");
+                    }
+
+                    prev_height = height;
+
+                    warn!(?height, "Database upgrade is at:");
+                }
+            });
+
+            tokio::spawn(async move {
+                sapling_read_task.await.unwrap();
+                sapling_compare_task.await.unwrap();
+                sapling_delete_task.await.unwrap();
+                orchard_read_task.await.unwrap();
+                orchard_compare_task.await.unwrap();
+                orchard_delete_task.await.unwrap();
+
+                // At the end of each format upgrade, we mark the database as upgraded to that version.
+                // We don't mark the database if `height` didn't reach the `initial_tip_height` because
+                // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
+                // wouldn't be upgraded.
                 info!(?newer_running_version, "Database has been upgraded to:");
                 Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
-            }
+            });
         }
 
         // End of a database upgrade task.
