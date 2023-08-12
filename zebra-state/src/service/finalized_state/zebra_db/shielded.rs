@@ -24,6 +24,7 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::IntoDisk,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -113,8 +114,7 @@ impl ZebraDb {
             .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
-    /// Returns the Sapling note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
+    /// Returns the Sapling note commitment trees starting from the given block height up to the chain tip
     pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -123,6 +123,35 @@ impl ZebraDb {
 
         self.sapling_tree_by_height(&height)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Orchard note commitment trees starting from the given block height up to the chain tip
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_tree_from_height<'a>(
+        &'a self,
+        height: &Height,
+    ) -> impl Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>> + 'a {
+        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+
+        self.db.iterator_cf(
+            &orchard_trees,
+            rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
+        )
+    }
+
+    /// Returns the Sapling note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_tree_from_height<'a>(
+        &'a self,
+        height: &Height,
+    ) -> impl Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>> + 'a {
+        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+
+        self.db.iterator_cf(
+            &sapling_trees,
+            rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
+        )
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
