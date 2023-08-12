@@ -12,7 +12,7 @@ use tracing::Span;
 use zebra_chain::{
     block::Height,
     diagnostic::task::{CheckForPanics, WaitForPanics},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
 };
 
 use DbFormatChange::*;
@@ -282,7 +282,52 @@ impl DbFormatChange {
                 .cf_handle("orchard_note_commitment_tree")
                 .unwrap();
 
+            let (&sapling_height, _) = NetworkUpgrade::activation_list(network)
+                .iter()
+                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Sapling)
+                .expect("there should be sapling upgrade");
+
+            let (&orchard_height, _) = NetworkUpgrade::activation_list(network)
+                .iter()
+                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Nu5)
+                .expect("there should be Nu5 upgrade");
+
             height = height.next();
+            let mut batch = DiskWriteBatch::new();
+
+            batch.delete_range_sapling_tree(&sapling_cf, &height, &sapling_height);
+            batch.delete_range_orchard_tree(&orchard_cf, &height, &orchard_height);
+            upgrade_db
+                .write_batch(batch)
+                .expect("Deleting note commitment trees should always succeed.");
+
+            height = sapling_height;
+            warn!(?height, "Database upgrade is at:");
+
+            while height <= orchard_height {
+                let mut batch = DiskWriteBatch::new();
+                for _ in 0..1_000 {
+                    // Return early if the task is cancelled by a shutdown.
+                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                        return;
+                    }
+
+                    if height >= sapling_height {
+                        break;
+                    }
+
+                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+
+                    if sapling_tree.is_some() && prev_sapling_tree == sapling_tree {
+                        batch.delete_sapling_tree(&sapling_cf, &height);
+                    }
+
+                    prev_sapling_tree = sapling_tree;
+                    warn!(?height, "Database upgrade is at:");
+
+                    height = height.next();
+                }
+            }
 
             // Go through every height from genesis to the tip of the old version. If the state was
             // downgraded, some heights might already be upgraded. (Since the upgraded format is
@@ -291,24 +336,25 @@ impl DbFormatChange {
             //
             // Keep upgrading until the initial database has been upgraded.
             while height <= initial_tip_height {
-                // Return early if the task is cancelled by a shutdown.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
-                }
-
                 let mut batch = DiskWriteBatch::new();
                 for _ in 0..1_000 {
+                    // Return early if the task is cancelled by a shutdown.
+                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                        return;
+                    }
+
                     if height >= initial_tip_height {
                         break;
                     }
+
                     let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
                     let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
-                    if prev_sapling_tree == sapling_tree {
+                    if sapling_tree.is_some() && prev_sapling_tree == sapling_tree {
                         batch.delete_sapling_tree(&sapling_cf, &height);
                     }
 
-                    if prev_orchard_tree == orchard_tree {
+                    if orchard_tree.is_some() && prev_orchard_tree == orchard_tree {
                         batch.delete_orchard_tree(&orchard_cf, &height);
                     }
 
