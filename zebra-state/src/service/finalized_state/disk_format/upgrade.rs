@@ -299,35 +299,48 @@ impl DbFormatChange {
                 .write_batch(batch)
                 .expect("Deleting note commitment trees should always succeed.");
 
-            height = sapling_height;
-            warn!(?height, "Database upgrade is at:");
+            warn!(?sapling_height, "Database upgrade is at:");
 
-            let mut prev_sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+            let prev_sapling_tree =
+                upgrade_db.sapling_tree_by_height(&(sapling_height - 1).expect("valid height"));
 
-            while height <= orchard_height {
-                let mut batch = DiskWriteBatch::new();
-                for _ in 0..1_000 {
-                    // Return early if the task is cancelled by a shutdown.
-                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                        return;
+            // Create an unbounded channel for reading note commitment trees
+            let (sapling_tree_tx, sapling_tree_rx) = mpsc::channel();
+
+            // Set up task for reading sapling note commitment trees
+            {
+                let db = upgrade_db.clone();
+
+                tokio::spawn(async move {
+                    for (height, tree) in db.sapling_tree_from_height(&sapling_height).flatten() {
+                        let _ = sapling_tree_tx.send((height, tree));
                     }
+                })
+            };
 
-                    if height >= sapling_height {
-                        break;
+            // Create an unbounded channel for duplicate sapling note commitment tree heights
+            let (dup_sapling_tree_height_tx, dup_sapling_tree_height_rx) = mpsc::channel();
+
+            // Set up task for reading sapling note commitment trees
+            tokio::spawn(async move {
+                while let Ok((height, tree)) = sapling_tree_rx.recv() {
+                    if prev_sapling_tree == Some(tree) {
+                        let _ = dup_sapling_tree_height_tx.send(height);
                     }
-
-                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
-
-                    if sapling_tree.is_some() && prev_sapling_tree == sapling_tree {
-                        batch.delete_sapling_tree(&sapling_cf, &height);
-                    }
-
-                    prev_sapling_tree = sapling_tree;
-                    warn!(?height, "Database upgrade is at:");
-
-                    height = height.next();
                 }
-            }
+            });
+
+            // Set up task for deleting sapling note commitment trees
+            {
+                let _db = upgrade_db.clone();
+
+                tokio::spawn(async move {
+                    let _prev_height = Height(0);
+                    while let Ok(_height) = dup_sapling_tree_height_rx.recv() {
+                        // TODO: Delete range from prev height to this height
+                    }
+                })
+            };
 
             let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
@@ -349,19 +362,13 @@ impl DbFormatChange {
                         break;
                     }
 
-                    let sapling_tree = upgrade_db.sapling_tree_by_height(&height);
                     let orchard_tree = upgrade_db.orchard_tree_by_height(&height);
-
-                    if sapling_tree.is_some() && prev_sapling_tree == sapling_tree {
-                        batch.delete_sapling_tree(&sapling_cf, &height);
-                    }
 
                     if orchard_tree.is_some() && prev_orchard_tree == orchard_tree {
                         batch.delete_orchard_tree(&orchard_cf, &height);
                     }
 
                     prev_orchard_tree = orchard_tree;
-                    prev_sapling_tree = sapling_tree;
 
                     height = height.next();
                 }
