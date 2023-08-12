@@ -304,7 +304,7 @@ impl DbFormatChange {
 
             // Set up task for reading sapling note commitment trees
             let db = upgrade_db.clone();
-            let sapling_read_task = tokio::spawn(async move {
+            let sapling_read_task = std::thread::spawn(move || {
                 for (height, tree) in
                     db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
                 {
@@ -316,7 +316,7 @@ impl DbFormatChange {
             let (unique_sapling_tree_height_tx, unique_sapling_tree_height_rx) = mpsc::channel();
 
             // Set up task for reading sapling note commitment trees
-            let sapling_compare_task = tokio::spawn(async move {
+            let sapling_compare_task = std::thread::spawn(move || {
                 while let Ok((height, tree)) = sapling_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_sapling_tree != tree {
@@ -328,7 +328,7 @@ impl DbFormatChange {
 
             // Set up task for deleting sapling note commitment trees
             let db = upgrade_db.clone();
-            let sapling_delete_task = tokio::spawn(async move {
+            let sapling_delete_task = std::thread::spawn(move || {
                 let mut prev_height = sapling_height;
                 while let Ok(height) = unique_sapling_tree_height_rx.recv() {
                     let delete_from = (prev_height + 1).expect("should be valid height");
@@ -358,7 +358,7 @@ impl DbFormatChange {
 
             // Set up task for reading orchard note commitment trees
             let db = upgrade_db.clone();
-            let orchard_read_task = tokio::spawn(async move {
+            let orchard_read_task = std::thread::spawn(move || {
                 for (height, tree) in
                     db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
                 {
@@ -370,7 +370,7 @@ impl DbFormatChange {
             let (unique_orchard_tree_height_tx, unique_orchard_tree_height_rx) = mpsc::channel();
 
             // Set up task for reading orchard note commitment trees
-            let orchard_compare_task = tokio::spawn(async move {
+            let orchard_compare_task = std::thread::spawn(move || {
                 while let Ok((height, tree)) = orchard_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_orchard_tree != tree {
@@ -382,7 +382,7 @@ impl DbFormatChange {
 
             // Set up task for deleting orchard note commitment trees
             let db = upgrade_db;
-            let orchard_delete_task = tokio::spawn(async move {
+            let orchard_delete_task = std::thread::spawn(move || {
                 let mut prev_height = orchard_height;
                 while let Ok(height) = unique_orchard_tree_height_rx.recv() {
                     let delete_from = (prev_height + 1).expect("should be valid height");
@@ -407,21 +407,19 @@ impl DbFormatChange {
                 }
             });
 
-            tokio::spawn(async move {
-                sapling_read_task.await.unwrap();
-                sapling_compare_task.await.unwrap();
-                sapling_delete_task.await.unwrap();
-                orchard_read_task.await.unwrap();
-                orchard_compare_task.await.unwrap();
-                orchard_delete_task.await.unwrap();
+            sapling_read_task.join().unwrap();
+            sapling_compare_task.join().unwrap();
+            sapling_delete_task.join().unwrap();
+            orchard_read_task.join().unwrap();
+            orchard_compare_task.join().unwrap();
+            orchard_delete_task.join().unwrap();
 
-                // At the end of each format upgrade, we mark the database as upgraded to that version.
-                // We don't mark the database if `height` didn't reach the `initial_tip_height` because
-                // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
-                // wouldn't be upgraded.
-                info!(?newer_running_version, "Database has been upgraded to:");
-                Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
-            });
+            // At the end of each format upgrade, we mark the database as upgraded to that version.
+            // We don't mark the database if `height` didn't reach the `initial_tip_height` because
+            // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
+            // wouldn't be upgraded.
+            info!(?newer_running_version, "Database has been upgraded to:");
+            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
         // End of a database upgrade task.
