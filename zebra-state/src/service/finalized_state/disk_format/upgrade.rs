@@ -271,8 +271,6 @@ impl DbFormatChange {
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
             let mut height = Height(0);
-            let mut prev_sapling_tree = upgrade_db.sapling_tree_by_height(&height);
-            let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
             let sapling_cf = upgrade_db
                 .db
                 .cf_handle("sapling_note_commitment_tree")
@@ -304,6 +302,8 @@ impl DbFormatChange {
             height = sapling_height;
             warn!(?height, "Database upgrade is at:");
 
+            let mut prev_sapling_tree = upgrade_db.sapling_tree_by_height(&height);
+
             while height <= orchard_height {
                 let mut batch = DiskWriteBatch::new();
                 for _ in 0..1_000 {
@@ -328,6 +328,8 @@ impl DbFormatChange {
                     height = height.next();
                 }
             }
+
+            let mut prev_orchard_tree = upgrade_db.orchard_tree_by_height(&height);
 
             // Go through every height from genesis to the tip of the old version. If the state was
             // downgraded, some heights might already be upgraded. (Since the upgraded format is
