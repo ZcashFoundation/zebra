@@ -14,6 +14,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use itertools::Itertools;
 use rocksdb::AsColumnFamilyRef;
 use zebra_chain::{
     block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
@@ -24,7 +25,7 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::IntoDisk,
+        disk_format::{FromDisk, IntoDisk},
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -145,13 +146,21 @@ impl ZebraDb {
     pub fn sapling_tree_from_height<'a>(
         &'a self,
         height: &Height,
-    ) -> impl Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>> + 'a {
+    ) -> impl Iterator<Item = Result<(Height, Arc<sapling::tree::NoteCommitmentTree>), rocksdb::Error>>
+           + 'a {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.iterator_cf(
-            &sapling_trees,
-            rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
-        )
+        self.db
+            .iterator_cf(
+                &sapling_trees,
+                rocksdb::IteratorMode::From(&height.as_bytes(), rocksdb::Direction::Forward),
+            )
+            .filter_map_ok(|(key_bytes, value_bytes)| {
+                Some((
+                    Height::from_bytes(key_bytes),
+                    sapling::tree::NoteCommitmentTree::from_bytes(value_bytes).into(),
+                ))
+            })
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
