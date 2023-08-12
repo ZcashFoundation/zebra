@@ -113,8 +113,14 @@ pub trait WriteDisk {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
-    /// Remove the given key form rocksdb column family if it exists.
+    /// Remove the given key from rocksdb column family if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug;
+
+    /// Remove the given key range from rocksdb column family if it exists.
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
@@ -139,6 +145,16 @@ impl WriteDisk for DiskWriteBatch {
     {
         let key_bytes = key.as_bytes();
         self.batch.delete_cf(cf, key_bytes);
+    }
+
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+    {
+        let from_bytes = from.as_bytes();
+        let to_bytes = to.as_bytes();
+        self.batch.delete_range_cf(cf, from_bytes, to_bytes);
     }
 }
 
