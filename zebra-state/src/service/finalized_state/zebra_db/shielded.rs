@@ -342,4 +342,24 @@ impl DiskWriteBatch {
     pub fn delete_orchard_tree(&mut self, tree_cf: &impl AsColumnFamilyRef, height: &Height) {
         self.zs_delete(tree_cf, height);
     }
+
+    /// Deletes the range of Orchard note commitment trees at the given [`Height`]s.
+    pub fn delete_range_orchard_tree(
+        &mut self,
+        tree_cf: &impl AsColumnFamilyRef,
+        from: &Height,
+        to: &Height,
+    ) {
+        self.zs_delete_range(tree_cf, from, to);
+    }
+
+    /// Deletes the range of Sapling note commitment trees at the given [`Height`]s.
+    pub fn delete_range_sapling_tree(
+        &mut self,
+        tree_cf: &impl AsColumnFamilyRef,
+        from: &Height,
+        to: &Height,
+    ) {
+        self.zs_delete_range(tree_cf, from, to);
+    }
 }
