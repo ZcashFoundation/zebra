@@ -151,7 +151,7 @@ pub async fn run() -> Result<()> {
     // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Nu5 network upgrade
     assert!(block_tip.height > Nu5.activation_height(network).unwrap().0 as u64);
 
-    // The first block in the mainnet thas has sapling and orchard information.
+    // The first block in the mainnet that has sapling and orchard information.
     let block_with_trees = 1687107;
 
     // Call `GetBlock` with `block_with_trees`.
@@ -165,8 +165,6 @@ pub async fn run() -> Result<()> {
 
     // Make sure we got block `block_with_trees` back
     assert_eq!(get_block_response.height, block_with_trees);
-
-    tracing::info!("{:?}", get_block_response.chain_metadata.clone());
 
     // Testing the `trees` field of `GetBlock`.
     assert_eq!(
