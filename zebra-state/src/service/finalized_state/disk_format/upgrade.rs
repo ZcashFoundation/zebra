@@ -339,9 +339,9 @@ impl DbFormatChange {
                         batch.delete_range_sapling_tree(&db, &delete_from, &height);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
-                    } else if num_entries.map_or(false, |n| n == 0) {
+                    } else if num_entries.map_or(false, |n| n == 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_sapling_tree(&db, &height);
+                        batch.delete_sapling_tree(&db, &delete_from);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
                     }
@@ -392,9 +392,9 @@ impl DbFormatChange {
                         batch.delete_range_orchard_tree(&db, &delete_from, &height);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
-                    } else if num_entries.map_or(false, |n| n == 0) {
+                    } else if num_entries.map_or(false, |n| n == 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_orchard_tree(&db, &height);
+                        batch.delete_orchard_tree(&db, &delete_from);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
                     }
