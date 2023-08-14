@@ -308,7 +308,9 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
                 {
-                    let _ = sapling_tree_tx.send((height, tree));
+                    let _ = sapling_tree_tx
+                        .send((height, tree))
+                        .map_err(|error| warn!(?error, "unexpected send error"));
                 }
             });
 
@@ -320,7 +322,9 @@ impl DbFormatChange {
                 while let Ok((height, tree)) = sapling_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_sapling_tree != tree {
-                        let _ = unique_sapling_tree_height_tx.send(height);
+                        let _ = unique_sapling_tree_height_tx
+                            .send(height)
+                            .map_err(|error| warn!(?error, "unexpected send error"));
                         prev_sapling_tree = tree;
                     }
                 }
@@ -361,7 +365,9 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
                 {
-                    let _ = orchard_tree_tx.send((height, tree));
+                    let _ = orchard_tree_tx
+                        .send((height, tree))
+                        .map_err(|error| warn!(?error, "unexpected send error"));
                 }
             });
 
@@ -373,7 +379,9 @@ impl DbFormatChange {
                 while let Ok((height, tree)) = orchard_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_orchard_tree != tree {
-                        let _ = unique_orchard_tree_height_tx.send(height);
+                        let _ = unique_orchard_tree_height_tx
+                            .send(height)
+                            .map_err(|error| warn!(?error, "unexpected send error"));
                         prev_orchard_tree = tree;
                     }
                 }
