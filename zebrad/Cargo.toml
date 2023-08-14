@@ -159,14 +159,14 @@ humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
 semver = "1.0.18"
-serde = { version = "1.0.175", features = ["serde_derive"] }
+serde = { version = "1.0.179", features = ["serde_derive"] }
 toml = "0.7.6"
 
 futures = "0.3.28"
 rayon = "1.7.0"
 tokio = { version = "1.29.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
-pin-project = "1.1.2"
+pin-project = "1.1.3"
 
 color-eyre = { version = "0.6.2", default-features = false, features = ["issue-url"] }
 # This is a transitive dependency via color-eyre.
@@ -213,7 +213,7 @@ log = "0.4.19"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
-indicatif = { version = "0.17.5", optional = true }
+indicatif = { version = "0.17.6", optional = true }
 
 # test feature proptest-impl
 proptest = { version = "1.2.0", optional = true }
@@ -233,10 +233,10 @@ abscissa_core = { version = "0.7.0", features = ["testing"] }
 hex = "0.4.3"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
-regex = "1.9.1"
+regex = "1.9.3"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.100", features = ["preserve_order"] }
+serde_json = { version = "1.0.104", features = ["preserve_order"] }
 tempfile = "3.7.0"
 
 hyper = { version = "0.14.27", features = ["http1", "http2", "server"]}
