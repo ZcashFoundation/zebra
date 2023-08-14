@@ -291,8 +291,6 @@ impl DbFormatChange {
                     .write_batch(batch)
                     .expect("Deleting note commitment trees should always succeed.");
 
-                warn!(?sapling_height, "Database upgrade is at:");
-
                 (
                     upgrade_db.sapling_tree_by_height(&Height(0)),
                     upgrade_db.orchard_tree_by_height(&Height(0)),
@@ -351,8 +349,6 @@ impl DbFormatChange {
                     }
 
                     prev_height = height;
-
-                    warn!(?height, "Database upgrade is at:");
                 }
             });
 
@@ -408,8 +404,6 @@ impl DbFormatChange {
                     }
 
                     prev_height = height;
-
-                    warn!(?height, "Database upgrade is at:");
                 }
             });
 
