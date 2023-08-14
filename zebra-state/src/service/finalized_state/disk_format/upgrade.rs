@@ -332,12 +332,11 @@ impl DbFormatChange {
                 let mut prev_height = sapling_height;
                 while let Ok(height) = unique_sapling_tree_height_rx.recv() {
                     let delete_from = (prev_height + 1).expect("should be valid height");
-                    let delete_to = (height - 1).expect("should be a valid height");
-                    let num_entries = delete_to.0.checked_sub(delete_from.0);
+                    let num_entries = height.0.checked_sub(delete_from.0);
 
                     if num_entries.map_or(false, |n| n >= 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_range_sapling_tree(&db, &delete_from, &delete_to);
+                        batch.delete_range_sapling_tree(&db, &delete_from, &height);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
                     } else if num_entries.map_or(false, |n| n == 0) {
@@ -386,12 +385,11 @@ impl DbFormatChange {
                 let mut prev_height = orchard_height;
                 while let Ok(height) = unique_orchard_tree_height_rx.recv() {
                     let delete_from = (prev_height + 1).expect("should be valid height");
-                    let delete_to = (height - 1).expect("should be a valid height");
-                    let num_entries = delete_to.0.checked_sub(delete_from.0);
+                    let num_entries = height.0.checked_sub(delete_from.0);
 
                     if num_entries.map_or(false, |n| n >= 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_range_orchard_tree(&db, &delete_from, &delete_to);
+                        batch.delete_range_orchard_tree(&db, &delete_from, &height);
                         db.write_batch(batch)
                             .expect("Deleting note commitment trees should always succeed.");
                     } else if num_entries.map_or(false, |n| n == 0) {
