@@ -306,9 +306,9 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
                 {
-                    let _ = sapling_tree_tx
-                        .send((height, tree))
-                        .map_err(|error| warn!(?error, "unexpected send error"));
+                    if let Err(error) = sapling_tree_tx.send((height, tree)) {
+                        warn!(?error, "unexpected send error")
+                    }
                 }
             });
 
@@ -320,9 +320,9 @@ impl DbFormatChange {
                 while let Ok((height, tree)) = sapling_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_sapling_tree != tree {
-                        let _ = unique_sapling_tree_height_tx
-                            .send(height)
-                            .map_err(|error| warn!(?error, "unexpected send error"));
+                        if let Err(error) = unique_sapling_tree_height_tx.send(height) {
+                            warn!(?error, "unexpected send error")
+                        }
                         prev_sapling_tree = tree;
                     }
                 }
@@ -361,9 +361,9 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
                 {
-                    let _ = orchard_tree_tx
-                        .send((height, tree))
-                        .map_err(|error| warn!(?error, "unexpected send error"));
+                    if let Err(error) = orchard_tree_tx.send((height, tree)) {
+                        warn!(?error, "unexpected send error")
+                    }
                 }
             });
 
@@ -375,9 +375,10 @@ impl DbFormatChange {
                 while let Ok((height, tree)) = orchard_tree_rx.recv() {
                     let tree = Some(tree);
                     if prev_orchard_tree != tree {
-                        let _ = unique_orchard_tree_height_tx
-                            .send(height)
-                            .map_err(|error| warn!(?error, "unexpected send error"));
+                        if let Err(error) = unique_orchard_tree_height_tx.send(height) {
+                            warn!(?error, "unexpected send error")
+                        }
+
                         prev_orchard_tree = tree;
                     }
                 }
@@ -407,12 +408,18 @@ impl DbFormatChange {
                 }
             });
 
-            sapling_read_task.join().unwrap();
-            sapling_compare_task.join().unwrap();
-            sapling_delete_task.join().unwrap();
-            orchard_read_task.join().unwrap();
-            orchard_compare_task.join().unwrap();
-            orchard_delete_task.join().unwrap();
+            for task in [
+                sapling_read_task,
+                sapling_compare_task,
+                sapling_delete_task,
+                orchard_read_task,
+                orchard_compare_task,
+                orchard_delete_task,
+            ] {
+                if let Err(error) = task.join() {
+                    warn!(?error, "unexpected join error")
+                }
+            }
 
             // At the end of each format upgrade, we mark the database as upgraded to that version.
             // We don't mark the database if `height` didn't reach the `initial_tip_height` because
