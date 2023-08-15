@@ -313,7 +313,7 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
                 {
-                    // Breaking from this look and dropping the sapling_tree channel
+                    // Breaking from this loop and dropping the sapling_tree channel
                     // will cause the sapling compare and delete tasks to finish.
                     if should_cancel_flag.load(atomic::Ordering::Relaxed) {
                         break;
@@ -371,7 +371,7 @@ impl DbFormatChange {
                 for (height, tree) in
                     db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
                 {
-                    // Breaking from this look and dropping the orchard_tree channel
+                    // Breaking from this loop and dropping the orchard_tree channel
                     // will cause the orchard compare and delete tasks to finish.
                     if should_cancel_flag.load(atomic::Ordering::Relaxed) {
                         break;
