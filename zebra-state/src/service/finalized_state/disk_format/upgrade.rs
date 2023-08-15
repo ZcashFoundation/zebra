@@ -2,7 +2,10 @@
 
 use std::{
     cmp::Ordering,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{self, AtomicBool},
+        mpsc, Arc,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -68,7 +71,7 @@ pub struct DbFormatChangeThreadHandle {
     update_task: Option<Arc<JoinHandle<()>>>,
 
     /// A channel that tells the running format thread to finish early.
-    cancel_handle: mpsc::SyncSender<CancelFormatChange>,
+    should_cancel_format_change: Arc<AtomicBool>,
 }
 
 /// Marker for cancelling a format upgrade.
@@ -146,24 +149,27 @@ impl DbFormatChange {
         //
         // Cancel handles must use try_send() to avoid blocking waiting for the format change
         // thread to shut down.
-        let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
+        let should_cancel_format_change = Arc::new(AtomicBool::new(false));
 
         let span = Span::current();
-        let update_task = thread::spawn(move || {
-            span.in_scope(move || {
-                self.apply_format_change(
-                    config,
-                    network,
-                    initial_tip_height,
-                    upgrade_db,
-                    cancel_receiver,
-                );
+        let update_task = {
+            let should_cancel_format_change = should_cancel_format_change.clone();
+            thread::spawn(move || {
+                span.in_scope(move || {
+                    self.apply_format_change(
+                        config,
+                        network,
+                        initial_tip_height,
+                        upgrade_db,
+                        should_cancel_format_change,
+                    );
+                })
             })
-        });
+        };
 
         let mut handle = DbFormatChangeThreadHandle {
             update_task: Some(Arc::new(update_task)),
-            cancel_handle,
+            should_cancel_format_change,
         };
 
         handle.check_for_panics();
@@ -183,7 +189,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        should_cancel_format_change: Arc<AtomicBool>,
     ) {
         match self {
             // Handled in the rest of this function.
@@ -192,7 +198,7 @@ impl DbFormatChange {
                 network,
                 initial_tip_height,
                 upgrade_db,
-                cancel_receiver,
+                should_cancel_format_change,
             ),
 
             NewlyCreated { .. } => {
@@ -231,7 +237,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
-        _cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        should_cancel_format_change: Arc<AtomicBool>,
     ) {
         let Upgrade {
             newer_running_version,
@@ -302,10 +308,17 @@ impl DbFormatChange {
 
             // Set up task for reading sapling note commitment trees
             let db = upgrade_db.clone();
+            let should_cancel_flag = should_cancel_format_change.clone();
             let sapling_read_task = std::thread::spawn(move || {
                 for (height, tree) in
                     db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
                 {
+                    // Breaking from this look and dropping the sapling_tree channel
+                    // will cause the sapling compare and delete tasks to finish.
+                    if should_cancel_flag.load(atomic::Ordering::Relaxed) {
+                        break;
+                    }
+
                     if let Err(error) = sapling_tree_tx.send((height, tree)) {
                         warn!(?error, "unexpected send error")
                     }
@@ -353,10 +366,17 @@ impl DbFormatChange {
 
             // Set up task for reading orchard note commitment trees
             let db = upgrade_db.clone();
+            let should_cancel_flag = should_cancel_format_change;
             let orchard_read_task = std::thread::spawn(move || {
                 for (height, tree) in
                     db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
                 {
+                    // Breaking from this look and dropping the orchard_tree channel
+                    // will cause the orchard compare and delete tasks to finish.
+                    if should_cancel_flag.load(atomic::Ordering::Relaxed) {
+                        break;
+                    }
+
                     if let Err(error) = orchard_tree_tx.send((height, tree)) {
                         warn!(?error, "unexpected send error")
                     }
@@ -593,7 +613,8 @@ impl DbFormatChangeThreadHandle {
         // There's nothing we can do about errors here.
         // If the channel is disconnected, the task has exited.
         // If it's full, it's already been cancelled.
-        let _ = self.cancel_handle.try_send(CancelFormatChange);
+        self.should_cancel_format_change
+            .store(true, atomic::Ordering::Relaxed);
     }
 
     /// Check for panics in the code running in the spawned thread.
