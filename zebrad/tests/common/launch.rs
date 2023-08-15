@@ -7,16 +7,17 @@
 
 use std::{
     env,
+    fmt::Debug,
     net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use color_eyre::eyre::Result;
-use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
+use zebra_network::CacheDir;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt},
@@ -35,6 +36,10 @@ use crate::common::{
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
+
+/// After we launch `zebrad`, wait this long in extended tests.
+/// See [`LAUNCH_DELAY`] for details.
+pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(45);
 
 /// After we launch `lightwalletd`, wait this long for the command to start up,
 /// take the actions expected by the quick tests, and log the expected logs.
@@ -167,9 +172,16 @@ where
     }
 
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
+        let dir = self.as_ref();
+        let cache_dir = PathBuf::from(dir);
+
+        // If the peer cache has already been disabled, don't re-enable it
+        if config.network.cache_dir.is_enabled() {
+            config.network.cache_dir = CacheDir::custom_path(&cache_dir);
+        }
+
+        // Only replace the state cache directory if it's going to be used
         if !config.state.ephemeral {
-            let dir = self.as_ref();
-            let cache_dir = PathBuf::from(dir);
             config.state.cache_dir = cache_dir;
         }
 
@@ -209,7 +221,7 @@ where
 ///
 /// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
 #[tracing::instrument]
-pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     network: Network,
     test_name: S,
     test_type: TestType,
@@ -218,23 +230,16 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
-    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, use_internet_connection) {
         return Ok(None);
     }
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name)
+        .zebrad_config(test_name, use_internet_connection, None)
         .expect("already checked config")?;
 
-    // TODO: move this into zebrad_config()
     config.network.network = network;
-    if !use_internet_connection {
-        config.network.initial_mainnet_peers = IndexSet::new();
-        config.network.initial_testnet_peers = IndexSet::new();
-
-        config.mempool.debug_enable_at_height = Some(0);
-    }
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
@@ -250,13 +255,90 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     Ok(Some((zebrad, config.rpc.listen_addr)))
 }
 
+/// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
+///
+/// If `use_cached_state` is `true`, then update the cached state to the tip.
+/// If `ephemeral` is `true`, then use an ephemeral state path.
+/// If `reuse_state_path` is `Some(path)`, then use the state at that path, and take ownership of
+/// the temporary directory, so it isn't deleted until the test ends.
+/// Otherwise, just create an empty state in this test's new temporary directory.
+///
+/// If `use_internet_connection` is `false` then spawn, but without any peers.
+/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
+/// environmental variable to provide an initial state to the zebrad instance.
+///
+/// Returns:
+/// - `Ok(Some(zebrad))` on success,
+/// - `Ok(None)` if the test doesn't have the required network or cached state, and
+/// - `Err(_)` if spawning zebrad fails.
+#[tracing::instrument]
+pub fn spawn_zebrad_without_rpc<Str, Dir>(
+    network: Network,
+    test_name: Str,
+    use_cached_state: bool,
+    ephemeral: bool,
+    reuse_state_path: Dir,
+    use_internet_connection: bool,
+) -> Result<Option<TestChild<TempDir>>>
+where
+    Str: AsRef<str> + Debug,
+    Dir: Into<Option<TempDir>> + Debug,
+{
+    use TestType::*;
+
+    let test_name = test_name.as_ref();
+
+    let reuse_state_path = reuse_state_path.into();
+    let testdir = reuse_state_path
+        .unwrap_or_else(|| testdir().expect("failed to create test temporary directory"));
+
+    let (test_type, replace_cache_dir) = if use_cached_state {
+        (UpdateZebraCachedStateNoRpc, None)
+    } else if ephemeral {
+        (
+            LaunchWithEmptyState {
+                launches_lightwalletd: false,
+            },
+            None,
+        )
+    } else {
+        (UseAnyState, Some(testdir.path()))
+    };
+
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_test_type(test_name, test_type, use_internet_connection) {
+        return Ok(None);
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name, use_internet_connection, replace_cache_dir)
+        .expect("already checked config")?;
+
+    config.network.network = network;
+
+    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+
+    // Writes a configuration that does not have RPC listen_addr set.
+    // If the state path env var is set, uses it in the config.
+    let zebrad = testdir
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+    Ok(Some(zebrad))
+}
+
 /// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
 #[tracing::instrument]
-pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
     test_name: S,
     test_type: TestType,
+    use_internet_connection: bool,
 ) -> bool {
-    if zebra_test::net::zebra_skip_network_tests() {
+    if use_internet_connection && zebra_test::net::zebra_skip_network_tests() {
         return false;
     }
 
@@ -267,8 +349,9 @@ pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         return false;
     }
 
-    // Check if we have any necessary cached states for the zebrad config
-    test_type.zebrad_config(test_name).is_some()
+    // Check if we have any necessary cached states for the zebrad config.
+    // The cache_dir value doesn't matter here.
+    test_type.zebrad_config(test_name, true, None).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

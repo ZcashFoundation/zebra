@@ -63,7 +63,8 @@ flycheck_*.el
 ### Firebase ###
 .idea
 **/node_modules/*
-**/.firebaserc
+# We need to check in the .firebaserc file because it contains the target names
+# **/.firebaserc
 
 ### Firebase Patch ###
 .runtimeconfig.json

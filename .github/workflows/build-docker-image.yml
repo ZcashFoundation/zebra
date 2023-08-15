@@ -21,12 +21,6 @@ on:
         type: string
   workflow_call:
     inputs:
-      network:
-        required: false
-        type: string
-      checkpoint_sync:
-        required: false
-        type: boolean
       image_name:
         required: true
         type: string
@@ -49,12 +43,6 @@ on:
       rust_lib_backtrace:
         required: false
         type: string
-      colorbt_show_hidden:
-        required: false
-        type: string
-      zebra_skip_ipv6_tests:
-        required: false
-        type: string
       rust_log:
         required: false
         type: string
@@ -63,18 +51,20 @@ on:
       # https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile#L83
       features:
         required: false
-        default: "sentry"
+        default: "default-release-binaries"
         type: string
       test_features:
         required: false
         default: "lightwalletd-grpc-tests zebra-checkpoints"
         type: string
-      rpc_port:
-        required: false
-        type: string
       tag_suffix:
         required: false
         type: string
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       image_digest:
@@ -93,10 +83,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -106,12 +96,12 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.4.0
+        uses: docker/metadata-action@v4.6.0
         with:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
           # appends inputs.tag_suffix to image tags/names
           flavor: |
             suffix=${{ inputs.tag_suffix }}
@@ -148,7 +138,7 @@ jobs:
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v2.1.0
+        uses: docker/login-action@v2.2.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
@@ -158,7 +148,7 @@ jobs:
         # We only publish images to DockerHub if a release is not a pre-release
         # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
         if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
-        uses: docker/login-action@v2.1.0
+        uses: docker/login-action@v2.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -166,7 +156,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v4.0.0
+        uses: docker/build-push-action@v4.1.1
         with:
           target: ${{ inputs.dockerfile_target }}
           context: ${{ inputs.docker_context || '.' }}
@@ -174,25 +164,20 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NETWORK=${{ inputs.network }}
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            RUST_BACKTRACE=${{ inputs.rust_backtrace }}
-            RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
-            COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
-            ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
-            CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
             FEATURES=${{ inputs.features }}
             TEST_FEATURES=${{ inputs.test_features }}
-            RPC_PORT=${{ inputs.rpc_port }}
           push: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
-          # and if there's no hit, then continue with the `main` branch. When changes are added to a PR,
-          # they are usually smaller than the diff between the PR and `main` branch. So this provides the
-          # best performance.
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache.
+          # If there's no hit, we continue with a `main` branch cache, which helps us avoid
+          # rebuilding cargo-chef, most dependencies, and possibly some Zebra crates.
           #
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550

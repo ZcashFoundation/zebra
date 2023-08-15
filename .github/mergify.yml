@@ -29,34 +29,67 @@ queue_rules:
     conditions:
       - base=main
 
+# These rules are checked in order, the first one to be satisfied applies
 pull_request_rules:
-  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
+  - name: move to urgent queue when CI passes with multiple reviews
     conditions:
-      # This queue handles a PR if:
-      # - it targets main
-      # - is not in draft
-      # - does not include the do-not-merge label
-      # - is labeled with Critical priority
-      - base=main
-      - -draft
-      - label!=do-not-merge
+      # This queue handles a PR if it:
+      # has multiple approving reviewers
+      - "#approved-reviews-by>=2"
+      # is labeled with Critical priority
       - 'label~=^P-Critical'
+      # and satisfies the standard merge conditions:
+      # targets main
+      - base=main
+      # is not in draft
+      - -draft
+      # does not include the do-not-merge label
+      - label!=do-not-merge
     actions:
       queue:
         name: urgent
         method: squash
 
-  - name: move to batched queue when CI passes with 1 review and not WIP targeting main
+  - name: move to urgent queue when CI passes with 1 review
     conditions:
-      # This queue handles a PR if:
-      # - it targets main
-      # - is not in draft
-      # - does not include the do-not-merge label
-      # - is labeled with any other priority except Critical, or does not have a priority label,
-      #   including automated dependabot PRs.
-      #
-      # We don't need to check priority labels here, because the rules are evaluated in order:
-      # https://docs.mergify.com/configuration/#pull-request-rules      
+      # This queue handles a PR if it:
+      # has at least one approving reviewer (branch protection rule)
+      # does not need extra reviews
+      - 'label!=extra-reviews'
+      # is labeled with Critical priority
+      - 'label~=^P-Critical'
+      # and satisfies the standard merge conditions:
+      - base=main
+      - -draft
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: urgent
+        method: squash
+
+  - name: move to batched queue when CI passes with multiple reviews
+    conditions:
+      # This queue handles a PR if it:
+      # has multiple approving reviewers
+      - "#approved-reviews-by>=2"
+      # is labeled with any other priority (rules are checked in order)
+      # and satisfies the standard merge conditions:
+      - base=main
+      - -draft
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: batched
+        method: squash
+
+  - name: move to batched queue when CI passes with 1 review
+    conditions:
+      # This queue handles a PR if it:
+      # has at least one approving reviewer (branch protection rule)
+      # does not need extra reviews
+      - 'label!=extra-reviews'
+      # is labeled with any other priority (rules are checked in order)
+      # and satisfies the standard merge conditions:
       - base=main
       - -draft
       - label!=do-not-merge

@@ -782,7 +782,9 @@ async fn state_error_converted_correctly() {
         "expected matching state and transaction errors"
     );
 
-    let TransactionError::ValidateContextError(propagated_validate_context_error) = transaction_error else {
+    let TransactionError::ValidateContextError(propagated_validate_context_error) =
+        transaction_error
+    else {
         panic!("should be a ValidateContextError variant");
     };
 
@@ -866,8 +868,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
         let verifier = Verifier::new(network, state_service);
 
         let transaction = fake_v5_transactions_for_network(network, blocks)
-            .rev()
-            .next()
+            .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
 
         let result = verifier
@@ -918,8 +919,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
         let verifier = Verifier::new(network, state_service);
 
         let mut transaction = fake_v5_transactions_for_network(network, blocks)
-            .rev()
-            .next()
+            .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
         if transaction
             .expiry_height()
@@ -2155,7 +2155,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
             })
             .await;
 
-        if result == expected_error || i >= 10 {
+        if result == expected_error || i >= 100 {
             break result;
         }
 

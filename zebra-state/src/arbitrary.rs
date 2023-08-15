@@ -11,19 +11,19 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, FinalizedBlock,
-    PreparedBlock,
+    request::ContextuallyVerifiedBlock, service::chain_tip::ChainTipBlock, CheckpointVerifiedBlock,
+    SemanticallyVerifiedBlock,
 };
 
 /// Mocks computation done during semantic validation
 pub trait Prepare {
     /// Runs block semantic validation computation, and returns the result.
     /// Test-only method.
-    fn prepare(self) -> PreparedBlock;
+    fn prepare(self) -> SemanticallyVerifiedBlock;
 }
 
 impl Prepare for Arc<Block> {
-    fn prepare(self) -> PreparedBlock {
+    fn prepare(self) -> SemanticallyVerifiedBlock {
         let block = self;
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
@@ -31,7 +31,7 @@ impl Prepare for Arc<Block> {
         let new_outputs =
             transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
-        PreparedBlock {
+        SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -50,9 +50,9 @@ where
     }
 }
 
-impl From<PreparedBlock> for ChainTipBlock {
-    fn from(prepared: PreparedBlock) -> Self {
-        let PreparedBlock {
+impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
+    fn from(prepared: SemanticallyVerifiedBlock) -> Self {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -71,17 +71,17 @@ impl From<PreparedBlock> for ChainTipBlock {
     }
 }
 
-impl PreparedBlock {
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+impl SemanticallyVerifiedBlock {
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_spent_utxos(&self) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_zero_spent_utxos(self)
+    pub fn test_with_zero_spent_utxos(&self) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_zero_spent_utxos(self)
     }
 
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
@@ -89,26 +89,26 @@ impl PreparedBlock {
     pub fn test_with_chain_pool_change(
         &self,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
-    ) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_chain_pool_change(self, fake_chain_value_pool_change)
+    ) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_chain_pool_change(self, fake_chain_value_pool_change)
     }
 
-    /// Returns a [`ContextuallyValidBlock`] created from this block,
+    /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyValidBlock {
-        ContextuallyValidBlock::test_with_zero_chain_pool_change(self)
+    pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_zero_chain_pool_change(self)
     }
 }
 
-impl ContextuallyValidBlock {
+impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual
-    /// validation, using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
+    /// validation, using a [`SemanticallyVerifiedBlock`] and fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
-    pub fn test_with_zero_spent_utxos(block: impl Into<PreparedBlock>) -> Self {
+    pub fn test_with_zero_spent_utxos(block: impl Into<SemanticallyVerifiedBlock>) -> Self {
         let block = block.into();
 
         let zero_output = transparent::Output {
@@ -128,19 +128,19 @@ impl ContextuallyValidBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyValidBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
             .expect("all UTXOs are provided with zero values")
     }
 
-    /// Create a [`ContextuallyValidBlock`] from a [`Block`] or [`PreparedBlock`],
+    /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
     pub fn test_with_chain_pool_change(
-        block: impl Into<PreparedBlock>,
+        block: impl Into<SemanticallyVerifiedBlock>,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
     ) -> Self {
-        let PreparedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -162,20 +162,20 @@ impl ContextuallyValidBlock {
         }
     }
 
-    /// Create a [`ContextuallyValidBlock`] from a [`Block`] or [`PreparedBlock`],
+    /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
-    pub fn test_with_zero_chain_pool_change(block: impl Into<PreparedBlock>) -> Self {
+    pub fn test_with_zero_chain_pool_change(block: impl Into<SemanticallyVerifiedBlock>) -> Self {
         Self::test_with_chain_pool_change(block, ValueBalance::zero())
     }
 }
 
-impl FinalizedBlock {
+impl CheckpointVerifiedBlock {
     /// Create a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`] and [`block::Height`].
     ///
-    /// This is a test-only method, prefer [`FinalizedBlock::with_hash`].
+    /// This is a test-only method, prefer [`CheckpointVerifiedBlock::with_hash`].
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn with_hash_and_height(
         block: Arc<Block>,
@@ -183,14 +183,15 @@ impl FinalizedBlock {
         height: block::Height,
     ) -> Self {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_outputs_with_height(&block, height, &transaction_hashes);
+        let new_outputs =
+            transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
-        Self {
+        Self(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             new_outputs,
             transaction_hashes,
-        }
+        })
     }
 }

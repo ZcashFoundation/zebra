@@ -30,14 +30,14 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v35.9.2
+        uses: tj-actions/changed-files@v37.5.1
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v35.9.2
+        uses: tj-actions/changed-files@v37.5.1
         with:
           files: |
             .github/workflows/*.yml
@@ -62,15 +62,15 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check workflow permissions
@@ -86,7 +86,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
-      - uses: Swatinem/rust-cache@v2.3.0
+      - uses: Swatinem/rust-cache@v2.6.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -112,16 +112,16 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and default profile
@@ -131,7 +131,7 @@ jobs:
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v2.3.0
+      #- uses: Swatinem/rust-cache@v2.6.0
 
       - run: |
           cargo fmt --all -- --check
@@ -145,22 +145,22 @@ jobs:
     # cargo doc doesn't support '--  -D warnings', so we have to add it here
     # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
     #
-    # These -A and -W settings must be the same as the rustdoc settings in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L53
+    # The -A and -W settings must be the same as the `rustdocflags` in:
+    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
     env:
       RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and default profile
@@ -177,17 +177,20 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v3.5.2
-      - uses: reviewdog/action-actionlint@v1.37.0
+      - uses: actions/checkout@v3.5.3
+      - name: actionlint
+        uses: reviewdog/action-actionlint@v1.37.1
         with:
           level: warning
           fail_on_error: false
+      - name: validate-dependabot
+        uses: marocchino/validate-dependabot@v2.1.0
 
   codespell:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
       - uses: plettich/action-codespell@master
         with:
           github_token: ${{ secrets.github_token }}

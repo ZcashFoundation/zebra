@@ -136,6 +136,7 @@
 //! ```
 
 use std::{
+    cmp::Ordering,
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
@@ -146,6 +147,7 @@ use color_eyre::{
     eyre::{eyre, Result, WrapErr},
     Help,
 };
+use semver::Version;
 
 use zebra_chain::{
     block::{self, Height},
@@ -153,7 +155,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::constants::LOCK_FILE_ERROR;
+use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
@@ -165,7 +167,10 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY,
+    },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -264,11 +269,11 @@ fn help_no_args() -> Result<()> {
         is_zebrad_version,
         &output.output.stdout,
         "stdout",
-        "a valid zebrad semantic version",
+        "are valid zebrad semantic versions",
     )?;
 
-    // Make sure we are in help by looking usage string
-    output.stdout_line_contains("USAGE:")?;
+    // Make sure we are in help by looking for the usage string
+    output.stdout_line_contains("Usage:")?;
 
     Ok(())
 }
@@ -371,6 +376,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     Ok(())
 }
 
+/// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -381,7 +387,7 @@ fn persistent_mode() -> Result<()> {
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -393,6 +399,13 @@ fn persistent_mode() -> Result<()> {
         cache_dir.read_dir()?.count() > 0,
         &output,
         "state directory empty despite persistent state config"
+    );
+
+    let cache_dir = testdir.path().join("network");
+    assert_with_context!(
+        cache_dir.read_dir()?.count() > 0,
+        &output,
+        "network directory empty despite persistent network config"
     );
 
     Ok(())
@@ -424,6 +437,9 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+/// Check that the state directory created on disk matches the state config.
+///
+/// TODO: do a similar test for `network.cache_dir`
 #[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
@@ -449,7 +465,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -472,7 +488,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["state", "zebrad.toml"].iter()
+            ["state", "network", "zebrad.toml"].iter()
         }
 
         // we didn't create the state directory, so it should not exist
@@ -490,7 +506,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["zebrad.toml"].iter()
+            ["network", "zebrad.toml"].iter()
         }
     };
 
@@ -522,7 +538,7 @@ fn version_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(args!["version"])?;
+    let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -544,15 +560,23 @@ fn version_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    // unexpected free argument `argument`
-    let child = testdir.spawn_child(args!["version", "argument"])?;
+    // unrecognized option `-f`
+    let child = testdir.spawn_child(args!["tip-height", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
-    // unrecognized option `-f`
-    let child = testdir.spawn_child(args!["version", "-f"])?;
+    // unrecognized option `-f` is ignored
+    let child = testdir.spawn_child(args!["--version", "-f"])?;
     let output = child.wait_with_output()?;
-    output.assert_failure()?;
+    let output = output.assert_success()?;
+
+    // The output should only contain the version
+    output.output_check(
+        is_zebrad_version,
+        &output.output.stdout,
+        "stdout",
+        "a valid zebrad semantic version",
+    )?;
 
     Ok(())
 }
@@ -572,8 +596,8 @@ fn config_tests() -> Result<()> {
     // Check that we have a current version of the config stored
     last_config_is_stored()?;
 
-    // Check that Zebra stored configuration works
-    stored_configs_works()?;
+    // Check that Zebra's previous configurations still work
+    stored_configs_work()?;
 
     // Runs `zebrad` serially to avoid potential port conflicts
     app_no_args()?;
@@ -702,13 +726,31 @@ fn last_config_is_stored() -> Result<()> {
         .to_string();
 
     // Loop all the stored configs
+    //
+    // TODO: use the same filename list code in last_config_is_stored() and stored_configs_work()
     for config_file in configs_dir()
         .read_dir()
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // Read stored config
-        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+        let stored_content = fs::read_to_string(config_file_full_path(config_file_path))
             .expect("Should have been able to read the file")
             .trim()
             .to_string();
@@ -736,7 +778,7 @@ fn last_config_is_stored() -> Result<()> {
          Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
          zebrad/tests/common/configs/{}<next-release-tag>.toml",
         if cfg!(feature = "getblocktemplate-rpcs") {
             GET_BLOCK_TEMPLATE_CONFIG_PREFIX
@@ -832,7 +874,7 @@ fn invalid_generated_config() -> Result<()> {
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
 #[tracing::instrument]
-fn stored_configs_works() -> Result<()> {
+fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
     for config_file in old_configs_dir
@@ -840,15 +882,33 @@ fn stored_configs_works() -> Result<()> {
         .expect("read_dir call failed")
         .flatten()
     {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_string_lossy();
+
+        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
+        {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
         // ignore files starting with getblocktemplate prefix
         // if we were not built with the getblocktemplate-rpcs feature.
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file
-            .file_name()
-            .into_string()
-            .expect("all files names should be string convertible")
+        if config_file_name
+            .as_ref()
             .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
         {
+            tracing::info!(
+                ?config_file_path,
+                "skipping getblocktemplate-rpcs config file path"
+            );
             continue;
         }
 
@@ -1038,7 +1098,8 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    let checkpoint_stop_regex = format!("{STOP_AT_HEIGHT_REGEX}.*CommitFinalized request");
+    let checkpoint_stop_regex =
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit checkpoint-verified request");
 
     create_cached_database_height(
         network,
@@ -1056,7 +1117,7 @@ fn create_cached_database(network: Network) -> Result<()> {
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
-        format!("{STOP_AT_HEIGHT_REGEX}.*best non-finalized chain root");
+        format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
 
     create_cached_database_height(
         network,
@@ -1408,6 +1469,88 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+/// Test that the JSON-RPC endpoint responds to requests with different content types.
+///
+/// This test ensures that the curl examples of zcashd rpc methods will also work in Zebra.
+///
+/// https://zcash.github.io/rpc/getblockchaininfo.html
+#[tokio::test]
+async fn rpc_endpoint_client_content_type() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    // Write a configuration that has RPC listen_addr set
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config(true)?;
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(args!["start"])?;
+
+    // Wait until port is open.
+    child.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
+
+    // Create an http client
+    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
+
+    // Call to `getinfo` RPC method with a no content type.
+    let res = client
+        .call_with_no_content_type("getinfo", "[]".to_string())
+        .await?;
+
+    // Zebra will insert valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain`.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain".to_string())
+        .await?;
+
+    // Zebra will replace to the valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain` content type as the zcashd rpc docs.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "text/plain;".to_string())
+        .await?;
+
+    // Zebra will replace to the valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a `text/plain; other string` content type.
+    let res = client
+        .call_with_content_type(
+            "getinfo",
+            "[]".to_string(),
+            "text/plain; other string".to_string(),
+        )
+        .await?;
+
+    // Zebra will replace to the valid `application/json` content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with a valid `application/json` content type.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "application/json".to_string())
+        .await?;
+
+    // Zebra will not replace valid content type and succeed.
+    assert!(res.status().is_success());
+
+    // Call to `getinfo` RPC method with invalid string as content type.
+    let res = client
+        .call_with_content_type("getinfo", "[]".to_string(), "whatever".to_string())
+        .await?;
+
+    // Zebra will not replace unrecognized content type and fail.
+    assert!(res.status().is_client_error());
+
+    Ok(())
+}
+
 /// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
 /// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
 ///
@@ -1688,10 +1831,11 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         }
 
         if test_type.needs_lightwalletd_cached_state() {
-            lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
+            lightwalletd
+                .expect_stdout_line_matches("Done reading [0-9]{7} blocks from disk cache")?;
         } else if !test_type.allow_lightwalletd_cached_state() {
             // Timeout the test if we're somehow accidentally using a cached state in our temp dir
-            lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
+            lightwalletd.expect_stdout_line_matches("Done reading 0 blocks from disk cache")?;
         }
 
         // getblock with the first Sapling block in Zebra's state
@@ -1948,7 +2092,7 @@ fn zebra_state_conflict() -> Result<()> {
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
-            zebra_state::constants::DATABASE_FORMAT_VERSION
+            zebra_state::database_format_version_in_code().major,
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(
@@ -2240,6 +2384,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 
     Ok(())
 }
+
 /// Test `zebra-checkpoints` on mainnet.
 ///
 /// If you want to run this test individually, see the module documentation.
@@ -2261,4 +2406,200 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 #[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Testnet).await
+}
+
+/// Check that new states are created with the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
+#[tokio::test]
+async fn new_state_format() -> Result<()> {
+    for network in [Mainnet, Testnet] {
+        state_format_test("new_state_format_test", network, 2, None).await?;
+    }
+
+    Ok(())
+}
+
+/// Check that outdated states are updated to the current state format version,
+/// and that restarting `zebrad` doesn't change the updated format version.
+///
+/// TODO: test partial updates, once we have some updates that take a while.
+///       (or just add a delay during tests)
+#[tokio::test]
+async fn update_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = 0;
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test("update_state_format_test", network, 3, Some(&fake_version)).await?;
+    }
+
+    Ok(())
+}
+
+/// Check that newer state formats are downgraded to the current state format version,
+/// and that restarting `zebrad` doesn't change the format version.
+///
+/// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
+#[tokio::test]
+async fn downgrade_state_format() -> Result<()> {
+    let mut fake_version = database_format_version_in_code();
+    fake_version.minor = u16::MAX.into();
+    fake_version.patch = 0;
+
+    for network in [Mainnet, Testnet] {
+        state_format_test(
+            "downgrade_state_format_test",
+            network,
+            3,
+            Some(&fake_version),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Test state format changes, see calling tests for details.
+async fn state_format_test(
+    base_test_name: &str,
+    network: Network,
+    reopen_count: usize,
+    fake_version: Option<&Version>,
+) -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let test_name = &format!("{base_test_name}/new");
+
+    // # Create a new state and check it has the current version
+
+    let zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, None, false)?;
+
+    // Skip the test unless it has the required state and environmental variables.
+    let Some(mut zebrad) = zebrad else {
+        return Ok(());
+    };
+
+    tracing::info!(?network, "running {test_name} using zebrad");
+
+    zebrad.expect_stdout_line_matches("creating new database with the current format")?;
+    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+
+    // Give Zebra enough time to actually write the database to disk.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let logs = zebrad.kill_and_return_output(false)?;
+
+    assert!(
+        !logs.contains("marked database format as upgraded"),
+        "unexpected format upgrade in logs:\n\
+         {logs}"
+    );
+    assert!(
+        !logs.contains("marked database format as downgraded"),
+        "unexpected format downgrade in logs:\n\
+         {logs}"
+    );
+
+    let output = zebrad.wait_with_output()?;
+    let mut output = output.assert_failure()?;
+
+    let mut dir = output
+        .take_dir()
+        .expect("dir should not already have been taken");
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    // # Apply the fake version if needed
+    let mut expect_older_version = false;
+    let mut expect_newer_version = false;
+
+    if let Some(fake_version) = fake_version {
+        let test_name = &format!("{base_test_name}/apply_fake_version/{fake_version}");
+        tracing::info!(?network, "running {test_name} using zebra-state");
+
+        let mut config = UseAnyState
+            .zebrad_config(test_name, false, Some(dir.path()))
+            .expect("already checked config")?;
+        config.network.network = network;
+
+        zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
+            .expect("can't write fake database version to disk");
+
+        // Give zebra_state enough time to actually write the database version to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let running_version = database_format_version_in_code();
+
+        match fake_version.cmp(&running_version) {
+            Ordering::Less => expect_older_version = true,
+            Ordering::Equal => {}
+            Ordering::Greater => expect_newer_version = true,
+        }
+    }
+
+    // # Reopen that state and check the version hasn't changed
+
+    for reopened in 0..reopen_count {
+        let test_name = &format!("{base_test_name}/reopen/{reopened}");
+
+        if reopened > 0 {
+            expect_older_version = false;
+            expect_newer_version = false;
+        }
+
+        let mut zebrad = spawn_zebrad_without_rpc(network, test_name, false, false, dir, false)?
+            .expect("unexpectedly missing required state or env vars");
+
+        tracing::info!(?network, "running {test_name} using zebrad");
+
+        if expect_older_version {
+            zebrad.expect_stdout_line_matches("trying to open older database format")?;
+            zebrad.expect_stdout_line_matches("marked database format as upgraded")?;
+            zebrad.expect_stdout_line_matches("database is fully upgraded")?;
+        } else if expect_newer_version {
+            zebrad.expect_stdout_line_matches("trying to open newer database format")?;
+            zebrad.expect_stdout_line_matches("marked database format as downgraded")?;
+        } else {
+            zebrad.expect_stdout_line_matches("trying to open current database format")?;
+            zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+        }
+
+        // Give Zebra enough time to actually write the database to disk.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let logs = zebrad.kill_and_return_output(false)?;
+
+        if !expect_older_version {
+            assert!(
+                !logs.contains("marked database format as upgraded"),
+                "unexpected format upgrade in logs:\n\
+                 {logs}"
+            );
+        }
+
+        if !expect_newer_version {
+            assert!(
+                !logs.contains("marked database format as downgraded"),
+                "unexpected format downgrade in logs:\n\
+                 {logs}"
+            );
+        }
+
+        let output = zebrad.wait_with_output()?;
+        let mut output = output.assert_failure()?;
+
+        dir = output
+            .take_dir()
+            .expect("dir should not already have been taken");
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    }
+    Ok(())
 }

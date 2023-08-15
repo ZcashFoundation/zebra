@@ -74,15 +74,15 @@
 <path fill="none" stroke="#000000" d="M261.2822,-293.6228C291.5824,-281.7662 337.5245,-263.7888 371.0388,-250.6745"/>
 <polygon fill="#000000" stroke="#000000" points="372.5364,-253.847 380.5734,-246.9436 369.9855,-247.3283 372.5364,-253.847"/>
 </g>
-<!-- chain_verifier -->
+<!-- block_verifier_router -->
 <a id="node6" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_consensus/chain/index.html">
-<title>chain_verifier</title>
+<title>block_verifier_router</title>
 <ellipse fill="transparent" stroke="#000000" cx="244.6515" cy="-234" rx="65.3859" ry="18"/>
-<text text-anchor="middle" x="244.6515" y="-229.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">chain_verifier</text>
+<text text-anchor="middle" x="244.6515" y="-229.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">block_verifier_router</text>
 </a>
-<!-- inbound&#45;&gt;chain_verifier -->
+<!-- inbound&#45;&gt;block_verifier_router -->
 <g id="edge9" class="edge">
-<title>inbound&#45;&gt;chain_verifier</title>
+<title>inbound&#45;&gt;block_verifier_router</title>
 <path fill="none" stroke="#000000" d="M233.4366,-287.8314C235.0409,-280.131 236.9485,-270.9743 238.7314,-262.4166"/>
 <polygon fill="#000000" stroke="#000000" points="242.2022,-262.9169 240.8154,-252.4133 235.3494,-261.4892 242.2022,-262.9169"/>
 </g>
@@ -104,9 +104,9 @@
 <path fill="none" stroke="#000000" d="M383.846,-360.9895C393.4567,-351.221 404.1854,-338.1106 409.6515,-324 417.2551,-304.3715 417.9695,-280.5065 416.9367,-262.2845"/>
 <polygon fill="#000000" stroke="#000000" points="420.424,-261.9839 416.1656,-252.2825 413.4447,-262.522 420.424,-261.9839"/>
 </g>
-<!-- rpc_server&#45;&gt;chain_verifier -->
+<!-- rpc_server&#45;&gt;block_verifier_router -->
 <g id="edge11" class="edge">
-<title>rpc_server&#45;&gt;chain_verifier</title>
+<title>rpc_server&#45;&gt;block_verifier_router</title>
 <path fill="none" stroke="#000000" stroke-dasharray="1,5" d="M350.1767,-360.6302C329.2082,-335.4681 290.2442,-288.7112 265.9807,-259.595"/>
 <polygon fill="#000000" stroke="#000000" points="268.6447,-257.3247 259.5541,-251.8831 263.2672,-261.806 268.6447,-257.3247"/>
 </g>
@@ -116,9 +116,9 @@
 <ellipse fill="transparent" stroke="#000000" cx="112.6515" cy="-90" rx="86.7972" ry="18"/>
 <text text-anchor="middle" x="112.6515" y="-85.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">checkpoint_verifier</text>
 </a>
-<!-- chain_verifier&#45;&gt;checkpoint_verifier -->
+<!-- block_verifier_router&#45;&gt;checkpoint_verifier -->
 <g id="edge6" class="edge">
-<title>chain_verifier&#45;&gt;checkpoint_verifier</title>
+<title>block_verifier_router&#45;&gt;checkpoint_verifier</title>
 <path fill="none" stroke="#000000" d="M216.638,-217.5178C201.6091,-207.8136 183.4054,-194.5969 169.6515,-180 151.8569,-161.1147 136.447,-135.8982 126.1523,-116.962"/>
 <polygon fill="#000000" stroke="#000000" points="129.1594,-115.1615 121.3857,-107.9628 122.9735,-118.438 129.1594,-115.1615"/>
 </g>
@@ -128,9 +128,9 @@
 <ellipse fill="transparent" stroke="#000000" cx="244.6515" cy="-162" rx="65.9697" ry="18"/>
 <text text-anchor="middle" x="244.6515" y="-157.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">block_verifier</text>
 </a>
-<!-- chain_verifier&#45;&gt;block_verifier -->
+<!-- block_verifier_router&#45;&gt;block_verifier -->
 <g id="edge17" class="edge">
-<title>chain_verifier&#45;&gt;block_verifier</title>
+<title>block_verifier_router&#45;&gt;block_verifier</title>
 <path fill="none" stroke="#000000" d="M244.6515,-215.8314C244.6515,-208.131 244.6515,-198.9743 244.6515,-190.4166"/>
 <polygon fill="#000000" stroke="#000000" points="248.1516,-190.4132 244.6515,-180.4133 241.1516,-190.4133 248.1516,-190.4132"/>
 </g>
@@ -146,9 +146,9 @@
 <ellipse fill="transparent" stroke="#000000" cx="364.6515" cy="-306" rx="36.4761" ry="18"/>
 <text text-anchor="middle" x="364.6515" y="-301.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">syncer</text>
 </a>
-<!-- syncer&#45;&gt;chain_verifier -->
+<!-- syncer&#45;&gt;block_verifier_router -->
 <g id="edge10" class="edge">
-<title>syncer&#45;&gt;chain_verifier</title>
+<title>syncer&#45;&gt;block_verifier_router</title>
 <path fill="none" stroke="#000000" d="M341.5143,-292.1177C324.2684,-281.7701 300.3887,-267.4423 280.6551,-255.6022"/>
 <polygon fill="#000000" stroke="#000000" points="282.2946,-252.5042 271.9189,-250.3604 278.6931,-258.5067 282.2946,-252.5042"/>
 </g>

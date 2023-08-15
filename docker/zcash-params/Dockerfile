@@ -1,39 +1,19 @@
-# This steps implement cargo-chef for docker layer caching
-# This image is for caching Zcash Sprout and Sapling parameters
-FROM rust:bullseye as chef
-RUN cargo install cargo-chef --locked
-WORKDIR /opt/zebrad
+# This image is for caching Zcash Sprout and Sapling parameters.
+# We don't test it automatically in CI due to download server rate-limiting.
+# To manually run it on the PR branch before merging, go to:
+# https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+FROM debian:bullseye-slim AS release
 
-FROM chef AS release
-COPY --from=planner /opt/zebrad/recipe.json recipe.json
+# Just use the precompiled zebrad binary from a recent release image.
+#
+# It doesn't matter what build or commit of Zebra we use, because it just calls into the
+# zcash_proofs download code. (Which doesn't change much.)
+# Test image zebrad binaries would also work, but it's harder to get a recent tag for them.
+#
+# Compiling the download-params example using `cargo ` is another alternative:
+# `cargo run --locked --release --features default-docker --example download-params`
+COPY --from=zfnd/zebra:latest /usr/local/bin/zebrad /usr/local/bin
 
-# Install zebra build deps
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
-    llvm \
-    libclang-dev \
-    clang \
-    ca-certificates \
-    ; \
-    rm -rf /var/lib/apt/lists/* /tmp/*
-
-ENV CARGO_HOME /opt/zebrad/.cargo/
-# Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --features sentry --package zebrad --recipe-path recipe.json
-
-ARG RUST_BACKTRACE=0
-ENV RUST_BACKTRACE ${RUST_BACKTRACE}
-
-ARG RUST_LIB_BACKTRACE=0
-ENV RUST_LIB_BACKTRACE ${RUST_LIB_BACKTRACE}
-
-ARG COLORBT_SHOW_HIDDEN=0
-ENV COLORBT_SHOW_HIDDEN ${COLORBT_SHOW_HIDDEN}
-
-COPY . .
 # Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --release --features sentry --package zebrad --bin zebrad download
+RUN zebrad download

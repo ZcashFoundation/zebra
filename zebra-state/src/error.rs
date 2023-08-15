@@ -24,8 +24,8 @@ pub struct CloneError {
     source: Arc<dyn std::error::Error + Send + Sync + 'static>,
 }
 
-impl From<CommitBlockError> for CloneError {
-    fn from(source: CommitBlockError) -> Self {
+impl From<CommitSemanticallyVerifiedError> for CloneError {
+    fn from(source: CommitSemanticallyVerifiedError) -> Self {
         let source = Arc::new(source);
         Self { source }
     }
@@ -41,17 +41,17 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// An error describing the reason a block could not be committed to the state.
+/// An error describing the reason a semantically verified block could not be committed to the state.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("block is not contextually valid: {}", .0)]
-pub struct CommitBlockError(#[from] ValidateContextError);
+pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
-    #[error("block parent not found in any chain")]
+    #[error("block parent not found in any chain, or not enough blocks in chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,
 

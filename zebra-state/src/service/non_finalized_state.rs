@@ -16,9 +16,9 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyValidBlock, FinalizedWithTrees},
+    request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    PreparedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -36,6 +36,8 @@ pub(crate) use chain::Chain;
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
+    // Chain Data
+    //
     /// Verified, non-finalized chains, in ascending work order.
     ///
     /// The best chain is [`NonFinalizedState::best_chain()`], or `chain_iter().next()`.
@@ -43,6 +45,8 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    // Configuration
+    //
     /// The configured Zcash network.
     pub network: Network,
 
@@ -174,7 +178,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedWithTrees {
+    pub fn finalize(&mut self) -> FinalizableBlock {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -226,7 +230,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizedWithTrees::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -235,7 +239,7 @@ impl NonFinalizedState {
     #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
     pub fn commit_block(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
@@ -266,7 +270,7 @@ impl NonFinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_new_chain(
         &mut self,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let finalized_tip_height = finalized_state.finalized_tip_height();
@@ -280,9 +284,9 @@ impl NonFinalizedState {
         let chain = Chain::new(
             self.network,
             finalized_tip_height,
-            finalized_state.sprout_note_commitment_tree(),
-            finalized_state.sapling_note_commitment_tree(),
-            finalized_state.orchard_note_commitment_tree(),
+            finalized_state.sprout_tree(),
+            finalized_state.sapling_tree(),
+            finalized_state.orchard_tree(),
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );
@@ -308,7 +312,7 @@ impl NonFinalizedState {
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
-        prepared: PreparedBlock,
+        prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         // Reads from disk
@@ -336,7 +340,7 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
+        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
         )
@@ -358,7 +362,7 @@ impl NonFinalizedState {
     #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
-        contextual: ContextuallyValidBlock,
+        contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
@@ -399,6 +403,8 @@ impl NonFinalizedState {
             // Pushing a block onto a Chain can launch additional parallel batches.
             // TODO: should we pass _scope into Chain::push()?
             scope.spawn_fifo(|_scope| {
+                // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                // https://github.com/rust-lang/rust/issues/93610
                 let new_chain = Arc::try_unwrap(new_chain)
                     .unwrap_or_else(|shared_chain| (*shared_chain).clone());
                 chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
@@ -489,7 +495,7 @@ impl NonFinalizedState {
 
     /// Returns the block at the tip of the best chain.
     #[allow(dead_code)]
-    pub fn best_tip_block(&self) -> Option<&ContextuallyValidBlock> {
+    pub fn best_tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
         let best_chain = self.best_chain()?;
 
         best_chain.tip_block()
@@ -549,7 +555,7 @@ impl NonFinalizedState {
 
     /// Return the non-finalized portion of the current best chain.
     pub fn best_chain(&self) -> Option<&Arc<Chain>> {
-        self.chain_set.iter().rev().next()
+        self.chain_iter().next()
     }
 
     /// Return the number of chains.
@@ -651,7 +657,7 @@ impl NonFinalizedState {
 
             // Update the chain count bar
             if self.chain_count_bar.is_none() {
-                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+                self.chain_count_bar = Some(howudoin::new_root().label("Chain Forks"));
             }
 
             let chain_count_bar = self
@@ -662,9 +668,8 @@ impl NonFinalizedState {
                 .best_chain()
                 .map(|chain| chain.non_finalized_root_height().0 - 1);
 
-            chain_count_bar
-                .set_pos(u64::try_from(self.chain_count()).expect("fits in u64"))
-                .set_len(u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"));
+            chain_count_bar.set_pos(u64::try_from(self.chain_count()).expect("fits in u64"));
+            // .set_len(u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"));
 
             if let Some(finalized_tip_height) = finalized_tip_height {
                 chain_count_bar.desc(format!("Finalized Root {finalized_tip_height}"));
@@ -676,9 +681,11 @@ impl NonFinalizedState {
             match self.chain_count().cmp(&prev_length_bars) {
                 Greater => self
                     .chain_fork_length_bars
-                    .resize_with(self.chain_count(), howudoin::new),
+                    .resize_with(self.chain_count(), || {
+                        howudoin::new_with_parent(chain_count_bar.id())
+                    }),
                 Less => {
-                    let redundant_bars = self.chain_fork_length_bars.split_off(prev_length_bars);
+                    let redundant_bars = self.chain_fork_length_bars.split_off(self.chain_count());
                     for bar in redundant_bars {
                         bar.close();
                     }
@@ -701,24 +708,30 @@ impl NonFinalizedState {
                 // - the chain this bar was previously assigned to might have changed position.
                 chain_length_bar
                     .label(format!("Fork {fork_height}"))
-                    .set_pos(u64::try_from(chain.len()).expect("fits in u64"))
-                    .set_len(u64::from(
-                        zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
-                    ));
+                    .set_pos(u64::try_from(chain.len()).expect("fits in u64"));
+                // TODO: should this be MAX_BLOCK_REORG_HEIGHT?
+                // .set_len(u64::from(
+                //     zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+                // ));
 
-                // display work as bits
-                let mut desc = format!(
-                    "Work {:.1} bits",
-                    chain.partial_cumulative_work.difficulty_bits_for_display(),
-                );
+                // TODO: store work in the finalized state for each height (#7109),
+                //       and show the full chain work here, like `zcashd` (#7110)
+                //
+                // For now, we don't show any work here, see the deleted code in PR #7087.
+                let mut desc = String::new();
 
                 if let Some(recent_fork_height) = chain.recent_fork_height() {
                     let recent_fork_length = chain
                         .recent_fork_length()
                         .expect("just checked recent fork height");
 
+                    let mut plural = "s";
+                    if recent_fork_length == 1 {
+                        plural = "";
+                    }
+
                     desc.push_str(&format!(
-                        " at {recent_fork_height:?} + {recent_fork_length} blocks"
+                        " at {recent_fork_height:?} + {recent_fork_length} block{plural}"
                     ));
                 }
 

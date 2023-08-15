@@ -9,16 +9,25 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
+
   push:
     branches:
       - 'main'
     paths:
       # parameter download code
       - 'zebra-consensus/src/primitives/groth16/params.rs'
-      - 'zebra-consensus/src/chain.rs'
+      - 'zebra-consensus/src/router.rs'
+      - 'zebrad/src/commands/download.rs'
       - 'zebrad/src/commands/start.rs'
       # workflow definitions
       - 'docker/zcash-params/Dockerfile'
+      - '.dockerignore'
       - '.github/workflows/zcash-params.yml'
       - '.github/workflows/build-docker-image.yml'
 
@@ -30,7 +39,7 @@ jobs:
       dockerfile_path: ./docker/zcash-params/Dockerfile
       dockerfile_target: release
       image_name: zcash-params
+      no_cache: ${{ inputs.no_cache || false }}
       rust_backtrace: full
       rust_lib_backtrace: full
-      colorbt_show_hidden: '1'
       rust_log: info

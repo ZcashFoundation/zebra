@@ -4,22 +4,27 @@
 //!   - inbound message as request
 //!   - inbound message, but not a request (or a response)
 
-use std::{collections::HashSet, task::Poll, time::Duration};
+use std::{
+    collections::HashSet,
+    task::Poll,
+    time::{Duration, Instant},
+};
 
 use futures::{
     channel::{mpsc, oneshot},
     sink::SinkMapErr,
-    FutureExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
 };
-
+use tower::load_shed::error::Overloaded;
 use tracing::Span;
+
 use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    constants::REQUEST_TIMEOUT,
+    constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
     peer::{
-        connection::{Connection, State},
+        connection::{overload_drop_connection_probability, Connection, State},
         ClientRequest, ErrorSlot,
     },
     protocol::external::Message,
@@ -654,6 +659,230 @@ async fn connection_run_loop_receive_timeout() {
     connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
+}
+
+/// Check basic properties of overload probabilities
+#[test]
+fn overload_probability_reduces_over_time() {
+    let now = Instant::now();
+
+    // Edge case: previous is in the future due to OS monotonic clock bugs
+    let prev = now + Duration::from_secs(1);
+    assert_eq!(
+        overload_drop_connection_probability(now, Some(prev)),
+        MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overload time is in the future (OS bugs?), it should have maximum drop probability",
+    );
+
+    // Overload/DoS case/edge case: rapidly repeated overloads
+    let prev = now;
+    assert_eq!(
+        overload_drop_connection_probability(now, Some(prev)),
+        MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overload times are the same, overloads should have maximum drop probability",
+    );
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_micros(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability <= MAX_OVERLOAD_DROP_PROBABILITY,
+        "if the overloads are very close together, drops can optionally decrease: {drop_probability} <= {MAX_OVERLOAD_DROP_PROBABILITY}",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
+    );
+    let last_probability = drop_probability;
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_millis(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
+    );
+    let last_probability = drop_probability;
+
+    // Overload/DoS case: rapidly repeated overloads
+    let prev = now - Duration::from_millis(10);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.001,
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: frequent overloads
+    let prev = now - Duration::from_millis(100);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability < 0.01,
+        "if the overloads are very close together, drops can only decrease slightly: {drop_probability}",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: occasional but repeated overloads
+    let prev = now - Duration::from_secs(1);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
+    );
+    assert!(
+        MAX_OVERLOAD_DROP_PROBABILITY - drop_probability > 0.4,
+        "if the overloads are distant, drops should decrease a lot: {drop_probability}",
+    );
+    let last_probability = drop_probability;
+
+    // Overload case: occasional overloads
+    let prev = now - Duration::from_secs(5);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert!(
+        drop_probability < last_probability,
+        "if the overloads decrease, drops should decrease: {drop_probability} < {last_probability}",
+    );
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if overloads are far apart, drops should have minimum drop probability: {drop_probability}",
+    );
+    let _last_probability = drop_probability;
+
+    // Base case: infrequent overloads
+    let prev = now - Duration::from_secs(10);
+    let drop_probability = overload_drop_connection_probability(now, Some(prev));
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if overloads are far apart, drops should have minimum drop probability: {drop_probability}",
+    );
+
+    // Base case: no previous overload
+    let drop_probability = overload_drop_connection_probability(now, None);
+    assert_eq!(
+        drop_probability, MIN_OVERLOAD_DROP_PROBABILITY,
+        "if there is no previous overload time, overloads should have minimum drop probability: {drop_probability}",
+    );
+}
+
+/// Test that connections are randomly terminated in response to `Overloaded` errors.
+///
+/// TODO: do a similar test on the real service stack created in the `start` command.
+#[tokio::test(flavor = "multi_thread")]
+async fn connection_is_randomly_disconnected_on_overload() {
+    let _init_guard = zebra_test::init();
+
+    // The number of times we repeat the test
+    const TEST_RUNS: usize = 220;
+    // The expected number of tests before a test failure due to random chance.
+    // Based on 10 tests per PR, 100 PR pushes per week, 50 weeks per year.
+    const TESTS_BEFORE_FAILURE: f32 = 50_000.0;
+
+    let test_runs = TEST_RUNS.try_into().expect("constant fits in i32");
+    // The probability of random test failure is:
+    // MIN_OVERLOAD_DROP_PROBABILITY^TEST_RUNS + MAX_OVERLOAD_DROP_PROBABILITY^TEST_RUNS
+    assert!(
+        1.0 / MIN_OVERLOAD_DROP_PROBABILITY.powi(test_runs) > TESTS_BEFORE_FAILURE,
+        "not enough test runs: failures must be frequent enough to happen in almost all tests"
+    );
+    assert!(
+        1.0 / MAX_OVERLOAD_DROP_PROBABILITY.powi(test_runs) > TESTS_BEFORE_FAILURE,
+        "not enough test runs: successes must be frequent enough to happen in almost all tests"
+    );
+
+    let mut connection_continues = 0;
+    let mut connection_closes = 0;
+
+    for _ in 0..TEST_RUNS {
+        // The real stream and sink are from a split TCP connection,
+        // but that doesn't change how the state machine behaves.
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+
+        let (
+            connection,
+            _client_tx,
+            mut inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+
+        // The connection hasn't run so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before starting the connection event loop: {error:?}",
+        );
+
+        // Start the connection run loop future in a spawned task
+        let connection_handle = tokio::spawn(connection.run(peer_rx));
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        // The connection hasn't received any messages, so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before sending messages to the connection event loop: {error:?}",
+        );
+
+        // Simulate an overloaded connection error in response to an inbound request.
+        let inbound_req = Message::GetAddr;
+        peer_tx
+            .send(Ok(inbound_req))
+            .await
+            .expect("send to channel always succeeds");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        // The connection hasn't got a response, so it must not have errors
+        let error = shared_error_slot.try_get_error();
+        assert!(
+            error.is_none(),
+            "unexpected error before sending responses to the connection event loop: {error:?}",
+        );
+
+        inbound_service
+            .expect_request(Request::Peers)
+            .await
+            .respond_error(Overloaded::new().into());
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        let outbound_result = peer_outbound_messages.try_next();
+        assert!(
+            !matches!(outbound_result, Ok(Some(_))),
+            "unexpected outbound message after Overloaded error:\n\
+             {outbound_result:?}\n\
+             note: TryRecvErr means there are no messages, Ok(None) means the channel is closed"
+        );
+
+        let error = shared_error_slot.try_get_error();
+        if error.is_some() {
+            connection_closes += 1;
+        } else {
+            connection_continues += 1;
+        }
+
+        // We need to terminate the spawned task
+        connection_handle.abort();
+    }
+
+    assert!(
+        connection_closes > 0,
+        "some overloaded connections must be closed at random"
+    );
+    assert!(
+        connection_continues > 0,
+        "some overloaded errors must be ignored at random"
+    );
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

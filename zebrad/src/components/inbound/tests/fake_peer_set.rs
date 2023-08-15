@@ -23,7 +23,9 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
-use zebra_network::{AddressBook, InventoryResponse, Request, Response};
+use zebra_network::{
+    constants::DEFAULT_MAX_CONNS_PER_IP, AddressBook, InventoryResponse, Request, Response,
+};
 use zebra_node_services::mempool;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -35,7 +37,7 @@ use crate::{
             gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
             Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus, TIPS_RESPONSE_TIMEOUT},
+        sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
     },
     BoxError,
 };
@@ -117,13 +119,13 @@ async fn mempool_requests_for_transactions() {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 }
@@ -208,13 +210,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -313,13 +315,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -410,7 +412,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .unwrap();
     state_service
         .clone()
-        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block_two.clone().into(),
         ))
         .await
@@ -421,7 +423,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     hs.insert(tx1_id);
 
     // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs),
         Request::AdvertiseBlock(block_two.hash()),
@@ -483,14 +485,14 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .unwrap();
     state_service
         .clone()
-        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block_three.clone().into(),
         ))
         .await
         .unwrap();
 
     // Test the block is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash()))
         .await
@@ -567,7 +569,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     );
 
     // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
 
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
@@ -591,14 +593,14 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     for block in more_blocks {
         state_service
             .clone()
-            .oneshot(zebra_state::Request::CommitFinalizedBlock(
+            .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
                 block.clone().into(),
             ))
             .await
             .unwrap();
 
         // Test the block is gossiped, after waiting for the multi-gossip delay
-        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await
@@ -629,13 +631,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -727,13 +729,13 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
-        matches!(sync_gossip_result, None),
+        sync_gossip_result.is_none(),
         "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
-        matches!(tx_gossip_result, None),
+        tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
@@ -771,6 +773,7 @@ async fn setup(
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
         Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
@@ -784,7 +787,7 @@ async fn setup(
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::chain::init(
+        zebra_consensus::router::init(
             consensus_config.clone(),
             network,
             state_service.clone(),
@@ -812,7 +815,7 @@ async fn setup(
         .ready()
         .await
         .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
             genesis_block.clone().into(),
         ))
         .await
@@ -842,7 +845,7 @@ async fn setup(
         .unwrap();
     state_service
         .clone()
-        .oneshot(zebra_state::Request::CommitFinalizedBlock(
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
             block_one.clone().into(),
         ))
         .await

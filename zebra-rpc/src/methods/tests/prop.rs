@@ -41,6 +41,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 Mainnet,
                 false,
                 true,
@@ -76,7 +77,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -94,6 +95,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -137,7 +139,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -153,6 +155,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -197,7 +200,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -220,6 +223,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -251,7 +255,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -276,6 +280,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -307,7 +312,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -330,6 +335,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -405,7 +411,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -430,6 +436,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -461,7 +468,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -488,6 +495,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -519,7 +527,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -535,6 +543,7 @@ proptest! {
 
         // look for an error with a `NoChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+            "RPC test",
             "RPC test",
             network,
             false,
@@ -552,7 +561,7 @@ proptest! {
 
         // The queue task should continue without errors or panics
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         runtime.block_on(async move {
             mempool.expect_no_requests().await?;
@@ -585,6 +594,7 @@ proptest! {
 
         // Start RPC with the mocked `ChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+            "RPC test",
             "RPC test",
             network,
             false,
@@ -631,7 +641,7 @@ proptest! {
 
         // The queue task should continue without errors or panics
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -671,6 +681,7 @@ proptest! {
         // Start RPC with the mocked `ChainTip`
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 network,
                 false,
@@ -735,6 +746,7 @@ proptest! {
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                "RPC test",
                 network,
                 false,
                 true,
@@ -785,6 +797,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -855,7 +868,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -874,6 +887,7 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
                 "RPC test",
                 Mainnet,
                 false,
@@ -955,7 +969,7 @@ proptest! {
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             Ok::<_, TestCaseError>(())
         })?;

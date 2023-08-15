@@ -1,0 +1,73 @@
+name: '🐛 Bug report'
+description: Create a report to help us improve
+title: 'bug: '
+labels: [C-bug, S-needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug in Zebra!
+
+        Please fill out the sections below to help us reproduce and fix the bug.
+        If you have a question, please ask on [Discord](https://discord.gg/fP2JGmhm) or [GitHub Discussions](https://github.com/ZcashFoundation/zebra/discussions)
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us, what did you expect to happen?
+      value: '
+        I expected to see this happen:
+
+
+        Instead, this happened:
+        '
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What were you doing when the issue happened?
+      description: Copy and paste the exact commands or code here.
+      placeholder: 'Behavior or code sample that causes the bug'
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Zebra logs
+      description: Copy and paste the last 100 Zebra log lines or upload the full logs to https://gist.github.com/ and add a link to them here.
+      placeholder: 'Copy and paste the logs here'
+    validations:
+      required: false
+  - type: input
+    id: zebrad-version
+    attributes:
+      label: Zebra Version
+      description: 'For bugs in `zebrad`, run `zebrad --version`.'
+      placeholder: 'zebrad 1.0.0-placeholder'
+    validations:
+      required: false
+  - type: checkboxes
+    id: os
+    attributes:
+      label: Which operating systems does the issue happen on?
+      description: You may select more than one.
+      options:
+        - label: Linux
+        - label: macOS
+        - label: Windows
+        - label: Other OS
+  - type: input
+    id: os-details
+    attributes:
+      label: OS details
+      description: 'Linux, macOS, BSD: the output of `uname -a`; Windows: version and 32-bit or 64-bit; Other OS: name and version'
+    validations:
+      required: false
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Additional information
+      description: Is there anything else that could help us solve this issue?
+    validations:
+      required: false

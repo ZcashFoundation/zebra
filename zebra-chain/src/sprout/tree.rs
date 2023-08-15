@@ -10,15 +10,18 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-use std::{fmt, ops::Deref};
+use std::fmt;
 
 use byteorder::{BigEndian, ByteOrder};
-use incrementalmerkletree::{bridgetree, Frontier};
+use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
 use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
 
 use super::commitment::NoteCommitment;
+
+pub mod legacy;
+use legacy::LegacyNoteCommitmentTree;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -128,7 +131,7 @@ impl From<&Root> for [u8; 32] {
 
 /// A node of the Sprout note commitment tree.
 #[derive(Clone, Copy, Eq, PartialEq)]
-struct Node([u8; 32]);
+pub struct Node([u8; 32]);
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -147,12 +150,12 @@ impl incrementalmerkletree::Hashable for Node {
     /// Note that Sprout does not use the `level` argument.
     ///
     /// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh
-    fn combine(_level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
+    fn combine(_level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
         Self(merkle_crh_sprout(a.0, b.0))
     }
 
     /// Returns the node for the level below the given level. (A quirk of the API)
-    fn empty_root(level: incrementalmerkletree::Altitude) -> Self {
+    fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
     }
@@ -200,16 +203,18 @@ pub enum NoteCommitmentTreeError {
 /// job of this tree to protect against double-spending, as it is append-only; double-spending
 /// is prevented by maintaining the [nullifier set] for each shielded pool.
 ///
-/// Internally this wraps [`incrementalmerkletree::bridgetree::Frontier`], so that we can maintain and increment
+/// Internally this wraps [`bridgetree::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
 ///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(into = "LegacyNoteCommitmentTree")]
+#[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
+    /// The tree represented as a [`bridgetree::Frontier`].
     ///
-    /// A [`incrementalmerkletree::Frontier`] is a subset of the tree that allows to fully specify it. It
+    /// A [`bridgetree::Frontier`] is a subset of the tree that allows to fully specify it. It
     /// consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.
@@ -222,7 +227,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sprout = MERKLE_DEPTH = 29.
-    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
+    inner: Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -248,7 +253,7 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(&cm.into()) {
+        if self.inner.append(cm.into()) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -266,14 +271,9 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree; used as an anchor in Sprout
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        if let Some(root) = self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked")
-            .deref()
-        {
+        if let Some(root) = self.cached_root() {
             // Return cached root.
-            return *root;
+            return root;
         }
 
         // Get exclusive access, compute the root, and cache it.
@@ -287,11 +287,25 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root(self.inner.root().0);
+                let root = self.recalculate_root();
                 *write_root = Some(root);
                 root
             }
         }
+    }
+
+    /// Returns the current root of the tree, if it has already been cached.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn cached_root(&self) -> Option<Root> {
+        *self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked")
+    }
+
+    /// Calculates and returns the current root of the tree, ignoring any caching.
+    pub fn recalculate_root(&self) -> Root {
+        Root(self.inner.root().0)
     }
 
     /// Returns a hash of the Sprout note commitment tree root.
@@ -314,17 +328,34 @@ impl NoteCommitmentTree {
     ///
     /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
     pub fn count(&self) -> u64 {
-        self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+        self.inner
+            .value()
+            .map_or(0, |x| u64::from(x.position()) + 1)
+    }
+
+    /// Checks if the tree roots and inner data structures of `self` and `other` are equal.
+    ///
+    /// # Panics
+    ///
+    /// If they aren't equal, with a message explaining the differences.
+    ///
+    /// Only for use in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn assert_frontier_eq(&self, other: &Self) {
+        // It's technically ok for the cached root not to be preserved,
+        // but it can result in expensive cryptographic operations,
+        // so we fail the tests if it happens.
+        assert_eq!(self.cached_root(), other.cached_root());
+
+        // Check the data in the internal data structure
+        assert_eq!(self.inner, other.inner);
     }
 }
 
 impl Clone for NoteCommitmentTree {
     /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
     fn clone(&self) -> Self {
-        let cached_root = *self
-            .cached_root
-            .read()
-            .expect("a thread that previously held exclusive lock access panicked");
+        let cached_root = self.cached_root();
 
         Self {
             inner: self.inner.clone(),
@@ -336,7 +367,7 @@ impl Clone for NoteCommitmentTree {
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: bridgetree::Frontier::empty(),
+            inner: Frontier::empty(),
             cached_root: Default::default(),
         }
     }

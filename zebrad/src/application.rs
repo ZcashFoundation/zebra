@@ -1,26 +1,26 @@
 //! Zebrad Abscissa Application
 
-use std::{fmt::Write as _, io::Write as _, process};
+use std::{env, fmt::Write as _, io::Write as _, process, sync::Arc};
 
 use abscissa_core::{
     application::{self, AppCell},
-    config::{self, Configurable},
+    config::CfgCell,
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, Configurable, FrameworkError, Shutdown, StandardPaths,
 };
+use semver::{BuildMetadata, Version};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
+use zebra_state::{
+    constants::LOCK_FILE_ERROR, database_format_version_in_code, database_format_version_on_disk,
+};
 
 use crate::{
-    commands::ZebradCmd,
+    commands::EntryPoint,
     components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
     config::ZebradConfig,
 };
-
-mod entry_point;
-use entry_point::EntryPoint;
 
 /// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit
@@ -32,78 +32,119 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
-/// Obtain a read-only (multi-reader) lock on the application state.
+/// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
-/// Panics if the application state has not been initialized.
-pub fn app_reader() -> application::lock::Reader<ZebradApp> {
-    APPLICATION.read()
-}
-
-/// Obtain an exclusive mutable lock on the application state.
-pub fn app_writer() -> application::lock::Writer<ZebradApp> {
-    APPLICATION.write()
-}
-
-/// Obtain a read-only (multi-reader) lock on the application configuration.
-///
-/// Panics if the application configuration has not been loaded.
-pub fn app_config() -> config::Reader<ZebradApp> {
-    config::Reader::new(&APPLICATION)
-}
-
-/// Returns the zebrad version for this build, in SemVer 2.0 format.
-///
-/// Includes the git commit and the number of commits since the last version
-/// tag, if available.
+/// Includes `git describe` build metatata if available:
+/// - the number of commits since the last version tag, and
+/// - the git commit.
 ///
 /// For details, see <https://semver.org/>
-pub fn app_version() -> Version {
+pub fn build_version() -> Version {
+    // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-    let vergen_git_describe: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
 
-    match vergen_git_describe {
-        // change the git describe format to the semver 2.0 format
-        Some(mut vergen_git_describe) if !vergen_git_describe.is_empty() => {
-            // strip the leading "v", if present
-            if &vergen_git_describe[0..1] == "v" {
-                vergen_git_describe = &vergen_git_describe[1..];
-            }
+    // We're using the same library as cargo uses internally, so this is guaranteed.
+    let fallback_version = CARGO_PKG_VERSION.parse().unwrap_or_else(|error| {
+        panic!(
+            "unexpected invalid CARGO_PKG_VERSION: {error:?} in {CARGO_PKG_VERSION:?}, \
+             should have been checked by cargo"
+        )
+    });
 
-            // split into tag, commit count, hash
-            let rparts: Vec<_> = vergen_git_describe.rsplitn(3, '-').collect();
-
-            match rparts.as_slice() {
-                // assume it's a cargo package version or a git tag with no hash
-                [_] | [_, _] => vergen_git_describe.parse().unwrap_or_else(|_| {
-                    panic!(
-                        "VERGEN_GIT_DESCRIBE without a hash {vergen_git_describe:?} must be valid semver 2.0"
-                    )
-                }),
-
-                // it's the "git describe" format, which doesn't quite match SemVer 2.0
-                [hash, commit_count, tag] => {
-                    let semver_fix = format!("{tag}+{commit_count}.{hash}");
-                    semver_fix.parse().unwrap_or_else(|_|
-                                                      panic!("Modified VERGEN_GIT_DESCRIBE {vergen_git_describe:?} -> {rparts:?} -> {semver_fix:?} must be valid. Note: CARGO_PKG_VERSION was {CARGO_PKG_VERSION:?}."))
-                }
-
-                _ => unreachable!("split is limited to 3 parts"),
-            }
-        }
-        _ => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
-            panic!("CARGO_PKG_VERSION {CARGO_PKG_VERSION:?} must be valid semver 2.0")
-        }),
-    }
+    vergen_build_version().unwrap_or(fallback_version)
 }
 
-/// The Zebra current release version.
-pub fn release_version() -> String {
-    app_version()
-        .to_string()
-        .split('+')
-        .next()
-        .expect("always at least 1 slice")
-        .to_string()
+/// Returns the `zebrad` version from this build, if available from `vergen`.
+fn vergen_build_version() -> Option<Version> {
+    // VERGEN_GIT_DESCRIBE should be in the format:
+    // - v1.0.0-rc.9-6-g319b01bb84
+    // - v1.0.0-6-g319b01bb84
+    // but sometimes it is just a short commit hash. See #6879 for details.
+    //
+    // Currently it is the output of `git describe --tags --dirty --match='v*.*.*'`,
+    // or whatever is specified in zebrad/build.rs.
+    const VERGEN_GIT_DESCRIBE: Option<&str> = option_env!("VERGEN_GIT_DESCRIBE");
+
+    // The SemVer 2.0 format is:
+    // - 1.0.0-rc.9+6.g319b01bb84
+    // - 1.0.0+6.g319b01bb84
+    //
+    // Or as a pattern:
+    // - version: major`.`minor`.`patch
+    // - optional pre-release: `-`tag[`.`tag ...]
+    // - optional build: `+`tag[`.`tag ...]
+    // change the git describe format to the semver 2.0 format
+    let Some(vergen_git_describe) = VERGEN_GIT_DESCRIBE else {
+        return None;
+    };
+
+    // `git describe` uses "dirty" for uncommitted changes,
+    // but users won't understand what that means.
+    let vergen_git_describe = vergen_git_describe.replace("dirty", "modified");
+
+    // Split using "git describe" separators.
+    let mut vergen_git_describe = vergen_git_describe.split('-').peekable();
+
+    // Check the "version core" part.
+    let version = vergen_git_describe.next();
+    let Some(mut version) = version else {
+        return None;
+    };
+
+    // strip the leading "v", if present.
+    version = version.strip_prefix('v').unwrap_or(version);
+
+    // If the initial version is empty, just a commit hash, or otherwise invalid.
+    if Version::parse(version).is_err() {
+        return None;
+    }
+
+    let mut semver = version.to_string();
+
+    // Check if the next part is a pre-release or build part,
+    // but only consume it if it is a pre-release tag.
+    let Some(part) = vergen_git_describe.peek() else {
+        // No pre-release or build.
+        return semver.parse().ok();
+    };
+
+    if part.starts_with(char::is_alphabetic) {
+        // It's a pre-release tag.
+        semver.push('-');
+        semver.push_str(part);
+
+        // Consume the pre-release tag to move on to the build tags, if any.
+        let _ = vergen_git_describe.next();
+    }
+
+    // Check if the next part is a build part.
+    let Some(build) = vergen_git_describe.peek() else {
+        // No build tags.
+        return semver.parse().ok();
+    };
+
+    if !build.starts_with(char::is_numeric) {
+        // It's not a valid "commit count" build tag from "git describe".
+        return None;
+    }
+
+    // Append the rest of the build parts with the correct `+` and `.` separators.
+    let build_parts: Vec<_> = vergen_git_describe.collect();
+    let build_parts = build_parts.join(".");
+
+    semver.push('+');
+    semver.push_str(&build_parts);
+
+    semver.parse().ok()
+}
+
+/// The Zebra current release version, without any build metadata.
+pub fn release_version() -> Version {
+    let mut release_version = build_version();
+
+    release_version.build = BuildMetadata::EMPTY;
+
+    release_version
 }
 
 /// The User-Agent string provided by the node.
@@ -117,21 +158,16 @@ pub fn user_agent() -> String {
 }
 
 /// Zebrad Application
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ZebradApp {
     /// Application configuration.
-    config: Option<ZebradConfig>,
+    config: CfgCell<ZebradConfig>,
 
     /// Application state.
     state: application::State<Self>,
 }
 
 impl ZebradApp {
-    /// Are standard output and standard error both connected to ttys?
-    fn outputs_are_ttys() -> bool {
-        atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr)
-    }
-
     /// Returns the git commit for this build, if available.
     ///
     ///
@@ -147,21 +183,6 @@ impl ZebradApp {
     }
 }
 
-/// Initialize a new application instance.
-///
-/// By default no configuration is loaded, and the framework state is
-/// initialized to a default, empty state (no components, threads, etc).
-#[allow(unknown_lints)]
-#[allow(clippy::derivable_impls)]
-impl Default for ZebradApp {
-    fn default() -> Self {
-        Self {
-            config: None,
-            state: application::State::default(),
-        }
-    }
-}
-
 impl Application for ZebradApp {
     /// Entrypoint command for this application.
     type Cmd = EntryPoint;
@@ -173,8 +194,8 @@ impl Application for ZebradApp {
     type Paths = StandardPaths;
 
     /// Accessor for application configuration.
-    fn config(&self) -> &ZebradConfig {
-        self.config.as_ref().expect("config not loaded")
+    fn config(&self) -> Arc<ZebradConfig> {
+        self.config.read()
     }
 
     /// Borrow the application state immutably.
@@ -182,34 +203,21 @@ impl Application for ZebradApp {
         &self.state
     }
 
-    /// Borrow the application state mutably.
-    fn state_mut(&mut self) -> &mut application::State<Self> {
-        &mut self.state
-    }
-
     /// Returns the framework components used by this application.
     fn framework_components(
         &mut self,
-        command: &Self::Cmd,
+        _command: &Self::Cmd,
     ) -> Result<Vec<Box<dyn Component<Self>>>, FrameworkError> {
-        // Automatically use color if we're outputting to a terminal
+        // TODO: Open a PR in abscissa to add a TerminalBuilder for opting out
+        //       of the `color_eyre::install` part of `Terminal::new` without
+        //       ColorChoice::Never?
+
+        // The Tracing component uses stdout directly and will apply colors automatically.
         //
-        // The `abcissa` docs claim that abscissa implements `Auto`, but it
-        // does not - except in `color_backtrace` backtraces.
-        let mut term_colors = self.term_colors(command);
-        if term_colors == ColorChoice::Auto {
-            // We want to disable colors on a per-stream basis, but that feature
-            // can only be implemented inside the terminal component streams.
-            // Instead, if either output stream is not a terminal, disable
-            // colors.
-            //
-            // We'd also like to check `config.tracing.use_color` here, but the
-            // config has not been loaded yet.
-            if !Self::outputs_are_ttys() {
-                term_colors = ColorChoice::Never;
-            }
-        }
-        let terminal = Terminal::new(term_colors);
+        // Note: It's important to use `ColorChoice::Never` here to avoid panicking in
+        //       `register_components()` below if `color_eyre::install()` is called
+        //       after `color_spantrace` has been initialized.
+        let terminal = Terminal::new(ColorChoice::Never);
 
         Ok(vec![Box::new(terminal)])
     }
@@ -229,10 +237,12 @@ impl Application for ZebradApp {
         let mut components = self.framework_components(command)?;
 
         // Load config *after* framework components so that we can
-        // report an error to the terminal if it occurs.
+        // report an error to the terminal if it occurs (unless used with a command that doesn't need the config).
         let config = match command.config_path() {
             Some(path) => match self.load_config(&path) {
                 Ok(config) => config,
+                // Ignore errors loading the config for some commands.
+                Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
                 Err(e) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
@@ -243,7 +253,7 @@ impl Application for ZebradApp {
 
         let config = command.process_config(config)?;
 
-        let theme = if Self::outputs_are_ttys() && config.tracing.use_color {
+        let theme = if config.tracing.use_color_stdout_and_stderr() {
             color_eyre::config::Theme::dark()
         } else {
             color_eyre::config::Theme::new()
@@ -252,13 +262,32 @@ impl Application for ZebradApp {
         // collect the common metadata for the issue URL and panic report,
         // skipping any env vars that aren't present
 
+        // reads state disk version file, doesn't open RocksDB database
+        let disk_db_version =
+            match database_format_version_on_disk(&config.state, config.network.network) {
+                Ok(Some(version)) => version.to_string(),
+                // This "version" is specially formatted to match a relaxed version regex in CI
+                Ok(None) => "creating.new.database".to_string(),
+                Err(error) => {
+                    let mut error = format!("error: {error:?}");
+                    error.truncate(100);
+                    error
+                }
+            };
+
         let app_metadata = vec![
-            // cargo or git tag + short commit
-            ("version", app_version().to_string()),
+            // build-time constant: cargo or git tag + short commit
+            ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
-            // constants
-            ("state version", DATABASE_FORMAT_VERSION.to_string()),
+            // code constant
+            (
+                "running state version",
+                database_format_version_in_code().to_string(),
+            ),
+            // state disk file, doesn't open database
+            ("initial disk state version", disk_db_version),
+            // build-time constant
             ("features", env!("VERGEN_CARGO_FEATURES").to_string()),
         ];
 
@@ -362,7 +391,7 @@ impl Application for ZebradApp {
         #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
-            release: Some(app_version().to_string().into()),
+            release: Some(build_version().to_string().into()),
             ..Default::default()
         });
 
@@ -394,23 +423,9 @@ impl Application for ZebradApp {
             .build_global()
             .expect("unable to initialize rayon thread pool");
 
-        self.config = Some(config);
-
-        let cfg_ref = self
-            .config
-            .as_ref()
-            .expect("config is loaded before register_components");
-
-        let default_filter = command
-            .command
-            .as_ref()
-            .map(|zcmd| zcmd.default_tracing_filter(command.verbose, command.help))
-            .unwrap_or("warn");
-        let is_server = command
-            .command
-            .as_ref()
-            .map(ZebradCmd::is_server)
-            .unwrap_or(false);
+        let cfg_ref = &config;
+        let default_filter = command.cmd().default_tracing_filter(command.verbose);
+        let is_server = command.cmd().is_server();
 
         // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
@@ -425,7 +440,11 @@ impl Application for ZebradApp {
             tracing_config.filter = Some(default_filter.to_owned());
             tracing_config.flamegraph = None;
         }
-        components.push(Box::new(Tracing::new(tracing_config)?));
+        components.push(Box::new(Tracing::new(
+            config.network.network,
+            tracing_config,
+            command.cmd().uses_intro(),
+        )?));
 
         // Log git metadata and platform info when zebrad starts up
         if is_server {
@@ -436,7 +455,7 @@ impl Application for ZebradApp {
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
         // short commit hash, and the unique part of the network name.
-        let net = &self.config.clone().unwrap().network.network.to_string()[..4];
+        let net = &config.network.network.to_string()[..4];
         let global_span = if let Some(git_commit) = ZebradApp::git_commit() {
             error_span!("", zebrad = git_commit, net)
         } else {
@@ -459,7 +478,10 @@ impl Application for ZebradApp {
             components.push(Box::new(MetricsEndpoint::new(&metrics_config)?));
         }
 
-        self.state.components.register(components)
+        self.state.components_mut().register(components)?;
+
+        // Fire callback to signal state in the application lifecycle
+        self.after_config(config)
     }
 
     /// Load this application's configuration and initialize its components.
@@ -468,16 +490,7 @@ impl Application for ZebradApp {
         // Create and register components with the application.
         // We do this first to calculate a proper dependency ordering before
         // application configuration is processed
-        self.register_components(command)?;
-
-        // Fire callback to signal state in the application lifecycle
-        let config = self
-            .config
-            .take()
-            .expect("register_components always populates the config");
-        self.after_config(config)?;
-
-        Ok(())
+        self.register_components(command)
     }
 
     /// Post-configuration lifecycle callback.
@@ -487,13 +500,13 @@ impl Application for ZebradApp {
     /// possible.
     fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
         // Configure components
-        self.state.components.after_config(&config)?;
-        self.config = Some(config);
+        self.state.components_mut().after_config(&config)?;
+        self.config.set_once(config);
 
         Ok(())
     }
 
-    fn shutdown(&mut self, shutdown: Shutdown) -> ! {
+    fn shutdown(&self, shutdown: Shutdown) -> ! {
         // Some OSes require a flush to send all output to the terminal.
         // zebrad's logging uses Abscissa, so we flush its streams.
         //
@@ -503,16 +516,17 @@ impl Application for ZebradApp {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
-        if let Err(e) = self.state().components.shutdown(self, shutdown) {
-            let app_name = self.name().to_string();
+        let shutdown_result = self.state().components().shutdown(self, shutdown);
 
-            // Swap out a fake app so we can trigger the destructor on the original
-            let _ = std::mem::take(self);
+        self.state()
+            .components_mut()
+            .get_downcast_mut::<Tracing>()
+            .map(Tracing::shutdown);
+
+        if let Err(e) = shutdown_result {
+            let app_name = self.name().to_string();
             fatal_error(app_name, &e);
         }
-
-        // Swap out a fake app so we can trigger the destructor on the original
-        let _ = std::mem::take(self);
 
         match shutdown {
             Shutdown::Graceful => process::exit(0),
@@ -520,8 +534,15 @@ impl Application for ZebradApp {
             Shutdown::Crash => process::exit(2),
         }
     }
+}
 
-    fn version(&self) -> Version {
-        app_version()
-    }
+/// Boot the given application, parsing subcommand and options from
+/// command-line arguments, and terminating when complete.
+// <https://docs.rs/abscissa_core/0.7.0/src/abscissa_core/application.rs.html#174-178>
+pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
+    let args =
+        EntryPoint::process_cli_args(env::args_os().collect()).unwrap_or_else(|err| err.exit());
+
+    ZebradApp::run(app_cell, args);
+    process::exit(0);
 }

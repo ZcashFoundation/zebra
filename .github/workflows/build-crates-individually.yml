@@ -50,8 +50,8 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v3.5.2
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: actions/checkout@v3.5.3
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
@@ -106,16 +106,16 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile

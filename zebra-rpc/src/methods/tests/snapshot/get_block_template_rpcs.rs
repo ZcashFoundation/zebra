@@ -5,7 +5,10 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Instant,
+};
 
 use hex::FromHex;
 use insta::Settings;
@@ -82,11 +85,11 @@ pub async fn test_responses<State, ReadState>(
     <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
     let (
-        chain_verifier,
+        block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
+    ) = zebra_consensus::router::init(
         zebra_consensus::Config::default(),
         network,
         state.clone(),
@@ -133,8 +136,7 @@ pub async fn test_responses<State, ReadState>(
         )
         .into(),
     )
-    .into_new_meta_addr()
-    .unwrap()]);
+    .into_new_meta_addr(Instant::now(), DateTime32::now())]);
 
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -143,7 +145,7 @@ pub async fn test_responses<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         read_state,
         mock_chain_tip.clone(),
-        chain_verifier.clone(),
+        block_verifier_router.clone(),
         mock_sync_status.clone(),
         mock_address_book,
     );
@@ -265,7 +267,7 @@ pub async fn test_responses<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip.clone(),
-        chain_verifier,
+        block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
     );
@@ -284,10 +286,11 @@ pub async fn test_responses<State, ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -328,10 +331,11 @@ pub async fn test_responses<State, ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .expect("unexpected error in getblocktemplate RPC call") else {
-            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-        };
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -363,16 +367,16 @@ pub async fn test_responses<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // the following snapshots use a mock read_state and chain_verifier
+    // the following snapshots use a mock read_state and block_verifier_router
 
-    let mut mock_chain_verifier = MockService::build().for_unit_tests();
+    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
     let get_block_template_rpc_mock_state_verifier = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        mock_chain_verifier.clone(),
+        mock_block_verifier_router.clone(),
         mock_sync_status,
         MockAddressBookPeers::default(),
     );
@@ -385,15 +389,17 @@ pub async fn test_responses<State, ReadState>(
         }),
     );
 
-    let mock_chain_verifier_request_handler = async move {
-        mock_chain_verifier
+    let mock_block_verifier_router_request_handler = async move {
+        mock_block_verifier_router
             .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
             .await
             .respond(Hash::from([0; 32]));
     };
 
-    let (get_block_template, ..) =
-        tokio::join!(get_block_template_fut, mock_chain_verifier_request_handler,);
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_block_verifier_router_request_handler,
+    );
 
     let get_block_template =
         get_block_template.expect("unexpected error in getblocktemplate RPC call");

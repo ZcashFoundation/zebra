@@ -20,7 +20,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock, service::watch_receiver::WatchReceiver, FinalizedBlock,
+    request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver,
+    CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
 };
 
 use TipAction::*;
@@ -85,9 +86,9 @@ impl fmt::Display for ChainTipBlock {
     }
 }
 
-impl From<ContextuallyValidBlock> for ChainTipBlock {
-    fn from(contextually_valid: ContextuallyValidBlock) -> Self {
-        let ContextuallyValidBlock {
+impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
+    fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
+        let ContextuallyVerifiedBlock {
             block,
             hash,
             height,
@@ -106,15 +107,15 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
     }
 }
 
-impl From<FinalizedBlock> for ChainTipBlock {
-    fn from(finalized: FinalizedBlock) -> Self {
-        let FinalizedBlock {
+impl From<CheckpointVerifiedBlock> for ChainTipBlock {
+    fn from(finalized: CheckpointVerifiedBlock) -> Self {
+        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
             block,
             hash,
             height,
             transaction_hashes,
             ..
-        } = finalized;
+        }) = finalized;
 
         Self {
             hash,

@@ -58,7 +58,7 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// # Correctness
 ///
 /// Transaction verification requests should be wrapped in a timeout, so that
-/// out-of-order and invalid requests do not hang indefinitely. See the [`chain`](`crate::chain`)
+/// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
 #[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
@@ -740,10 +740,6 @@ where
             orchard_shielded_data,
             &shielded_sighash,
         )?))
-
-        // TODO:
-        // - verify orchard shielded pool (ZIP-224) (#2105)
-        // - shielded input and output limits? (#2379)
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.

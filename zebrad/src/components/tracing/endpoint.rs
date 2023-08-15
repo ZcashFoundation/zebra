@@ -120,9 +120,9 @@ To set the filter, POST the new filter string to /filter:
         (&Method::GET, "/filter") => Response::builder()
             .status(StatusCode::OK)
             .body(Body::from(
-                app_reader()
+                APPLICATION
                     .state()
-                    .components
+                    .components()
                     .get_downcast_ref::<Tracing>()
                     .expect("Tracing component should be available")
                     .filter(),
@@ -130,9 +130,9 @@ To set the filter, POST the new filter string to /filter:
             .expect("response with known status code cannot fail"),
         (&Method::POST, "/filter") => match read_filter(req).await {
             Ok(filter) => {
-                app_reader()
+                APPLICATION
                     .state()
-                    .components
+                    .components()
                     .get_downcast_ref::<Tracing>()
                     .expect("Tracing component should be available")
                     .reload_filter(filter);

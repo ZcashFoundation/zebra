@@ -18,7 +18,7 @@ use crate::{
         write::validate_and_commit_non_finalized,
     },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    PreparedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // Sprout
@@ -105,7 +105,10 @@ fn check_sprout_anchors() {
     );
 }
 
-fn prepare_sprout_block(mut block_to_prepare: Block, reference_block: Block) -> PreparedBlock {
+fn prepare_sprout_block(
+    mut block_to_prepare: Block,
+    reference_block: Block,
+) -> SemanticallyVerifiedBlock {
     // Convert the coinbase transaction to a version that the non-finalized state will accept.
     block_to_prepare.transactions[0] =
         transaction_v4_from_coinbase(&block_to_prepare.transactions[0]).into();

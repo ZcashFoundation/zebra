@@ -184,10 +184,10 @@ impl Codec {
     /// Obtain the size of the body of a given message. This will match the
     /// number of bytes written to the writer provided to `write_body` for the
     /// same message.
-    ///
-    /// TODO: Replace with a size estimate, to avoid multiple serializations
-    /// for large data structures like lists, blocks, and transactions.
-    /// See #1774.
+    // # Performance TODO
+    //
+    // If this code shows up in profiles, replace with a size estimate or cached size,
+    // to avoid multiple serializations for large data structures like lists, blocks, and transactions.
     fn body_length(&self, msg: &Message) -> usize {
         let mut writer = FakeWriter(0);
 
@@ -500,8 +500,6 @@ impl Codec {
     /// Note: zcashd only requires fields up to `address_recv`, but everything up to `relay` is required in Zebra.
     ///       see <https://github.com/zcash/zcash/blob/11d563904933e889a11d9685c3b249f1536cfbe7/src/main.cpp#L6490-L6507>
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
-        #[allow(clippy::unnecessary_lazy_evaluations)]
         Ok(VersionMessage {
             version: Version(reader.read_u32::<LittleEndian>()?),
             // Use from_bits_truncate to discard unknown service bits.

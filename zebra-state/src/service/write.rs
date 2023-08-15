@@ -17,10 +17,10 @@ use crate::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
-        queued_blocks::{QueuedFinalized, QueuedNonFinalized},
+        queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
     },
-    CommitBlockError, PreparedBlock,
+    CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
 
 // These types are used in doc links
@@ -49,8 +49,8 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
-    prepared: PreparedBlock,
-) -> Result<(), CommitBlockError> {
+    prepared: SemanticallyVerifiedBlock,
+) -> Result<(), CommitSemanticallyVerifiedError> {
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
@@ -131,8 +131,8 @@ fn update_latest_chain_channels(
     )
 )]
 pub fn write_blocks_from_channels(
-    mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,
-    mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedNonFinalized>,
+    mut finalized_block_write_receiver: UnboundedReceiver<QueuedCheckpointVerified>,
+    mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedSemanticallyVerified>,
     mut finalized_state: FinalizedState,
     mut non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
@@ -140,6 +140,7 @@ pub fn write_blocks_from_channels(
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 ) {
     let mut last_zebra_mined_log_height = None;
+    let mut prev_finalized_note_commitment_trees = None;
 
     // Write all the finalized blocks sent by the state,
     // until the state closes the finalized block channel's sender.
@@ -178,9 +179,12 @@ pub fn write_blocks_from_channels(
         }
 
         // Try committing the block
-        match finalized_state.commit_finalized(ordered_block) {
-            Ok(finalized) => {
+        match finalized_state
+            .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+        {
+            Ok((finalized, note_commitment_trees)) => {
                 let tip_block = ChainTipBlock::from(finalized);
+                prev_finalized_note_commitment_trees = Some(note_commitment_trees);
 
                 log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
 
@@ -288,12 +292,12 @@ pub fn write_blocks_from_channels(
 
         while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
-            let finalized_with_trees = non_finalized_state.finalize();
-            finalized_state
-                        .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
+            let contextually_verified_with_trees = non_finalized_state.finalize();
+            prev_finalized_note_commitment_trees = finalized_state
+                        .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                        );
+                        ).1.into();
         }
 
         // Update the metrics if semantic and contextual validation passes

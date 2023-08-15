@@ -25,9 +25,7 @@ impl Copy for Bctv14Proof {}
 
 impl Clone for Bctv14Proof {
     fn clone(&self) -> Self {
-        let mut bytes = [0; 296];
-        bytes[..].copy_from_slice(&self.0[..]);
-        Self(bytes)
+        *self
     }
 }
 

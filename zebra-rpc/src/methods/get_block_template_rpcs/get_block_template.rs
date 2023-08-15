@@ -39,8 +39,8 @@ pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
 pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
     let Some(parameters) = parameters else {
-            return Ok(())
-        };
+        return Ok(());
+    };
 
     match parameters {
         JsonParameters {
@@ -97,15 +97,15 @@ pub fn check_miner_address(
 /// usual acceptance rules (except proof-of-work).
 ///
 /// Returns a `getblocktemplate` [`Response`].
-pub async fn validate_block_proposal<ChainVerifier, Tip, SyncStatus>(
-    mut chain_verifier: ChainVerifier,
+pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
+    mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
     network: Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
 ) -> Result<Response>
 where
-    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -129,7 +129,7 @@ where
         }
     };
 
-    let chain_verifier_response = chain_verifier
+    let block_verifier_router_response = block_verifier_router
         .ready()
         .await
         .map_err(|error| Error {
@@ -140,12 +140,12 @@ where
         .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
         .await;
 
-    Ok(chain_verifier_response
+    Ok(block_verifier_router_response
         .map(|_hash| ProposalResponse::Valid)
         .unwrap_or_else(|verify_chain_error| {
             tracing::info!(
                 ?verify_chain_error,
-                "error response from chain_verifier in CheckProposal request"
+                "error response from block_verifier_router in CheckProposal request"
             );
 
             ProposalResponse::rejected("invalid proposal", verify_chain_error)
@@ -267,7 +267,8 @@ where
     let mempool::Response::FullTransactions {
         transactions,
         last_seen_tip_hash,
-    } = response else {
+    } = response
+    else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
     };
 

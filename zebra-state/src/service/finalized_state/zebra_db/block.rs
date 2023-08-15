@@ -19,18 +19,19 @@ use itertools::Itertools;
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
-    history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
+    sprout,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -38,9 +39,8 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        FinalizedBlock,
     },
-    BoxError, HashOrHeight,
+    BoxError, HashOrHeight, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -149,34 +149,28 @@ impl ZebraDb {
         }))
     }
 
-    /// Returns the Sapling
-    /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_tree(
+    pub fn sapling_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&sapling_tree_handle, &height)
+        self.sapling_tree_by_height(&height)
     }
 
-    /// Returns the Orchard
-    /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the finalized `db`.
+    /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_tree(
+    pub fn orchard_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-
-        self.db.zs_get(&orchard_tree_handle, &height)
+        self.orchard_tree_by_height(&height)
     }
 
     // Read tip block methods
@@ -282,15 +276,13 @@ impl ZebraDb {
     /// - Propagates any errors from updating history and note commitment trees
     pub(in super::super) fn write_block(
         &mut self,
-        finalized: FinalizedBlock,
-        history_tree: Arc<HistoryTree>,
-        note_commitment_trees: NoteCommitmentTrees,
+        finalized: SemanticallyVerifiedBlockWithTrees,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
-        let finalized_hash = finalized.hash;
-
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .verified
             .transaction_hashes
             .iter()
             .enumerate()
@@ -303,12 +295,13 @@ impl ZebraDb {
         //       simplify the spent_utxos location lookup code,
         //       and remove the extra new_outputs_by_out_loc argument
         let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
+            .verified
             .new_outputs
             .iter()
-            .map(|(outpoint, utxo)| {
+            .map(|(outpoint, ordered_utxo)| {
                 (
-                    lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
-                    utxo.clone(),
+                    lookup_out_loc(finalized.verified.height, outpoint, &tx_hash_indexes),
+                    ordered_utxo.utxo.clone(),
                 )
             })
             .collect();
@@ -316,6 +309,7 @@ impl ZebraDb {
         // Get a list of the spent UTXOs, before we delete any from the database
         let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
             finalized
+                .verified
                 .block
                 .transactions
                 .iter()
@@ -327,11 +321,17 @@ impl ZebraDb {
                         // Some utxos are spent in the same block, so they will be in
                         // `tx_hash_indexes` and `new_outputs`
                         self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                            lookup_out_loc(finalized.verified.height, &outpoint, &tx_hash_indexes)
                         }),
                         self.utxo(&outpoint)
                             .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                            .or_else(|| {
+                                finalized
+                                    .verified
+                                    .new_outputs
+                                    .get(&outpoint)
+                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                            })
                             .expect("already checked UTXO was in state or block"),
                     )
                 })
@@ -350,7 +350,13 @@ impl ZebraDb {
         // Get the transparent addresses with changed balances/UTXOs
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
-            .chain(finalized.new_outputs.values())
+            .chain(
+                finalized
+                    .verified
+                    .new_outputs
+                    .values()
+                    .map(|ordered_utxo| &ordered_utxo.utxo),
+            )
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
             .collect();
@@ -366,22 +372,21 @@ impl ZebraDb {
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
-            &self.db,
-            finalized,
+            self,
+            &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
-            history_tree,
-            note_commitment_trees,
             self.finalized_value_pool(),
+            prev_note_commitment_trees,
         )?;
 
         self.db.write(batch)?;
 
         tracing::trace!(?source, "committed block from");
 
-        Ok(finalized_hash)
+        Ok(finalized.verified.hash)
     }
 }
 
@@ -419,26 +424,19 @@ impl DiskWriteBatch {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
-        db: &DiskDb,
-        finalized: FinalizedBlock,
+        zebra_db: &ZebraDb,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
-        history_tree: Arc<HistoryTree>,
-        note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
-        let FinalizedBlock {
-            block,
-            hash,
-            height,
-            ..
-        } = &finalized;
-
+        let db = &zebra_db.db;
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
-        self.prepare_block_header_and_transaction_data_batch(db, &finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, &finalized.verified)?;
 
         // # Consensus
         //
@@ -449,28 +447,37 @@ impl DiskWriteBatch {
         //
         // By returning early, Zebra commits the genesis block and transaction data,
         // but it ignores the genesis UTXO and value pool updates.
-        if self.prepare_genesis_batch(db, &finalized) {
+        if self.prepare_genesis_batch(db, finalized) {
             return Ok(());
         }
 
         // Commit transaction indexes
         self.prepare_transparent_transaction_batch(
             db,
-            &finalized,
+            &finalized.verified,
             &new_outputs_by_out_loc,
             &spent_utxos_by_outpoint,
             &spent_utxos_by_out_loc,
             address_balances,
         )?;
-        self.prepare_shielded_transaction_batch(db, &finalized)?;
+        self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
 
-        self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(db, &finalized, spent_utxos_by_outpoint, value_pool)?;
+        self.prepare_chain_value_pools_batch(
+            db,
+            &finalized.verified,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
-        block_precommit_metrics(block, *hash, *height);
+        block_precommit_metrics(
+            &finalized.verified.block,
+            finalized.verified.hash,
+            finalized.verified.height,
+        );
 
         Ok(())
     }
@@ -485,7 +492,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &SemanticallyVerifiedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
@@ -497,7 +504,7 @@ impl DiskWriteBatch {
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
         let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
-        let FinalizedBlock {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
@@ -531,25 +538,71 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// If `finalized.block` is a genesis block,
-    /// prepare a database batch that finishes initializing the database,
-    /// and return `true` (without actually writing anything).
+    /// If `finalized.block` is a genesis block, prepares a database batch that finishes
+    /// initializing the database, and returns `true` without actually writing anything.
     ///
-    /// Since the genesis block's transactions are skipped,
-    /// the returned genesis batch should be written to the database immediately.
+    /// Since the genesis block's transactions are skipped, the returned genesis batch should be
+    /// written to the database immediately.
     ///
     /// If `finalized.block` is not a genesis block, does nothing.
     ///
-    /// This method never returns an error.
-    pub fn prepare_genesis_batch(&mut self, db: &DiskDb, finalized: &FinalizedBlock) -> bool {
-        let FinalizedBlock { block, .. } = finalized;
+    /// # Panics
+    ///
+    /// If `finalized.block` is a genesis block, and a note commitment tree in `finalized` doesn't
+    /// match its corresponding empty tree.
+    pub fn prepare_genesis_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
+    ) -> bool {
+        if finalized.verified.block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.sprout,
+                sprout::tree::NoteCommitmentTree::default(),
+                "The Sprout tree in the finalized block must match the empty Sprout tree."
+            );
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.sapling,
+                sapling::tree::NoteCommitmentTree::default(),
+                "The Sapling tree in the finalized block must match the empty Sapling tree."
+            );
+            assert_eq!(
+                *finalized.treestate.note_commitment_trees.orchard,
+                orchard::tree::NoteCommitmentTree::default(),
+                "The Orchard tree in the finalized block must match the empty Orchard tree."
+            );
 
-        if block.header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH {
-            self.prepare_genesis_note_commitment_tree_batch(db, finalized);
+            // We want to store the trees of the genesis block together with their roots, and since
+            // the trees cache the roots after their computation, we trigger the computation.
+            //
+            // At the time of writing this comment, the roots are precomputed before this function
+            // is called, so the roots should already be cached.
+            finalized.treestate.note_commitment_trees.sprout.root();
+            finalized.treestate.note_commitment_trees.sapling.root();
+            finalized.treestate.note_commitment_trees.orchard.root();
 
-            return true;
+            // Insert the empty note commitment trees. Note that these can't be used too early
+            // (e.g. the Orchard tree before Nu5 activates) since the block validation will make
+            // sure only appropriate transactions are allowed in a block.
+            self.zs_insert(
+                &db.cf_handle("sprout_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.sprout.clone(),
+            );
+            self.zs_insert(
+                &db.cf_handle("sapling_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.sapling.clone(),
+            );
+            self.zs_insert(
+                &db.cf_handle("orchard_note_commitment_tree").unwrap(),
+                finalized.verified.height,
+                finalized.treestate.note_commitment_trees.orchard.clone(),
+            );
+
+            true
+        } else {
+            false
         }
-
-        false
     }
 }

@@ -2,62 +2,49 @@
 
 mod copy_state;
 mod download;
+mod entry_point;
 mod generate;
 mod start;
 mod tip_height;
-mod version;
+
+#[cfg(test)]
+mod tests;
 
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
-    tip_height::TipHeightCmd, version::VersionCmd,
+    tip_height::TipHeightCmd,
 };
 
-pub use self::start::StartCmd;
+pub use self::{entry_point::EntryPoint, start::StartCmd};
 
 use crate::config::ZebradConfig;
 
-use abscissa_core::{
-    config::Override, Command, Configurable, FrameworkError, Help, Options, Runnable,
-};
+use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
 use std::path::PathBuf;
 
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
 
 /// Zebrad Subcommands
-#[derive(Command, Debug, Options)]
+#[derive(Command, Debug, clap::Subcommand)]
 pub enum ZebradCmd {
-    /// The `copy-state` subcommand, used to debug cached chain state
+    /// The `copy-state` subcommand, used to debug cached chain state (expert users only)
     // TODO: hide this command from users in release builds (#3279)
-    #[options(help = "copy cached chain state (debug only)")]
     CopyState(CopyStateCmd),
 
-    /// The `download` subcommand
-    #[options(help = "pre-download required parameter files")]
+    // The `download` subcommand
+    /// Pre-download required Zcash Sprout and Sapling parameter files
     Download(DownloadCmd),
 
-    /// The `generate` subcommand
-    #[options(help = "generate a skeleton configuration")]
+    /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
 
-    /// The `help` subcommand
-    #[options(help = "get usage information, \
-        use help <subcommand> for subcommand usage information, \
-        or --help flag to see top-level options")]
-    Help(Help<Self>),
-
-    /// The `start` subcommand
-    #[options(help = "start the application")]
+    /// Start the application (default command)
     Start(StartCmd),
 
-    /// The `tip-height` subcommand
-    #[options(help = "get the block height of Zebra's persisted chain state")]
+    /// Print the tip block height of Zebra's chain state on disk
     TipHeight(TipHeightCmd),
-
-    /// The `version` subcommand
-    #[options(help = "display version information")]
-    Version(VersionCmd),
 }
 
 impl ZebradCmd {
@@ -73,27 +60,46 @@ impl ZebradCmd {
             CopyState(_) | Start(_) => true,
 
             // Utility commands that don't use server components
-            Download(_) | Generate(_) | Help(_) | TipHeight(_) | Version(_) => false,
+            Download(_) | Generate(_) | TipHeight(_) => false,
         }
+    }
+
+    /// Returns true if this command shows the Zebra intro logo and text.
+    ///
+    /// For example, `Start` acts as a Zcash node.
+    pub(crate) fn uses_intro(&self) -> bool {
+        // List all the commands, so new commands have to make a choice here
+        match self {
+            // Commands that need an intro
+            Start(_) => true,
+
+            // Utility commands
+            CopyState(_) | Download(_) | Generate(_) | TipHeight(_) => false,
+        }
+    }
+
+    /// Returns true if this command should ignore errors when
+    /// attempting to load a config file.
+    pub(crate) fn should_ignore_load_config_error(&self) -> bool {
+        matches!(self, ZebradCmd::Generate(_) | ZebradCmd::Download(_))
     }
 
     /// Returns the default log level for this command, based on the `verbose` command line flag.
     ///
     /// Some commands need to be quiet by default.
-    pub(crate) fn default_tracing_filter(&self, verbose: bool, help: bool) -> &'static str {
+    pub(crate) fn default_tracing_filter(&self, verbose: bool) -> &'static str {
         let only_show_warnings = match self {
             // Commands that generate quiet output by default.
             // This output:
             // - is used by automated tools, or
             // - needs to be read easily.
-            Generate(_) | TipHeight(_) | Help(_) | Version(_) => true,
+            Generate(_) | TipHeight(_) => true,
 
             // Commands that generate informative logging output by default.
             CopyState(_) | Download(_) | Start(_) => false,
         };
 
-        // set to warn so that usage info is printed without info-level logs from component registration
-        if help || (only_show_warnings && !verbose) {
+        if only_show_warnings && !verbose {
             "warn"
         } else if only_show_warnings || !verbose {
             "info"
@@ -109,10 +115,8 @@ impl Runnable for ZebradCmd {
             CopyState(cmd) => cmd.run(),
             Download(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
-            ZebradCmd::Help(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),
-            Version(cmd) => cmd.run(),
         }
     }
 }

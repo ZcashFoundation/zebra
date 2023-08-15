@@ -23,7 +23,7 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     service::{check, ReadStateService, StateService},
-    BoxError, ChainTipChange, Config, LatestChainTip, PreparedBlock, Request, Response,
+    BoxError, ChainTipChange, Config, LatestChainTip, Request, Response, SemanticallyVerifiedBlock,
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
@@ -33,7 +33,7 @@ pub const CHAIN_TIP_UPDATE_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
-    chain: Arc<SummaryDebug<Vec<PreparedBlock>>>,
+    chain: Arc<SummaryDebug<Vec<SemanticallyVerifiedBlock>>>,
     count: BinarySearch,
     network: Network,
     history_tree: Arc<HistoryTree>,
@@ -41,7 +41,7 @@ pub struct PreparedChainTree {
 
 impl ValueTree for PreparedChainTree {
     type Value = (
-        Arc<SummaryDebug<Vec<PreparedBlock>>>,
+        Arc<SummaryDebug<Vec<SemanticallyVerifiedBlock>>>,
         <BinarySearch as ValueTree>::Value,
         Network,
         Arc<HistoryTree>,
@@ -71,7 +71,7 @@ pub struct PreparedChain {
     chain: std::sync::Mutex<
         Option<(
             Network,
-            Arc<SummaryDebug<Vec<PreparedBlock>>>,
+            Arc<SummaryDebug<Vec<SemanticallyVerifiedBlock>>>,
             Arc<HistoryTree>,
         )>,
     >,
@@ -173,7 +173,10 @@ impl Strategy for PreparedChain {
         }
 
         let chain = chain.clone().expect("should be generated");
-        let count = (1..chain.1.len()).new_tree(runner)?;
+        // The generated chain should contain at least two blocks:
+        // 1. the zeroth genesis block, and
+        // 2. a first block.
+        let count = (2..chain.1.len()).new_tree(runner)?;
         Ok(PreparedChainTree {
             chain: chain.1,
             count,
@@ -199,7 +202,7 @@ pub async fn populated_state(
 ) {
     let requests = blocks
         .into_iter()
-        .map(|block| Request::CommitFinalizedBlock(block.into()));
+        .map(|block| Request::CommitCheckpointVerifiedBlock(block.into()));
 
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.

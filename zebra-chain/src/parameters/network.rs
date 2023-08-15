@@ -59,7 +59,7 @@ pub enum Network {
     #[default]
     Mainnet,
 
-    /// The testnet.
+    /// The oldest public test network.
     Testnet,
 }
 
@@ -118,6 +118,16 @@ impl Network {
             Network::Mainnet => "main".to_string(),
             Network::Testnet => "test".to_string(),
         }
+    }
+
+    /// Return the lowercase network name.
+    pub fn lowercase_name(&self) -> String {
+        self.to_string().to_ascii_lowercase()
+    }
+
+    /// Returns `true` if this network is a testing network.
+    pub fn is_a_test_network(&self) -> bool {
+        *self != Network::Mainnet
     }
 }
 

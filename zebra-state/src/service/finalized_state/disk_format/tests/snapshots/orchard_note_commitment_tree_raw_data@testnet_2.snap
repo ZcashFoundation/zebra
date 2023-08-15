@@ -5,14 +5,6 @@ expression: cf_data
 [
   KV(
     k: "000000",
-    v: "0000",
-  ),
-  KV(
-    k: "000001",
-    v: "0001ae2935f1dfd8a24aed7c70df7de3a668eb7a49b1319880dde2bbd9031ae5d82f",
-  ),
-  KV(
-    k: "000002",
     v: "0001ae2935f1dfd8a24aed7c70df7de3a668eb7a49b1319880dde2bbd9031ae5d82f",
   ),
 ]

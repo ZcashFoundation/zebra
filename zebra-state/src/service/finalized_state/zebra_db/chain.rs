@@ -21,12 +21,12 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         zebra_db::ZebraDb,
-        FinalizedBlock,
     },
-    BoxError,
+    BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
@@ -70,15 +70,14 @@ impl DiskWriteBatch {
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
-        history_tree: Arc<HistoryTree>,
+        finalized: &SemanticallyVerifiedBlockWithTrees,
     ) -> Result<(), BoxError> {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let FinalizedBlock { height, .. } = finalized;
+        let height = finalized.verified.height;
 
         // Update the tree in state
-        let current_tip_height = *height - 1;
+        let current_tip_height = height - 1;
         if let Some(h) = current_tip_height {
             self.zs_delete(&history_tree_cf, h);
         }
@@ -88,7 +87,7 @@ impl DiskWriteBatch {
         // Otherwise, the ReadStateService could access a height
         // that was just deleted by a concurrent StateService write.
         // This requires a database version update.
-        if let Some(history_tree) = history_tree.as_ref().as_ref() {
+        if let Some(history_tree) = finalized.treestate.history_tree.as_ref().as_ref() {
             self.zs_insert(&history_tree_cf, height, history_tree);
         }
 
@@ -108,13 +107,13 @@ impl DiskWriteBatch {
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &FinalizedBlock,
+        finalized: &SemanticallyVerifiedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let FinalizedBlock { block, .. } = finalized;
+        let SemanticallyVerifiedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);

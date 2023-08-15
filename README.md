@@ -7,79 +7,58 @@
 
 ## Contents
 
-- [Contents](#contents)
 - [About](#about)
-  - [Using Zebra](#using-zebra)
-- [Release Candidates](#release-candidates)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
     - [Optional Features](#optional-features)
-  - [Configuring JSON-RPC for lightwalletd](#configuring-json-rpc-for-lightwalletd)
   - [Network Ports](#network-ports)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
+- [User support](#user-support)
 - [Security](#security)
 - [License](#license)
 
 ## About
 
 [Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of a Zcash node, currently under
-development. It can be used to join the Zcash peer-to-peer network, which helps
-keeping Zcash working by validating and broadcasting transactions, and maintaining
-the Zcash blockchain state in a distributed manner.
+consensus-compatible implementation of a Zcash node.
 
-[Zcash](https://doc.zebra.zfnd.org/zebrad/index.html#about-zcash)
-is a cryptocurrency designed to preserve the user's privacy.
-If you just want to send and receive Zcash then you don't need to use Zebra
-directly. You can download a Zcash wallet application which will handle that
-for you.
+Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
+the features required to reach Zcash network consensus, including the validation
+of all the consensus rules for the NU5 network upgrade.
+[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+benefits of Zebra.
 
-Please [join us on Discord](https://discord.gg/na6QZNd) if you'd
-like to find out more or get involved!
+Zebra validates blocks and transactions, but needs extra software to generate
+them:
 
-### Using Zebra
+- To generate transactions, [run Zebra with
+  `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
+- To generate blocks, [enable mining
+  support](https://zebra.zfnd.org/user/mining.html), and use a mining pool or
+  miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
+  experimental, and off by default.
 
-You would want to run Zebra if you want to contribute to the
-Zcash network: the more nodes are run, the more reliable the network will be
-in terms of speed and resistance to denial of service attacks, for example.
-
-Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
-than other Zcash implementations.
-
-## Release Candidates
-
-Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
-
-Zebra's network stack is interoperable with `zcashd`,
-and Zebra implements all the features required to reach Zcash network consensus.
-Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-
-Zebra validates blocks and transactions, but needs extra software to generate them:
-
-- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
-  and use a light wallet with `lightwalletd` and Zebra.
-- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
-  and use a mining pool or miner with Zebra's mining JSON-RPCs.
-  Mining support is currently incomplete, experimental, and off by default.
+Please [join us on Discord](https://discord.gg/na6QZNd) if you'd like to find
+out more or get involved!
 
 ## Getting Started
 
 You can run Zebra using our Docker image or you can build it manually. Please
-see the [requirements section of the  Zebra Book](https://zebra.zfnd.org/user/requirements.html) for system
-requirements.
+see the [System Requirements](https://zebra.zfnd.org/user/requirements.html)
+section in the Zebra book for system requirements.
 
 ### Docker
 
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.8
+docker run zfnd/zebra:latest
 ```
 
-For more information, read our [Docker documentation](book/src/user/docker.md).
+For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Building Zebra
 
@@ -88,12 +67,16 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [pkg-config](http://pkgconf.org/), and a C++ compiler.
 
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
-supported or tested. Note that Zebra's code currently uses features introduced
-in Rust 1.68, or any later stable release.
+supported or tested. Any Zebra release can start depending on new features in the
+latest stable Rust.
+
+Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
 
 Below are quick summaries for installing the dependencies on your machine.
 
-<details><summary><h4>General instructions for installing dependencies</h4></summary>
+<details>
+
+<summary><h4>General instructions for installing dependencies</h4></summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
 
@@ -107,7 +90,9 @@ Below are quick summaries for installing the dependencies on your machine.
 
 </details>
 
-<details><summary><h4>Dependencies on Arch</h4></summary>
+<details>
+
+<summary><h4>Dependencies on Arch</h4></summary>
 
 ```sh
 sudo pacman -S rust clang pkgconf
@@ -117,10 +102,10 @@ Note that the package `clang` includes `libclang` as well as the C++ compiler.
 
 </details>
 
-Once the dependencies are in place, you can build Zebra
+Once the dependencies are in place, you can build and install Zebra:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.8 zebrad
+cargo install --locked zebrad
 ```
 
 You can start Zebra by
@@ -129,12 +114,13 @@ You can start Zebra by
 zebrad start
 ```
 
-See the [Running Zebra](https://zebra.zfnd.org/user/run.html) section in the
-book for more details.
+See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
+sections in the book for more details.
 
 #### Optional Features
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring)
 - `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging)
 - `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics)
@@ -152,27 +138,6 @@ documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags)
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
 
-### Configuring JSON-RPC for lightwalletd
-
-To use `zebrad` as a `lightwalletd` backend, give it this `~/.config/zebrad.toml`:
-
-```toml
-[rpc]
-# listen for RPC queries on localhost
-listen_addr = '127.0.0.1:8232'
-
-# automatically use multiple CPU threads
-parallel_cpu_threads = 0
-```
-
-**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
-
-`lightwalletd` also requires a `zcash.conf` file.
-
-It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because that is used in testing.
-Other `lightwalletd` forks have limited support, see the [detailed `lightwalletd` instructions](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/lightwalletd.md#sync-lightwalletd).
-
 ### Network Ports
 
 Zebra uses the following inbound and outbound TCP ports:
@@ -188,19 +153,20 @@ section of the Zebra book for more details.
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
+
 - If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead.
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
+
+- Rust 1.70 [causes crashes during shutdown on macOS x86_64 (#6812)](https://github.com/ZcashFoundation/zebra/issues/6812). The state cache should stay valid despite the crash.
 
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
 
-- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent [#5502](https://github.com/ZcashFoundation/zebra/issues/5502). See the issue for details.
 
 ## Future Work
-
-The Zebra team is currently working towards an audited stable release.
 
 We will continue to add new features as part of future network upgrades, and in response to community feedback.
 
@@ -213,6 +179,12 @@ documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
 as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
 private APIs.
 
+## User support
+
+For bug reports please [open a bug report ticket in the Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=%5BUser+reported+bug%5D%3A+).
+
+Alternatively by chat, [Join the Zcash Foundation Discord Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support channel.
+
 ## Security
 
 Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
@@ -223,3 +195,7 @@ Zebra is distributed under the terms of both the MIT license
 and the Apache License (Version 2.0).
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+
+Some Zebra crates are distributed under the [MIT license only](LICENSE-MIT),
+because some of their code was originally from MIT-licensed projects.
+See each crate's directory for details.

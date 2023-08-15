@@ -1,17 +1,25 @@
 [package]
 # Crate metadata
 name = "zebrad"
+version = "1.1.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.8"
 repository = "https://github.com/ZcashFoundation/zebra"
+
+readme = "../README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # Settings that impact compilation
 edition = "2021"
 
-# Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
-# Zebra's code uses features introduced in Rust 1.68, or any later stable release.
-rust-version = "1.68"
+# Zebra is only supported on the latest stable Rust version. See the README for details.
+# Any Zebra release can break compatibility with older Rust versions.
+rust-version = "1.70"
 
 # Settings that impact runtime behaviour
 
@@ -19,9 +27,35 @@ rust-version = "1.68"
 # when run in the workspace directory
 default-run = "zebrad"
 
+# `cargo release` settings
+[package.metadata.release]
+pre-release-replacements = [
+  {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout v{{version}}"},
+  {file="../book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
+  {file="../book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch v{{version}}"},
+]
+
+[package.metadata.docs.rs]
+
+# Publish Zebra's supported production and developer features on docs.rs.
+# (Except for the log level features, because there are a lot of them.)
+#
+# <https://docs.rs/about/metadata>
+features = [
+    "default-release-binaries",
+    "filter-reload",
+    "flamegraph",
+    "journald",
+    "prometheus",
+    "sentry",
+]
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
+
+# Default features for official ZF binary release builds
+default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -108,34 +142,38 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" }
-zebra-consensus = { path = "../zebra-consensus" }
-zebra-network = { path = "../zebra-network" }
-zebra-node-services = { path = "../zebra-node-services" }
-zebra-rpc = { path = "../zebra-rpc" }
-zebra-state = { path = "../zebra-state" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.28" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.28" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.28" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.28" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.28" }
 
-abscissa_core = "0.5"
-gumdrop = { version = "0.7", features = ["default_expr"]}
-chrono = { version = "0.4.24", default-features = false, features = ["clock", "std"] }
+# Required for crates.io publishing, but it's only used in tests
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.28", optional = true }
+
+abscissa_core = "0.7.0"
+clap = { version = "4.3.21", features = ["cargo"] }
+chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "1.9.3"
+indexmap = "2.0.0"
 lazy_static = "1.4.0"
-serde = { version = "1.0.163", features = ["serde_derive"] }
-toml = "0.7.4"
+semver = "1.0.18"
+serde = { version = "1.0.179", features = ["serde_derive"] }
+toml = "0.7.6"
 
 futures = "0.3.28"
 rayon = "1.7.0"
-tokio = { version = "1.28.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.29.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
-pin-project = "1.1.0"
+pin-project = "1.1.3"
 
-color-eyre = { version = "0.6.2", default_features = false, features = ["issue-url"] }
+color-eyre = { version = "0.6.2", default-features = false, features = ["issue-url"] }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.40"
+thiserror = "1.0.44"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"
@@ -143,16 +181,16 @@ tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.37"
 
-metrics = "0.21.0"
+metrics = "0.21.1"
 
 dirs = "5.0.1"
 atty = "0.2.14"
 
 num-integer = "0.1.45"
-rand = { version = "0.8.5", package = "rand" }
+rand = "0.8.5"
 
 # prod feature sentry
-sentry = { version = "0.31.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { version = "0.31.5", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
@@ -162,7 +200,7 @@ inferno = { version = "0.11.15", default-features = false, optional = true }
 tracing-journald = { version = "0.3.0", optional = true }
 
 # prod feature filter-reload
-hyper = { version = "0.14.26", features = ["http1", "http2", "server"], optional = true }
+hyper = { version = "0.14.27", features = ["http1", "http2", "server"], optional = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { version = "0.12.0", default-features = false, features = ["http-listener"], optional = true }
@@ -171,48 +209,47 @@ metrics-exporter-prometheus = { version = "0.12.0", default-features = false, fe
 #
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
-log = "0.4.17"
+log = "0.4.19"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
-indicatif = { version = "0.17.3", optional = true }
+indicatif = { version = "0.17.6", optional = true }
 
 # test feature proptest-impl
-proptest = { version = "1.1.0", optional = true }
+proptest = { version = "1.2.0", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 # test feature tokio-console
-console-subscriber = { version = "0.1.8", optional = true }
+console-subscriber = { version = "0.1.10", optional = true }
 
 [build-dependencies]
-vergen = { version = "8.1.3", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
+vergen = { version = "8.2.4", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
 tonic-build = { version = "0.9.2", optional = true }
 
 [dev-dependencies]
-abscissa_core = { version = "0.5", features = ["testing"] }
+abscissa_core = { version = "0.7.0", features = ["testing"] }
 hex = "0.4.3"
 jsonrpc-core = "18.0.0"
-once_cell = "1.17.1"
-regex = "1.8.1"
-semver = "1.0.17"
+once_cell = "1.18.0"
+regex = "1.9.3"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.96", features = ["preserve_order"] }
-tempfile = "3.5.0"
+serde_json = { version = "1.0.104", features = ["preserve_order"] }
+tempfile = "3.7.1"
 
-hyper = { version = "0.14.26", features = ["http1", "http2", "server"]}
+hyper = { version = "0.14.27", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.28.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.14"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.11.9"
 tonic = "0.9.2"
 
-proptest = "1.1.0"
+proptest = "1.2.0"
 proptest-derive = "0.3.0"
 
 # enable span traces and track caller in tests

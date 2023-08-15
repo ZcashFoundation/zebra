@@ -1,5 +1,7 @@
 //! Randomised test data generation for MetaAddr.
 
+use std::{net::IpAddr, time::Instant};
+
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
@@ -49,12 +51,20 @@ impl MetaAddr {
     ///
     /// [1]: super::PeerAddrState::NeverAttemptedAlternate
     pub fn alternate_strategy() -> BoxedStrategy<Self> {
-        (canonical_peer_addr_strategy(), any::<PeerServices>())
-            .prop_map(|(socket_addr, untrusted_services)| {
-                MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                    .into_new_meta_addr()
-                    .expect("unexpected invalid alternate change")
-            })
+        (
+            canonical_peer_addr_strategy(),
+            any::<PeerServices>(),
+            any::<Instant>(),
+            any::<DateTime32>(),
+        )
+            .prop_map(
+                |(socket_addr, untrusted_services, instant_now, local_now)| {
+                    // instant_now is not actually used for this variant,
+                    // so we could just provide a default value
+                    MetaAddr::new_alternate(socket_addr, &untrusted_services)
+                        .into_new_meta_addr(instant_now, local_now)
+                },
+            )
             .boxed()
     }
 }
@@ -89,7 +99,17 @@ impl MetaAddrChange {
             .boxed()
     }
 
-    /// Create a strategy that generates [`MetaAddrChange`]s which are ready for
+    /// Create a strategy that generates [`IpAddr`]s for [`MetaAddrChange`]s which are ready for
+    /// outbound connections.
+    pub fn ready_outbound_strategy_ip() -> BoxedStrategy<IpAddr> {
+        any::<IpAddr>()
+            .prop_filter("failed MetaAddr::is_valid_for_outbound", |ip| {
+                !ip.is_unspecified()
+            })
+            .boxed()
+    }
+
+    /// Create a strategy that generates port numbers for [`MetaAddrChange`]s which are ready for
     /// outbound connections.
     ///
     /// Currently, all generated changes are the [`NewAlternate`][1] variant.
@@ -97,23 +117,30 @@ impl MetaAddrChange {
     /// fields. (After PR #2276 merges.)
     ///
     /// [1]: super::NewAlternate
-    pub fn ready_outbound_strategy() -> BoxedStrategy<Self> {
-        canonical_peer_addr_strategy()
-            .prop_filter_map("failed MetaAddr::is_valid_for_outbound", |addr| {
-                // Alternate nodes use the current time, so they're always ready
-                //
-                // TODO: create a "Zebra supported services" constant
-                let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
-                if change
-                    .into_new_meta_addr()
-                    .expect("unexpected invalid alternate change")
-                    .last_known_info_is_valid_for_outbound(Mainnet)
-                {
-                    Some(change)
-                } else {
-                    None
-                }
-            })
+    pub fn ready_outbound_strategy_port() -> BoxedStrategy<u16> {
+        (
+            canonical_peer_addr_strategy(),
+            any::<Instant>(),
+            any::<DateTime32>(),
+        )
+            .prop_filter_map(
+                "failed MetaAddr::is_valid_for_outbound",
+                |(addr, instant_now, local_now)| {
+                    // Alternate nodes use the current time, so they're always ready
+                    //
+                    // TODO: create a "Zebra supported services" constant
+
+                    let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
+                    if change
+                        .into_new_meta_addr(instant_now, local_now)
+                        .last_known_info_is_valid_for_outbound(Mainnet)
+                    {
+                        Some(addr.port())
+                    } else {
+                        None
+                    }
+                },
+            )
             .boxed()
     }
 }

@@ -65,6 +65,29 @@ impl Height {
     /// previous to Nu5 and in non-coinbase transactions from Nu5 activation
     /// height and above.
     pub const MAX_EXPIRY_HEIGHT: Height = Height(499_999_999);
+
+    /// Returns the next [`Height`].
+    ///
+    /// # Panics
+    ///
+    /// - If the current height is at its maximum.
+    pub fn next(self) -> Self {
+        (self + 1).expect("Height should not be at its maximum.")
+    }
+
+    /// Returns the previous [`Height`].
+    ///
+    /// # Panics
+    ///
+    /// - If the current height is at its minimum.
+    pub fn previous(self) -> Self {
+        (self - 1).expect("Height should not be at its minimum.")
+    }
+
+    /// Returns `true` if the [`Height`] is at its minimum.
+    pub fn is_min(self) -> bool {
+        self == Self::MIN
+    }
 }
 
 /// A difference between two [`Height`]s, possibly negative.
@@ -82,7 +105,11 @@ impl TryFrom<u32> for Height {
     /// Checks that the `height` is within the valid [`Height`] range.
     fn try_from(height: u32) -> Result<Self, Self::Error> {
         // Check the bounds.
-        if Height::MIN.0 <= height && height <= Height::MAX.0 {
+        //
+        // Clippy warns that `height >= Height::MIN.0` is always true.
+        assert_eq!(Height::MIN.0, 0);
+
+        if height <= Height::MAX.0 {
             Ok(Height(height))
         } else {
             Err("heights must be less than or equal to Height::MAX")
@@ -200,9 +227,6 @@ fn operator_tests() {
     assert_eq!(None, Height(Height::MAX_AS_U32 + 1) + 0);
     assert_eq!(None, Height(i32::MAX as u32) + 1);
     assert_eq!(None, Height(u32::MAX) + 0);
-
-    assert_eq!(Some(Height(2)), Height(1) + 1);
-    assert_eq!(None, Height::MAX + 1);
 
     // Adding negative numbers
     assert_eq!(Some(Height(1)), Height(2) + -1);

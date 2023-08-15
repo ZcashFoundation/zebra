@@ -82,6 +82,15 @@ pub enum PeerError {
     #[error("Internal services over capacity")]
     Overloaded,
 
+    /// This peer request's caused an internal service timeout, so the connection was dropped
+    /// to shed load or prevent attacks.
+    #[error("Internal services timed out")]
+    InboundTimeout,
+
+    /// This node's internal services are no longer able to service requests.
+    #[error("Internal services have failed or shutdown")]
+    ServiceShutdown,
+
     /// We requested data, but the peer replied with a `notfound` message.
     /// (Or it didn't respond before the request finished.)
     ///
@@ -138,6 +147,8 @@ impl PeerError {
             PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
+            PeerError::InboundTimeout => "InboundTimeout".into(),
+            PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
             PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
         }

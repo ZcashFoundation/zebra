@@ -14,7 +14,7 @@
 /zebrad/src/commands/start.rs           @ZcashFoundation/general-rust-reviewers
 
 # Network and Async Code
-/tower-batch/                           @ZcashFoundation/network-reviewers
+/tower-batch-control/                   @ZcashFoundation/network-reviewers
 /tower-fallback/                        @ZcashFoundation/network-reviewers
 /zebra-network/                         @ZcashFoundation/network-reviewers
 /zebra-node-services/                   @ZcashFoundation/network-reviewers

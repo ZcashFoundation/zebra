@@ -27,7 +27,7 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
     service::finalized_state::{disk_db::DiskWriteBatch, FinalizedState},
-    Config, FinalizedBlock,
+    CheckpointVerifiedBlock, Config,
 };
 
 /// Storage round-trip test for block and transaction data in the finalized state database.
@@ -112,7 +112,7 @@ fn test_block_db_round_trip_with(
             original_block.clone().into()
         } else {
             // Fake a zero height
-            FinalizedBlock::with_hash_and_height(
+            CheckpointVerifiedBlock::with_hash_and_height(
                 original_block.clone(),
                 original_block.hash(),
                 Height(0),

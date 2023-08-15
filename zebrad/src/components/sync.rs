@@ -8,7 +8,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, time::sleep};
+use tokio::{sync::watch, task::JoinError, time::sleep};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -106,6 +106,16 @@ pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
 pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// Controls how long we wait between gossiping successive blocks or transactions.
+///
+/// ## Correctness
+///
+/// If this timeout is set too high, blocks and transactions won't propagate through
+/// the network efficiently.
+///
+/// If this timeout is set too low, the peer set and remote peers can get overloaded.
+pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
 /// Controls how long we wait for a block download request to complete.
 ///
@@ -658,7 +668,17 @@ where
         let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
             match res
-                .expect("panic in spawned obtain tips request")
+                .unwrap_or_else(|e @ JoinError { .. }| {
+                    if e.is_panic() {
+                        panic!("panic in obtain tips task: {e:?}");
+                    } else {
+                        info!(
+                            "task error during obtain tips task: {e:?},\
+                     is Zebra shutting down?"
+                        );
+                        Err(e.into())
+                    }
+                })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
                 Ok(zn::Response::BlockHashes(hashes)) => {

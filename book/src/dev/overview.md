@@ -56,18 +56,18 @@ digraph services {
     inbound -> state
     rpc_server -> state
     mempool -> transaction_verifier
-    chain_verifier -> checkpoint_verifier
+    block_verifier_router -> checkpoint_verifier
     inbound -> mempool
     rpc_server -> mempool
-    inbound -> chain_verifier
-    syncer -> chain_verifier
-    rpc_server -> chain_verifier [style=dotted]
+    inbound -> block_verifier_router
+    syncer -> block_verifier_router
+    rpc_server -> block_verifier_router [style=dotted]
     syncer -> peer_set
     mempool -> peer_set
     block_verifier -> state
     checkpoint_verifier -> state
     block_verifier -> transaction_verifier
-    chain_verifier -> block_verifier
+    block_verifier_router -> block_verifier
     rpc_server -> inbound [style=invis] // for layout of the diagram
 }
 
@@ -123,7 +123,7 @@ into several components:
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts. Internally, the library
-  uses [`tower-batch`](https://doc.zebra.zfnd.org/tower_batch/index.html) to
+  uses [`tower-batch-control`](https://doc.zebra.zfnd.org/tower_batch_control/index.html) to
   perform automatic, transparent batch processing of contemporaneous
   verification requests.
 

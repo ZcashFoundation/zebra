@@ -21,7 +21,7 @@ use crate::{
         write::validate_and_commit_non_finalized,
     },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    FinalizedBlock,
+    CheckpointVerifiedBlock,
     ValidateContextError::{
         DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
         MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
@@ -184,8 +184,8 @@ proptest! {
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
-            let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
+            let block1 = CheckpointVerifiedBlock::from(Arc::new(block1));
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), None, "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -272,8 +272,8 @@ proptest! {
         block2.transactions.push(spend_transaction.into());
 
         if use_finalized_state_spend {
-            let block2 = FinalizedBlock::from(Arc::new(block2));
-            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(), "test");
+            let block2 = CheckpointVerifiedBlock::from(Arc::new(block2));
+            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(),None,  "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -611,8 +611,8 @@ proptest! {
         let block2 = Arc::new(block2);
 
         if use_finalized_state_spend {
-            let block2 = FinalizedBlock::from(block2.clone());
-            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(), "test");
+            let block2 = CheckpointVerifiedBlock::from(block2.clone());
+            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(), None, "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -842,7 +842,7 @@ struct TestState {
     /// The genesis block that has already been committed to the `state` service's
     /// finalized state.
     #[allow(dead_code)]
-    genesis: FinalizedBlock,
+    genesis: CheckpointVerifiedBlock,
 
     /// A block at height 1, that has already been committed to the `state` service.
     block1: Arc<Block>,
@@ -883,8 +883,9 @@ fn new_state_with_mainnet_transparent_data(
     let block1 = Arc::new(block1);
 
     if use_finalized_state {
-        let block1 = FinalizedBlock::from(block1.clone());
-        let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
+        let block1 = CheckpointVerifiedBlock::from(block1.clone());
+        let commit_result =
+            finalized_state.commit_finalized_direct(block1.clone().into(), None, "test");
 
         // the block was committed
         assert_eq!(

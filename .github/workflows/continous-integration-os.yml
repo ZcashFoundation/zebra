@@ -69,7 +69,8 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macos-latest]
+        # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
+        os: [ubuntu-latest]
         rust: [stable, beta]
         features: ["", " --features getblocktemplate-rpcs"]
         exclude:
@@ -81,18 +82,23 @@ jobs:
             rust: beta
           - os: macos-latest
             features: " --features getblocktemplate-rpcs"
+        # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
+        # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
+          - os: ubuntu-latest
+            rust: beta
+            features: " --features getblocktemplate-rpcs"
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with ${{ matrix.rust }} toolchain and minimal profile
@@ -101,7 +107,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
 
 
-      - uses: Swatinem/rust-cache@v2.3.0
+      - uses: Swatinem/rust-cache@v2.6.0
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -197,10 +203,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
@@ -219,16 +225,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1.2.0
+        uses: arduino/setup-protoc@v2.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '3.20.1'
+          version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile
@@ -236,7 +242,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-      - uses: Swatinem/rust-cache@v2.3.0
+      - uses: Swatinem/rust-cache@v2.6.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -252,25 +258,30 @@ jobs:
         checks:
           - bans
           - sources
-        features: ['', '--all-features', '--no-default-features']
-      # We always want to run the --all-features job, because it gives accurate "skip tree root was not found" warnings
+        # We don't need to check `--no-default-features` here, because (except in very rare cases):
+        # - disabling features isn't going to add duplicate dependencies
+        # - disabling features isn't going to add more crate sources
+        features: ['', '--features default-release-binaries', '--all-features']
+      # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 
     # Prevent sudden announcement of a new advisory from failing ci:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v3.5.2
+      - uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
-      # The --all-features job is the only job that gives accurate "skip tree root was not found" warnings.
-      # In other jobs, we expect some of these warnings, due to disabled features.
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          command: check ${{ matrix.checks }}
+          # --all-features spuriously activates openssl, but we want to ban that dependency in
+          # all of zebrad's production features for security reasons. But the --all-features job is
+          # the only job that gives accurate "skip tree root was not found" warnings.
+          # In other jobs, we expect some of these warnings, due to disabled features.
+          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
 
   unused-deps:
@@ -279,10 +290,10 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
@@ -290,7 +301,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v2.0.0
+        uses: baptiste0928/cargo-install@v2.1.0
         with:
           crate: cargo-machete
 
@@ -302,7 +313,7 @@ jobs:
           cargo machete --skip-target-dir || true
           echo "-- unused dependencies are below this line, full output is above --"
           if (cargo machete --skip-target-dir 2>/dev/null || true) | \
-          grep -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done; then
+          grep -v -e gumdrop -e humantime-serde -e tinyvec -e zebra-utils -e "found the following" -e Cargo.toml -e Done; then
               echo "New unused dependencies were found, please remove them!"
               exit 1
           else

@@ -66,7 +66,7 @@ impl ActiveConnectionCounter {
         let label = label.to_string();
 
         #[cfg(feature = "progress-bar")]
-        let connection_bar = howudoin::new().label(label.clone());
+        let connection_bar = howudoin::new_root().label(label.clone());
 
         Self {
             count: 0,
@@ -115,8 +115,8 @@ impl ActiveConnectionCounter {
 
         #[cfg(feature = "progress-bar")]
         self.connection_bar
-            .set_pos(u64::try_from(self.count).expect("fits in u64"))
-            .set_len(u64::try_from(self.limit).expect("fits in u64"));
+            .set_pos(u64::try_from(self.count).expect("fits in u64"));
+        // .set_len(u64::try_from(self.limit).expect("fits in u64"));
 
         self.count
     }
@@ -178,8 +178,9 @@ impl Drop for ConnectionTracker {
 
         // We ignore disconnected errors, because the receiver can be dropped
         // before some connections are dropped.
+        // # Security
         //
-        // TODO: This channel will be bounded by the connection limit (#1850, #1851, #2902).
+        // This channel is actually bounded by the inbound and outbound connection limit.
         let _ = self.close_notification_tx.send(ConnectionClosed);
     }
 }

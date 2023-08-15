@@ -1,39 +1,43 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fs::{canonicalize, remove_dir_all, DirEntry, ReadDir},
+    fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
+use crate::{
+    constants::{
+        DATABASE_FORMAT_MINOR_VERSION, DATABASE_FORMAT_PATCH_VERSION, DATABASE_FORMAT_VERSION,
+        DATABASE_FORMAT_VERSION_FILE_NAME,
+    },
+    BoxError,
+};
+
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// The root directory for storing cached data.
+    /// The root directory for storing cached block data.
     ///
-    /// Cached data includes any state that can be replicated from the network
-    /// (e.g., the chain state, the blocks, the UTXO set, etc.). It does *not*
-    /// include private data that cannot be replicated from the network, such as
-    /// wallet data.  That data is not handled by `zebra-state`.
+    /// If you change this directory, you might also want to change `network.cache_dir`.
     ///
-    /// Each state format version and network has a separate state.
-    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
-    /// underneath the `cache_dir` path, where `N` is the state format version.
+    /// This cache stores permanent blockchain state that can be replicated from
+    /// the network, including the best chain, blocks, the UTXO set, and other indexes.
+    /// Any state that can be rolled back is only stored in memory.
     ///
-    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
-    /// and re-syncs from genesis.
+    /// The `zebra-state` cache does *not* include any private data, such as wallet data.
     ///
-    /// Old state versions are [not automatically deleted](https://github.com/ZcashFoundation/zebra/issues/1213).
-    /// It is ok to manually delete old state versions.
-    ///
-    /// It is also ok to delete the entire cached state directory.
-    /// If you do, Zebra will re-sync from genesis next time it is launched.
+    /// You can delete the entire cached state directory, but it will impact your node's
+    /// readiness and network usage. If you do, Zebra will re-sync from genesis the next
+    /// time it is launched.
     ///
     /// The default directory is platform dependent, based on
     /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
@@ -51,6 +55,18 @@ pub struct Config {
     /// directory for this file before running Zebra, and make sure the Zebra user
     /// account has exclusive access to that directory, and other users can't modify
     /// its parent directories.
+    ///
+    /// # Implementation Details
+    ///
+    /// Each state format version and network has a separate state.
+    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
+    /// underneath the `cache_dir` path, where `N` is the state format version.
+    ///
+    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
+    /// and re-syncs from genesis.
+    ///
+    /// Old state versions are automatically deleted at startup. You can also manually delete old
+    /// state versions.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.
@@ -103,10 +119,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 impl Config {
     /// Returns the path for the finalized state database
     pub fn db_path(&self, network: Network) -> PathBuf {
-        let net_dir = match network {
-            Network::Mainnet => "mainnet",
-            Network::Testnet => "testnet",
-        };
+        let net_dir = network.lowercase_name();
 
         if self.ephemeral {
             gen_temp_path(&format!(
@@ -120,6 +133,15 @@ impl Config {
                 .join(format!("v{}", crate::constants::DATABASE_FORMAT_VERSION))
                 .join(net_dir)
         }
+    }
+
+    /// Returns the path of the database format version file.
+    pub fn version_file_path(&self, network: Network) -> PathBuf {
+        let mut version_path = self.db_path(network);
+
+        version_path.push(DATABASE_FORMAT_VERSION_FILE_NAME);
+
+        version_path
     }
 
     /// Construct a config for an ephemeral database
@@ -153,6 +175,7 @@ impl Default for Config {
 }
 
 // Cleaning up old database versions
+// TODO: put this in a different module?
 
 /// Spawns a task that checks if there are old database folders,
 /// and deletes them from the filesystem.
@@ -264,8 +287,96 @@ fn parse_dir_name(entry: &DirEntry) -> Option<String> {
 /// Parse the state version number from `dir_name`.
 ///
 /// Returns `None` if parsing fails, or the directory name is not in the expected format.
-fn parse_version_number(dir_name: &str) -> Option<u32> {
+fn parse_version_number(dir_name: &str) -> Option<u64> {
     dir_name
         .strip_prefix('v')
         .and_then(|version| version.parse().ok())
+}
+
+// TODO: move these to the format upgrade module
+
+/// Returns the full semantic version of the currently running database format code.
+///
+/// This is the version implemented by the Zebra code that's currently running,
+/// the minor and patch versions on disk can be different.
+pub fn database_format_version_in_code() -> Version {
+    Version::new(
+        DATABASE_FORMAT_VERSION,
+        DATABASE_FORMAT_MINOR_VERSION,
+        DATABASE_FORMAT_PATCH_VERSION,
+    )
+}
+
+/// Returns the full semantic version of the on-disk database.
+/// If there is no existing on-disk database, returns `Ok(None)`.
+///
+/// This is the format of the data on disk, the minor and patch versions
+/// implemented by the running Zebra code can be different.
+pub fn database_format_version_on_disk(
+    config: &Config,
+    network: Network,
+) -> Result<Option<Version>, BoxError> {
+    let version_path = config.version_file_path(network);
+
+    let version = match fs::read_to_string(version_path) {
+        Ok(version) => version,
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            // If the version file doesn't exist, don't guess the version.
+            // (It will end up being the version in code, once the database is created.)
+            return Ok(None);
+        }
+        Err(e) => Err(e)?,
+    };
+
+    let (minor, patch) = version
+        .split_once('.')
+        .ok_or("invalid database format version file")?;
+
+    Ok(Some(Version::new(
+        DATABASE_FORMAT_VERSION,
+        minor.parse()?,
+        patch.parse()?,
+    )))
+}
+
+/// Writes `changed_version` to the on-disk database after the format is changed.
+/// (Or a new database is created.)
+///
+/// # Correctness
+///
+/// This should only be called:
+/// - after each format upgrade is complete,
+/// - when creating a new database, or
+/// - when an older Zebra version opens a newer database.
+///
+/// # Concurrency
+///
+/// This must only be called while RocksDB has an open database for `config`.
+/// Otherwise, multiple Zebra processes could write the version at the same time,
+/// corrupting the file.
+///
+/// # Panics
+///
+/// If the major versions do not match. (The format is incompatible.)
+pub fn write_database_format_version_to_disk(
+    changed_version: &Version,
+    config: &Config,
+    network: Network,
+) -> Result<(), BoxError> {
+    let version_path = config.version_file_path(network);
+
+    // The major version is already in the directory path.
+    assert_eq!(
+        changed_version.major, DATABASE_FORMAT_VERSION,
+        "tried to do in-place database format change to an incompatible version"
+    );
+
+    let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+
+    // # Concurrency
+    //
+    // The caller handles locking for this file write.
+    fs::write(version_path, version.as_bytes())?;
+
+    Ok(())
 }

@@ -1,11 +1,14 @@
 //! A peer set whose size is dynamically determined by resource constraints.
-
-// Portions of this submodule were adapted from tower-balance,
-// which is (c) 2019 Tower Contributors (MIT licensed).
+//!
+//! The [`PeerSet`] implementation is adapted from the one in [tower::Balance][tower-balance].
+//!
+//! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 
 use std::{
     collections::{BTreeMap, HashSet},
+    convert::Infallible,
     net::SocketAddr,
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -13,8 +16,8 @@ use std::{
 use futures::{
     future::{self, FutureExt},
     sink::SinkExt,
-    stream::{FuturesUnordered, StreamExt, TryStreamExt},
-    TryFutureExt,
+    stream::{FuturesUnordered, StreamExt},
+    Future, TryFutureExt,
 };
 use rand::seq::SliceRandom;
 use tokio::{
@@ -26,9 +29,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
+use tracing::Span;
 use tracing_futures::Instrument;
 
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
 
 use crate::{
     address_book_updater::AddressBookUpdater,
@@ -38,6 +42,7 @@ use crate::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
+    peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
@@ -45,11 +50,17 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The result of an outbound peer connection attempt or inbound connection
-/// handshake.
+mod recent_by_ip;
+
+/// A successful outbound peer connection attempt or inbound connection handshake.
 ///
-/// This result comes from the `Handshaker`.
-type DiscoveredPeer = Result<(PeerSocketAddr, peer::Client), BoxError>;
+/// The [`Handshake`](peer::Handshake) service returns a [`Result`]. Only successful connections
+/// should be sent on the channel. Errors should be logged or ignored.
+///
+/// We don't allow any errors in this type, because:
+/// - The connection limits don't include failed connections
+/// - tower::Discover interprets an error as stream termination
+type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -93,17 +104,10 @@ pub async fn init<S, C>(
     Arc<std::sync::Mutex<AddressBook>>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
-    C: ChainTip + Clone + Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
 {
-    // If we want Zebra to operate with no network,
-    // we should implement a `zebrad` command that doesn't use `zebra-network`.
-    assert!(
-        config.peerset_initial_target_size > 0,
-        "Zebra must be allowed to connect to at least one peer"
-    );
-
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
@@ -145,14 +149,15 @@ where
 
     // Create an mpsc channel for peer changes,
     // based on the maximum number of inbound and outbound peers.
+    //
+    // The connection limit does not apply to errors,
+    // so they need to be handled before sending to this channel.
     let (peerset_tx, peerset_rx) =
         futures::channel::mpsc::channel::<DiscoveredPeer>(config.peerset_total_connection_limit());
 
-    let discovered_peers = peerset_rx
-        // Discover interprets an error as stream termination,
-        // so discard any errored connections...
-        .filter(|result| future::ready(result.is_ok()))
-        .map_ok(|(address, client)| Change::Insert(address, client.into()));
+    let discovered_peers = peerset_rx.map(|(address, client)| {
+        Result::<_, Infallible>::Ok(Change::Insert(address, client.into()))
+    });
 
     // Create an mpsc channel for peerset demand signaling,
     // based on the maximum number of outbound peers.
@@ -171,6 +176,7 @@ where
         inv_receiver,
         address_metrics,
         MinimumPeerVersion::new(latest_chain_tip, config.network),
+        None,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
@@ -186,7 +192,7 @@ where
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
-    // 2. Initial peers, specified in the config.
+    // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
         config.clone(),
         outbound_connector.clone(),
@@ -200,8 +206,8 @@ where
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
+        .wait_for_panics()
         .await
-        .expect("unexpected panic in spawned initial peers task")
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
@@ -209,6 +215,9 @@ where
     // because zcashd rate-limits `addr`/`addrv2` messages per connection,
     // and if we only have one initial peer,
     // we need to ensure that its `Response::Addr` is used by the crawler.
+    //
+    // TODO: this might not be needed after we added the Connection peer address cache,
+    //       try removing it in a future release?
     info!(
         ?active_initial_peer_count,
         "sending initial request for peers"
@@ -224,8 +233,9 @@ where
         let _ = demand_tx.try_send(MorePeers);
     }
 
+    // Start the peer crawler
     let crawl_fut = crawl_and_dial(
-        config,
+        config.clone(),
         demand_tx,
         demand_rx,
         candidates,
@@ -235,15 +245,24 @@ where
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
+    // Start the peer disk cache updater
+    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
+
     handle_tx
-        .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
+        .send(vec![
+            listen_guard,
+            crawl_guard,
+            address_book_updater_guard,
+            peer_cache_updater_guard,
+        ])
         .unwrap();
 
     (peer_set, address_book)
 }
 
-/// Use the provided `outbound_connector` to connect to the configured initial peers,
-/// then send the resulting peer connections over `peerset_tx`.
+/// Use the provided `outbound_connector` to connect to the configured DNS seeder and
+/// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
 /// Also sends every initial peer address to the `address_book_updater`.
 #[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
@@ -273,9 +292,12 @@ where
         "Outbound Connections",
     );
 
+    // TODO: update when we add Tor peers or other kinds of addresses.
+    let ipv4_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv4()).count();
+    let ipv6_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv6()).count();
     info!(
-        initial_peer_count = ?initial_peers.len(),
-        ?initial_peers,
+        ?ipv4_peer_count,
+        ?ipv6_peer_count,
         "connecting to initial peer set"
     );
 
@@ -321,14 +343,13 @@ where
                 }
                 .in_current_span(),
             )
+            .wait_for_panics()
         })
         .collect();
 
     while let Some(handshake_result) = handshakes.next().await {
-        let handshake_result =
-            handshake_result.expect("unexpected panic in initial peer handshake");
         match handshake_result {
-            Ok(ref change) => {
+            Ok(change) => {
                 handshake_success_total += 1;
                 debug!(
                     ?handshake_success_total,
@@ -336,6 +357,9 @@ where
                     ?change,
                     "an initial peer handshake succeeded"
                 );
+
+                // The connection limit makes sure this send doesn't block
+                peerset_tx.send(change).await?;
             }
             Err((addr, ref e)) => {
                 handshake_error_total += 1;
@@ -370,10 +394,6 @@ where
             }
         }
 
-        peerset_tx
-            .send(handshake_result.map_err(|(_addr, e)| e))
-            .await?;
-
         // Security: Let other tasks run after each connection is processed.
         //
         // Avoids remote peers starving other Zebra tasks using initial connection successes or errors.
@@ -385,7 +405,7 @@ where
         ?handshake_success_total,
         ?handshake_error_total,
         ?outbound_connections,
-        "finished connecting to initial seed peers"
+        "finished connecting to initial seed and disk cache peers"
     );
 
     Ok(active_outbound_connections)
@@ -423,16 +443,22 @@ async fn limit_initial_peers(
                 .entry(preference)
                 .or_default()
                 .push(peer_addr),
-            Err(error) => warn!(
+            Err(error) => info!(
                 ?peer_addr,
                 ?error,
-                "invalid initial peer from DNS seeder or configured IP address",
+                "invalid initial peer from DNS seeder, configured IP address, or disk cache",
             ),
         }
     }
 
     // Send every initial peer to the address book, in preferred order.
     // (This treats initial peers the same way we treat gossiped peers.)
+    //
+    // # Security
+    //
+    // Initial peers are limited because:
+    // - the number of initial peers is limited
+    // - this code only runs once at startup
     for peer in preferred_peers.values().flatten() {
         let peer_addr = MetaAddr::new_initial_peer(*peer);
         // `send` only waits when the channel is full.
@@ -522,7 +548,7 @@ async fn accept_inbound_connections<S>(
     config: Config,
     listener: TcpListener,
     min_inbound_peer_connection_interval: Duration,
-    mut handshaker: S,
+    handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Result<(), BoxError>
 where
@@ -530,12 +556,16 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
+    let mut recent_inbound_connections =
+        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
+
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
     );
 
-    let mut handshakes = FuturesUnordered::new();
+    let mut handshakes: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
+        FuturesUnordered::new();
     // Keeping an unresolved future in the pool means the stream never terminates.
     handshakes.push(future::pending().boxed());
 
@@ -545,11 +575,11 @@ where
             biased;
             next_handshake_res = handshakes.next() => match next_handshake_res {
                 // The task has already sent the peer change to the peer set.
-                Some(Ok(_)) => continue,
-                Some(Err(task_panic)) => panic!("panic in inbound handshake task: {task_panic:?}"),
+                Some(()) => continue,
                 None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
             },
 
+            // This future must wait until new connections are available: it can't have a timeout.
             inbound_result = listener.accept() => inbound_result,
         };
 
@@ -558,10 +588,14 @@ where
 
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()
+                || recent_inbound_connections.is_past_limit_or_add(addr.ip())
             {
                 // Too many open inbound connections or pending handshakes already.
                 // Close the connection.
                 std::mem::drop(tcp_stream);
+                // Allow invalid connections to be cleared quickly,
+                // but still put a limit on our CPU and network usage from failed connections.
+                tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
                 continue;
             }
 
@@ -573,40 +607,17 @@ where
                 "handshaking on an open inbound peer connection"
             );
 
-            let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
-            let accept_span = info_span!("listen_accept", peer = ?connected_addr);
-            let _guard = accept_span.enter();
-
-            debug!("got incoming connection");
-            handshaker.ready().await?;
-            // TODO: distinguish between proxied listeners and direct listeners
-            let handshaker_span = info_span!("listen_handshaker", peer = ?connected_addr);
-
-            // Construct a handshake future but do not drive it yet....
-            let handshake = handshaker.call(HandshakeRequest {
-                data_stream: tcp_stream,
-                connected_addr,
+            let handshake_task = accept_inbound_handshake(
+                addr,
+                handshaker.clone(),
+                tcp_stream,
                 connection_tracker,
-            });
-            // ... instead, spawn a new task to handle this connection
-            {
-                let mut peerset_tx = peerset_tx.clone();
+                peerset_tx.clone(),
+            )
+            .await?
+            .wait_for_panics();
 
-                let handshake_task = tokio::spawn(
-                    async move {
-                        let handshake_result = handshake.await;
-
-                        if let Ok(client) = handshake_result {
-                            let _ = peerset_tx.send(Ok((addr, client))).await;
-                        } else {
-                            debug!(?handshake_result, "error handshaking with inbound peer");
-                        }
-                    }
-                    .instrument(handshaker_span),
-                );
-
-                handshakes.push(Box::pin(handshake_task));
-            }
+            handshakes.push(handshake_task);
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
@@ -636,24 +647,80 @@ where
     }
 }
 
+/// Set up a new inbound connection as a Zcash peer.
+///
+/// Uses `handshaker` to perform a Zcash network protocol handshake, and sends
+/// the [`peer::Client`] result over `peerset_tx`.
+//
+// TODO: when we support inbound proxies, distinguish between proxied listeners and
+//       direct listeners in the span generated by this instrument macro
+#[instrument(skip(handshaker, tcp_stream, connection_tracker, peerset_tx))]
+async fn accept_inbound_handshake<S>(
+    addr: PeerSocketAddr,
+    mut handshaker: S,
+    tcp_stream: TcpStream,
+    connection_tracker: ConnectionTracker,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+) -> Result<tokio::task::JoinHandle<()>, BoxError>
+where
+    S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
+        + Clone,
+    S::Future: Send + 'static,
+{
+    let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
+
+    debug!("got incoming connection");
+
+    // # Correctness
+    //
+    // Holding the drop guard returned by Span::enter across .await points will
+    // result in incorrect traces if it yields.
+    //
+    // This await is okay because the handshaker's `poll_ready` method always returns Ready.
+    handshaker.ready().await?;
+
+    // Construct a handshake future but do not drive it yet....
+    let handshake = handshaker.call(HandshakeRequest {
+        data_stream: tcp_stream,
+        connected_addr,
+        connection_tracker,
+    });
+    // ... instead, spawn a new task to handle this connection
+    let mut peerset_tx = peerset_tx.clone();
+
+    let handshake_task = tokio::spawn(
+        async move {
+            let handshake_result = handshake.await;
+
+            if let Ok(client) = handshake_result {
+                // The connection limit makes sure this send doesn't block
+                let _ = peerset_tx.send((addr, client)).await;
+            } else {
+                debug!(?handshake_result, "error handshaking with inbound peer");
+            }
+        }
+        .in_current_span(),
+    );
+
+    Ok(handshake_task)
+}
+
 /// An action that the peer crawler can take.
 enum CrawlerAction {
     /// Drop the demand signal because there are too many pending handshakes.
     DemandDrop,
-    /// Initiate a handshake to `candidate` in response to demand.
-    DemandHandshake { candidate: MetaAddr },
-    /// Crawl existing peers for more peers in response to demand, because there
-    /// are no available candidates.
-    DemandCrawl,
+    /// Initiate a handshake to the next candidate peer in response to demand.
+    ///
+    /// If there are no available candidates, crawl existing peers.
+    DemandHandshakeOrCrawl,
     /// Crawl existing peers for more peers in response to a timer `tick`.
     TimerCrawl { tick: Instant },
-    /// Handle a successfully connected handshake `peer_set_change`.
-    HandshakeConnected {
-        address: PeerSocketAddr,
-        client: peer::Client,
-    },
-    /// Handle a handshake failure to `failed_addr`.
-    HandshakeFailed { failed_addr: MetaAddr },
+    /// Clear a finished handshake.
+    HandshakeFinished,
+    /// Clear a finished demand crawl (DemandHandshakeOrCrawl with no peers).
+    DemandCrawlFinished,
+    /// Clear a finished TimerCrawl.
+    TimerCrawlFinished,
 }
 
 /// Given a channel `demand_rx` that signals a need for new peers, try to find
@@ -689,11 +756,11 @@ enum CrawlerAction {
 )]
 async fn crawl_and_dial<C, S>(
     config: Config,
-    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+    demand_tx: futures::channel::mpsc::Sender<MorePeers>,
     mut demand_rx: futures::channel::mpsc::Receiver<MorePeers>,
-    mut candidates: CandidateSet<S>,
+    candidates: CandidateSet<S>,
     outbound_connector: C,
-    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
 ) -> Result<(), BoxError>
 where
@@ -705,18 +772,10 @@ where
         + Send
         + 'static,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxError>,
+    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     use CrawlerAction::*;
-
-    // CORRECTNESS
-    //
-    // To avoid hangs and starvation, the crawler must:
-    // - spawn a separate task for each crawl and handshake, so they can make
-    //   progress independently (and avoid deadlocking each other)
-    // - use the `select!` macro for all actions, because the `select` function
-    //   is biased towards the first ready future
 
     info!(
         crawl_new_peer_interval = ?config.crawl_new_peer_interval,
@@ -724,12 +783,21 @@ where
         "starting the peer address crawler",
     );
 
-    let mut handshakes = FuturesUnordered::new();
+    let address_book = candidates.address_book().await;
+
+    // # Concurrency
+    //
+    // Allow tasks using the candidate set to be spawned, so they can run concurrently.
+    // Previously, Zebra has had deadlocks and long hangs caused by running dependent
+    // candidate set futures in the same async task.
+    let candidates = Arc::new(futures::lock::Mutex::new(candidates));
+
+    // This contains both crawl and handshake tasks.
+    let mut handshakes: FuturesUnordered<
+        Pin<Box<dyn Future<Output = Result<CrawlerAction, BoxError>> + Send>>,
+    > = FuturesUnordered::new();
     // <FuturesUnordered as Stream> returns None when empty.
-    // Keeping an unresolved future in the pool means the stream
-    // never terminates.
-    // We could use StreamExt::select_next_some and StreamExt::fuse, but `fuse`
-    // prevents us from adding items to the stream and checking its length.
+    // Keeping an unresolved future in the pool means the stream never terminates.
     handshakes.push(future::pending().boxed());
 
     let mut crawl_timer = tokio::time::interval(config.crawl_new_peer_interval);
@@ -739,6 +807,10 @@ where
 
     let mut crawl_timer = IntervalStream::new(crawl_timer).map(|tick| TimerCrawl { tick });
 
+    // # Concurrency
+    //
+    // To avoid hangs and starvation, the crawler must spawn a separate task for each crawl
+    // and handshake, so they can make progress independently (and avoid deadlocking each other).
     loop {
         metrics::gauge!(
             "crawler.in_flight_handshakes",
@@ -749,33 +821,45 @@ where
         );
 
         let crawler_action = tokio::select! {
+            biased;
+            // Check for completed handshakes first, because the rest of the app needs them.
+            // Pending handshakes are limited by the connection limit.
             next_handshake_res = handshakes.next() => next_handshake_res.expect(
                 "handshakes never terminates, because it contains a future that never resolves"
             ),
-            next_timer = crawl_timer.next() => next_timer.expect("timers never terminate"),
-            // turn the demand into an action, based on the crawler's current state
-            _ = demand_rx.next() => {
+            // The timer is rate-limited
+            next_timer = crawl_timer.next() => Ok(next_timer.expect("timers never terminate")),
+            // Turn any new demand into an action, based on the crawler's current state.
+            //
+            // # Concurrency
+            //
+            // Demand is potentially unlimited, so it must go last in a biased select!.
+            next_demand = demand_rx.next() => next_demand.ok_or("demand stream closed, is Zebra shutting down?".into()).map(|MorePeers|{
                 if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
                     // Too many open outbound connections or pending handshakes already
                     DemandDrop
-                } else if let Some(candidate) = candidates.next().await {
-                    // candidates.next has a short delay, and briefly holds the address
-                    // book lock, so it shouldn't hang
-                    DemandHandshake { candidate }
                 } else {
-                    DemandCrawl
+                    DemandHandshakeOrCrawl
                 }
-            }
+            })
         };
 
         match crawler_action {
-            DemandDrop => {
+            // Dummy actions
+            Ok(DemandDrop) => {
                 // This is set to trace level because when the peerset is
-                // congested it can generate a lot of demand signal very
-                // rapidly.
+                // congested it can generate a lot of demand signal very rapidly.
                 trace!("too many open connections or in-flight handshakes, dropping demand signal");
             }
-            DemandHandshake { candidate } => {
+
+            // Spawned tasks
+            Ok(DemandHandshakeOrCrawl) => {
+                let candidates = candidates.clone();
+                let outbound_connector = outbound_connector.clone();
+                let peerset_tx = peerset_tx.clone();
+                let address_book = address_book.clone();
+                let demand_tx = demand_tx.clone();
+
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
                 debug!(
@@ -783,74 +867,85 @@ where
                     "opening an outbound peer connection"
                 );
 
-                // Spawn each handshake into an independent task, so it can make
-                // progress independently of the crawls.
-                let hs_join = tokio::spawn(dial(
-                    candidate,
-                    outbound_connector.clone(),
-                    outbound_connection_tracker,
-                ))
-                .map(move |res| match res {
-                    Ok(crawler_action) => crawler_action,
-                    Err(e) => {
-                        panic!("panic during handshaking with {candidate:?}: {e:?} ");
+                // Spawn each handshake or crawl into an independent task, so handshakes can make
+                // progress while crawls are running.
+                let handshake_or_crawl_handle = tokio::spawn(
+                    async move {
+                        // Try to get the next available peer for a handshake.
+                        //
+                        // candidates.next() has a short timeout, and briefly holds the address
+                        // book lock, so it shouldn't hang.
+                        //
+                        // Hold the lock for as short a time as possible.
+                        let candidate = { candidates.lock().await.next().await };
+
+                        if let Some(candidate) = candidate {
+                            // we don't need to spawn here, because there's nothing running concurrently
+                            dial(
+                                candidate,
+                                outbound_connector,
+                                outbound_connection_tracker,
+                                peerset_tx,
+                                address_book,
+                                demand_tx,
+                            )
+                            .await?;
+
+                            Ok(HandshakeFinished)
+                        } else {
+                            // There weren't any peers, so try to get more peers.
+                            debug!("demand for peers but no available candidates");
+
+                            crawl(candidates, demand_tx).await?;
+
+                            Ok(DemandCrawlFinished)
+                        }
                     }
-                })
-                .in_current_span();
+                    .in_current_span(),
+                )
+                .wait_for_panics();
 
-                handshakes.push(Box::pin(hs_join));
+                handshakes.push(handshake_or_crawl_handle);
             }
-            DemandCrawl => {
-                debug!("demand for peers but no available candidates");
-                // update has timeouts, and briefly holds the address book
-                // lock, so it shouldn't hang
-                //
-                // TODO: refactor candidates into a buffered service, so we can
-                //       spawn independent tasks to avoid deadlocks
-                let more_peers = candidates.update().await?;
+            Ok(TimerCrawl { tick }) => {
+                let candidates = candidates.clone();
+                let demand_tx = demand_tx.clone();
 
-                // If we got more peers, try to connect to a new peer.
-                //
-                // # Security
-                //
-                // Update attempts are rate-limited by the candidate set.
-                //
-                // We only try peers if there was actually an update.
-                // So if all peers have had a recent attempt,
-                // and there was recent update with no peers,
-                // the channel will drain.
-                // This prevents useless update attempt loops.
-                if let Some(more_peers) = more_peers {
-                    let _ = demand_tx.try_send(more_peers);
-                }
-            }
-            TimerCrawl { tick } => {
-                debug!(
-                    ?tick,
-                    "crawling for more peers in response to the crawl timer"
-                );
-                // TODO: spawn independent tasks to avoid deadlocks
-                candidates.update().await?;
-                // Try to connect to a new peer.
-                let _ = demand_tx.try_send(MorePeers);
-            }
-            HandshakeConnected { address, client } => {
-                debug!(candidate.addr = ?address, "successfully dialed new peer");
-                // successes are handled by an independent task, except for `candidates.update` in
-                // this task, which has a timeout, so they shouldn't hang
-                peerset_tx.send(Ok((address, client))).await?;
-            }
-            HandshakeFailed { failed_addr } => {
-                // The connection was never opened, or it failed the handshake and was dropped.
+                let crawl_handle = tokio::spawn(
+                    async move {
+                        debug!(
+                            ?tick,
+                            "crawling for more peers in response to the crawl timer"
+                        );
 
-                debug!(?failed_addr.addr, "marking candidate as failed");
-                candidates.report_failed(&failed_addr).await;
-                // The demand signal that was taken out of the queue
-                // to attempt to connect to the failed candidate never
-                // turned into a connection, so add it back:
-                //
-                // Security: handshake failures are rate-limited by peer attempt timeouts.
-                let _ = demand_tx.try_send(MorePeers);
+                        crawl(candidates, demand_tx).await?;
+
+                        Ok(TimerCrawlFinished)
+                    }
+                    .in_current_span(),
+                )
+                .wait_for_panics();
+
+                handshakes.push(crawl_handle);
+            }
+
+            // Completed spawned tasks
+            Ok(HandshakeFinished) => {
+                // Already logged in dial()
+            }
+            Ok(DemandCrawlFinished) => {
+                // This is set to trace level because when the peerset is
+                // congested it can generate a lot of demand signal very rapidly.
+                trace!("demand-based crawl finished");
+            }
+            Ok(TimerCrawlFinished) => {
+                debug!("timer-based crawl finished");
+            }
+
+            // Fatal errors and shutdowns
+            Err(error) => {
+                info!(?error, "crawler task exiting due to an error");
+                return Err(error);
             }
         }
 
@@ -861,17 +956,79 @@ where
     }
 }
 
+/// Try to get more peers using `candidates`, then queue a connection attempt using `demand_tx`.
+/// If there were no new peers, the connection attempt is skipped.
+#[instrument(skip(candidates, demand_tx))]
+async fn crawl<S>(
+    candidates: Arc<futures::lock::Mutex<CandidateSet<S>>>,
+    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+) -> Result<(), BoxError>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    // update() has timeouts, and briefly holds the address book
+    // lock, so it shouldn't hang.
+    // Try to get new peers, holding the lock for as short a time as possible.
+    let result = {
+        let result = candidates.lock().await.update().await;
+        std::mem::drop(candidates);
+        result
+    };
+    let more_peers = match result {
+        Ok(more_peers) => more_peers,
+        Err(e) => {
+            info!(
+                ?e,
+                "candidate set returned an error, is Zebra shutting down?"
+            );
+            return Err(e);
+        }
+    };
+
+    // If we got more peers, try to connect to a new peer on our next loop.
+    //
+    // # Security
+    //
+    // Update attempts are rate-limited by the candidate set,
+    // and we only try peers if there was actually an update.
+    //
+    // So if all peers have had a recent attempt, and there was recent update
+    // with no peers, the channel will drain. This prevents useless update attempt
+    // loops.
+    if let Some(more_peers) = more_peers {
+        if let Err(send_error) = demand_tx.try_send(more_peers) {
+            if send_error.is_disconnected() {
+                // Zebra is shutting down
+                return Err(send_error.into());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Try to connect to `candidate` using `outbound_connector`.
 /// Uses `outbound_connection_tracker` to track the active connection count.
 ///
-/// Returns a `HandshakeConnected` action on success, and a
-/// `HandshakeFailed` action on error.
-#[instrument(skip(outbound_connector, outbound_connection_tracker))]
+/// On success, sends peers to `peerset_tx`.
+/// On failure, marks the peer as failed in the address book,
+/// then re-adds demand to `demand_tx`.
+#[instrument(skip(
+    outbound_connector,
+    outbound_connection_tracker,
+    peerset_tx,
+    address_book,
+    demand_tx
+))]
 async fn dial<C>(
     candidate: MetaAddr,
     mut outbound_connector: C,
     outbound_connection_tracker: ConnectionTracker,
-) -> CrawlerAction
+    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+) -> Result<(), BoxError>
 where
     C: Service<
             OutboundConnectorRequest,
@@ -882,7 +1039,7 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
-    // CORRECTNESS
+    // # Correctness
     //
     // To avoid hangs, the dialer must only await:
     // - functions that return immediately, or
@@ -891,10 +1048,7 @@ where
     debug!(?candidate.addr, "attempting outbound connection in response to demand");
 
     // the connector is always ready, so this can't hang
-    let outbound_connector = outbound_connector
-        .ready()
-        .await
-        .expect("outbound connector never errors");
+    let outbound_connector = outbound_connector.ready().await?;
 
     let req = OutboundConnectorRequest {
         addr: candidate.addr,
@@ -902,24 +1056,57 @@ where
     };
 
     // the handshake has timeouts, so it shouldn't hang
-    outbound_connector
-        .call(req)
-        .map_err(|e| (candidate, e))
-        .map(Into::into)
-        .await
-}
+    let handshake_result = outbound_connector.call(req).map(Into::into).await;
 
-impl From<Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>> for CrawlerAction {
-    fn from(dial_result: Result<(PeerSocketAddr, peer::Client), (MetaAddr, BoxError)>) -> Self {
-        use CrawlerAction::*;
-        match dial_result {
-            Ok((address, client)) => HandshakeConnected { address, client },
-            Err((candidate, e)) => {
-                debug!(?candidate.addr, ?e, "failed to connect to candidate");
-                HandshakeFailed {
-                    failed_addr: candidate,
+    match handshake_result {
+        Ok((address, client)) => {
+            debug!(?candidate.addr, "successfully dialed new peer");
+
+            // The connection limit makes sure this send doesn't block.
+            peerset_tx.send((address, client)).await?;
+        }
+        // The connection was never opened, or it failed the handshake and was dropped.
+        Err(error) => {
+            debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            report_failed(address_book.clone(), candidate).await;
+
+            // The demand signal that was taken out of the queue to attempt to connect to the
+            // failed candidate never turned into a connection, so add it back.
+            //
+            // # Security
+            //
+            // Handshake failures are rate-limited by peer attempt timeouts.
+            if let Err(send_error) = demand_tx.try_send(MorePeers) {
+                if send_error.is_disconnected() {
+                    // Zebra is shutting down
+                    return Err(send_error.into());
                 }
             }
         }
     }
+
+    Ok(())
+}
+
+/// Mark `addr` as a failed peer in `address_book`.
+#[instrument(skip(address_book))]
+async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: MetaAddr) {
+    let addr = MetaAddr::new_errored(addr.addr, addr.services);
+
+    // # Correctness
+    //
+    // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
+    let span = Span::current();
+    let updated_addr = tokio::task::spawn_blocking(move || {
+        span.in_scope(|| address_book.lock().unwrap().update(addr))
+    })
+    .wait_for_panics()
+    .await;
+
+    assert_eq!(
+        updated_addr.map(|addr| addr.addr()),
+        Some(addr.addr()),
+        "incorrect address updated by address book: \
+         original: {addr:?}, updated: {updated_addr:?}"
+    );
 }

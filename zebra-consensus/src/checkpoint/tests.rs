@@ -254,7 +254,7 @@ async fn continuous_blockchain(
     //   - checkpoints start at genesis
     //   - checkpoints end at the end of the range (there's no point in having extra blocks)
     let expected_max_height = block::Height((blockchain_len - 1).try_into().unwrap());
-    let checkpoint_list = vec![
+    let checkpoint_list = [
         &blockchain[0],
         &blockchain[blockchain_len / 3],
         &blockchain[blockchain_len / 2],
@@ -326,7 +326,7 @@ async fn continuous_blockchain(
 
                     // SPANDOC: Add block directly to the state {?height}
                     ready_state_service
-                        .call(zebra_state::Request::CommitFinalizedBlock(
+                        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
                             block.clone().into(),
                         ))
                         .await

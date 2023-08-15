@@ -2,21 +2,133 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: '/'
+    # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
       timezone: America/New_York
-    open-pull-requests-limit: 10
+    # Limit dependabot to 1 PR per reviewer
+    open-pull-requests-limit: 6
     labels:
       - 'C-trivial'
       - 'A-rust'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
+    groups:
+        ecc:
+          patterns:
+            # deliberately include zcash_script (even though it is maintained by ZF)
+            - "zcash_*"
+            - "orchard"
+            - "halo2*"
+            - "incrementalmerkletree"
+            - "equihash"
+            # addresses
+            - "bs58"
+            - "ripemd"
+        # groups are limited to 10 items
+        crypto:
+          patterns:
+            - "bellman"
+            # reddsa, redjubjub
+            - "red*"
+            - "jubjub"
+            - "group"
+            - "bls12_381"
+            - "blake*"
+            - "secp256k1"
+            - "sha2"
+            - "*25519*"
+            - "rand*"
+        async:
+          patterns:
+            - "tokio*"
+            - "console-subscriber"
+            - "tower*"
+            - "hyper*"
+            - "h2"
+            - "reqwest"
+            - "futures*"
+            - "pin-project*"
+        log:
+          patterns:
+            - "tracing*"
+            - "log"
+            - "*eyre*"
+            - "thiserror"
+            - "displaydoc"
+            - "spandoc"
+            - "owo-colors"
+            - "sentry*"
+            - "metrics*"
+            - "inferno"
+        concurrency:
+          patterns:
+            - "once_cell"
+            - "lazy_static"
+            - "rayon*"
+            - "crossbeam*"
+            - "num_cpus"
+        progress-bar:
+          patterns:
+            - "indicatif"
+            - "howudoin"
+        time:
+          patterns:
+            - "chrono*"
+            - "time*"
+            - "humantime*"
+        app:
+          patterns:
+            - "abscissa*"
+            - "structopt*"
+            - "clap*"
+            - "atty*"
+            - "semver*"
+            # dirs, directories, directories-next
+            - "dir*"
+            - "vergen"
+            - "*git*"
+            - "toml*"
+            - "rlimit"
+        formats:
+          patterns:
+            - "serde*"
+            - "jsonrpc*"
+            - "hex*"
+            - "regex"
+            - "byteorder"
+            - "bytes"
+            - "bincode"    
+        data-structures:
+          patterns:
+            - "bitflags*"
+            - "bitvec"
+            - "indexmap"
+            - "num-integer"
+            - "primitive-types"
+            - "uint"
+            - "tinyvec"
+            - "itertools"
+            - "ordered-map"
+            - "mset"
+        test:
+          patterns:
+            - "proptest*"
+            - "insta"
+            - "prost*"
+            - "tonic*"
+            - "tempfile"
+            - "static_assertions"
+            - "criterion"
   - package-ecosystem: github-actions
     directory: '/'
     schedule:
-      interval: daily
+      # tj-actions/changed-files often updates daily, which is too much for us
+      interval: weekly
+      day: wednesday
       timezone: America/New_York
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 4
     labels:
       - 'C-trivial'
       - 'A-devops'

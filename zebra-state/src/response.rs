@@ -24,7 +24,7 @@ use crate::{service::read::AddressUtxos, TransactionLocation};
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
-    /// Response to [`Request::CommitBlock`] indicating that a block was
+    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] indicating that a block was
     /// successfully committed to the state.
     Committed(block::Hash),
 
@@ -32,6 +32,9 @@ pub enum Response {
     Depth(Option<u32>),
 
     /// Response to [`Request::Tip`] with the current best chain tip.
+    //
+    // TODO: remove this request, and replace it with a call to
+    //       `LatestChainTip::best_tip_height_and_hash()`
     Tip(Option<(block::Height, block::Hash)>),
 
     /// Response to [`Request::BlockLocator`] with a block locator object.

@@ -268,15 +268,15 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // Create shielded spends from deserialized parts
         let spends: Vec<_> = spend_prefixes
             .into_iter()
-            .zip(spend_proofs.into_iter())
-            .zip(spend_sigs.into_iter())
+            .zip(spend_proofs)
+            .zip(spend_sigs)
             .map(|((prefix, proof), sig)| Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig))
             .collect();
 
         // Create shielded outputs from deserialized parts
         let outputs = output_prefixes
             .into_iter()
-            .zip(output_proofs.into_iter())
+            .zip(output_proofs)
             .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
             .collect();
 
@@ -427,7 +427,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // Create the AuthorizedAction from deserialized parts
         let authorized_actions: Vec<orchard::AuthorizedAction> = actions
             .into_iter()
-            .zip(sigs.into_iter())
+            .zip(sigs)
             .map(|(action, spend_auth_sig)| {
                 orchard::AuthorizedAction::from_parts(action, spend_auth_sig)
             })
@@ -884,9 +884,6 @@ impl ZcashDeserialize for Transaction {
                 }
                 // Denoted as `nConsensusBranchId` in the spec.
                 // Convert it to a NetworkUpgrade
-                //
-                // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
-                #[allow(clippy::unnecessary_lazy_evaluations)]
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
                         .ok_or_else(|| {
@@ -1026,8 +1023,17 @@ impl fmt::Display for SerializedTransaction {
 
 impl fmt::Debug for SerializedTransaction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // A transaction with a lot of transfers can be extremely long in logs.
+        let mut data_truncated = hex::encode(&self.bytes);
+        if data_truncated.len() > 1003 {
+            let end = data_truncated.len() - 500;
+            // Replace the middle bytes with "...", but leave 500 bytes on either side.
+            // The data is hex, so this replacement won't panic.
+            data_truncated.replace_range(500..=end, "...");
+        }
+
         f.debug_tuple("SerializedTransaction")
-            .field(&hex::encode(&self.bytes))
+            .field(&data_truncated)
             .finish()
     }
 }

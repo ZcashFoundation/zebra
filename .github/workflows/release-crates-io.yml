@@ -1,0 +1,125 @@
+# This workflow checks that Zebra's crates.io release script works.
+#
+# We use a separate action, because the changed files are different to a Continuous Deployment
+# or Docker release.
+#
+# This workflow is triggered when:
+# - A PR that changes Rust files, a README, or this workflow is opened or updated
+# - A change is pushed to the main branch
+#
+# TODO:
+# If we decide to automate crates.io releases, we can also publish crates using this workflow, when:
+# - A release is published
+# - A pre-release is changed to a release
+
+name: Release crates
+
+# Ensures that only one workflow task will run at a time. Previous releases, if
+# already in process, won't get cancelled. Instead, we let the first release complete,
+# then queue the latest pending workflow, cancelling any workflows in between.
+#
+# Since the different event types do very different things (test vs release),
+# we can run different event types concurrently.
+#
+# For pull requests, we only run the tests from this workflow, and don't do any releases.
+# So an in-progress pull request gets cancelled, just like other tests.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+
+on:
+# disabled for now
+#  release:
+#    types:
+#      - released
+
+  # Only runs the release tests, doesn't release any crates.
+  #
+  # We test all changes on the main branch, just in case the PR paths are too strict.
+  push:
+    branches:
+      - main
+
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints (and proptest regressions, which are not actually needed)
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # READMEs, which are shown on the crate page
+      - '**/README.md'
+      # workflow definitions
+      - '.github/workflows/release-crates.io.yml'
+
+
+jobs:
+  # Test that Zebra can be released to crates.io using `cargo`.
+  # This checks that Zebra's dependencies and release configs are correct.
+  check-release:
+    name: Check crate release dry run
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Checkout git repository
+        uses: actions/checkout@v3.5.3
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Setup Rust with stable toolchain and minimal profile
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+
+      - name: Install cargo-release
+        uses: baptiste0928/cargo-install@v2.1.0
+        with:
+          crate: cargo-release
+
+      # Make sure Zebra can be released!
+      #
+      # These steps should be kept up to date with the release checklist.
+      #
+      # TODO: move these steps into a script which is run in the release checklist and CI
+      - name: Crate release dry run
+        run: |
+          set -ex
+          git config --global user.email "release-tests-no-reply@zfnd.org"
+          git config --global user.name "Automated Release Test"
+          # This script must be the same as:
+          # https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md#update-crate-versions
+          # with an extra `--no-confirm` argument for non-interactive testing.
+          cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad beta
+          cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
+          cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
+          cargo release commit --verbose --execute --no-confirm --allow-branch '*'
+          # Check the release will work using a dry run
+          #
+          # Workaround unpublished dependency version errors by skipping those crates:
+          # https://github.com/crate-ci/cargo-release/issues/691
+          #
+          # TODO: check all crates after fixing these errors
+          cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad
+
+
+  # TODO: actually do the release here
+  #release-crates:
+  #  name: Release Zebra Crates
+  #  needs: [ check-release ]
+  #  runs-on: ubuntu-latest
+  #  timeout-minutes: 30
+  #  if: ${{ !cancelled() && !failure() && github.event_name == 'release' }}
+  #  steps:

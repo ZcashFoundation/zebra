@@ -2,8 +2,9 @@
 //!
 //! # Implementation
 //!
-//! The [`PeerSet`] implementation is adapted from the one in the [Tower Balance][tower-balance] crate.
-//! As described in that crate's documentation, it:
+//! The [`PeerSet`] implementation is adapted from the one in [tower::Balance][tower-balance].
+//!
+//! As described in Tower's documentation, it:
 //!
 //! > Distributes requests across inner services using the [Power of Two Choices][p2c].
 //! >
@@ -40,7 +41,7 @@
 //!
 //! [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
 //! [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
-//! [tower-balance]: https://crates.io/crates/tower-balance
+//! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 //!
 //! # Behavior During Network Upgrades
 //!
@@ -98,6 +99,7 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
+    net::IpAddr,
     pin::Pin,
     task::{Context, Poll},
     time::Instant,
@@ -109,6 +111,8 @@ use futures::{
     prelude::*,
     stream::FuturesUnordered,
 };
+use itertools::Itertools;
+use num_integer::div_ceil;
 use tokio::{
     sync::{broadcast, oneshot::error::TryRecvError, watch},
     task::JoinHandle,
@@ -123,6 +127,7 @@ use zebra_chain::chain_tip::ChainTip;
 
 use crate::{
     address_book::AddressMetrics,
+    constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -247,6 +252,10 @@ where
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
+
+    /// The configured maximum number of peers that can be in the
+    /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
+    max_conns_per_ip: usize,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -266,6 +275,7 @@ where
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
+    #[allow(clippy::too_many_arguments)]
     /// Construct a peerset which uses `discover` to manage peer connections.
     ///
     /// Arguments:
@@ -278,6 +288,10 @@ where
     /// - `inv_stream`: receives inventory changes from peers,
     ///                 allowing the peer set to direct inventory requests;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
+    /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
+    /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
+    ///                       peer set per IP, defaults to the config value or to
+    ///                       [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
         discover: D,
@@ -286,6 +300,7 @@ where
         inv_stream: broadcast::Receiver<InventoryChange>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
+        max_conns_per_ip: Option<usize>,
     ) -> Self {
         Self {
             // New peers
@@ -313,6 +328,8 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
+
+            max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
         }
     }
 
@@ -418,8 +435,6 @@ where
         for guard in self.guards.iter() {
             guard.abort();
         }
-
-        // TODO: implement graceful shutdown for InventoryRegistry (#1678)
     }
 
     /// Check busy peer services for request completion or errors.
@@ -474,6 +489,26 @@ where
         }
     }
 
+    /// Returns the number of peer connections Zebra already has with
+    /// the provided IP address
+    ///
+    /// # Performance
+    ///
+    /// This method is `O(connected peers)`, so it should not be called from a loop
+    /// that is already iterating through the peer set.
+    fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .filter(|addr| addr.ip() == ip)
+            .count()
+    }
+
+    /// Returns `true` if Zebra is already connected to the IP and port in `addr`.
+    fn has_peer_with_addr(&self, addr: PeerSocketAddr) -> bool {
+        self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
+    }
+
     /// Checks for newly inserted or removed services.
     ///
     /// Puts inserted services in the unready list.
@@ -494,7 +529,25 @@ where
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
                     trace!(?key, "got Change::Insert from Discover");
-                    self.remove(&key);
+
+                    // # Security
+                    //
+                    // Drop the new peer if we are already connected to it.
+                    // Preferring old connections avoids connection thrashing.
+                    if self.has_peer_with_addr(key) {
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
+                    // # Security
+                    //
+                    // drop the new peer if there are already `max_conns_per_ip` peers with
+                    // the same IP address in the peer set.
+                    if self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
@@ -504,15 +557,12 @@ where
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            // TODO: Remove when the code base migrates to Rust 2021 edition (#2709).
-            let preselected_p2c_peer = &mut self.preselected_p2c_peer;
-
             self.ready_services.retain(|address, peer| {
                 if peer.remote_version() >= minimum_version {
                     true
                 } else {
-                    if *preselected_p2c_peer == Some(*address) {
-                        *preselected_p2c_peer = None;
+                    if self.preselected_p2c_peer == Some(*address) {
+                        self.preselected_p2c_peer = None;
                     }
 
                     false
@@ -733,11 +783,11 @@ where
             return fut.map_err(Into::into).boxed();
         }
 
-        // TODO: reduce this log level after testing #2156 and #2726
-        tracing::info!(
+        tracing::debug!(
             ?hash,
             "all ready peers are missing inventory, failing request"
         );
+
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
             tokio::task::yield_now().await;
@@ -810,38 +860,91 @@ where
     /// Given a number of ready peers calculate to how many of them Zebra will
     /// actually send the request to. Return this number.
     pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
-        // We are currently sending broadcast messages to half of the total peers.
+        // We are currently sending broadcast messages to a third of the total peers.
+        const PEER_FRACTION_TO_BROADCAST: usize = 3;
+
         // Round up, so that if we have one ready peer, it gets the request.
-        (self.ready_services.len() + 1) / 2
+        div_ceil(self.ready_services.len(), PEER_FRACTION_TO_BROADCAST)
     }
 
-    /// Logs the peer set size.
+    /// Returns the list of addresses in the peer set.
+    fn peer_set_addresses(&self) -> Vec<PeerSocketAddr> {
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .cloned()
+            .collect()
+    }
+
+    /// Logs the peer set size, and any potential connectivity issues.
     fn log_peer_set_size(&mut self) {
         let ready_services_len = self.ready_services.len();
         let unready_services_len = self.unready_services.len();
         trace!(ready_peers = ?ready_services_len, unready_peers = ?unready_services_len);
 
-        if ready_services_len > 0 {
-            return;
-        }
+        let now = Instant::now();
 
         // These logs are designed to be human-readable in a terminal, at the
         // default Zebra log level. If you need to know the peer set size for
         // every request, use the trace-level logs, or the metrics exporter.
         if let Some(last_peer_log) = self.last_peer_log {
             // Avoid duplicate peer set logs
-            if Instant::now().duration_since(last_peer_log).as_secs() < 60 {
+            if now.duration_since(last_peer_log) < MIN_PEER_SET_LOG_INTERVAL {
                 return;
             }
         } else {
             // Suppress initial logs until the peer set has started up.
             // There can be multiple initial requests before the first peer is
             // ready.
-            self.last_peer_log = Some(Instant::now());
+            self.last_peer_log = Some(now);
             return;
         }
 
-        self.last_peer_log = Some(Instant::now());
+        self.last_peer_log = Some(now);
+
+        // Log potential duplicate connections.
+        let peers = self.peer_set_addresses();
+
+        // Check for duplicates by address and port: these are unexpected and represent a bug.
+        let duplicates: Vec<PeerSocketAddr> = peers.iter().duplicates().cloned().collect();
+
+        let mut peer_counts = peers.iter().counts();
+        peer_counts.retain(|peer, _count| duplicates.contains(peer));
+
+        if !peer_counts.is_empty() {
+            let duplicate_connections: usize = peer_counts.values().sum();
+
+            warn!(
+                ?duplicate_connections,
+                duplicated_peers = ?peer_counts.len(),
+                peers = ?peers.len(),
+                "duplicate peer connections in peer set"
+            );
+        }
+
+        // Check for duplicates by address: these can happen if there are multiple nodes
+        // behind a NAT or on a single server.
+        let peers: Vec<IpAddr> = peers.iter().map(|addr| addr.ip()).collect();
+        let duplicates: Vec<IpAddr> = peers.iter().duplicates().cloned().collect();
+
+        let mut peer_counts = peers.iter().counts();
+        peer_counts.retain(|peer, _count| duplicates.contains(peer));
+
+        if !peer_counts.is_empty() {
+            let duplicate_connections: usize = peer_counts.values().sum();
+
+            info!(
+                ?duplicate_connections,
+                duplicated_peers = ?peer_counts.len(),
+                peers = ?peers.len(),
+                "duplicate IP addresses in peer set"
+            );
+        }
+
+        // Only log connectivity warnings if all our peers are busy (or there are no peers).
+        if ready_services_len > 0 {
+            return;
+        }
 
         let address_metrics = *self.address_metrics.borrow();
         if unready_services_len == 0 {

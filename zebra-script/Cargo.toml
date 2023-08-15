@@ -1,18 +1,25 @@
 [package]
 name = "zebra-script"
-version = "1.0.0-beta.24"
+version = "1.0.0-beta.28"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "Zebra script verification wrapping zcashd's zcash_script library"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+readme = "../README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 [dependencies]
-zcash_script = "0.1.12"
+zcash_script = "0.1.13"
 
-zebra-chain = { path = "../zebra-chain" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28" }
 
-thiserror = "1.0.40"
+thiserror = "1.0.44"
 displaydoc = "0.2.4"
 
 [dev-dependencies]

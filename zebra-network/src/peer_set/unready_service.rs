@@ -1,6 +1,9 @@
-/// Services that are busy or newly created.
-///
-/// Adapted from tower-balance.
+//! Services that are busy or newly created.
+//!
+//! The [`UnreadyService`] implementation is adapted from the one in [tower::Balance][tower-balance].
+//!
+//! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
+
 use std::{
     future::Future,
     marker::PhantomData,

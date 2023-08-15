@@ -35,7 +35,7 @@
 
 use std::{cmp::min, path::PathBuf};
 
-use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
+use abscissa_core::{config, Command, FrameworkError, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use tokio::time::Instant;
 use tower::{Service, ServiceExt};
@@ -45,6 +45,7 @@ use zebra_state as old_zs;
 use zebra_state as new_zs;
 
 use crate::{
+    application::ZebradApp,
     components::tokio::{RuntimeRun, TokioComponent},
     config::ZebradConfig,
     prelude::*,
@@ -54,11 +55,11 @@ use crate::{
 /// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 
-/// `copy-state` subcommand
-#[derive(Command, Debug, Options)]
+/// copy cached chain state (expert users only)
+#[derive(Command, Debug, clap::Parser)]
 pub struct CopyStateCmd {
     /// Source height that the copy finishes at.
-    #[options(help = "stop copying at this source height")]
+    #[clap(long, short, help = "stop copying at this source height")]
     max_source_height: Option<u32>,
 
     /// Path to a Zebra config.toml for the target state.
@@ -66,26 +67,30 @@ pub struct CopyStateCmd {
     ///
     /// Zebra only uses the state options from this config.
     /// All other options are ignored.
-    #[options(help = "config file path for the target state (default: ephemeral), \
-                      the source state uses the main zebrad config")]
+    #[clap(
+        long,
+        short,
+        help = "config file path for the target state (default: ephemeral), \
+                      the source state uses the main zebrad config"
+    )]
     target_config_path: Option<PathBuf>,
 
     /// Filter strings which override the config file and defaults
-    #[options(free, help = "tracing filters which override the zebrad.toml config")]
+    #[clap(help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
 
 impl CopyStateCmd {
     /// Configure and launch the copy command
     async fn start(&self) -> Result<(), Report> {
-        let base_config = app_config().clone();
+        let base_config = APPLICATION.config();
         let source_config = base_config.state.clone();
 
         // The default load_config impl doesn't actually modify the app config.
         let target_config = self
             .target_config_path
             .as_ref()
-            .map(|path| app_writer().load_config(path))
+            .map(|path| ZebradApp::default().load_config(path))
             .transpose()?
             .map(|app_config| app_config.state)
             .unwrap_or_else(new_zs::Config::ephemeral);
@@ -230,7 +235,7 @@ impl CopyStateCmd {
             let target_block_commit_hash = target_state
                 .ready()
                 .await?
-                .call(new_zs::Request::CommitFinalizedBlock(
+                .call(new_zs::Request::CommitCheckpointVerifiedBlock(
                     source_block.clone().into(),
                 ))
                 .await?;
@@ -240,7 +245,7 @@ impl CopyStateCmd {
                     target_block_commit_hash
                 }
                 response => Err(format!(
-                    "unexpected response to CommitFinalizedBlock request, height: {height}\n \
+                    "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
                      response: {response:?}",
                 ))?,
             };
@@ -394,9 +399,9 @@ impl Runnable for CopyStateCmd {
             target_config_path = ?self.target_config_path,
             "starting cached chain state copy"
         );
-        let rt = app_writer()
-            .state_mut()
-            .components
+        let rt = APPLICATION
+            .state()
+            .components_mut()
             .get_downcast_mut::<TokioComponent>()
             .expect("TokioComponent should be available")
             .rt

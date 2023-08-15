@@ -1,11 +1,5 @@
 # Zebra cargo configuration
 
-# Disabled until we upgrade to abscissa 0.7 or later:
-# https://github.com/ZcashFoundation/zebra/issues/5502
-# https://doc.rust-lang.org/cargo/reference/future-incompat-report.html
-[future-incompat-report]
-frequency = "never"
-
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
@@ -61,12 +55,6 @@ rustflags = [
     # Documentation
     "-Wmissing_docs",
 
-    # These rustdoc -A and -W settings must be the same as the RUSTDOCFLAGS in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml#L152
-
-    # Links in public docs can point to private items.
-    "-Arustdoc::private_intra_doc_links",
-
     # TODOs:
     # `cargo fix` might help do these fixes,
     # or add a config.toml to sub-directories which should allow these lints,
@@ -87,4 +75,13 @@ rustflags = [
 
     # fix hidden lifetime parameters
     #"-Wrust_2018_idioms",
+]
+
+[build]
+rustdocflags = [
+    # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
+    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml#L151
+
+    # Links in public docs can point to private items.
+    "-Arustdoc::private_intra_doc_links",
 ]

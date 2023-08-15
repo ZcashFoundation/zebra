@@ -10,14 +10,14 @@ use zebra_chain::{
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
     service::finalized_state::ZebraDb,
-    PreparedBlock,
+    SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
         MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
     },
 };
 
-/// Lookup all the [`transparent::Utxo`]s spent by a [`PreparedBlock`].
+/// Lookup all the [`transparent::Utxo`]s spent by a [`SemanticallyVerifiedBlock`].
 /// If any of the spends are invalid, return an error.
 /// Otherwise, return the looked up UTXOs.
 ///
@@ -36,14 +36,16 @@ use crate::{
 /// - spends of an immature transparent coinbase output,
 /// - unshielded spends of a transparent coinbase output.
 pub fn transparent_spend(
-    prepared: &PreparedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
 
-    for (spend_tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+    for (spend_tx_index_in_block, transaction) in
+        semantically_verified.block.transactions.iter().enumerate()
+    {
         // Coinbase inputs represent new coins,
         // so there are no UTXOs to mark as spent.
         let spends = transaction
@@ -55,7 +57,7 @@ pub fn transparent_spend(
             let utxo = transparent_spend_chain_order(
                 spend,
                 spend_tx_index_in_block,
-                &prepared.new_outputs,
+                &semantically_verified.new_outputs,
                 non_finalized_chain_unspent_utxos,
                 non_finalized_chain_spent_utxos,
                 finalized_state,
@@ -70,7 +72,8 @@ pub fn transparent_spend(
             // We don't want to use UTXOs from invalid pending blocks,
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
-            let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
+            let spend_restriction =
+                transaction.coinbase_spend_restriction(semantically_verified.height);
             transparent_coinbase_spend(spend, spend_restriction, utxo.as_ref())?;
 
             // We don't delete the UTXOs until the block is committed,
@@ -86,7 +89,7 @@ pub fn transparent_spend(
         }
     }
 
-    remaining_transaction_value(prepared, &block_spends)?;
+    remaining_transaction_value(semantically_verified, &block_spends)?;
 
     Ok(block_spends)
 }
@@ -225,11 +228,12 @@ pub fn transparent_coinbase_spend(
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
 pub fn remaining_transaction_value(
-    prepared: &PreparedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        // TODO: check coinbase transaction remaining value (#338, #1162)
+    for (tx_index_in_block, transaction) in
+        semantically_verified.block.transactions.iter().enumerate()
+    {
         if transaction.is_coinbase() {
             continue;
         }
@@ -244,26 +248,28 @@ pub fn remaining_transaction_value(
                 {
                     Err(ValidateContextError::NegativeRemainingTransactionValue {
                         amount_error,
-                        height: prepared.height,
+                        height: semantically_verified.height,
                         tx_index_in_block,
-                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                        transaction_hash: semantically_verified.transaction_hashes
+                            [tx_index_in_block],
                     })
                 }
                 Err(amount_error) => {
                     Err(ValidateContextError::CalculateRemainingTransactionValue {
                         amount_error,
-                        height: prepared.height,
+                        height: semantically_verified.height,
                         tx_index_in_block,
-                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                        transaction_hash: semantically_verified.transaction_hashes
+                            [tx_index_in_block],
                     })
                 }
             },
             Err(value_balance_error) => {
                 Err(ValidateContextError::CalculateTransactionValueBalances {
                     value_balance_error,
-                    height: prepared.height,
+                    height: semantically_verified.height,
                     tx_index_in_block,
-                    transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                    transaction_hash: semantically_verified.transaction_hashes[tx_index_in_block],
                 })
             }
         }?

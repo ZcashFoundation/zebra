@@ -4,14 +4,16 @@ use std::{collections::HashMap, env, net::SocketAddr, str::FromStr, sync::Arc, t
 
 use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
-use tokio::time::Instant;
 use tower::service_fn;
 use tracing::Span;
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
-    constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE, MIN_PEER_RECONNECTION_DELAY},
+    constants::{
+        DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE,
+        MIN_PEER_RECONNECTION_DELAY,
+    },
     meta_addr::{
         arbitrary::{MAX_ADDR_CHANGE, MAX_META_ADDR},
         MetaAddr, MetaAddrChange,
@@ -64,8 +66,12 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
+        let instant_now = std::time::Instant::now();
+        let chrono_now = Utc::now();
+        let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+
         for change in changes {
-            if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
+            if let Some(changed_addr) = change.apply_to_meta_addr(addr, instant_now, chrono_now) {
                 // untrusted last seen times:
                 // check that we replace None with Some, but leave Some unchanged
                 if addr.untrusted_last_seen.is_some() {
@@ -73,7 +79,7 @@ proptest! {
                 } else {
                     prop_assert_eq!(
                         changed_addr.untrusted_last_seen,
-                        change.untrusted_last_seen()
+                        change.untrusted_last_seen(local_now)
                     );
                 }
 
@@ -112,18 +118,22 @@ proptest! {
 
         for change in changes {
             while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
-                attempt_count += 1;
-                // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
-                prop_assert!(attempt_count <= 1);
-
                 // Simulate an attempt
-                addr = MetaAddr::new_reconnect(addr.addr)
-                    .apply_to_meta_addr(addr)
-                    .expect("unexpected invalid attempt");
+                addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
+                    .apply_to_meta_addr(addr, instant_now, chrono_now) {
+                        attempt_count += 1;
+                        // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
+                        prop_assert!(attempt_count <= 1);
+                        addr
+                    } else {
+                        // Stop updating when an attempt comes too soon after a failure.
+                        // In production these are prevented by the dialer code.
+                        break;
+                    }
             }
 
             // If `change` is invalid for the current MetaAddr state, skip it.
-            if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
+            if let Some(changed_addr) = change.apply_to_meta_addr(addr, instant_now, chrono_now) {
                 prop_assert_eq!(changed_addr.addr, addr.addr);
                 addr = changed_addr;
             }
@@ -149,13 +159,14 @@ proptest! {
         let address_book = AddressBook::new_with_addrs(
             local_listener,
             Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             address_book_addrs
         );
         let sanitized_addrs = address_book.sanitized(chrono_now);
 
-        let expected_local_listener = address_book.local_listener_meta_addr();
+        let expected_local_listener = address_book.local_listener_meta_addr(chrono_now);
         let canonical_local_listener = canonical_peer_addr(local_listener);
         let book_sanitized_local_listener = sanitized_addrs
             .iter()
@@ -186,9 +197,12 @@ proptest! {
 
         let local_listener = "0.0.0.0:0".parse().expect("unexpected invalid SocketAddr");
 
+        let instant_now = std::time::Instant::now();
+        let chrono_now = Utc::now();
+
         for change in changes {
             // Check direct application
-            let new_addr = change.apply_to_meta_addr(None);
+            let new_addr = change.apply_to_meta_addr(None, instant_now, chrono_now);
 
             prop_assert!(
                 new_addr.is_some(),
@@ -204,6 +218,7 @@ proptest! {
             let mut address_book = AddressBook::new_with_addrs(
                 local_listener,
                 Mainnet,
+                DEFAULT_MAX_CONNS_PER_IP,
                 1,
                 Span::none(),
                 Vec::new(),
@@ -317,6 +332,7 @@ proptest! {
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
             Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addrs,
@@ -328,7 +344,7 @@ proptest! {
             tokio::time::pause();
 
             // The earliest time we can have a valid next attempt for this peer
-            let earliest_next_attempt = Instant::now() + MIN_PEER_RECONNECTION_DELAY;
+            let earliest_next_attempt = tokio::time::Instant::now() + MIN_PEER_RECONNECTION_DELAY;
 
             // The number of attempts for this peer in the last MIN_PEER_RECONNECTION_DELAY
             let mut attempt_count: usize = 0;
@@ -349,7 +365,7 @@ proptest! {
                          original addr was in address book: {}\n",
                         candidate_addr,
                         i,
-                        Instant::now(),
+                        tokio::time::Instant::now(),
                         earliest_next_attempt,
                         attempt_count,
                         LIVE_PEER_INTERVALS,
@@ -365,7 +381,7 @@ proptest! {
                 address_book.clone().lock().unwrap().update(change);
 
                 tokio::time::advance(peer_change_interval).await;
-                if Instant::now() >= earliest_next_attempt {
+                if tokio::time::Instant::now() >= earliest_next_attempt {
                     attempt_count = 0;
                 }
             }
@@ -423,20 +439,24 @@ proptest! {
                     let change = changes.get(change_index);
 
                     while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
-                        *attempt_counts.entry(addr.addr).or_default() += 1;
-                        prop_assert!(
-                            *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
-                        );
-
                         // Simulate an attempt
-                        *addr = MetaAddr::new_reconnect(addr.addr)
-                            .apply_to_meta_addr(*addr)
-                            .expect("unexpected invalid attempt");
+                        *addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
+                            .apply_to_meta_addr(*addr, instant_now, chrono_now) {
+                                *attempt_counts.entry(addr.addr).or_default() += 1;
+                                prop_assert!(
+                                    *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
+                                );
+                                addr
+                            } else {
+                                // Stop updating when an attempt comes too soon after a failure.
+                                // In production these are prevented by the dialer code.
+                                break;
+                            }
                     }
 
                     // If `change` is invalid for the current MetaAddr state, skip it.
                     // If we've run out of changes for this addr, do nothing.
-                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(*addr))
+                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(*addr, instant_now, chrono_now))
                     {
                         prop_assert_eq!(changed_addr.addr, addr.addr);
                         *addr = changed_addr;

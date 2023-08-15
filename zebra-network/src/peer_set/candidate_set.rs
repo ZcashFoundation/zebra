@@ -8,7 +8,7 @@ use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
 use tracing::Span;
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{diagnostic::task::WaitForPanics, serialization::DateTime32};
 
 use crate::{
     constants, meta_addr::MetaAddrChange, peer_set::set::MorePeers, types::MetaAddr, AddressBook,
@@ -125,7 +125,11 @@ mod tests;
 // When we add the Seed state:
 //   * show that seed peers that transition to other never attempted
 //     states are already in the address book
-pub(crate) struct CandidateSet<S> {
+pub(crate) struct CandidateSet<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S::Future: Send + 'static,
+{
     // Correctness: the address book must be private,
     //              so all operations are performed on a blocking thread (see #1976).
     address_book: Arc<std::sync::Mutex<AddressBook>>,
@@ -136,7 +140,7 @@ pub(crate) struct CandidateSet<S> {
 
 impl<S> CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError>,
+    S: Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
     /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
@@ -179,8 +183,6 @@ where
     ///
     /// The handshaker sets up the peer message receiver so it also sends a
     /// [`Responded`] peer address update.
-    ///
-    /// [`report_failed`][Self::report_failed] puts peers into the [`Failed`] state.
     ///
     /// [`next`][Self::next] puts peers into the [`AttemptPending`] state.
     ///
@@ -316,6 +318,12 @@ where
 
     /// Add new `addrs` to the address book.
     async fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
+        // # Security
+        //
+        // New gossiped peers are rate-limited because:
+        // - Zebra initiates requests for new gossiped peers
+        // - the fanout is limited
+        // - the number of addresses per peer is limited
         let addrs: Vec<MetaAddrChange> = addrs
             .into_iter()
             .map(MetaAddr::new_gossiped_change)
@@ -340,8 +348,8 @@ where
         tokio::task::spawn_blocking(move || {
             span.in_scope(|| address_book.lock().unwrap().extend(addrs))
         })
+        .wait_for_panics()
         .await
-        .expect("panic in new peers address book update task");
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -395,8 +403,8 @@ where
         // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
         let span = Span::current();
         let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
-            .await
-            .expect("panic in next peer address book task")?;
+            .wait_for_panics()
+            .await?;
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;
@@ -405,21 +413,9 @@ where
         Some(next_peer)
     }
 
-    /// Mark `addr` as a failed peer.
-    pub async fn report_failed(&mut self, addr: &MetaAddr) {
-        let addr = MetaAddr::new_errored(addr.addr, addr.services);
-
-        // # Correctness
-        //
-        // Spawn address book accesses on a blocking thread,
-        // to avoid deadlocks (see #1976).
-        let address_book = self.address_book.clone();
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().update(addr))
-        })
-        .await
-        .expect("panic in peer failure address book update task");
+    /// Returns the address book for this `CandidateSet`.
+    pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
+        self.address_book.clone()
     }
 }
 
