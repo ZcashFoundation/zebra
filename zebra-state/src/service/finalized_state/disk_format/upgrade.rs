@@ -339,8 +339,9 @@ impl DbFormatChange {
                     if num_entries.map_or(false, |n| n >= 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
                         batch.delete_range_sapling_tree(&db, &delete_from, &height);
-                        db.write_batch(batch)
-                            .expect("Deleting note commitment trees should always succeed.");
+                        db.write_batch(batch).expect(
+                            "Deleting Sapling note commitment trees should always succeed.",
+                        );
                     }
 
                     prev_height = height;
@@ -390,8 +391,9 @@ impl DbFormatChange {
                     if num_entries.map_or(false, |n| n >= 1) {
                         let mut batch: DiskWriteBatch = DiskWriteBatch::new();
                         batch.delete_range_orchard_tree(&db, &delete_from, &height);
-                        db.write_batch(batch)
-                            .expect("Deleting note commitment trees should always succeed.");
+                        db.write_batch(batch).expect(
+                            "Deleting Orchard note commitment trees should always succeed.",
+                        );
                     }
 
                     prev_height = height;
