@@ -54,7 +54,7 @@ pub struct ZebraDb {
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
     /// The inner low-level database wrapper for the RocksDB database.
-    pub db: DiskDb,
+    db: DiskDb,
 }
 
 impl ZebraDb {
