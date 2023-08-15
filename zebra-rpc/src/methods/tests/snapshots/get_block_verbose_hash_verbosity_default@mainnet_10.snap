@@ -7,5 +7,6 @@ expression: block
   "confirmations": 10,
   "tx": [
     "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609"
-  ]
+  ],
+  "trees": {}
 }
