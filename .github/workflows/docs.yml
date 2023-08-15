@@ -4,12 +4,30 @@ name: Docs
 # already in process, won't get cancelled. Instead, we let the first to complete
 # then queue the latest pending workflow, cancelling any workflows in between
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+    paths:
+      # doc source files
+      - 'book/**'
+      - '**/firebase.json'
+      - 'katex-header.html'
+      # rustdoc source files
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - '.github/workflows/docs.yml'
+
+  pull_request:
     branches:
       - main
     paths:
@@ -32,12 +50,70 @@ env:
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
+  FIREBASE_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'live' }}
 
 jobs:
-  build:
-    name: Build and Deploy Docs (+beta)
+  build-docs-book:
+    name: Build and Deploy Zebra Book Docs
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    environment: docs
+    permissions:
+      checks: write
+      contents: 'read'
+      id-token: 'write'
+      pull-requests: write
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v3.5.3
+        with:
+          persist-credentials: false
+
+      - name: Setup mdBook
+        uses: jontze/action-mdbook@v2.2.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mdbook-version: '~0.4'
+          use-linkcheck: true
+          use-mermaid: true
+
+      - name: Build Zebra book
+        run: |
+          mdbook build book --dest-dir "$(pwd)"/target/book
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+
+      - name: Deploy Zebra book to firebase
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: ${{ env.FIREBASE_CHANNEL }}
+          projectId: ${{ vars.GCP_PROJECT }}
+          target: docs-book
+
+  build-docs-external:
+    name: Build and Deploy Zebra External Docs
     timeout-minutes: 45
     runs-on: ubuntu-latest
+    environment: docs
+    permissions:
+      checks: write
+      contents: 'read'
+      id-token: 'write'
+      pull-requests: write
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v3.5.3
@@ -47,7 +123,6 @@ jobs:
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.0.0
         with:
-          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,54 +133,90 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.6.0
 
-      - name: Setup mdBook
-        uses: peaceiris/actions-mdbook@v1.2.0
-        with:
-          mdbook-version: '0.4.18'
-
-      # TODO: actions-mdbook does not yet have an option to install mdbook-mermaid https://github.com/peaceiris/actions-mdbook/issues/426
-      - name: Install mdbook
-        run: |
-          cargo install mdbook-mermaid
-
-      - name: Build Zebra book
-        run: |
-          mdbook build book/
-
-      - name: Deploy Zebra book to firebase
-        uses: w9jds/firebase-action@v12.4.0
-        with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_PATH: book/
-          PROJECT_ID: zebra-book-b535f
-
       - name: Build external docs
         run: |
           # Exclude zebra-utils, it is not for library or app users
-          cargo doc --no-deps --workspace --all-features --exclude zebra-utils
+          cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir target/external
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
-      - name: Deploy external docs to firebase
-        uses: w9jds/firebase-action@v12.4.0
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
         with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID: zebra-doc-external
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+
+      - name: Deploy external docs to firebase
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: ${{ env.FIREBASE_CHANNEL }}
+          target: docs-external
+          projectId: ${{ vars.GCP_PROJECT }}
+
+  build-docs-internal:
+    name: Build and Deploy Zebra Internal Docs
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    environment: docs
+    permissions:
+      checks: write
+      contents: 'read'
+      id-token: 'write'
+      pull-requests: write
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v3.5.3
+        with:
+          persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v2.0.0
+        with:
+          version: '23.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Setup Rust with beta toolchain and default profile (to include rust-docs)
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
+
+      - uses: Swatinem/rust-cache@v2.6.0
 
       - name: Build internal docs
         run: |
-          cargo doc --no-deps --workspace --all-features --document-private-items
+          cargo doc --no-deps --workspace --all-features --document-private-items --target-dir target/internal
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
-      - name: Deploy internal docs to firebase
-        uses: w9jds/firebase-action@v12.4.0
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
         with:
-          args: deploy
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID: zebra-doc-internal-e9fd4
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      - run: |
+          # shellcheck disable=SC2002
+          echo "GCP_FIREBASE_SA=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
+
+      - name: Deploy internal docs to firebase
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA }}
+          channelId: ${{ env.FIREBASE_CHANNEL }}
+          target: docs-internal
+          projectId: ${{ vars.GCP_PROJECT }}
