@@ -60,7 +60,6 @@ env:
   # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
   RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links
 
-
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
@@ -98,7 +97,7 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -155,7 +154,7 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -211,7 +210,7 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
