@@ -110,7 +110,6 @@ jobs:
     name: Build and Deploy Zebra External Docs
     timeout-minutes: 45
     runs-on: ubuntu-latest
-    environment: docs
     permissions:
       checks: write
       contents: 'read'
@@ -170,7 +169,6 @@ jobs:
     name: Build and Deploy Zebra Internal Docs
     timeout-minutes: 45
     runs-on: ubuntu-latest
-    environment: docs
     permissions:
       checks: write
       contents: 'read'
