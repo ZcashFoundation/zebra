@@ -173,7 +173,7 @@ color-eyre = { version = "0.6.2", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.44"
+thiserror = "1.0.46"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"
@@ -209,7 +209,7 @@ metrics-exporter-prometheus = { version = "0.12.0", default-features = false, fe
 #
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
-log = "0.4.19"
+log = "0.4.20"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", features = ["term-line"], optional = true }

@@ -59,7 +59,7 @@ rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.18"
 serde = { version = "1.0.179", features = ["serde_derive"] }
 tempfile = "3.7.1"
-thiserror = "1.0.44"
+thiserror = "1.0.46"
 
 rayon = "1.7.0"
 tokio = { version = "1.29.1", features = ["rt-multi-thread", "sync", "tracing"] }
