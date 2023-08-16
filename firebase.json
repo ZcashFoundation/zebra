@@ -1,7 +1,7 @@
 {
   "hosting": [
     {
-      "public": "target/external",
+      "public": "target/external/doc",
       "target": "docs-external",
       "ignore": [
         "firebase.json",
@@ -23,7 +23,7 @@
       ]
     },
     {
-      "public": "target/internal",
+      "public": "target/internal/doc",
       "target": "docs-internal",
       "ignore": [
         "firebase.json",
