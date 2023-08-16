@@ -344,20 +344,24 @@ impl DbFormatChange {
             // Set up task for deleting sapling note commitment trees
             let db = upgrade_db.clone();
             let sapling_delete_task = std::thread::spawn(move || {
-                let mut prev_height = sapling_height;
-                while let Ok(height) = unique_sapling_tree_height_rx.recv() {
-                    let delete_from = (prev_height + 1).expect("should be valid height");
-                    let num_entries = height.0.checked_sub(delete_from.0);
+                let mut delete_from = sapling_height.next();
+                while let Ok(delete_to) = unique_sapling_tree_height_rx.recv() {
+                    let num_entries = delete_to - delete_from;
+                    if num_entries > 0 {
+                        let mut batch = DiskWriteBatch::new();
 
-                    if num_entries.map_or(false, |n| n >= 1) {
-                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_range_sapling_tree(&db, &delete_from, &height);
+                        if num_entries == 1 {
+                            batch.delete_sapling_tree(&db, &delete_from);
+                        } else {
+                            batch.delete_range_sapling_tree(&db, &delete_from, &delete_to);
+                        }
+
                         db.write_batch(batch).expect(
                             "Deleting Sapling note commitment trees should always succeed.",
                         );
                     }
 
-                    prev_height = height;
+                    delete_from = delete_to.next();
                 }
             });
 
@@ -403,20 +407,24 @@ impl DbFormatChange {
             // Set up task for deleting orchard note commitment trees
             let db = upgrade_db;
             let orchard_delete_task = std::thread::spawn(move || {
-                let mut prev_height = orchard_height;
-                while let Ok(height) = unique_orchard_tree_height_rx.recv() {
-                    let delete_from = (prev_height + 1).expect("should be valid height");
-                    let num_entries = height.0.checked_sub(delete_from.0);
+                let mut delete_from = orchard_height.next();
+                while let Ok(delete_to) = unique_orchard_tree_height_rx.recv() {
+                    let num_entries = delete_to - delete_from;
+                    if num_entries > 0 {
+                        let mut batch = DiskWriteBatch::new();
 
-                    if num_entries.map_or(false, |n| n >= 1) {
-                        let mut batch: DiskWriteBatch = DiskWriteBatch::new();
-                        batch.delete_range_orchard_tree(&db, &delete_from, &height);
+                        if num_entries == 1 {
+                            batch.delete_orchard_tree(&db, &delete_from);
+                        } else {
+                            batch.delete_range_orchard_tree(&db, &delete_from, &delete_to);
+                        }
+
                         db.write_batch(batch).expect(
                             "Deleting Orchard note commitment trees should always succeed.",
                         );
                     }
 
-                    prev_height = height;
+                    delete_from = delete_to.next();
                 }
             });
 
