@@ -136,41 +136,6 @@ jobs:
       - run: |
           cargo fmt --all -- --check
 
-  docs:
-    name: Rust doc
-    timeout-minutes: 30
-    runs-on: ubuntu-latest
-    needs: changed-files
-    if: ${{ needs.changed-files.outputs.rust == 'true' }}
-    # cargo doc doesn't support '--  -D warnings', so we have to add it here
-    # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
-    #
-    # The -A and -W settings must be the same as the `rustdocflags` in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-    env:
-      RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
-
-    steps:
-      - uses: actions/checkout@v3.5.3
-        with:
-          persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v2.0.0
-        with:
-          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Setup Rust with stable toolchain and default profile
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
-
-      - run: |
-          cargo doc --no-deps --document-private-items --all-features
-
   actionlint:
     runs-on: ubuntu-latest
     continue-on-error: true
