@@ -19,6 +19,7 @@ use std::{
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
+    parameters::Network,
     transaction::{self, Transaction},
     transparent::{self, Input},
 };
@@ -366,9 +367,11 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating note commitment trees
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare_transparent_transaction_batch(
         &mut self,
         db: &DiskDb,
+        network: Network,
         finalized: &SemanticallyVerifiedBlock,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -380,11 +383,13 @@ impl DiskWriteBatch {
         // Update created and spent transparent outputs
         self.prepare_new_transparent_outputs_batch(
             db,
+            network,
             new_outputs_by_out_loc,
             &mut address_balances,
         )?;
         self.prepare_spent_transparent_outputs_batch(
             db,
+            network,
             spent_utxos_by_out_loc,
             &mut address_balances,
         )?;
@@ -395,6 +400,7 @@ impl DiskWriteBatch {
 
             self.prepare_spending_transparent_tx_ids_batch(
                 db,
+                network,
                 spending_tx_location,
                 transaction,
                 spent_utxos_by_outpoint,
@@ -422,6 +428,7 @@ impl DiskWriteBatch {
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
+        network: Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
@@ -434,7 +441,7 @@ impl DiskWriteBatch {
         // Index all new transparent outputs
         for (new_output_location, utxo) in new_outputs_by_out_loc {
             let unspent_output = &utxo.output;
-            let receiving_address = unspent_output.address(self.network());
+            let receiving_address = unspent_output.address(network);
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
@@ -498,6 +505,7 @@ impl DiskWriteBatch {
     pub fn prepare_spent_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
+        network: Network,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
@@ -510,7 +518,7 @@ impl DiskWriteBatch {
         // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
         for (spent_output_location, utxo) in spent_utxos_by_out_loc {
             let spent_output = &utxo.output;
-            let sending_address = spent_output.address(self.network());
+            let sending_address = spent_output.address(network);
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
@@ -552,6 +560,7 @@ impl DiskWriteBatch {
     pub fn prepare_spending_transparent_tx_ids_batch(
         &mut self,
         db: &DiskDb,
+        network: Network,
         spending_tx_location: TransactionLocation,
         transaction: &Transaction,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -567,7 +576,7 @@ impl DiskWriteBatch {
             let spent_utxo = spent_utxos_by_outpoint
                 .get(&spent_outpoint)
                 .expect("unexpected missing spent output");
-            let sending_address = spent_utxo.output.address(self.network());
+            let sending_address = spent_utxo.output.address(network);
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {

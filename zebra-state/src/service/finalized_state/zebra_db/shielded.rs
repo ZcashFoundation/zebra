@@ -112,8 +112,7 @@ impl ZebraDb {
             .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
-    /// Returns the Sapling note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
+    /// Returns the Sapling note commitment trees starting from the given block height up to the chain tip
     pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -122,6 +121,33 @@ impl ZebraDb {
 
         self.sapling_tree_by_height(&height)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Orchard note commitment trees starting from the given block height up to the chain tip
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<orchard::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
+        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        self.db.zs_range_iter(&orchard_trees, range)
+    }
+
+    /// Returns the Sapling note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<sapling::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
+        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        self.db.zs_range_iter(&sapling_trees, range)
     }
 
     /// Returns the Sapling note commitment tree matching the given block height,
@@ -142,11 +168,6 @@ impl ZebraDb {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
-        //
-        // # Compatibility
-        //
-        // Allow older Zebra versions to read future database formats, after note commitment trees
-        // have been deduplicated. See ticket #6642 for details.
         let (_first_duplicate_height, tree) = self
             .db
             .zs_prev_key_value_back_from(&sapling_trees, height)
@@ -186,9 +207,7 @@ impl ZebraDb {
 
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        // # Compatibility
-        //
-        // Allow older Zebra versions to read future database formats. See ticket #6642 for details.
+        // If we know there must be a tree, search backwards for it.
         let (_first_duplicate_height, tree) = self
             .db
             .zs_prev_key_value_back_from(&orchard_trees, height)
@@ -337,5 +356,41 @@ impl DiskWriteBatch {
         }
 
         self.prepare_history_batch(db, finalized)
+    }
+
+    /// Deletes the Sapling note commitment tree at the given [`Height`].
+    pub fn delete_sapling_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&sapling_tree_cf, height);
+    }
+
+    /// Deletes the range of Sapling note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    pub fn delete_range_sapling_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+        self.zs_delete_range(&sapling_tree_cf, from, to);
+    }
+
+    /// Deletes the Orchard note commitment tree at the given [`Height`].
+    pub fn delete_orchard_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+        self.zs_delete(&orchard_tree_cf, height);
+    }
+
+    /// Deletes the range of Orchard note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    pub fn delete_range_orchard_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+        self.zs_delete_range(&orchard_tree_cf, from, to);
     }
 }

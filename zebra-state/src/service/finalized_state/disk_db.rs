@@ -94,12 +94,10 @@ pub struct DiskDb {
 //       (DiskDb can be cloned),
 //       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
+#[derive(Default)]
 pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
-
-    /// The configured network.
-    network: Network,
 }
 
 /// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
@@ -115,8 +113,14 @@ pub trait WriteDisk {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
-    /// Remove the given key form rocksdb column family if it exists.
+    /// Remove the given key from rocksdb column family if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug;
+
+    /// Remove the given key range from rocksdb column family if it exists.
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
@@ -141,6 +145,16 @@ impl WriteDisk for DiskWriteBatch {
     {
         let key_bytes = key.as_bytes();
         self.batch.delete_cf(cf, key_bytes);
+    }
+
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+    {
+        let from_bytes = from.as_bytes();
+        let to_bytes = to.as_bytes();
+        self.batch.delete_range_cf(cf, from_bytes, to_bytes);
     }
 }
 
@@ -395,16 +409,10 @@ impl DiskWriteBatch {
     /// Each block must be written to the state inside a batch, so that:
     /// - concurrent `ReadStateService` queries don't see half-written blocks, and
     /// - if Zebra calls `exit`, panics, or crashes, half-written blocks are rolled back.
-    pub fn new(network: Network) -> Self {
+    pub fn new() -> Self {
         DiskWriteBatch {
             batch: rocksdb::WriteBatch::default(),
-            network,
         }
-    }
-
-    /// Returns the configured network for this write batch.
-    pub fn network(&self) -> Network {
-        self.network
     }
 }
 
@@ -412,7 +420,7 @@ impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
-    fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    pub fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
@@ -457,7 +465,7 @@ impl DiskDb {
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
             // Handle Excluded start and the end bound
-            .filter(move |(key, _value)| range.contains(key))
+            .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
     }
 
