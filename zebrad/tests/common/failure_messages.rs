@@ -70,6 +70,7 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "into Go value of type",
     // lightwalletd custom RPC error messages from:
     // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
+    // TODO: check for differences, support messages from both? https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go
     "block requested is newer than latest block",
     "Cache add failed",
     "error decoding",

@@ -209,14 +209,9 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L529-L531
-    //
-    // TODO: re-enable it when lightwalletd starts returning transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(
-        counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
+    assert!(
+        counter >= 1,
+        "all transactions from future blocks failed to send to an isolated mempool"
     );
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
@@ -230,14 +225,9 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
-    //
-    // TODO: re-enable it when lightwalletd starts streaming transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(
-        counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
+    assert!(
+        counter >= 1,
+        "all transactions from future blocks failed to send to an isolated mempool"
     );
 
     Ok(())
