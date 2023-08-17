@@ -98,6 +98,7 @@ jobs:
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
+
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -137,7 +138,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.6.0
+      - uses: Swatinem/rust-cache@v2.6.1
 
       - name: Build external docs
         run: |
@@ -193,7 +194,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.6.0
+      - uses: Swatinem/rust-cache@v2.6.1
 
       - name: Build internal docs
         run: |
