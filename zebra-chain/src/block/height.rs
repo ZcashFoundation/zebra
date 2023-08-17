@@ -71,6 +71,7 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its maximum.
+    // TODO Return an error instead of panicking #7263.
     pub fn next(self) -> Self {
         (self + 1).expect("Height should not be at its maximum.")
     }
@@ -80,6 +81,7 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its minimum.
+    // TODO Return an error instead of panicking #7263.
     pub fn previous(self) -> Self {
         (self - 1).expect("Height should not be at its minimum.")
     }
