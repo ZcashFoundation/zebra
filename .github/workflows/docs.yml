@@ -106,7 +106,6 @@ jobs:
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           projectId: ${{ vars.GCP_FIREBASE_PROJECT }}
@@ -163,7 +162,6 @@ jobs:
       - name: Deploy external docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           target: docs-external
@@ -219,7 +217,6 @@ jobs:
       - name: Deploy internal docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           target: docs-internal
