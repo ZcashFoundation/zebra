@@ -80,7 +80,7 @@ rustflags = [
 [build]
 rustdocflags = [
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml#L151
+    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs.yml#L61
 
     # Links in public docs can point to private items.
     "-Arustdoc::private_intra_doc_links",
