@@ -237,7 +237,7 @@ regex = "1.9.3"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.105", features = ["preserve_order"] }
-tempfile = "3.7.1"
+tempfile = "3.8.0"
 
 hyper = { version = "0.14.27", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
