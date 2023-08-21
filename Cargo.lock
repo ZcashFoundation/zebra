@@ -2018,9 +2018,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.15"
+version = "0.11.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fb7c1b80a1dfa604bb4a649a5c5aeef3d913f7c520cb42b40e534e8a61bcdfc"
+checksum = "73c0fefcb6d409a6587c07515951495d482006f89a21daa0f2f783aa4fd5e027"
 dependencies = [
  "ahash",
  "is-terminal",
@@ -4241,18 +4241,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.46"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9207952ae1a003f42d3d5e892dac3c6ba42aa6ac0c79a6a91a2b5cb4253e75c"
+checksum = "97a802ec30afc17eee47b2855fc72e0c4cd62be9b4efe6591edde0ec5bd68d8f"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.46"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1728216d3244de4f14f14f8c15c79be1a7c67867d28d69b719690e2a19fb445"
+checksum = "6bb623b56e39ab7dcd4b1b98bb6c8f8d907ed255b18de254088016b27a8ee19b"
 dependencies = [
  "proc-macro2 1.0.66",
  "quote 1.0.31",
