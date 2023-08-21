@@ -58,7 +58,7 @@ rayon = "1.7.0"
 regex = "1.9.3"
 serde = { version = "1.0.183", features = ["serde_derive"] }
 tempfile = "3.7.1"
-thiserror = "1.0.46"
+thiserror = "1.0.47"
 
 futures = "0.3.28"
 tokio = { version = "1.31.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
