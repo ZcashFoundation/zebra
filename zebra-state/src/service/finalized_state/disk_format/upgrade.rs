@@ -179,8 +179,8 @@ impl DbFormatChange {
 
     /// Apply this format change to the database.
     ///
-    /// Format changes should be launched in an independent `std::thread`, which runs until the
-    /// upgrade is finished.
+    /// Format changes are launched in an independent `std::thread` by `apply_format_upgrade()`.
+    /// This thread runs until the upgrade is finished.
     ///
     /// See `apply_format_upgrade()` for details.
     fn apply_format_change(
@@ -192,7 +192,7 @@ impl DbFormatChange {
         should_cancel_format_change: Arc<AtomicBool>,
     ) {
         match self {
-            // Handled in the rest of this function.
+            // Perform any required upgrades, then mark the state as upgraded.
             Upgrade { .. } => self.apply_format_upgrade(
                 config,
                 network,
