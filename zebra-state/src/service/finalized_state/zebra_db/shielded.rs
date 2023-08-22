@@ -112,7 +112,8 @@ impl ZebraDb {
             .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
-    /// Returns the Sapling note commitment trees starting from the given block height up to the chain tip
+    /// Returns the Sapling note commitment tree of the finalized tip or the empty tree if the state
+    /// is empty.
     pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
