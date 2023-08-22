@@ -405,7 +405,7 @@ impl DbFormatChange {
             });
 
             // Set up task for deleting orchard note commitment trees
-            let db = upgrade_db;
+            let db = upgrade_db.clone();
             let orchard_delete_task = std::thread::spawn(move || {
                 let mut delete_from = orchard_height.next();
                 while let Ok(delete_to) = unique_orchard_tree_height_rx.recv() {
@@ -437,8 +437,59 @@ impl DbFormatChange {
                 orchard_delete_task,
             ] {
                 if let Err(error) = task.join() {
-                    warn!(?error, "unexpected join error")
+                    // If any thread panicked, propagate that panic to the upgrade thread.
+                    std::panic::resume_unwind(error);
                 }
+            }
+
+            // Runtime test: make sure we removed all duplicates
+            let mut duplicate_found = false;
+
+            let mut prev_height = None;
+            let mut prev_tree = None;
+            for (height, tree) in upgrade_db.sapling_tree_by_height_range(..) {
+                if prev_tree == Some(tree.clone()) {
+                    // TODO: replace this with a panic because it indicates an unrecoverable
+                    //       bug, which should fail the tests immediately
+                    error!(
+                        height = ?height,
+                        prev_height = ?prev_height.unwrap(),
+                        tree_root = ?tree.root(),
+                        "found duplicate sapling trees after running de-duplicate tree upgrade"
+                    );
+
+                    duplicate_found = true;
+                }
+
+                prev_height = Some(height);
+                prev_tree = Some(tree);
+            }
+
+            let mut prev_height = None;
+            let mut prev_tree = None;
+            for (height, tree) in upgrade_db.orchard_tree_by_height_range(..) {
+                if prev_tree == Some(tree.clone()) {
+                    // TODO: replace this with a panic because it indicates an unrecoverable
+                    //       bug, which should fail the tests immediately
+                    error!(
+                        height = ?height,
+                        prev_height = ?prev_height.unwrap(),
+                        tree_root = ?tree.root(),
+                        "found duplicate orchard trees after running de-duplicate tree upgrade"
+                    );
+
+                    duplicate_found = true;
+                }
+
+                prev_height = Some(height);
+                prev_tree = Some(tree);
+            }
+
+            if duplicate_found {
+                panic!(
+                    "found duplicate sapling or orchard trees \
+                     after running de-duplicate tree upgrade"
+                );
             }
 
             // At the end of each format upgrade, we mark the database as upgraded to that version.
