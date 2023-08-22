@@ -1,6 +1,6 @@
 ---
-name: "\U0001F680 Zebra Release"
-about: Zebra team use only
+name: "🚀 Zebra Release"
+about: 'Zebra team use only'
 title: 'Publish next Zebra release: (version)'
 labels: 'A-release, C-trivial, P-Medium :zap:'
 assignees: ''
