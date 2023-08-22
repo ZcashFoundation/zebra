@@ -15,7 +15,7 @@ use tracing::Span;
 use zebra_chain::{
     block::Height,
     diagnostic::task::{CheckForPanics, WaitForPanics},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
 };
 
 use DbFormatChange::*;
@@ -276,33 +276,6 @@ impl DbFormatChange {
 
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
-            // Get network upgrade heights
-            let (&sapling_height, _) = NetworkUpgrade::activation_list(network)
-                .iter()
-                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Sapling)
-                .expect("there should be sapling upgrade");
-            let (&orchard_height, _) = NetworkUpgrade::activation_list(network)
-                .iter()
-                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Nu5)
-                .expect("there should be Nu5 upgrade");
-
-            // Delete duplicates before sapling and orchard heights
-            let (mut prev_sapling_tree, mut prev_orchard_tree) = {
-                let height = Height(1);
-                let mut batch = DiskWriteBatch::new();
-
-                batch.delete_range_sapling_tree(&upgrade_db, &height, &sapling_height);
-                batch.delete_range_orchard_tree(&upgrade_db, &height, &orchard_height);
-                upgrade_db
-                    .write_batch(batch)
-                    .expect("Deleting note commitment trees should always succeed.");
-
-                (
-                    upgrade_db.sapling_tree_by_height(&Height(0)),
-                    upgrade_db.orchard_tree_by_height(&Height(0)),
-                )
-            };
-
             // Create an unbounded channel for reading note commitment trees
             let (sapling_tree_tx, sapling_tree_rx) = mpsc::channel();
 
@@ -310,8 +283,7 @@ impl DbFormatChange {
             let db = upgrade_db.clone();
             let should_cancel_flag = should_cancel_format_change.clone();
             let sapling_read_task = std::thread::spawn(move || {
-                for (height, tree) in
-                    db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
+                for (height, tree) in db.sapling_tree_by_height_range(Height(1)..initial_tip_height)
                 {
                     // Breaking from this loop and dropping the sapling_tree channel
                     // will cause the sapling compare and delete tasks to finish.
@@ -329,14 +301,16 @@ impl DbFormatChange {
             let (unique_sapling_tree_height_tx, unique_sapling_tree_height_rx) = mpsc::channel();
 
             // Set up task for reading sapling note commitment trees
+            let db = upgrade_db.clone();
             let sapling_compare_task = std::thread::spawn(move || {
+                let mut prev_tree = db.sapling_tree_by_height(&Height(0));
                 while let Ok((height, tree)) = sapling_tree_rx.recv() {
                     let tree = Some(tree);
-                    if prev_sapling_tree != tree {
+                    if prev_tree != tree {
                         if let Err(error) = unique_sapling_tree_height_tx.send(height) {
                             warn!(?error, "unexpected send error")
                         }
-                        prev_sapling_tree = tree;
+                        prev_tree = tree;
                     }
                 }
             });
@@ -344,7 +318,7 @@ impl DbFormatChange {
             // Set up task for deleting sapling note commitment trees
             let db = upgrade_db.clone();
             let sapling_delete_task = std::thread::spawn(move || {
-                let mut delete_from = sapling_height.next();
+                let mut delete_from = Height(1);
                 while let Ok(delete_to) = unique_sapling_tree_height_rx.recv() {
                     let num_entries = delete_to - delete_from;
                     if num_entries > 0 {
@@ -372,8 +346,7 @@ impl DbFormatChange {
             let db = upgrade_db.clone();
             let should_cancel_flag = should_cancel_format_change;
             let orchard_read_task = std::thread::spawn(move || {
-                for (height, tree) in
-                    db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
+                for (height, tree) in db.orchard_tree_by_height_range(Height(1)..initial_tip_height)
                 {
                     // Breaking from this loop and dropping the orchard_tree channel
                     // will cause the orchard compare and delete tasks to finish.
@@ -391,15 +364,17 @@ impl DbFormatChange {
             let (unique_orchard_tree_height_tx, unique_orchard_tree_height_rx) = mpsc::channel();
 
             // Set up task for reading orchard note commitment trees
+            let db = upgrade_db.clone();
             let orchard_compare_task = std::thread::spawn(move || {
+                let mut prev_tree = db.orchard_tree_by_height(&Height(0));
                 while let Ok((height, tree)) = orchard_tree_rx.recv() {
                     let tree = Some(tree);
-                    if prev_orchard_tree != tree {
+                    if prev_tree != tree {
                         if let Err(error) = unique_orchard_tree_height_tx.send(height) {
                             warn!(?error, "unexpected send error")
                         }
 
-                        prev_orchard_tree = tree;
+                        prev_tree = tree;
                     }
                 }
             });
@@ -407,7 +382,7 @@ impl DbFormatChange {
             // Set up task for deleting orchard note commitment trees
             let db = upgrade_db;
             let orchard_delete_task = std::thread::spawn(move || {
-                let mut delete_from = orchard_height.next();
+                let mut delete_from = Height(1);
                 while let Ok(delete_to) = unique_orchard_tree_height_rx.recv() {
                     let num_entries = delete_to - delete_from;
                     if num_entries > 0 {
