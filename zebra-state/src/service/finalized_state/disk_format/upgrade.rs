@@ -272,7 +272,7 @@ impl DbFormatChange {
         // Start of a database upgrade task.
 
         let version_for_pruning_trees =
-            Version::parse("25.1.0").expect("Hardcoded version string should be valid.");
+            Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
 
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
