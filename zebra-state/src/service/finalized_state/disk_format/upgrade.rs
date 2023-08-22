@@ -197,13 +197,14 @@ impl DbFormatChange {
                 config,
                 network,
                 initial_tip_height,
-                upgrade_db,
+                upgrade_db.clone(),
                 should_cancel_format_change,
             ),
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(&config, network);
             }
+
             Downgrade { .. } => {
                 // # Correctness
                 //
@@ -219,6 +220,13 @@ impl DbFormatChange {
                 // We do this on a best-effort basis for versions that are still supported.
             }
         }
+
+        // This check should pass for all format changes:
+        // - upgrades should de-duplicate trees if needed (and they already do this check)
+        // - an empty state doesn't have any trees, so it can't have duplicate trees
+        // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
+        //   still know how to make sure trees are unique
+        Self::check_for_duplicate_trees(upgrade_db);
     }
 
     /// Apply any required format updates to the database.
@@ -442,55 +450,8 @@ impl DbFormatChange {
                 }
             }
 
-            // Runtime test: make sure we removed all duplicates
-            let mut duplicate_found = false;
-
-            let mut prev_height = None;
-            let mut prev_tree = None;
-            for (height, tree) in upgrade_db.sapling_tree_by_height_range(..) {
-                if prev_tree == Some(tree.clone()) {
-                    // TODO: replace this with a panic because it indicates an unrecoverable
-                    //       bug, which should fail the tests immediately
-                    error!(
-                        height = ?height,
-                        prev_height = ?prev_height.unwrap(),
-                        tree_root = ?tree.root(),
-                        "found duplicate sapling trees after running de-duplicate tree upgrade"
-                    );
-
-                    duplicate_found = true;
-                }
-
-                prev_height = Some(height);
-                prev_tree = Some(tree);
-            }
-
-            let mut prev_height = None;
-            let mut prev_tree = None;
-            for (height, tree) in upgrade_db.orchard_tree_by_height_range(..) {
-                if prev_tree == Some(tree.clone()) {
-                    // TODO: replace this with a panic because it indicates an unrecoverable
-                    //       bug, which should fail the tests immediately
-                    error!(
-                        height = ?height,
-                        prev_height = ?prev_height.unwrap(),
-                        tree_root = ?tree.root(),
-                        "found duplicate orchard trees after running de-duplicate tree upgrade"
-                    );
-
-                    duplicate_found = true;
-                }
-
-                prev_height = Some(height);
-                prev_tree = Some(tree);
-            }
-
-            if duplicate_found {
-                panic!(
-                    "found duplicate sapling or orchard trees \
-                     after running de-duplicate tree upgrade"
-                );
-            }
+            // Before marking the state as upgraded, check that the upgrade completed successfully.
+            Self::check_for_duplicate_trees(upgrade_db);
 
             // At the end of each format upgrade, we mark the database as upgraded to that version.
             // We don't mark the database if `height` didn't reach the `initial_tip_height` because
@@ -509,6 +470,64 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+    }
+
+    /// Check that note commitment trees were correctly de-duplicated.
+    ///
+    /// # Panics
+    ///
+    /// If a duplicate tree is found.
+    pub fn check_for_duplicate_trees(upgrade_db: ZebraDb) {
+        // Runtime test: make sure we removed all duplicates.
+        // We always run this test, even if the state has supposedly been upgraded.
+        let mut duplicate_found = false;
+
+        let mut prev_height = None;
+        let mut prev_tree = None;
+        for (height, tree) in upgrade_db.sapling_tree_by_height_range(..) {
+            if prev_tree == Some(tree.clone()) {
+                // TODO: replace this with a panic because it indicates an unrecoverable
+                //       bug, which should fail the tests immediately
+                error!(
+                    height = ?height,
+                    prev_height = ?prev_height.unwrap(),
+                    tree_root = ?tree.root(),
+                    "found duplicate sapling trees after running de-duplicate tree upgrade"
+                );
+
+                duplicate_found = true;
+            }
+
+            prev_height = Some(height);
+            prev_tree = Some(tree);
+        }
+
+        let mut prev_height = None;
+        let mut prev_tree = None;
+        for (height, tree) in upgrade_db.orchard_tree_by_height_range(..) {
+            if prev_tree == Some(tree.clone()) {
+                // TODO: replace this with a panic because it indicates an unrecoverable
+                //       bug, which should fail the tests immediately
+                error!(
+                    height = ?height,
+                    prev_height = ?prev_height.unwrap(),
+                    tree_root = ?tree.root(),
+                    "found duplicate orchard trees after running de-duplicate tree upgrade"
+                );
+
+                duplicate_found = true;
+            }
+
+            prev_height = Some(height);
+            prev_tree = Some(tree);
+        }
+
+        if duplicate_found {
+            panic!(
+                "found duplicate sapling or orchard trees \
+                     after running de-duplicate tree upgrade"
+            );
+        }
     }
 
     /// Mark a newly created database with the current format version.
