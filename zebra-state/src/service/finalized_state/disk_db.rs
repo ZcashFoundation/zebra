@@ -119,7 +119,8 @@ pub trait WriteDisk {
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
 
-    /// Remove the given key range from rocksdb column family if it exists.
+    /// Deletes the given key range from rocksdb column family if it exists, including `from` and
+    /// excluding `to`.
     fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
