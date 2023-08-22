@@ -465,7 +465,13 @@ impl DiskDb {
             .iterator_cf(cf, start_mode)
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
-            // Handle Excluded start and the end bound
+            // Skip excluded start bound and empty ranges. The `start_mode` already skips keys
+            // before the start bound.
+            .skip_while({
+                let range = range.clone();
+                move |(key, _value)| !range.contains(key)
+            })
+            // Take until the excluded end bound is reached, or we're after the included end bound.
             .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
     }
