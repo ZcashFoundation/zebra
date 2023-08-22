@@ -80,7 +80,7 @@ skip-tree = [
     { name = "rustls", version = "=0.20.8" },
 
     # wait for zcash_proofs to upgrade
-    { name = "webpki-roots", version = "=v0.22.6" },
+    { name = "webpki-roots", version = "=0.22.6" },
 
     # zebra-utils dependencies
 
