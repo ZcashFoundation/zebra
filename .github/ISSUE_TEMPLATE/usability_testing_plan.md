@@ -1,7 +1,7 @@
 ---
-name: "📋 Usability Testing Plan"
+name: "\U0001F4CB Usability Testing Plan"
 about: Create a Usability Testing Plan
-title: 'Usability Testing Plan'
+title: Usability Testing Plan
 labels: C-research
 assignees: ''
 
@@ -81,4 +81,3 @@ assignees: ''
 ## Required documentation
 
 <!-- List the documents you will need to produce and bring to the usability testing sessions, e.g consent forms, usability testing script, questionnaires, etc... -->
-
