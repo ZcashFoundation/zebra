@@ -18,7 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree;
+use bridgetree::{self, NonEmptyFrontier};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
@@ -31,7 +31,7 @@ use crate::{
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    subtree::{TRACKED_SUBTREE_HEIGHT, TRACKED_SUBTREE_SIZE},
+    subtree::TRACKED_SUBTREE_HEIGHT,
 };
 
 pub mod legacy;
@@ -178,6 +178,19 @@ impl Node {
     pub fn to_repr(&self) -> [u8; 32] {
         self.0.to_repr()
     }
+
+    /// Converts a byte representation of a field element into an element of
+    /// this prime field without checking if the input is not canonical
+    pub fn from_repr_unchecked(bytes: &[u8]) -> Self {
+        let mut tmp = [0, 0, 0, 0];
+
+        tmp[0] = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+        tmp[1] = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        tmp[2] = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        tmp[3] = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+
+        pallas::Base::from_raw(tmp).into()
+    }
 }
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
@@ -231,18 +244,6 @@ impl Hashable for Node {
 impl From<pallas::Base> for Node {
     fn from(x: pallas::Base) -> Self {
         Node(x)
-    }
-}
-
-impl TryFrom<&[u8]> for Node {
-    type Error = &'static str;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Option::<pallas::Base>::from(pallas::Base::from_repr(
-            bytes.try_into().map_err(|_| "wrong byte slice len")?,
-        ))
-        .map(Node)
-        .ok_or("invalid Pallas field element")
     }
 }
 
@@ -340,43 +341,46 @@ impl NoteCommitmentTree {
     }
 
     /// Returns true if the most recently appended leaf completes the subtree
-    pub fn is_complete_subtree(&self) -> bool {
-        self.inner.value().map_or(false, |x| {
-            x.position()
-                .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
-        })
+    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+        tree.position()
+            .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
     }
 
-    /// Returns subtree index at [`TRACKED_SUBTREE_HEIGHT`]
-    pub fn subtree_index(&self) -> u16 {
-        (self.position() >> TRACKED_SUBTREE_HEIGHT)
-            .try_into()
-            .expect("always within u16")
-    }
-
-    /// Returns subtree root, if any
-    pub fn subtree_root(&self) -> Option<Node> {
-        self.is_complete_subtree().then_some(())?;
-        Some(
-            self.inner
-                .value()?
-                .root(Some(TRACKED_SUBTREE_HEIGHT.into())),
+    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
+    pub fn subtree_address(&self) -> incrementalmerkletree::Address {
+        incrementalmerkletree::Address::above_position(
+            TRACKED_SUBTREE_HEIGHT.into(),
+            self.position().into(),
         )
     }
 
-    /// Returns the index of note completing the next subtree
-    pub fn next_complete_subtree_note_index(&self) -> usize {
-        // # Correctness
-        //
-        // 2^16 - (position % 2^16) should always be between 1..=2^16
-        (TRACKED_SUBTREE_SIZE - self.subtree_note_count() - 1)
+    /// Accepts a mutable reference to Orchard notes that are to be appended for a block,
+    /// checks if they will complete the current subtree, and splits off any notes that should
+    /// be appended to the next subtree.
+    ///
+    /// Returns current subtree index and notes in the next subtree if the notes complete
+    /// the current subtree.
+    ///
+    /// Returns None otherwise.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn subtree_index_and_notes_in_next_subtree(
+        &self,
+        notes: &mut Vec<NoteCommitmentUpdate>,
+    ) -> Option<(u16, Vec<NoteCommitmentUpdate>)> {
+        let address = self.subtree_address();
+        let index = || address.index().try_into().expect("should fit in u16");
+        let empty_leaf_count = (u64::from(address.max_position() - self.position()))
             .try_into()
-            .expect("should fit in usize")
+            .expect("should fit in usize");
+
+        (notes.len() > empty_leaf_count).then(|| (index(), notes.split_off(empty_leaf_count)))
     }
 
-    /// Counts of note commitments added to the current subtree, max 2^16
-    fn subtree_note_count(&self) -> u64 {
-        self.count() % TRACKED_SUBTREE_SIZE
+    /// Returns subtree root if the most recently appended leaf completes the subtree
+    pub fn subtree_root(&self) -> Option<Node> {
+        let value = self.inner.value()?;
+        Self::is_complete_subtree(value).then_some(())?;
+        Some(value.root(Some(TRACKED_SUBTREE_HEIGHT.into())))
     }
 
     /// Returns the current root of the tree, used as an anchor in Orchard
@@ -436,7 +440,7 @@ impl NoteCommitmentTree {
 
     /// Position of final leaf added to the tree.
     fn position(&self) -> u64 {
-        self.inner.value().map_or(0, |x| u64::from(x.position()))
+        self.inner.value().map_or(0, |x| x.position().into())
     }
 
     /// Count of note commitments added to the tree.

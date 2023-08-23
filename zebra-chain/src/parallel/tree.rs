@@ -1,14 +1,10 @@
 //! Parallel note commitment tree update methods.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::{
-    block::{Block, Height},
-    orchard, sapling, sprout,
-    subtree::NoteCommitmentSubtree,
-};
+use crate::{block::Block, orchard, sapling, sprout, subtree::NoteCommitmentSubtree};
 
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
@@ -60,7 +56,6 @@ impl NoteCommitmentTrees {
         let height = block
             .coinbase_height()
             .expect("height was already validated");
-        let block_list: BTreeMap<Height, Arc<Block>> = [(height, block)].into_iter().collect();
 
         // Prepare arguments for parallel threads
         let NoteCommitmentTrees {
@@ -70,21 +65,21 @@ impl NoteCommitmentTrees {
             ..
         } = self.clone();
 
-        let sprout_note_commitments: Vec<_> = block_list
-            .values()
-            .flat_map(|block| block.transactions.iter())
+        let sprout_note_commitments: Vec<_> = block
+            .transactions
+            .iter()
             .flat_map(|tx| tx.sprout_note_commitments())
             .cloned()
             .collect();
-        let sapling_note_commitments: Vec<_> = block_list
-            .values()
-            .flat_map(|block| block.transactions.iter())
+        let sapling_note_commitments: Vec<_> = block
+            .transactions
+            .iter()
             .flat_map(|tx| tx.sapling_note_commitments())
             .cloned()
             .collect();
-        let orchard_note_commitments: Vec<_> = block_list
-            .values()
-            .flat_map(|block| block.transactions.iter())
+        let orchard_note_commitments: Vec<_> = block
+            .transactions
+            .iter()
             .flat_map(|tx| tx.orchard_note_commitments())
             .cloned()
             .collect();
@@ -164,7 +159,7 @@ impl NoteCommitmentTrees {
     #[allow(clippy::unwrap_in_result)]
     fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
-        sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
+        mut sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
             Arc<sapling::tree::NoteCommitmentTree>,
@@ -173,7 +168,12 @@ impl NoteCommitmentTrees {
         NoteCommitmentTreeError,
     > {
         let sapling_nct = Arc::make_mut(&mut sapling);
-        let next_complete_subtree_note_index = sapling_nct.next_complete_subtree_note_index();
+        let subtree_index_and_notes_in_next_subtree =
+            sapling_nct.subtree_index_and_notes_in_next_subtree(&mut sapling_note_commitments);
+
+        for sapling_note_commitment in sapling_note_commitments {
+            sapling_nct.append(sapling_note_commitment)?;
+        }
 
         // It is impossible for blocks to contain more than one level 16 sapling root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
@@ -186,19 +186,14 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
         let mut subtree_root = None;
 
-        if sapling_note_commitments.len() > next_complete_subtree_note_index {
-            for (note_idx, sapling_note_commitment) in
-                sapling_note_commitments.into_iter().enumerate()
-            {
-                sapling_nct.append(sapling_note_commitment)?;
-                if note_idx == next_complete_subtree_note_index {
-                    let node = sapling_nct
-                        .subtree_root()
-                        .expect("should be frontier after appending a note");
-                    subtree_root = Some((sapling_nct.subtree_index(), node));
-                }
-            }
-        } else {
+        if let Some((subtree_index, sapling_note_commitments)) =
+            subtree_index_and_notes_in_next_subtree
+        {
+            let node: sapling::tree::Node = sapling_nct
+                .subtree_root()
+                .expect("should be frontier after appending a note");
+            subtree_root = Some((subtree_index, node));
+
             for sapling_note_commitment in sapling_note_commitments {
                 sapling_nct.append(sapling_note_commitment)?;
             }
@@ -214,7 +209,7 @@ impl NoteCommitmentTrees {
     #[allow(clippy::unwrap_in_result)]
     fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
+        mut orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
             Arc<orchard::tree::NoteCommitmentTree>,
@@ -223,26 +218,26 @@ impl NoteCommitmentTrees {
         NoteCommitmentTreeError,
     > {
         let orchard_nct = Arc::make_mut(&mut orchard);
-        let next_complete_subtree_note_index = orchard_nct.next_complete_subtree_note_index();
+        let subtree_index_and_notes_in_next_subtree =
+            orchard_nct.subtree_index_and_notes_in_next_subtree(&mut orchard_note_commitments);
+
+        for orchard_note_commitment in orchard_note_commitments {
+            orchard_nct.append(orchard_note_commitment)?;
+        }
 
         // It is impossible for blocks to contain more than one level 16 orchard root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let mut subtree_root = None;
 
-        if orchard_note_commitments.len() > next_complete_subtree_note_index {
-            for (note_idx, orchard_note_commitment) in
-                orchard_note_commitments.into_iter().enumerate()
-            {
-                orchard_nct.append(orchard_note_commitment)?;
-                if note_idx == next_complete_subtree_note_index {
-                    let node = orchard_nct
-                        .subtree_root()
-                        .expect("should be frontier after appending a note");
-                    subtree_root = Some((orchard_nct.subtree_index(), node));
-                }
-            }
-        } else {
+        if let Some((subtree_index, orchard_note_commitments)) =
+            subtree_index_and_notes_in_next_subtree
+        {
+            let node = orchard_nct
+                .subtree_root()
+                .expect("should be frontier after appending a note");
+            subtree_root = Some((subtree_index, node));
+
             for orchard_note_commitment in orchard_note_commitments {
                 orchard_nct.append(orchard_note_commitment)?;
             }

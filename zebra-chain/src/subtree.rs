@@ -7,9 +7,6 @@ use crate::block::Height;
 /// Height at which Zebra tracks subtree roots
 pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 
-/// Size of tracked subtrees
-pub const TRACKED_SUBTREE_SIZE: u64 = 1 << TRACKED_SUBTREE_HEIGHT;
-
 /// A subtree index
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);
@@ -20,7 +17,8 @@ impl From<u16> for NoteCommitmentSubtreeIndex {
     }
 }
 
-/// Subtree of Sapling or Orchard note commitment tree
+/// Subtree root of Sapling or Orchard note commitment tree,
+/// with its associated block height and subtree index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NoteCommitmentSubtree<Node> {
     /// Index of this subtree
@@ -39,16 +37,17 @@ impl<Node> NoteCommitmentSubtree<Node> {
     }
 }
 
-/// Partial subtree of Sapling note commitment tree
+/// Subtree root of Sapling or Orchard note commitment tree, with block height, but without the subtree index.
+/// Used for database key-value serialization, where the subtree index is the key, and this struct is the value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PartialNoteCommitmentSubtree<Node> {
+pub struct NoteCommitmentSubtreeData<Node> {
     /// End boundary of this subtree, the block height of its last leaf.
     pub end: Height,
     /// Root of this subtree.
     pub node: Node,
 }
 
-impl<Node> PartialNoteCommitmentSubtree<Node> {
+impl<Node> NoteCommitmentSubtreeData<Node> {
     /// Creates new [`PartialNoteCommitmentSubtree`]
     pub fn new(end: Height, node: Node) -> Self {
         Self { end, node }
