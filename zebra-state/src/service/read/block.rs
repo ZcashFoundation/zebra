@@ -30,7 +30,7 @@ use crate::{
     HashOrHeight,
 };
 
-/// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
+/// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
 where
@@ -48,7 +48,7 @@ where
         .or_else(|| db.block(hash_or_height))
 }
 
-/// Returns the [`block::Header`] with [`block::Hash`](zebra_chain::block::Hash) or
+/// Returns the [`block::Header`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_header<C>(
     chain: Option<C>,
