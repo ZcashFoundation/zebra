@@ -97,7 +97,8 @@ impl ZebraDb {
         self.db.zs_get(&height_by_hash, &hash)
     }
 
-    /// Returns the [`block::Header`] with [`block::Hash`] or [`Height`], if it exists in the finalized chain.
+    /// Returns the [`block::Header`] with [`block::Hash`] or
+    /// [`Height`], if it exists in the finalized chain.
     //
     // TODO: move this method to the start of the section
     #[allow(clippy::unwrap_in_result)]
