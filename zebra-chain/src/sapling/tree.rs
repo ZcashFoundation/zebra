@@ -251,7 +251,7 @@ pub enum NoteCommitmentTreeError {
 #[serde(into = "LegacyNoteCommitmentTree")]
 #[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a [`Frontier`](bridgetree::Frontier).
+    /// The tree represented as a [`Frontier`].
     ///
     /// A Frontier is a subset of the tree that allows to fully specify it.
     /// It consists of nodes along the rightmost (newer) branch of the tree that
