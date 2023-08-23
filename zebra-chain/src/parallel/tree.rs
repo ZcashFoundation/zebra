@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::{
     block::{Block, Height},
     orchard, sapling, sprout,
+    subtree::NoteCommitmentSubtree,
 };
 
 /// An argument wrapper struct for note commitment trees.
@@ -18,8 +19,14 @@ pub struct NoteCommitmentTrees {
     /// The sapling note commitment tree.
     pub sapling: Arc<sapling::tree::NoteCommitmentTree>,
 
+    /// The sapling note commitment subtree.
+    pub sapling_subtree: Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>,
+
     /// The orchard note commitment tree.
     pub orchard: Arc<orchard::tree::NoteCommitmentTree>,
+
+    /// The orchard note commitment subtree.
+    pub orchard_subtree: Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>,
 }
 
 /// Note commitment tree errors.
@@ -49,32 +56,18 @@ impl NoteCommitmentTrees {
         &mut self,
         block: &Arc<Block>,
     ) -> Result<(), NoteCommitmentTreeError> {
-        self.update_trees_parallel_list(
-            [(
-                block
-                    .coinbase_height()
-                    .expect("height was already validated"),
-                block.clone(),
-            )]
-            .into_iter()
-            .collect(),
-        )
-    }
+        let block = block.clone();
+        let height = block
+            .coinbase_height()
+            .expect("height was already validated");
+        let block_list: BTreeMap<Height, Arc<Block>> = [(height, block)].into_iter().collect();
 
-    /// Updates the note commitment trees using the transactions in `block`,
-    /// then re-calculates the cached tree roots, using parallel `rayon` threads.
-    ///
-    /// If any of the tree updates cause an error,
-    /// it will be returned at the end of the parallel batches.
-    pub fn update_trees_parallel_list(
-        &mut self,
-        block_list: BTreeMap<Height, Arc<Block>>,
-    ) -> Result<(), NoteCommitmentTreeError> {
         // Prepare arguments for parallel threads
         let NoteCommitmentTrees {
             sprout,
             sapling,
             orchard,
+            ..
         } = self.clone();
 
         let sprout_note_commitments: Vec<_> = block_list
@@ -132,12 +125,20 @@ impl NoteCommitmentTrees {
         if let Some(sprout_result) = sprout_result {
             self.sprout = sprout_result?;
         }
+
         if let Some(sapling_result) = sapling_result {
-            self.sapling = sapling_result?;
-        }
+            let (sapling, subtree_root) = sapling_result?;
+            self.sapling = sapling;
+            self.sapling_subtree =
+                subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
+        };
+
         if let Some(orchard_result) = orchard_result {
-            self.orchard = orchard_result?;
-        }
+            let (orchard, subtree_root) = orchard_result?;
+            self.orchard = orchard;
+            self.orchard_subtree =
+                subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
+        };
 
         Ok(())
     }
@@ -160,36 +161,96 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the sapling note commitment tree.
+    #[allow(clippy::unwrap_in_result)]
     fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
         sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
-    ) -> Result<Arc<sapling::tree::NoteCommitmentTree>, NoteCommitmentTreeError> {
+    ) -> Result<
+        (
+            Arc<sapling::tree::NoteCommitmentTree>,
+            Option<(u16, sapling::tree::Node)>,
+        ),
+        NoteCommitmentTreeError,
+    > {
         let sapling_nct = Arc::make_mut(&mut sapling);
+        let next_complete_subtree_note_index = sapling_nct.next_complete_subtree_note_index();
 
-        for sapling_note_commitment in sapling_note_commitments {
-            sapling_nct.append(sapling_note_commitment)?;
+        // It is impossible for blocks to contain more than one level 16 sapling root:
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        //
+        // Before NU5, this limit holds due to the minimum size of Sapling outputs (948 bytes)
+        // and the maximum size of a block:
+        // > The size of a block MUST be less than or equal to 2000000 bytes.
+        // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+        // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
+        let mut subtree_root = None;
+
+        if sapling_note_commitments.len() > next_complete_subtree_note_index {
+            for (note_idx, sapling_note_commitment) in
+                sapling_note_commitments.into_iter().enumerate()
+            {
+                sapling_nct.append(sapling_note_commitment)?;
+                if note_idx == next_complete_subtree_note_index {
+                    let node = sapling_nct
+                        .subtree_root()
+                        .expect("should be frontier after appending a note");
+                    subtree_root = Some((sapling_nct.subtree_index(), node));
+                }
+            }
+        } else {
+            for sapling_note_commitment in sapling_note_commitments {
+                sapling_nct.append(sapling_note_commitment)?;
+            }
         }
 
         // Re-calculate and cache the tree root.
         let _ = sapling_nct.root();
 
-        Ok(sapling)
+        Ok((sapling, subtree_root))
     }
 
     /// Update the orchard note commitment tree.
+    #[allow(clippy::unwrap_in_result)]
     fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
         orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
-    ) -> Result<Arc<orchard::tree::NoteCommitmentTree>, NoteCommitmentTreeError> {
+    ) -> Result<
+        (
+            Arc<orchard::tree::NoteCommitmentTree>,
+            Option<(u16, orchard::tree::Node)>,
+        ),
+        NoteCommitmentTreeError,
+    > {
         let orchard_nct = Arc::make_mut(&mut orchard);
+        let next_complete_subtree_note_index = orchard_nct.next_complete_subtree_note_index();
 
-        for orchard_note_commitment in orchard_note_commitments {
-            orchard_nct.append(orchard_note_commitment)?;
+        // It is impossible for blocks to contain more than one level 16 orchard root:
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        let mut subtree_root = None;
+
+        if orchard_note_commitments.len() > next_complete_subtree_note_index {
+            for (note_idx, orchard_note_commitment) in
+                orchard_note_commitments.into_iter().enumerate()
+            {
+                orchard_nct.append(orchard_note_commitment)?;
+                if note_idx == next_complete_subtree_note_index {
+                    let node = orchard_nct
+                        .subtree_root()
+                        .expect("should be frontier after appending a note");
+                    subtree_root = Some((orchard_nct.subtree_index(), node));
+                }
+            }
+        } else {
+            for orchard_note_commitment in orchard_note_commitments {
+                orchard_nct.append(orchard_note_commitment)?;
+            }
         }
 
         // Re-calculate and cache the tree root.
         let _ = orchard_nct.root();
 
-        Ok(orchard)
+        Ok((orchard, subtree_root))
     }
 }

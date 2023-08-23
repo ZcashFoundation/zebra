@@ -27,8 +27,11 @@ use zcash_primitives::merkle_tree::{write_commitment_tree, HashSer};
 
 use super::sinsemilla::*;
 
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
+    subtree::{TRACKED_SUBTREE_HEIGHT, TRACKED_SUBTREE_SIZE},
 };
 
 pub mod legacy;
@@ -170,6 +173,13 @@ impl ZcashDeserialize for Root {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Node(pallas::Base);
 
+impl Node {
+    /// Calls `to_repr()` on inner value.
+    pub fn to_repr(&self) -> [u8; 32] {
+        self.0.to_repr()
+    }
+}
+
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
 /// Zebra stores Orchard note commitment trees as [`Frontier`][1]s while the
@@ -221,6 +231,18 @@ impl Hashable for Node {
 impl From<pallas::Base> for Node {
     fn from(x: pallas::Base) -> Self {
         Node(x)
+    }
+}
+
+impl TryFrom<&[u8]> for Node {
+    type Error = &'static str;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Option::<pallas::Base>::from(pallas::Base::from_repr(
+            bytes.try_into().map_err(|_| "wrong byte slice len")?,
+        ))
+        .map(Node)
+        .ok_or("invalid Pallas field element")
     }
 }
 
@@ -317,6 +339,46 @@ impl NoteCommitmentTree {
         }
     }
 
+    /// Returns true if the most recently appended leaf completes the subtree
+    pub fn is_complete_subtree(&self) -> bool {
+        self.inner.value().map_or(false, |x| {
+            x.position()
+                .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
+        })
+    }
+
+    /// Returns subtree index at [`TRACKED_SUBTREE_HEIGHT`]
+    pub fn subtree_index(&self) -> u16 {
+        (self.position() >> TRACKED_SUBTREE_HEIGHT)
+            .try_into()
+            .expect("always within u16")
+    }
+
+    /// Returns subtree root, if any
+    pub fn subtree_root(&self) -> Option<Node> {
+        self.is_complete_subtree().then_some(())?;
+        Some(
+            self.inner
+                .value()?
+                .root(Some(TRACKED_SUBTREE_HEIGHT.into())),
+        )
+    }
+
+    /// Returns the index of note completing the next subtree
+    pub fn next_complete_subtree_note_index(&self) -> usize {
+        // # Correctness
+        //
+        // 2^16 - (position % 2^16) should always be between 1..=2^16
+        (TRACKED_SUBTREE_SIZE - self.subtree_note_count() - 1)
+            .try_into()
+            .expect("should fit in usize")
+    }
+
+    /// Counts of note commitments added to the current subtree, max 2^16
+    fn subtree_note_count(&self) -> u64 {
+        self.count() % TRACKED_SUBTREE_SIZE
+    }
+
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
@@ -370,6 +432,11 @@ impl NoteCommitmentTree {
     /// Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
     pub fn uncommitted() -> pallas::Base {
         pallas::Base::one().double()
+    }
+
+    /// Position of final leaf added to the tree.
+    fn position(&self) -> u64 {
+        self.inner.value().map_or(0, |x| u64::from(x.position()))
     }
 
     /// Count of note commitments added to the tree.
