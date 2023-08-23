@@ -1251,7 +1251,9 @@ impl Chain {
         let mut nct = NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree(),
             sapling: self.sapling_note_commitment_tree(),
+            sapling_subtree: None,
             orchard: self.orchard_note_commitment_tree(),
+            orchard_subtree: None,
         };
 
         let mut tree_result = None;

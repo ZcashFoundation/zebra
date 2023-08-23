@@ -224,7 +224,9 @@ impl ZebraDb {
         NoteCommitmentTrees {
             sprout: self.sprout_tree(),
             sapling: self.sapling_tree(),
+            sapling_subtree: None,
             orchard: self.orchard_tree(),
+            orchard_subtree: None,
         }
     }
 }
