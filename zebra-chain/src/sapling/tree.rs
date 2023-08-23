@@ -173,7 +173,7 @@ impl fmt::Debug for Node {
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
-/// Zebra stores Sapling note commitment trees as [`Frontier`][1]s while the
+/// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
 /// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
 /// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
 ///
@@ -449,13 +449,13 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 ///
 /// The format of the serialized data is compatible with
 /// [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree) from `librustzcash` and not
-/// with [`Frontier`](bridgetree::Frontier) from the crate
+/// with [`Frontier`] from the crate
 /// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
 /// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
-/// represented as [`Frontier`](bridgetree::Frontier).
+/// represented as [`Frontier`].
 ///
 /// The formats are semantically equivalent. The primary difference between them
-/// is that in [`Frontier`](bridgetree::Frontier), the vector of parents is
+/// is that in [`Frontier`], the vector of parents is
 /// dense (we know where the gaps are from the position of the leaf in the
 /// overall tree); whereas in [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree),
 /// the vector of parent hashes is sparse with [`None`] values in the gaps.
@@ -466,7 +466,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 ///
 /// It is likely that the dense format will be used in future RPCs, in which
 /// case the current implementation will have to change and use the format
-/// compatible with [`Frontier`](bridgetree::Frontier) instead.
+/// compatible with [`Frontier`] instead.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SerializedTree(Vec<u8>);
 
