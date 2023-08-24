@@ -178,18 +178,17 @@ impl Node {
     pub fn to_repr(&self) -> [u8; 32] {
         self.0.to_repr()
     }
+}
 
-    /// Converts a byte representation of a field element into an element of
-    /// this prime field without checking if the input is not canonical
-    pub fn from_repr_unchecked(bytes: &[u8]) -> Self {
-        let mut tmp = [0, 0, 0, 0];
+impl TryFrom<&[u8]> for Node {
+    type Error = &'static str;
 
-        tmp[0] = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        tmp[1] = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
-        tmp[2] = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-        tmp[3] = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
-
-        pallas::Base::from_raw(tmp).into()
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Option::<pallas::Base>::from(pallas::Base::from_repr(
+            bytes.try_into().map_err(|_| "wrong byte slice len")?,
+        ))
+        .map(Node)
+        .ok_or("invalid Pallas field element")
     }
 }
 

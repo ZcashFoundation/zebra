@@ -168,20 +168,6 @@ impl ZcashDeserialize for Root {
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Node([u8; 32]);
 
-impl Node {
-    /// Converts a little-endian byte representation of
-    /// a Sapling Node without checking if the input is not canonical.
-    pub fn from_repr_unchecked(bytes: &[u8]) -> Self {
-        let mut tmp = [0, 0, 0, 0];
-
-        tmp[0] = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        tmp[1] = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
-        tmp[2] = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-        tmp[3] = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
-
-        jubjub::Fq::from_raw(tmp).into()
-    }
-}
 impl AsRef<[u8; 32]> for Node {
     fn as_ref(&self) -> &[u8; 32] {
         &self.0
