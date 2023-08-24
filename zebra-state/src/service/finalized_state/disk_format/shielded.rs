@@ -15,6 +15,8 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
+use super::block::HEIGHT_DISK_BYTES;
+
 impl IntoDisk for sprout::Nullifier {
     type Bytes = [u8; 32];
 
@@ -179,22 +181,22 @@ impl<Node: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtree<Node> {
 
 impl FromDisk for sapling::tree::Node {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Self::from_repr_unchecked(bytes.as_ref())
+        Self::try_from(bytes.as_ref()).expect("trusted data should deserialize successfully")
     }
 }
 
 impl FromDisk for orchard::tree::Node {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Self::from_repr_unchecked(bytes.as_ref())
+        Self::try_from(bytes.as_ref()).expect("trusted data should deserialize successfully")
     }
 }
 
 impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let bytes = disk_bytes.as_ref();
+        let (height_bytes, node_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
         Self::new(
-            Height::from_bytes(&bytes[..3]),
-            Node::from_bytes(&bytes[3..35]),
+            Height::from_bytes(height_bytes),
+            Node::from_bytes(node_bytes),
         )
     }
 }

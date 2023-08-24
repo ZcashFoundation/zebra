@@ -97,7 +97,7 @@ We use the following rocksdb column families:
 | `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
-| `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtree`       | Create  |
+| `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Chain*                            |                        |                               |         |
 | `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
@@ -121,7 +121,7 @@ Block and Transaction Data:
 - `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
   used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
 - `NoteCommitmentSubtreeIndex`: 16 bits, big-endian, unsigned
-- `NoteCommitmentSubtree`: `Height \|\| {sapling, orchard}::tree::Node`
+- `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
