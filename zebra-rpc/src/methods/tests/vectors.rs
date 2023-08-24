@@ -121,6 +121,11 @@ async fn rpc_getblock() {
         assert_eq!(get_block, expected_result);
     }
 
+    // Create empty note commitment tree information.
+    let sapling = SaplingTrees { size: 0 };
+    let orchard = OrchardTrees { size: 0 };
+    let trees = GetBlockTrees { sapling, orchard };
+
     // Make height calls with verbosity=1 and check response
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
@@ -139,6 +144,7 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
+                trees,
             }
         );
     }
@@ -161,6 +167,7 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
+                trees,
             }
         );
     }
@@ -183,6 +190,7 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
+                trees,
             }
         );
     }
@@ -205,6 +213,7 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
+                trees,
             }
         );
     }

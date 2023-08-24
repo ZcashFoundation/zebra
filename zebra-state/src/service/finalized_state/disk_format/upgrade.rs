@@ -2,7 +2,10 @@
 
 use std::{
     cmp::Ordering,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{self, AtomicBool},
+        mpsc, Arc,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -12,14 +15,16 @@ use tracing::Span;
 use zebra_chain::{
     block::Height,
     diagnostic::task::{CheckForPanics, WaitForPanics},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
 };
 
 use DbFormatChange::*;
 
 use crate::{
-    config::write_database_format_version_to_disk, database_format_version_in_code,
-    database_format_version_on_disk, service::finalized_state::ZebraDb, Config,
+    config::write_database_format_version_to_disk,
+    database_format_version_in_code, database_format_version_on_disk,
+    service::finalized_state::{DiskWriteBatch, ZebraDb},
+    Config,
 };
 
 /// The kind of database format change we're performing.
@@ -66,7 +71,7 @@ pub struct DbFormatChangeThreadHandle {
     update_task: Option<Arc<JoinHandle<()>>>,
 
     /// A channel that tells the running format thread to finish early.
-    cancel_handle: mpsc::SyncSender<CancelFormatChange>,
+    should_cancel_format_change: Arc<AtomicBool>,
 }
 
 /// Marker for cancelling a format upgrade.
@@ -144,24 +149,27 @@ impl DbFormatChange {
         //
         // Cancel handles must use try_send() to avoid blocking waiting for the format change
         // thread to shut down.
-        let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
+        let should_cancel_format_change = Arc::new(AtomicBool::new(false));
 
         let span = Span::current();
-        let update_task = thread::spawn(move || {
-            span.in_scope(move || {
-                self.apply_format_change(
-                    config,
-                    network,
-                    initial_tip_height,
-                    upgrade_db,
-                    cancel_receiver,
-                );
+        let update_task = {
+            let should_cancel_format_change = should_cancel_format_change.clone();
+            thread::spawn(move || {
+                span.in_scope(move || {
+                    self.apply_format_change(
+                        config,
+                        network,
+                        initial_tip_height,
+                        upgrade_db,
+                        should_cancel_format_change,
+                    );
+                })
             })
-        });
+        };
 
         let mut handle = DbFormatChangeThreadHandle {
             update_task: Some(Arc::new(update_task)),
-            cancel_handle,
+            should_cancel_format_change,
         };
 
         handle.check_for_panics();
@@ -181,7 +189,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        should_cancel_format_change: Arc<AtomicBool>,
     ) {
         match self {
             // Handled in the rest of this function.
@@ -190,7 +198,7 @@ impl DbFormatChange {
                 network,
                 initial_tip_height,
                 upgrade_db,
-                cancel_receiver,
+                should_cancel_format_change,
             ),
 
             NewlyCreated { .. } => {
@@ -229,7 +237,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        should_cancel_format_change: Arc<AtomicBool>,
     ) {
         let Upgrade {
             newer_running_version,
@@ -261,46 +269,187 @@ impl DbFormatChange {
             return;
         };
 
-        // Example format change.
+        // Start of a database upgrade task.
 
-        // Check if we need to do this upgrade.
-        let database_format_add_format_change_task =
-            Version::parse("25.0.2").expect("version constant is valid");
+        let version_for_pruning_trees =
+            Version::parse("25.1.0").expect("Hardcoded version string should be valid.");
 
-        if older_disk_version < database_format_add_format_change_task {
-            let mut upgrade_height = Height(0);
+        // Check if we need to prune the note commitment trees in the database.
+        if older_disk_version < version_for_pruning_trees {
+            // Get network upgrade heights
+            let (&sapling_height, _) = NetworkUpgrade::activation_list(network)
+                .iter()
+                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Sapling)
+                .expect("there should be sapling upgrade");
+            let (&orchard_height, _) = NetworkUpgrade::activation_list(network)
+                .iter()
+                .find(|(_, upgrade)| **upgrade == NetworkUpgrade::Nu5)
+                .expect("there should be Nu5 upgrade");
 
-            // Go through every height from genesis to the tip of the old version.
-            // If the state was downgraded, some heights might already be upgraded.
-            // (Since the upgraded format is added to the tip, the database can switch between
-            // lower and higher versions at any block.)
-            //
-            // Keep upgrading until the initial database has been upgraded,
-            // or this task is cancelled by a shutdown.
-            while upgrade_height <= initial_tip_height
-                && matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty))
-            {
-                // TODO: Do one format upgrade step here
-                //
-                // This fake step just shows how to access the database.
-                let _replace_me_ = upgrade_db.tip();
+            // Delete duplicates before sapling and orchard heights
+            let (mut prev_sapling_tree, mut prev_orchard_tree) = {
+                let height = Height(1);
+                let mut batch = DiskWriteBatch::new();
 
-                upgrade_height = (upgrade_height + 1).expect("task exits before maximum height");
+                batch.delete_range_sapling_tree(&upgrade_db, &height, &sapling_height);
+                batch.delete_range_orchard_tree(&upgrade_db, &height, &orchard_height);
+                upgrade_db
+                    .write_batch(batch)
+                    .expect("Deleting note commitment trees should always succeed.");
+
+                (
+                    upgrade_db.sapling_tree_by_height(&Height(0)),
+                    upgrade_db.orchard_tree_by_height(&Height(0)),
+                )
+            };
+
+            // Create an unbounded channel for reading note commitment trees
+            let (sapling_tree_tx, sapling_tree_rx) = mpsc::channel();
+
+            // Set up task for reading sapling note commitment trees
+            let db = upgrade_db.clone();
+            let should_cancel_flag = should_cancel_format_change.clone();
+            let sapling_read_task = std::thread::spawn(move || {
+                for (height, tree) in
+                    db.sapling_tree_by_height_range(sapling_height..initial_tip_height)
+                {
+                    // Breaking from this loop and dropping the sapling_tree channel
+                    // will cause the sapling compare and delete tasks to finish.
+                    if should_cancel_flag.load(atomic::Ordering::Relaxed) {
+                        break;
+                    }
+
+                    if let Err(error) = sapling_tree_tx.send((height, tree)) {
+                        warn!(?error, "unexpected send error")
+                    }
+                }
+            });
+
+            // Create an unbounded channel for duplicate sapling note commitment tree heights
+            let (unique_sapling_tree_height_tx, unique_sapling_tree_height_rx) = mpsc::channel();
+
+            // Set up task for reading sapling note commitment trees
+            let sapling_compare_task = std::thread::spawn(move || {
+                while let Ok((height, tree)) = sapling_tree_rx.recv() {
+                    let tree = Some(tree);
+                    if prev_sapling_tree != tree {
+                        if let Err(error) = unique_sapling_tree_height_tx.send(height) {
+                            warn!(?error, "unexpected send error")
+                        }
+                        prev_sapling_tree = tree;
+                    }
+                }
+            });
+
+            // Set up task for deleting sapling note commitment trees
+            let db = upgrade_db.clone();
+            let sapling_delete_task = std::thread::spawn(move || {
+                let mut delete_from = sapling_height.next();
+                while let Ok(delete_to) = unique_sapling_tree_height_rx.recv() {
+                    let num_entries = delete_to - delete_from;
+                    if num_entries > 0 {
+                        let mut batch = DiskWriteBatch::new();
+
+                        if num_entries == 1 {
+                            batch.delete_sapling_tree(&db, &delete_from);
+                        } else {
+                            batch.delete_range_sapling_tree(&db, &delete_from, &delete_to);
+                        }
+
+                        db.write_batch(batch).expect(
+                            "Deleting Sapling note commitment trees should always succeed.",
+                        );
+                    }
+
+                    delete_from = delete_to.next();
+                }
+            });
+
+            // Create an unbounded channel for reading note commitment trees
+            let (orchard_tree_tx, orchard_tree_rx) = mpsc::channel();
+
+            // Set up task for reading orchard note commitment trees
+            let db = upgrade_db.clone();
+            let should_cancel_flag = should_cancel_format_change;
+            let orchard_read_task = std::thread::spawn(move || {
+                for (height, tree) in
+                    db.orchard_tree_by_height_range(orchard_height..initial_tip_height)
+                {
+                    // Breaking from this loop and dropping the orchard_tree channel
+                    // will cause the orchard compare and delete tasks to finish.
+                    if should_cancel_flag.load(atomic::Ordering::Relaxed) {
+                        break;
+                    }
+
+                    if let Err(error) = orchard_tree_tx.send((height, tree)) {
+                        warn!(?error, "unexpected send error")
+                    }
+                }
+            });
+
+            // Create an unbounded channel for duplicate orchard note commitment tree heights
+            let (unique_orchard_tree_height_tx, unique_orchard_tree_height_rx) = mpsc::channel();
+
+            // Set up task for reading orchard note commitment trees
+            let orchard_compare_task = std::thread::spawn(move || {
+                while let Ok((height, tree)) = orchard_tree_rx.recv() {
+                    let tree = Some(tree);
+                    if prev_orchard_tree != tree {
+                        if let Err(error) = unique_orchard_tree_height_tx.send(height) {
+                            warn!(?error, "unexpected send error")
+                        }
+
+                        prev_orchard_tree = tree;
+                    }
+                }
+            });
+
+            // Set up task for deleting orchard note commitment trees
+            let db = upgrade_db;
+            let orchard_delete_task = std::thread::spawn(move || {
+                let mut delete_from = orchard_height.next();
+                while let Ok(delete_to) = unique_orchard_tree_height_rx.recv() {
+                    let num_entries = delete_to - delete_from;
+                    if num_entries > 0 {
+                        let mut batch = DiskWriteBatch::new();
+
+                        if num_entries == 1 {
+                            batch.delete_orchard_tree(&db, &delete_from);
+                        } else {
+                            batch.delete_range_orchard_tree(&db, &delete_from, &delete_to);
+                        }
+
+                        db.write_batch(batch).expect(
+                            "Deleting Orchard note commitment trees should always succeed.",
+                        );
+                    }
+
+                    delete_from = delete_to.next();
+                }
+            });
+
+            for task in [
+                sapling_read_task,
+                sapling_compare_task,
+                sapling_delete_task,
+                orchard_read_task,
+                orchard_compare_task,
+                orchard_delete_task,
+            ] {
+                if let Err(error) = task.join() {
+                    warn!(?error, "unexpected join error")
+                }
             }
+
+            // At the end of each format upgrade, we mark the database as upgraded to that version.
+            // We don't mark the database if `height` didn't reach the `initial_tip_height` because
+            // Zebra wouldn't run the upgrade anymore, and the part of the database above `height`
+            // wouldn't be upgraded.
+            info!(?newer_running_version, "Database has been upgraded to:");
+            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
-        // At the end of each format upgrade, the database is marked as upgraded to that version.
-        // Upgrades can be run more than once if Zebra is restarted, so this is just a performance
-        // optimisation.
-        info!(
-            ?initial_tip_height,
-            ?newer_running_version,
-            ?older_disk_version,
-            "marking database as upgraded"
-        );
-        Self::mark_as_upgraded_to(&database_format_add_format_change_task, &config, network);
-
-        // End of example format change.
+        // End of a database upgrade task.
 
         // # New Upgrades Usually Go Here
         //
@@ -309,12 +458,6 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
-        info!(
-            ?initial_tip_height,
-            ?newer_running_version,
-            ?older_disk_version,
-            "database is fully upgraded"
-        );
     }
 
     /// Mark a newly created database with the current format version.
@@ -478,7 +621,8 @@ impl DbFormatChangeThreadHandle {
         // There's nothing we can do about errors here.
         // If the channel is disconnected, the task has exited.
         // If it's full, it's already been cancelled.
-        let _ = self.cancel_handle.try_send(CancelFormatChange);
+        self.should_cancel_format_change
+            .store(true, atomic::Ordering::Relaxed);
     }
 
     /// Check for panics in the code running in the spawned thread.

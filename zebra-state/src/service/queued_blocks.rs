@@ -237,6 +237,10 @@ pub(crate) struct SentHashes {
 
     /// Known UTXOs.
     known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+
+    /// Whether the hashes in this struct can be used check if the chain can be forked.
+    /// This is set to false until all checkpoint-verified block hashes have been pruned.
+    pub(crate) can_fork_chain_at_hashes: bool,
 }
 
 impl SentHashes {
@@ -335,6 +339,8 @@ impl SentHashes {
         });
 
         self.sent.shrink_to_fit();
+        self.known_utxos.shrink_to_fit();
+        self.bufs.shrink_to_fit();
 
         self.update_metrics_for_cache();
     }
@@ -342,6 +348,11 @@ impl SentHashes {
     /// Returns true if SentHashes contains the `hash`
     pub fn contains(&self, hash: &block::Hash) -> bool {
         self.sent.contains_key(hash)
+    }
+
+    /// Returns true if the chain can be forked at the provided hash
+    pub fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
+        self.can_fork_chain_at_hashes && self.contains(hash)
     }
 
     /// Update sent block metrics after a block is sent.

@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
 
 use crate::{
     request::{FinalizableBlock, SemanticallyVerifiedBlockWithTrees, Treestate},
@@ -42,6 +42,8 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_D
 
 pub(super) use zebra_db::ZebraDb;
 
+#[cfg(not(any(test, feature = "proptest-impl")))]
+pub(super) use disk_db::DiskWriteBatch;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_db::{DiskWriteBatch, WriteDisk};
 
@@ -168,10 +170,12 @@ impl FinalizedState {
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedCheckpointVerified,
-    ) -> Result<CheckpointVerifiedBlock, BoxError> {
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), BoxError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
+            prev_note_commitment_trees,
             "commit checkpoint-verified request",
         );
 
@@ -202,10 +206,10 @@ impl FinalizedState {
         // and the block write task.
         let result = result.map_err(CloneError::from);
 
-        let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
+        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash).map_err(BoxError::from));
 
         result
-            .map(|_hash| checkpoint_verified)
+            .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
             .map_err(BoxError::from)
     }
 
@@ -226,9 +230,10 @@ impl FinalizedState {
     pub fn commit_finalized_direct(
         &mut self,
         finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
-    ) -> Result<block::Hash, BoxError> {
-        let (height, hash, finalized) = match finalizable_block {
+    ) -> Result<(block::Hash, NoteCommitmentTrees), BoxError> {
+        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
@@ -240,9 +245,11 @@ impl FinalizedState {
 
                 let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
-                let mut note_commitment_trees = self.db.note_commitment_trees();
+                let prev_note_commitment_trees =
+                    prev_note_commitment_trees.unwrap_or_else(|| self.db.note_commitment_trees());
 
                 // Update the note commitment trees.
+                let mut note_commitment_trees = prev_note_commitment_trees.clone();
                 note_commitment_trees.update_trees_parallel(&block)?;
 
                 // Check the block commitment if the history tree was not
@@ -287,6 +294,7 @@ impl FinalizedState {
                             history_tree,
                         },
                     },
+                    Some(prev_note_commitment_trees),
                 )
             }
             FinalizableBlock::Contextual {
@@ -299,6 +307,7 @@ impl FinalizedState {
                     verified: contextually_verified.into(),
                     treestate,
                 },
+                prev_note_commitment_trees,
             ),
         };
 
@@ -331,8 +340,11 @@ impl FinalizedState {
 
         #[cfg(feature = "elasticsearch")]
         let finalized_block = finalized.verified.block.clone();
+        let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
-        let result = self.db.write_block(finalized, self.network, source);
+        let result =
+            self.db
+                .write_block(finalized, prev_note_commitment_trees, self.network, source);
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
@@ -360,7 +372,7 @@ impl FinalizedState {
             }
         }
 
-        result
+        result.map(|hash| (hash, note_commitment_trees))
     }
 
     #[cfg(feature = "elasticsearch")]

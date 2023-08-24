@@ -44,13 +44,13 @@ color-eyre = { version = "0.6.2", optional = true }
 jsonrpc-core = { version = "18.0.0", optional = true }
 # Security: avoid default dependency on openssl
 reqwest = { version = "0.11.18", default-features = false, features = ["rustls-tls"], optional = true }
-serde = { version = "1.0.175", optional = true }
-serde_json = { version = "1.0.100", optional = true }
+serde = { version = "1.0.185", optional = true }
+serde_json = { version = "1.0.105", optional = true }
 
 [dev-dependencies]
 
 color-eyre = "0.6.2"
 jsonrpc-core = "18.0.0"
 reqwest = { version = "0.11.18", default-features = false, features = ["rustls-tls"] }
-serde = "1.0.175"
-serde_json = "1.0.100"
+serde = "1.0.185"
+serde_json = "1.0.105"

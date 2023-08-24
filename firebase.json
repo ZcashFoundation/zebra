@@ -1,23 +1,63 @@
 {
-  "hosting": {
-    "public": "target/doc",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "redirects": [
-       {
-	 "source": "/",
-	 "destination": "/zebrad",
-	 "type": 301
-       }
-    ]
-  }
+  "hosting": [
+    {
+      "public": "target/external/doc",
+      "target": "docs-external",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "redirects": [
+        {
+          "source": "/",
+          "destination": "/zebrad",
+          "type": 301
+        }
+      ]
+    },
+    {
+      "public": "target/internal/doc",
+      "target": "docs-internal",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "redirects": [
+        {
+          "source": "/",
+          "destination": "/zebrad",
+          "type": 301
+        }
+      ]
+    },
+    {
+      "public": "target/book",
+      "target": "docs-book",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ]
 }

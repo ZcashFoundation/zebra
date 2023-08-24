@@ -15,6 +15,7 @@
   - [zk-SNARK Parameters](user/parameters.md)
   - [Mining](user/mining.md)
     - [Testnet Mining with s-nomp](user/mining-testnet-s-nomp.md)
+    - [Mining with Zebra in Docker](user/mining-docker.md)
   - [Kibana blockchain explorer](user/elasticsearch.md)
   - [Troubleshooting](user/troubleshooting.md)
 - [Developer Documentation](dev.md)

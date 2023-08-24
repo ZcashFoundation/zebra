@@ -118,7 +118,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -213,7 +213,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -279,7 +279,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -457,7 +457,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -1716,7 +1716,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -2014,7 +2014,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.3.0
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4

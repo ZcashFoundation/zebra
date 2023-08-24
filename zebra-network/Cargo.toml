@@ -40,7 +40,7 @@ progress-bar = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.3.3"
+bitflags = "2.4.0"
 byteorder = "1.4.3"
 bytes = "1.4.0"
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
@@ -52,16 +52,16 @@ itertools = "0.11.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.45"
 ordered-map = "0.4.2"
-pin-project = "1.1.2"
+pin-project = "1.1.3"
 rand = "0.8.5"
 rayon = "1.7.0"
-regex = "1.9.1"
-serde = { version = "1.0.175", features = ["serde_derive"] }
-tempfile = "3.7.0"
-thiserror = "1.0.44"
+regex = "1.9.3"
+serde = { version = "1.0.185", features = ["serde_derive"] }
+tempfile = "3.8.0"
+thiserror = "1.0.47"
 
 futures = "0.3.28"
-tokio = { version = "1.29.1", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.31.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "time"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
@@ -90,7 +90,7 @@ proptest = "1.2.0"
 proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.29.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.31.0", features = ["full", "tracing", "test-util"] }
 toml = "0.7.6"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
