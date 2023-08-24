@@ -201,7 +201,7 @@ where
         (batch, worker)
     }
 
-    /// Ask the `Batch` to monitor the spawned worker task's [`JoinHandle`](tokio::task::JoinHandle).
+    /// Ask the `Batch` to monitor the spawned worker task's [`JoinHandle`].
     ///
     /// Only used when the task is spawned on the tokio runtime.
     pub fn register_worker(&mut self, worker_handle: JoinHandle<()>) {

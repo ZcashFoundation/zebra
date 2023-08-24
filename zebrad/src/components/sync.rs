@@ -239,7 +239,7 @@ pub struct Config {
     /// astray.
     ///
     /// For reliable checkpoint syncing, Zebra enforces a
-    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`](MIN_CHECKPOINT_CONCURRENCY_LIMIT).
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`].
     ///
     /// This is set to a high value by default, to avoid verification pipeline stalls.
     /// Decreasing this value reduces RAM usage.

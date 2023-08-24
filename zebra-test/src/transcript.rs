@@ -1,4 +1,4 @@
-//! A [`Service`](tower::Service) implementation based on a fixed transcript.
+//! A [`Service`] implementation based on a fixed transcript.
 
 use std::{
     fmt::Debug,

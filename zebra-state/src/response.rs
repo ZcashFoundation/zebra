@@ -68,15 +68,14 @@ pub enum Response {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
-    /// Response to [`Request::BestChainBlockHash`](Request::BestChainBlockHash) with the
-    /// specified block hash.
+    /// Response to [`Request::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`Request::CheckBlockProposalValidity`](Request::CheckBlockProposalValidity)
+    /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
 
@@ -120,8 +119,7 @@ impl MinedTx {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
-/// [`ReadStateService`](crate::service::ReadStateService)'s
-/// [`ReadRequest`](ReadRequest).
+/// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
@@ -185,21 +183,20 @@ pub enum ReadResponse {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
-    /// Response to [`ReadRequest::BestChainBlockHash`](ReadRequest::BestChainBlockHash) with the
-    /// specified block hash.
+    /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::ChainInfo`](ReadRequest::ChainInfo) with the state
+    /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::SolutionRate`](ReadRequest::SolutionRate)
+    /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::CheckBlockProposalValidity`](ReadRequest::CheckBlockProposalValidity)
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
 
