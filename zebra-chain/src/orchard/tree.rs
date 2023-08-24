@@ -346,40 +346,23 @@ impl NoteCommitmentTree {
     }
 
     /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
-    pub fn subtree_address(&self) -> incrementalmerkletree::Address {
+    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
         incrementalmerkletree::Address::above_position(
             TRACKED_SUBTREE_HEIGHT.into(),
-            self.position().into(),
+            tree.position(),
         )
     }
 
-    /// Accepts a mutable reference to Orchard notes that are to be appended for a block,
-    /// checks if they will complete the current subtree, and splits off any notes that should
-    /// be appended to the next subtree.
-    ///
-    /// Returns current subtree index and notes in the next subtree if the notes complete
-    /// the current subtree.
-    ///
-    /// Returns None otherwise.
+    /// Returns subtree index and root if the most recently appended leaf completes the subtree
     #[allow(clippy::unwrap_in_result)]
-    pub fn subtree_index_and_notes_in_next_subtree(
-        &self,
-        notes: &mut Vec<NoteCommitmentUpdate>,
-    ) -> Option<(u16, Vec<NoteCommitmentUpdate>)> {
-        let address = self.subtree_address();
-        let index = || address.index().try_into().expect("should fit in u16");
-        let empty_leaf_count = (u64::from(address.max_position() - self.position()))
-            .try_into()
-            .expect("should fit in usize");
-
-        (notes.len() > empty_leaf_count).then(|| (index(), notes.split_off(empty_leaf_count)))
-    }
-
-    /// Returns subtree root if the most recently appended leaf completes the subtree
-    pub fn subtree_root(&self) -> Option<Node> {
+    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
         let value = self.inner.value()?;
         Self::is_complete_subtree(value).then_some(())?;
-        Some(value.root(Some(TRACKED_SUBTREE_HEIGHT.into())))
+        let address = Self::subtree_address(value);
+        let index = address.index().try_into().expect("should fit in u16");
+        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+
+        Some((index, root))
     }
 
     /// Returns the current root of the tree, used as an anchor in Orchard
@@ -435,11 +418,6 @@ impl NoteCommitmentTree {
     /// Uncommitted^Orchard = I2LEBSP_l_MerkleOrchard(2)
     pub fn uncommitted() -> pallas::Base {
         pallas::Base::one().double()
-    }
-
-    /// Position of final leaf added to the tree.
-    fn position(&self) -> u64 {
-        self.inner.value().map_or(0, |x| x.position().into())
     }
 
     /// Count of note commitments added to the tree.

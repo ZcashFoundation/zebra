@@ -159,7 +159,7 @@ impl NoteCommitmentTrees {
     #[allow(clippy::unwrap_in_result)]
     fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
-        mut sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
+        sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
             Arc<sapling::tree::NoteCommitmentTree>,
@@ -168,12 +168,6 @@ impl NoteCommitmentTrees {
         NoteCommitmentTreeError,
     > {
         let sapling_nct = Arc::make_mut(&mut sapling);
-        let subtree_index_and_notes_in_next_subtree =
-            sapling_nct.subtree_index_and_notes_in_next_subtree(&mut sapling_note_commitments);
-
-        for sapling_note_commitment in sapling_note_commitments {
-            sapling_nct.append(sapling_note_commitment)?;
-        }
 
         // It is impossible for blocks to contain more than one level 16 sapling root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
@@ -186,17 +180,12 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
         let mut subtree_root = None;
 
-        if let Some((subtree_index, sapling_note_commitments)) =
-            subtree_index_and_notes_in_next_subtree
-        {
-            let node: sapling::tree::Node = sapling_nct
-                .subtree_root()
-                .expect("should be frontier after appending a note");
-            subtree_root = Some((subtree_index, node));
-
-            for sapling_note_commitment in sapling_note_commitments {
-                sapling_nct.append(sapling_note_commitment)?;
+        for sapling_note_commitment in sapling_note_commitments {
+            if let Some(index_and_node) = sapling_nct.completed_subtree_index_and_root() {
+                subtree_root = Some(index_and_node);
             }
+
+            sapling_nct.append(sapling_note_commitment)?;
         }
 
         // Re-calculate and cache the tree root.
@@ -209,7 +198,7 @@ impl NoteCommitmentTrees {
     #[allow(clippy::unwrap_in_result)]
     fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        mut orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
+        orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
             Arc<orchard::tree::NoteCommitmentTree>,
@@ -218,29 +207,18 @@ impl NoteCommitmentTrees {
         NoteCommitmentTreeError,
     > {
         let orchard_nct = Arc::make_mut(&mut orchard);
-        let subtree_index_and_notes_in_next_subtree =
-            orchard_nct.subtree_index_and_notes_in_next_subtree(&mut orchard_note_commitments);
-
-        for orchard_note_commitment in orchard_note_commitments {
-            orchard_nct.append(orchard_note_commitment)?;
-        }
 
         // It is impossible for blocks to contain more than one level 16 orchard root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let mut subtree_root = None;
 
-        if let Some((subtree_index, orchard_note_commitments)) =
-            subtree_index_and_notes_in_next_subtree
-        {
-            let node = orchard_nct
-                .subtree_root()
-                .expect("should be frontier after appending a note");
-            subtree_root = Some((subtree_index, node));
-
-            for orchard_note_commitment in orchard_note_commitments {
-                orchard_nct.append(orchard_note_commitment)?;
+        for orchard_note_commitment in orchard_note_commitments {
+            if let Some(index_and_node) = orchard_nct.completed_subtree_index_and_root() {
+                subtree_root = Some(index_and_node);
             }
+
+            orchard_nct.append(orchard_note_commitment)?;
         }
 
         // Re-calculate and cache the tree root.

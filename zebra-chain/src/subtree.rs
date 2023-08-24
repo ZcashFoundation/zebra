@@ -48,12 +48,12 @@ pub struct NoteCommitmentSubtreeData<Node> {
 }
 
 impl<Node> NoteCommitmentSubtreeData<Node> {
-    /// Creates new [`PartialNoteCommitmentSubtree`]
+    /// Creates new [`NoteCommitmentSubtreeData`]
     pub fn new(end: Height, node: Node) -> Self {
         Self { end, node }
     }
 
-    /// Creates new [`NoteCommitmentSubtree`] from a [`PartialNoteCommitmentSubtree`] and index
+    /// Creates new [`NoteCommitmentSubtree`] from a [`NoteCommitmentSubtreeData`] and index
     pub fn with_index(
         self,
         index: impl Into<NoteCommitmentSubtreeIndex>,
