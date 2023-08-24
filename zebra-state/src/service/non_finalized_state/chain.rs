@@ -389,7 +389,7 @@ impl Chain {
     }
 
     /// Returns the [`ContextuallyVerifiedBlock`] with [`block::Hash`] or
-    /// [`Height`](zebra_chain::block::Height), if it exists in this chain.
+    /// [`Height`], if it exists in this chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyVerifiedBlock> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;

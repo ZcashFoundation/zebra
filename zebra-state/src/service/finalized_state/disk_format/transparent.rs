@@ -38,7 +38,7 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 
 /// The maximum value of an on-disk serialized [`OutputIndex`].
 ///
-/// This allows us to store [`OutputLocation`](crate::OutputLocation)s in
+/// This allows us to store [`OutputLocation`]s in
 /// 8 bytes, which makes database searches more efficient.
 ///
 /// # Consensus
