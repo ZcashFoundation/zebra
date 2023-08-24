@@ -18,7 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::{self};
+use bridgetree;
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
