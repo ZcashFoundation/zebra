@@ -276,20 +276,33 @@ impl DbFormatChange {
                 "The Sapling note commitment tree for the genesis block should be in the database.",
             );
             let mut last_height = Height(1);
+            // Run through all the trees in the finalized chain.
             for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
+                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
+                // identical trees excluding the first tree. We exclude the first tree so that we
+                // don't delete it. We get a batch if we encounter a tree that differs from the
+                // previous one, or if we're at the end of the chain. We get an empty batch if there
+                // are two consecutive differing trees.
                 if last_tree != tree || height == initial_tip_height {
-                    let num_entries = height - last_height;
-                    if num_entries > 0 {
+                    // Compute the size of the batch.
+                    let batch_size = height - last_height;
+                    // Check if we have a non-empty batch. In other words, check if there's at least
+                    // one duplicate tree between the last tree and the new one.
+                    if batch_size > 0 {
                         let mut batch = DiskWriteBatch::new();
 
-                        // # Optimization
+                        // Delete the batch.
                         //
-                        // Use a faster method if we're deleting a single tree.
-                        if num_entries == 1 {
+                        // The current tree at height `height` doesn't belong to the current batch
+                        // since it differs from the trees in the batch.
+                        if batch_size == 1 {
+                            // # Optimization
+                            //
+                            // Use a faster method if we're deleting a single tree.
                             batch.delete_sapling_tree(&db, &last_height);
                         } else {
                             batch.delete_range_sapling_tree(&db, &last_height, &height);
@@ -300,7 +313,11 @@ impl DbFormatChange {
                         );
                     }
 
+                    // Use the current tree to find the end of the next batch.
                     last_tree = tree;
+                    // Start the next batch at height just above the height of the current tree.
+                    // This excludes the current tree from the next batch so that we keep the tree
+                    // in the database.
                     last_height = height.next();
                 }
             }
@@ -325,20 +342,33 @@ impl DbFormatChange {
                 "The Orchard note commitment tree for the genesis block should be in the database.",
             );
             let mut last_height = Height(1);
+            // Run through all the trees in the finalized chain.
             for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
+                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
+                // identical trees excluding the first tree. We exclude the first tree so that we
+                // don't delete it. We get a batch if we encounter a tree that differs from the
+                // previous one, or if we're at the end of the chain. We get an empty batch if there
+                // are two consecutive differing trees.
                 if last_tree != tree || height == initial_tip_height {
-                    let num_entries = height - last_height;
-                    if num_entries > 0 {
+                    // Compute the size of the batch.
+                    let batch_size = height - last_height;
+                    // Check if we have a non-empty batch. In other words, check if there's at least
+                    // one duplicate tree between the last tree and the new one.
+                    if batch_size > 0 {
                         let mut batch = DiskWriteBatch::new();
 
-                        // # Optimization
+                        // Delete the batch.
                         //
-                        // Use a faster method if we're deleting a single tree.
-                        if num_entries == 1 {
+                        // The current tree at height `height` doesn't belong to the current batch
+                        // since it differs from the trees in the batch.
+                        if batch_size == 1 {
+                            // # Optimization
+                            //
+                            // Use a faster method if we're deleting a single tree.
                             batch.delete_orchard_tree(&db, &last_height);
                         } else {
                             batch.delete_range_orchard_tree(&db, &last_height, &height);
@@ -349,7 +379,11 @@ impl DbFormatChange {
                         );
                     }
 
+                    // Use the current tree to find the end of the next batch.
                     last_tree = tree;
+                    // Start the next batch at height just above the height of the current tree.
+                    // This excludes the current tree from the next batch so that we keep the tree
+                    // in the database.
                     last_height = height.next();
                 }
             }
