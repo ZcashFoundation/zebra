@@ -47,12 +47,15 @@ use crate::components::sync::SyncStatus;
 pub mod config;
 mod crawler;
 pub mod downloads;
+#[allow(clippy::arc_with_non_send_sync)]
 mod error;
 pub mod gossip;
 mod queue_checker;
+#[allow(clippy::arc_with_non_send_sync)]
 mod storage;
 
 #[cfg(test)]
+#[allow(clippy::arc_with_non_send_sync)]
 mod tests;
 
 pub use crate::BoxError;

@@ -155,6 +155,7 @@ mod address_book_updater;
 mod config;
 pub mod constants;
 mod isolated;
+#[allow(clippy::arc_with_non_send_sync)]
 mod meta_addr;
 mod peer;
 mod peer_cache_updater;

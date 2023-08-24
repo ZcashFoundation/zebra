@@ -41,6 +41,7 @@ mod parameters;
 mod primitives;
 mod script;
 
+#[allow(clippy::arc_with_non_send_sync)]
 pub mod error;
 pub mod router;
 pub mod transaction;

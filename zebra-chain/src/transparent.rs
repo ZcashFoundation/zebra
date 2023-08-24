@@ -15,6 +15,7 @@ mod keys;
 mod opcodes;
 mod script;
 mod serialize;
+#[allow(clippy::arc_with_non_send_sync)]
 mod utxo;
 
 pub use address::Address;
