@@ -341,8 +341,7 @@ impl DbFormatChange {
                     .next()
                     .is_some()
             {
-                warn!("Zebra could not prune all Sapling trees.");
-                return;
+                panic!("Zebra could not prune all Sapling trees.");
             }
 
             // Prune duplicate Orchard note commitment trees.
@@ -407,8 +406,7 @@ impl DbFormatChange {
                     .next()
                     .is_some()
             {
-                warn!("Zebra could not prune all Orchard trees.");
-                return;
+                panic!("Zebra could not prune all Orchard trees.");
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
