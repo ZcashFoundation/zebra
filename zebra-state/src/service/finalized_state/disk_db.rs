@@ -517,10 +517,12 @@ impl DiskDb {
         "sapling_nullifiers",
         "sapling_anchors",
         "sapling_note_commitment_tree",
+        "sapling_note_commitment_subtree",
         // Orchard
         "orchard_nullifiers",
         "orchard_anchors",
         "orchard_note_commitment_tree",
+        "orchard_note_commitment_subtree",
         // Chain
         "history_tree",
         "tip_chain_value_pool",
