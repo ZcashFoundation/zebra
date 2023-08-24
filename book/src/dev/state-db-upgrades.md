@@ -92,7 +92,7 @@ We use the following rocksdb column families:
 | `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
 | `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
-| `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtree`       | Create  |
+| `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Orchard*                          |                        |                               |         |
 | `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
