@@ -397,11 +397,11 @@ impl DiskWriteBatch {
         }
 
         if let Some(subtree) = trees.sapling_subtree {
-            self.zs_insert(&sapling_subtree_cf, subtree.index, subtree);
+            self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
         }
 
         if let Some(subtree) = trees.orchard_subtree {
-            self.zs_insert(&orchard_subtree_cf, subtree.index, subtree);
+            self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
         }
 
         self.prepare_history_batch(db, finalized)

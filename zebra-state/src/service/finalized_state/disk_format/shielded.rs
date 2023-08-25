@@ -10,7 +10,7 @@ use bincode::Options;
 use zebra_chain::{
     block::Height,
     orchard, sapling, sprout,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -171,7 +171,7 @@ impl IntoDisk for orchard::tree::Node {
     }
 }
 
-impl<Node: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtree<Node> {
+impl<Node: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtreeData<Node> {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {

@@ -24,7 +24,7 @@ use zebra_chain::{
         tree::NoteCommitmentTree as SproutNoteCommitmentTree,
         NoteCommitment as SproutNoteCommitment,
     },
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData},
+    subtree::NoteCommitmentSubtreeData,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -526,8 +526,7 @@ fn sapling_checks(
 
     // Check subtree format
 
-    let subtree = NoteCommitmentSubtree::new(
-        0,
+    let subtree = NoteCommitmentSubtreeData::new(
         Height(100000),
         sapling::tree::Node::from_bytes(incremental_tree.hash()),
     );
@@ -540,8 +539,7 @@ fn sapling_checks(
     );
 
     let deserialized_subtree =
-        NoteCommitmentSubtreeData::<sapling::tree::Node>::from_bytes(&serialized_subtree)
-            .with_index(0);
+        NoteCommitmentSubtreeData::<sapling::tree::Node>::from_bytes(&serialized_subtree);
 
     assert_eq!(
         subtree, deserialized_subtree,
@@ -604,8 +602,7 @@ fn orchard_checks(
 
     // Check subtree format
 
-    let subtree = NoteCommitmentSubtree::new(
-        0,
+    let subtree = NoteCommitmentSubtreeData::new(
         Height(100000),
         orchard::tree::Node::from_bytes(incremental_tree.hash()),
     );
@@ -618,8 +615,7 @@ fn orchard_checks(
     );
 
     let deserialized_subtree =
-        NoteCommitmentSubtreeData::<orchard::tree::Node>::from_bytes(&serialized_subtree)
-            .with_index(0);
+        NoteCommitmentSubtreeData::<orchard::tree::Node>::from_bytes(&serialized_subtree);
 
     assert_eq!(
         subtree, deserialized_subtree,

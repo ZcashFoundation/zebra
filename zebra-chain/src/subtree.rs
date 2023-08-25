@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 use crate::block::Height;
 
 /// Height at which Zebra tracks subtree roots
@@ -35,11 +38,17 @@ impl<Node> NoteCommitmentSubtree<Node> {
         let index = index.into();
         Arc::new(Self { index, end, node })
     }
+
+    /// Converts struct to [`NoteCommitmentSubtreeData`].
+    pub fn into_data(self) -> NoteCommitmentSubtreeData<Node> {
+        NoteCommitmentSubtreeData::new(self.end, self.node)
+    }
 }
 
 /// Subtree root of Sapling or Orchard note commitment tree, with block height, but without the subtree index.
 /// Used for database key-value serialization, where the subtree index is the key, and this struct is the value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentSubtreeData<Node> {
     /// End boundary of this subtree, the block height of its last leaf.
     pub end: Height,
