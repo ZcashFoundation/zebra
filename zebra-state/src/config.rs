@@ -318,25 +318,42 @@ pub fn database_format_version_on_disk(
 ) -> Result<Option<Version>, BoxError> {
     let version_path = config.version_file_path(network);
 
-    let version = match fs::read_to_string(version_path) {
-        Ok(version) => version,
+    let disk_version_file = match fs::read_to_string(version_path) {
+        Ok(version) => Some(version),
         Err(e) if e.kind() == ErrorKind::NotFound => {
-            // If the version file doesn't exist, don't guess the version.
-            // (It will end up being the version in code, once the database is created.)
-            return Ok(None);
+            // If the version file doesn't exist, don't guess the version yet.
+            None
         }
         Err(e) => Err(e)?,
     };
 
-    let (minor, patch) = version
-        .split_once('.')
-        .ok_or("invalid database format version file")?;
+    // The database has a version file on disk
+    if let Some(version) = disk_version_file {
+        let (minor, patch) = version
+            .split_once('.')
+            .ok_or("invalid database format version file")?;
 
-    Ok(Some(Version::new(
-        DATABASE_FORMAT_VERSION,
-        minor.parse()?,
-        patch.parse()?,
-    )))
+        return Ok(Some(Version::new(
+            DATABASE_FORMAT_VERSION,
+            minor.parse()?,
+            patch.parse()?,
+        )));
+    }
+
+    let db_path = config.db_path(network);
+
+    // There's no version file on disk, so we need to guess the version
+    // based on the database content
+    match fs::metadata(db_path) {
+        // But there is a database on disk, so it has the current major version with no upgrades
+        Ok(_metadata) => Ok(Some(Version::new(DATABASE_FORMAT_VERSION, 0, 0))),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            // There's no version file and no database on disk, so it's a new database.
+            // It will be created with the current version.
+            Ok(None)
+        }
+        Err(e) => Err(e)?,
+    }
 }
 
 /// Writes `changed_version` to the on-disk database after the format is changed.
