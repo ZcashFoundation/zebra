@@ -330,20 +330,6 @@ impl DbFormatChange {
                 }
             }
 
-            // The Sapling note commitment trees are pruned if `last_height` has reached the height
-            // right after `initial_tip_height`. If `last_height` has not reached that height, they
-            // have been pruned in a previous upgrade, so the inclusive range between `last_height`
-            // and `initial_tip_height` must be empty. If it is not, there is an error, and the
-            // current upgrade did not succeed.
-            if last_height != initial_tip_height.next()
-                && db
-                    .sapling_tree_by_height_range(last_height..=initial_tip_height)
-                    .next()
-                    .is_some()
-            {
-                panic!("Zebra could not prune all Sapling trees.");
-            }
-
             // Prune duplicate Orchard note commitment trees.
             let mut last_tree = db.orchard_tree_by_height(&Height(0)).expect(
                 "The Orchard note commitment tree for the genesis block should be in the database.",
@@ -393,20 +379,6 @@ impl DbFormatChange {
                     // in the database.
                     last_height = height.next();
                 }
-            }
-
-            // The Sapling note commitment trees are pruned if `last_height` has reached the height
-            // right after `initial_tip_height`. If `last_height` has not reached that height, they
-            // have been pruned in a previous upgrade, so the inclusive range between `last_height`
-            // and `initial_tip_height` must be empty. If it is not, there is an error, and the
-            // current upgrade did not succeed.
-            if last_height != initial_tip_height.next()
-                && db
-                    .orchard_tree_by_height_range(last_height..=initial_tip_height)
-                    .next()
-                    .is_some()
-            {
-                panic!("Zebra could not prune all Orchard trees.");
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
