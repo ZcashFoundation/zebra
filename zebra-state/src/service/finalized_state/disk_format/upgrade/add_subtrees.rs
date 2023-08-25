@@ -27,7 +27,7 @@ pub fn _run(
 
         let Some(frontier) = tree.frontier() else {
             prev_tree = Some(tree);
-            continue
+            continue;
         };
 
         // Blocks cannot complete multiple level 16 subtrees,
@@ -101,7 +101,7 @@ pub fn _run(
 
         let Some(frontier) = tree.frontier() else {
             prev_tree = Some(tree);
-            continue
+            continue;
         };
 
         // Blocks cannot complete multiple level 16 subtrees,
