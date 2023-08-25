@@ -20,7 +20,7 @@ pub fn _run(
 ) {
     let mut subtree_count = 0;
     let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.sapling_tree_by_height_range(..initial_tip_height) {
+    for (height, tree) in upgrade_db.sapling_tree_by_height_range(..=initial_tip_height) {
         if should_cancel_format_change.load(atomic::Ordering::Relaxed) {
             break;
         }
@@ -94,7 +94,7 @@ pub fn _run(
 
     let mut subtree_count = 0;
     let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.orchard_tree_by_height_range(..initial_tip_height) {
+    for (height, tree) in upgrade_db.orchard_tree_by_height_range(..=initial_tip_height) {
         if should_cancel_format_change.load(atomic::Ordering::Relaxed) {
             break;
         }
