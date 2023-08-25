@@ -12,7 +12,9 @@ use tracing::Span;
 use zebra_chain::{
     block::Height,
     diagnostic::task::{CheckForPanics, WaitForPanics},
+    orchard,
     parameters::Network,
+    sapling,
 };
 
 use DbFormatChange::*;
@@ -284,17 +286,30 @@ impl DbFormatChange {
                 "The Sapling note commitment tree for the genesis block should be in the database.",
             );
             let mut last_height = Height(1);
+
+            // We use this dummy cap in the loop below. It resolves an edge case when the pruning
+            // reaches the `initial_tip_height`.
+            let dummy_cap = Some((
+                initial_tip_height.next(),
+                Arc::new(sapling::tree::NoteCommitmentTree::default()),
+            ))
+            .into_iter();
+
             // Run through all the trees in the finalized chain.
-            for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
+            for (height, tree) in db
+                .sapling_tree_by_height_range(Height(1)..=initial_tip_height)
+                .chain(dummy_cap)
+            {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
                 // We delete duplicate trees in batches. A batch is a (possibly empty) series of
                 // identical trees excluding the first tree. We exclude the first tree so that we
-                // don't delete it. We get a batch if we encounter a tree that differs from the
-                // previous one, or if we're at the end of the chain. We get an empty batch if there
-                // are two consecutive differing trees.
+                // don't prune it. We get a batch if we encounter a tree that differs from the
+                // previous one. We get an empty batch if there are two consecutive differing trees.
+                // The dummy cap ensures we don't skip the last batch if the tree at
+                // `initial_tip_height` doesn't differ from the previous one.
                 if last_tree != tree || height == initial_tip_height {
                     // Compute the size of the batch.
                     let batch_size = height - last_height;
@@ -335,18 +350,31 @@ impl DbFormatChange {
                 "The Orchard note commitment tree for the genesis block should be in the database.",
             );
             let mut last_height = Height(1);
+
+            // We use this dummy cap in the loop below. It resolves an edge case when the pruning
+            // reaches the `initial_tip_height`.
+            let dummy_cap = Some((
+                initial_tip_height.next(),
+                Arc::new(orchard::tree::NoteCommitmentTree::default()),
+            ))
+            .into_iter();
+
             // Run through all the trees in the finalized chain.
-            for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
+            for (height, tree) in db
+                .orchard_tree_by_height_range(Height(1)..=initial_tip_height)
+                .chain(dummy_cap)
+            {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
                 // We delete duplicate trees in batches. A batch is a (possibly empty) series of
                 // identical trees excluding the first tree. We exclude the first tree so that we
-                // don't delete it. We get a batch if we encounter a tree that differs from the
-                // previous one, or if we're at the end of the chain. We get an empty batch if there
-                // are two consecutive differing trees.
-                if last_tree != tree || height == initial_tip_height {
+                // don't prune it. We get a batch if we encounter a tree that differs from the
+                // previous one. We get an empty batch if there are two consecutive differing trees.
+                // The dummy cap ensures we don't skip the last batch if the tree at
+                // `initial_tip_height` doesn't differ from the previous one.
+                if last_tree != tree {
                     // Compute the size of the batch.
                     let batch_size = height - last_height;
                     // Check if we have a non-empty batch. In other words, check if there's at least
