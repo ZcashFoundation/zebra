@@ -1373,7 +1373,7 @@ async fn send_one_heartbeat(
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout<F, T>(
     fut: F,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
@@ -1407,7 +1407,7 @@ where
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
@@ -1438,7 +1438,7 @@ where
 /// Mark `connected_addr` as shut down using `address_book_updater`.
 async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<(), BoxError> {
