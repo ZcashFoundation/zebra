@@ -1216,7 +1216,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     remote_services: PeerServices,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
     use futures::future::Either;
 
@@ -1277,7 +1277,7 @@ async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
     remote_services: PeerServices,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
     // Don't send the first heartbeat immediately - we've just completed the handshake!
     let mut interval = tokio::time::interval_at(
