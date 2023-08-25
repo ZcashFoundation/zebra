@@ -193,9 +193,9 @@ impl ZebraDb {
             .cf_handle("sapling_note_commitment_subtree")
             .unwrap();
 
-        let partial_subtree: NoteCommitmentSubtreeData<sapling::tree::Node> =
+        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
             self.db.zs_get(&sapling_subtrees, &index.into())?;
-        Some(partial_subtree.with_index(index))
+        Some(subtree_data.with_index(index))
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
@@ -221,9 +221,9 @@ impl ZebraDb {
             .cf_handle("orchard_note_commitment_subtree")
             .unwrap();
 
-        let partial_subtree: NoteCommitmentSubtreeData<orchard::tree::Node> =
+        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
             self.db.zs_get(&orchard_subtrees, &index.into())?;
-        Some(partial_subtree.with_index(index))
+        Some(subtree_data.with_index(index))
     }
 
     /// Returns the Orchard note commitment tree matching the given block height,
