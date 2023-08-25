@@ -1244,7 +1244,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
             tracing::trace!("shutting down because Client requested shut down");
             handle_heartbeat_shutdown(
                 PeerError::ClientCancelledHeartbeatTask,
-                &mut heartbeat_ts_collector,
+                &heartbeat_ts_collector,
                 &connected_addr,
                 &remote_services,
             )
@@ -1254,7 +1254,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
             tracing::trace!("shutting down because Client was dropped");
             handle_heartbeat_shutdown(
                 PeerError::ClientDropped,
-                &mut heartbeat_ts_collector,
+                &heartbeat_ts_collector,
                 &connected_addr,
                 &remote_services,
             )
@@ -1296,7 +1296,7 @@ async fn send_periodic_heartbeats_run_loop(
         let heartbeat = send_one_heartbeat(&mut server_tx);
         heartbeat_timeout(
             heartbeat,
-            &mut heartbeat_ts_collector,
+            &heartbeat_ts_collector,
             &connected_addr,
             &remote_services,
         )
