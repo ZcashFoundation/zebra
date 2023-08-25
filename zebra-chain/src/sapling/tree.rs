@@ -18,7 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::{self};
+use bridgetree;
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
@@ -174,12 +174,11 @@ impl fmt::Debug for Node {
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
 /// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
-/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
+/// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
 /// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
 ///
-/// [1]: bridgetree::Frontier
-/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [3]: incrementalmerkletree::frontier::CommitmentTree
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [2]: incrementalmerkletree::frontier::CommitmentTree
 impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
