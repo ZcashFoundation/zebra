@@ -73,8 +73,7 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// A message authentication tag.
     pub vmacs: [note::Mac; 2],
     /// A ZK JoinSplit proof, either a
-    /// [`Groth16Proof`](crate::primitives::Groth16Proof) or a
-    /// [`Bctv14Proof`](crate::primitives::Bctv14Proof).
+    /// [`Groth16Proof`] or a [`Bctv14Proof`].
     #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
     /// A ciphertext component for this output note.
