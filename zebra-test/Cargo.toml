@@ -36,11 +36,11 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 humantime = "2.1.0"
 owo-colors = "3.5.0"
 spandoc = "0.2.2"
-thiserror = "1.0.46"
+thiserror = "1.0.47"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing = "0.1.37"
 
 [dev-dependencies]
-tempfile = "3.7.1"
+tempfile = "3.8.0"

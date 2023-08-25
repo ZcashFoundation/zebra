@@ -53,6 +53,12 @@ env:
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   FIREBASE_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'live' }}
+  # cargo doc doesn't support '--  -D warnings', so we have to add it here
+  # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
+  #
+  # The -A and -W settings must be the same as the `rustdocflags` in:
+  # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
+  RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links
 
 jobs:
   build-docs-book:
@@ -91,7 +97,8 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
+
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -100,7 +107,6 @@ jobs:
       - name: Deploy Zebra book to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           projectId: ${{ vars.GCP_FIREBASE_PROJECT }}
@@ -132,14 +138,12 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.6.0
+      - uses: Swatinem/rust-cache@v2.6.1
 
       - name: Build external docs
         run: |
           # Exclude zebra-utils, it is not for library or app users
           cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir "$(pwd)"/target/external
-        env:
-          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -150,7 +154,7 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -159,7 +163,6 @@ jobs:
       - name: Deploy external docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           target: docs-external
@@ -191,13 +194,11 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.6.0
+      - uses: Swatinem/rust-cache@v2.6.1
 
       - name: Build internal docs
         run: |
           cargo doc --no-deps --workspace --all-features --document-private-items --target-dir "$(pwd)"/target/internal
-        env:
-          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -208,7 +209,7 @@ jobs:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
 
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed 
+      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
         run: |
           # shellcheck disable=SC2002
@@ -217,7 +218,6 @@ jobs:
       - name: Deploy internal docs to firebase
         uses: FirebaseExtended/action-hosting-deploy@v0.7.1
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
           target: docs-internal
