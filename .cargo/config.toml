@@ -1,5 +1,17 @@
 # Zebra cargo configuration
 
+# Flags that only apply to test code
+[target.'cfg(any(test, feature = "proptest-impl"))']
+rustflags = [
+    # Rust 1.72 has a false positive when nested generics are used inside Arc.
+    # This makes the `arc_with_non_send_sync` lint trigger on a lot of proptest code.
+    #
+    # TODO: remove this allow when Rust 1.73 is stable, because this lint bug is fixed in that
+    # release:
+    # <https://github.com/rust-lang/rust-clippy/issues/11076>
+    "-Aclippy::arc_with_non_send_sync",
+]
+
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [

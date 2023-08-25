@@ -1,3 +1,4 @@
-#[allow(clippy::arc_with_non_send_sync)]
+//! Tests for state ChainTip traits and types.
+
 mod prop;
 mod vectors;

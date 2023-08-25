@@ -763,7 +763,6 @@ impl Arbitrary for BindingSignature {
     type Strategy = BoxedStrategy<Self>;
 }
 
-#[allow(clippy::arc_with_non_send_sync)]
 impl Arbitrary for Transaction {
     type Parameters = LedgerState;
 
