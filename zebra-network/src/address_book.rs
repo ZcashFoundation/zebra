@@ -354,7 +354,7 @@ impl AddressBook {
     /// See [`AddressBook::is_ready_for_connection_attempt_with_ip`] for more details.
     fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
         let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
-            return false
+            return false;
         };
 
         if let Some(previous) = most_recent_by_ip.get(&updated.addr.ip()) {
@@ -369,7 +369,7 @@ impl AddressBook {
     /// The entry is checked for an exact match to the IP and port of `addr`.
     fn should_remove_most_recent_by_ip(&self, addr: PeerSocketAddr) -> bool {
         let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
-            return false
+            return false;
         };
 
         if let Some(previous) = most_recent_by_ip.get(&addr.ip()) {
