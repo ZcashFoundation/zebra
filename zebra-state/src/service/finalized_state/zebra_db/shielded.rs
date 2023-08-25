@@ -407,6 +407,19 @@ impl DiskWriteBatch {
         self.prepare_history_batch(db, finalized)
     }
 
+    /// Inserts the Sapling note commitment subtree.
+    pub fn insert_sapling_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: Arc<NoteCommitmentSubtree<sapling::tree::Node>>,
+    ) {
+        let sapling_subtree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
+    }
+
     /// Deletes the Sapling note commitment tree at the given [`Height`].
     pub fn delete_sapling_tree(&mut self, zebra_db: &ZebraDb, height: &Height) {
         let sapling_tree_cf = zebra_db
@@ -423,6 +436,19 @@ impl DiskWriteBatch {
             .cf_handle("sapling_note_commitment_tree")
             .unwrap();
         self.zs_delete_range(&sapling_tree_cf, from, to);
+    }
+
+    /// Inserts the Orchard note commitment subtree.
+    pub fn insert_orchard_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: Arc<NoteCommitmentSubtree<orchard::tree::Node>>,
+    ) {
+        let orchard_subtree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].
