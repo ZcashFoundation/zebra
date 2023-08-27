@@ -308,6 +308,12 @@ pub fn database_format_version_in_code() -> Version {
 }
 
 /// Returns the full semantic version of the on-disk database.
+///
+/// Typically, the version is read from a version text file.
+///
+/// If there is an existing on-disk database, but no version file, returns `Ok(Some(major.0.0))`.
+/// (This happens even if the database directory was just newly created.)
+///
 /// If there is no existing on-disk database, returns `Ok(None)`.
 ///
 /// This is the format of the data on disk, the minor and patch versions
@@ -345,13 +351,15 @@ pub fn database_format_version_on_disk(
     // There's no version file on disk, so we need to guess the version
     // based on the database content
     match fs::metadata(db_path) {
-        // But there is a database on disk, so it has the current major version with no upgrades
+        // But there is a database on disk, so it has the current major version with no upgrades.
+        // If the database directory was just newly created, we also return this version.
         Ok(_metadata) => Ok(Some(Version::new(DATABASE_FORMAT_VERSION, 0, 0))),
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            // There's no version file and no database on disk, so it's a new database.
-            // It will be created with the current version.
-            Ok(None)
-        }
+
+        // There's no version file and no database on disk, so it's a new database.
+        // It will be created with the current version,
+        // but temporarily return the default version above until the version file is written.
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+
         Err(e) => Err(e)?,
     }
 }

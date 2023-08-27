@@ -71,6 +71,10 @@ impl ZebraDb {
         // Open the database and do initial checks.
         let mut db = ZebraDb {
             format_change_handle: None,
+            // After the database directory is created, a newly created database temporarily
+            // changes to the default database version. Then we set the correct version in the
+            // upgrade thread. We need to do the version change in this order, because the version
+            // file can only be changed while we hold the RocksDB database lock.
             db: DiskDb::new(config, network),
         };
 
