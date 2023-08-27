@@ -46,13 +46,13 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     // <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
-        return Err(TransactionError::CoinbasePosition)?;
+        Err(TransactionError::CoinbasePosition)?;
     }
     // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
     //
     // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     if !rest.all(|tx| tx.is_valid_non_coinbase()) {
-        return Err(TransactionError::CoinbaseAfterFirst)?;
+        Err(TransactionError::CoinbaseAfterFirst)?;
     }
 
     Ok(first.clone())
@@ -237,7 +237,7 @@ pub fn miner_fees_are_valid(
     let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
     if left > right {
-        return Err(SubsidyError::InvalidMinerFees)?;
+        Err(SubsidyError::InvalidMinerFees)?;
     }
 
     Ok(())
