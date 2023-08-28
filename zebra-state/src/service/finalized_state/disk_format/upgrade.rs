@@ -19,6 +19,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk,
+    constants::DATABASE_FORMAT_VERSION,
     database_format_version_in_code, database_format_version_on_disk,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
     Config,
@@ -432,8 +433,12 @@ impl DbFormatChange {
             .expect("unable to read database format version file path");
         let running_version = database_format_version_in_code();
 
+        let default_new_version = Some(Version::new(DATABASE_FORMAT_VERSION, 0, 0));
+
+        // The database version isn't empty any more, because we've created the RocksDB database
+        // and acquired its lock. (If it is empty, we have a database locking bug.)
         assert_eq!(
-            disk_version, None,
+            disk_version, default_new_version,
             "can't overwrite the format version in an existing database:\n\
              disk: {disk_version:?}\n\
              running: {running_version}"

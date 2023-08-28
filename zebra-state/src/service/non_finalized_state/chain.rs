@@ -3,7 +3,7 @@
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     ops::{Deref, RangeInclusive},
     sync::Arc,
 };
@@ -20,6 +20,7 @@ use zebra_chain::{
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
     transaction::Transaction::*,
     transaction::{self, Transaction},
     transparent,
@@ -133,6 +134,8 @@ pub struct Chain {
     /// When a chain is forked from the finalized tip, also contains the finalized tip root.
     /// This extra root is removed when the first non-finalized block is committed.
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+    /// A list of Sapling subtrees completed in the non-finalized state
+    pub(crate) sapling_subtrees: VecDeque<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>,
 
     /// The Orchard anchors created by `blocks`.
     ///
@@ -144,6 +147,8 @@ pub struct Chain {
     /// When a chain is forked from the finalized tip, also contains the finalized tip root.
     /// This extra root is removed when the first non-finalized block is committed.
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+    /// A list of Orchard subtrees completed in the non-finalized state
+    pub(crate) orchard_subtrees: VecDeque<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>,
 
     // Nullifiers
     //
@@ -221,9 +226,11 @@ impl Chain {
             sapling_anchors: MultiSet::new(),
             sapling_anchors_by_height: Default::default(),
             sapling_trees_by_height: Default::default(),
+            sapling_subtrees: Default::default(),
             orchard_anchors: MultiSet::new(),
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
+            orchard_subtrees: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -342,6 +349,14 @@ impl Chain {
         let treestate = self
             .treestate(block_height.into())
             .expect("The treestate must be present for the root height.");
+
+        if treestate.note_commitment_trees.sapling_subtree.is_some() {
+            self.sapling_subtrees.pop_front();
+        }
+
+        if treestate.note_commitment_trees.orchard_subtree.is_some() {
+            self.orchard_subtrees.pop_front();
+        }
 
         // Remove the lowest height block from `self.blocks`.
         let block = self
@@ -663,6 +678,33 @@ impl Chain {
             .map(|(_height, tree)| tree.clone())
     }
 
+    /// Returns the Sapling [`NoteCommitmentSubtree`] specified
+    /// by an index, if it exists in the non-finalized [`Chain`].
+    pub fn sapling_subtree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.sapling_subtrees
+            .iter()
+            .find(|subtree| subtree.end == height)
+            .cloned()
+    }
+
+    /// Returns the Sapling [`NoteCommitmentSubtree`](sapling::tree::NoteCommitmentSubtree) specified
+    /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    pub fn sapling_subtree_by_index(
+        &self,
+        index: NoteCommitmentSubtreeIndex,
+    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        self.sapling_subtrees
+            .iter()
+            .find(|subtree| subtree.index == index)
+            .cloned()
+    }
+
     /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
@@ -810,6 +852,33 @@ impl Chain {
             .range(..=height)
             .next_back()
             .map(|(_height, tree)| tree.clone())
+    }
+
+    /// Returns the Orchard [`NoteCommitmentSubtree`](orchard::tree::NoteCommitmentSubtree) specified
+    /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    pub fn orchard_subtree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.orchard_subtrees
+            .iter()
+            .find(|subtree| subtree.end == height)
+            .cloned()
+    }
+
+    /// Returns the Orchard [`NoteCommitmentSubtree`] specified
+    /// by an index, if it exists in the non-finalized [`Chain`].
+    pub fn orchard_subtree_by_index(
+        &self,
+        index: NoteCommitmentSubtreeIndex,
+    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        self.orchard_subtrees
+            .iter()
+            .find(|subtree| subtree.index == index)
+            .cloned()
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
@@ -1004,11 +1073,15 @@ impl Chain {
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
         let history_tree = self.history_tree(hash_or_height)?;
+        let sapling_subtree = self.sapling_subtree(hash_or_height);
+        let orchard_subtree = self.orchard_subtree(hash_or_height);
 
         Some(Treestate::new(
             sprout_tree,
             sapling_tree,
             orchard_tree,
+            sapling_subtree,
+            orchard_subtree,
             history_tree,
         ))
     }
@@ -1251,7 +1324,9 @@ impl Chain {
         let mut nct = NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree(),
             sapling: self.sapling_note_commitment_tree(),
+            sapling_subtree: None,
             orchard: self.orchard_note_commitment_tree(),
+            orchard_subtree: None,
         };
 
         let mut tree_result = None;
@@ -1277,6 +1352,13 @@ impl Chain {
         self.add_sprout_tree_and_anchor(height, nct.sprout);
         self.add_sapling_tree_and_anchor(height, nct.sapling);
         self.add_orchard_tree_and_anchor(height, nct.orchard);
+
+        if let Some(subtree) = nct.sapling_subtree {
+            self.sapling_subtrees.push_back(subtree)
+        }
+        if let Some(subtree) = nct.orchard_subtree {
+            self.orchard_subtrees.push_back(subtree)
+        }
 
         let sapling_root = self.sapling_note_commitment_tree().root();
         let orchard_root = self.orchard_note_commitment_tree().root();

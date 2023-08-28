@@ -13,7 +13,10 @@
 
 use std::sync::Arc;
 
-use zebra_chain::{orchard, sapling};
+use zebra_chain::{
+    orchard, sapling,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+};
 
 use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
@@ -41,6 +44,28 @@ where
         .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
 }
 
+/// Returns the Sapling
+/// [`NoteCommitmentSubtree`](NoteCommitmentSubtree) specified by an
+/// index, if it exists in the non-finalized `chain` or finalized `db`.
+#[allow(unused)]
+pub fn sapling_subtree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    index: NoteCommitmentSubtreeIndex,
+) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since sapling treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chain` is always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .and_then(|chain| chain.as_ref().sapling_subtree_by_index(index))
+        .or_else(|| db.sapling_subtree_by_index(index))
+}
+
 /// Returns the Orchard
 /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
 /// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
@@ -60,6 +85,28 @@ where
     chain
         .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height))
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
+}
+
+/// Returns the Orchard
+/// [`NoteCommitmentSubtree`](NoteCommitmentSubtree) specified by an
+/// index, if it exists in the non-finalized `chain` or finalized `db`.
+#[allow(unused)]
+pub fn orchard_subtree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    index: NoteCommitmentSubtreeIndex,
+) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since orchard treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chain` is always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .and_then(|chain| chain.as_ref().orchard_subtree_by_index(index))
+        .or_else(|| db.orchard_subtree_by_index(index))
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
