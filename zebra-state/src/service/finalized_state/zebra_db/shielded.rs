@@ -379,6 +379,8 @@ impl DiskWriteBatch {
             .db
             .cf_handle("sapling_note_commitment_tree")
             .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&sapling_tree_cf, from, to);
     }
 
@@ -397,6 +399,8 @@ impl DiskWriteBatch {
             .db
             .cf_handle("orchard_note_commitment_tree")
             .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&orchard_tree_cf, from, to);
     }
 }
