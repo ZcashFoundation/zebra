@@ -18,12 +18,42 @@ use zebra_chain::{
 use DbFormatChange::*;
 
 use crate::{
-    config::write_database_format_version_to_disk,
-    constants::DATABASE_FORMAT_VERSION,
+    config::write_database_format_version_to_disk, constants::DATABASE_FORMAT_VERSION,
     database_format_version_in_code, database_format_version_on_disk,
-    service::finalized_state::{DiskWriteBatch, ZebraDb},
-    Config,
+    service::finalized_state::ZebraDb, Config,
 };
+
+mod prune_trees;
+
+use prune_trees::PruneTrees;
+
+/// Defines method signature for running disk format upgrades.
+pub trait DiskFormatUpgrade {
+    /// Runs disk format upgrade.
+    fn run(
+        &self,
+        initial_tip_height: Height,
+        db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    );
+
+    /// Check that state has been upgraded to this format correctly.
+    ///
+    /// # Panics
+    ///
+    /// If the state has not been upgraded to this format correctly.
+    fn validate(&self, upgrade_db: &ZebraDb);
+}
+
+fn format_upgrades() -> Vec<(Version, Box<dyn DiskFormatUpgrade>)> {
+    fn parse_expect_version(version: &str) -> Version {
+        version
+            .parse()
+            .expect("Hardcoded version string should be valid.")
+    }
+
+    vec![(parse_expect_version("25.1.1"), Box::new(PruneTrees))]
+}
 
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -222,7 +252,7 @@ impl DbFormatChange {
         // - an empty state doesn't have any trees, so it can't have duplicate trees
         // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
         //   still know how to make sure trees are unique
-        Self::check_for_duplicate_trees(upgrade_db);
+        Self::check_state_validity(upgrade_db);
     }
 
     /// Apply any required format updates to the database.
@@ -275,75 +305,24 @@ impl DbFormatChange {
 
         // Start of a database upgrade task.
 
-        let version_for_pruning_trees =
-            Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
+        for (version_for_upgrade, upgrade) in format_upgrades() {
+            // Check if we need to prune the note commitment trees in the database.
+            if older_disk_version < version_for_upgrade {
+                upgrade.run(initial_tip_height, &db, &cancel_receiver);
 
-        // Check if we need to prune the note commitment trees in the database.
-        if older_disk_version < version_for_pruning_trees {
-            // Prune duplicate Sapling note commitment trees.
+                // Before marking the state as upgraded, check that the upgrade completed successfully.
+                upgrade.validate(&db);
 
-            // The last tree we checked.
-            let mut last_tree = db
-                .sapling_tree_by_height(&Height(0))
-                .expect("Checked above that the genesis block is in the database.");
-
-            // Run through all the possible duplicate trees in the finalized chain.
-            // The block after genesis is the first possible duplicate.
-            for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
-                }
-
-                // Delete any duplicate trees.
-                if tree == last_tree {
-                    let mut batch = DiskWriteBatch::new();
-                    batch.delete_sapling_tree(&db, &height);
-                    db.write_batch(batch)
-                        .expect("Deleting Sapling note commitment trees should always succeed.");
-                }
-
-                // Compare against the last tree to find unique trees.
-                last_tree = tree;
+                // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
+                // database is marked, so the upgrade MUST be complete at this point.
+                info!(
+                    ?newer_running_version,
+                    "Zebra automatically upgraded the database format to:"
+                );
+                Self::mark_as_upgraded_to(&version_for_upgrade, &config, network);
+            } else {
+                upgrade.validate(&db)
             }
-
-            // Prune duplicate Orchard note commitment trees.
-
-            // The last tree we checked.
-            let mut last_tree = db
-                .orchard_tree_by_height(&Height(0))
-                .expect("Checked above that the genesis block is in the database.");
-
-            // Run through all the possible duplicate trees in the finalized chain.
-            // The block after genesis is the first possible duplicate.
-            for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
-                }
-
-                // Delete any duplicate trees.
-                if tree == last_tree {
-                    let mut batch = DiskWriteBatch::new();
-                    batch.delete_orchard_tree(&db, &height);
-                    db.write_batch(batch)
-                        .expect("Deleting Orchard note commitment trees should always succeed.");
-                }
-
-                // Compare against the last tree to find unique trees.
-                last_tree = tree;
-            }
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(db);
-
-            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
-            // database is marked, so the upgrade MUST be complete at this point.
-            info!(
-                ?newer_running_version,
-                "Zebra automatically upgraded the database format to:"
-            );
-            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
         // End of a database upgrade task.
@@ -357,61 +336,14 @@ impl DbFormatChange {
         // every time it runs its inner update loop.
     }
 
-    /// Check that note commitment trees were correctly de-duplicated.
+    /// Check that the state is upgraded to and valid for the latest disk format version.
     ///
     /// # Panics
     ///
-    /// If a duplicate tree is found.
-    pub fn check_for_duplicate_trees(upgrade_db: ZebraDb) {
-        // Runtime test: make sure we removed all duplicates.
-        // We always run this test, even if the state has supposedly been upgraded.
-        let mut duplicate_found = false;
-
-        let mut prev_height = None;
-        let mut prev_tree = None;
-        for (height, tree) in upgrade_db.sapling_tree_by_height_range(..) {
-            if prev_tree == Some(tree.clone()) {
-                // TODO: replace this with a panic because it indicates an unrecoverable
-                //       bug, which should fail the tests immediately
-                error!(
-                    height = ?height,
-                    prev_height = ?prev_height.unwrap(),
-                    tree_root = ?tree.root(),
-                    "found duplicate sapling trees after running de-duplicate tree upgrade"
-                );
-
-                duplicate_found = true;
-            }
-
-            prev_height = Some(height);
-            prev_tree = Some(tree);
-        }
-
-        let mut prev_height = None;
-        let mut prev_tree = None;
-        for (height, tree) in upgrade_db.orchard_tree_by_height_range(..) {
-            if prev_tree == Some(tree.clone()) {
-                // TODO: replace this with a panic because it indicates an unrecoverable
-                //       bug, which should fail the tests immediately
-                error!(
-                    height = ?height,
-                    prev_height = ?prev_height.unwrap(),
-                    tree_root = ?tree.root(),
-                    "found duplicate orchard trees after running de-duplicate tree upgrade"
-                );
-
-                duplicate_found = true;
-            }
-
-            prev_height = Some(height);
-            prev_tree = Some(tree);
-        }
-
-        if duplicate_found {
-            panic!(
-                "found duplicate sapling or orchard trees \
-                     after running de-duplicate tree upgrade"
-            );
+    /// If the state is not valid for the latest disk format version.
+    pub fn check_state_validity(upgrade_db: ZebraDb) {
+        for (_, upgrade) in format_upgrades() {
+            upgrade.validate(&upgrade_db);
         }
     }
 
