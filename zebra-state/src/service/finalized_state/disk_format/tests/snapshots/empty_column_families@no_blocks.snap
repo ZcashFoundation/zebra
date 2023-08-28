@@ -1,6 +1,6 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 154
+assertion_line: 166
 expression: empty_column_families
 ---
 [
@@ -11,9 +11,11 @@ expression: empty_column_families
   "height_by_hash: no entries",
   "history_tree: no entries",
   "orchard_anchors: no entries",
+  "orchard_note_commitment_subtree: no entries",
   "orchard_note_commitment_tree: no entries",
   "orchard_nullifiers: no entries",
   "sapling_anchors: no entries",
+  "sapling_note_commitment_subtree: no entries",
   "sapling_note_commitment_tree: no entries",
   "sapling_nullifiers: no entries",
   "sprout_anchors: no entries",
