@@ -438,7 +438,6 @@ pub fn calculate_default_root_hashes(
 ) -> DefaultRoots {
     let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_txn, mempool_txs);
 
-    let history_tree = history_tree;
     let chain_history_root = history_tree.hash().expect("history tree can't be empty");
 
     let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(

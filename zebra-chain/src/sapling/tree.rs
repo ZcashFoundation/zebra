@@ -18,7 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::{self};
+use bridgetree::{self, NonEmptyFrontier};
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
@@ -28,8 +28,11 @@ use zcash_primitives::merkle_tree::HashSer;
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
+    subtree::TRACKED_SUBTREE_HEIGHT,
 };
 
 pub mod legacy;
@@ -165,6 +168,12 @@ impl ZcashDeserialize for Root {
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Node([u8; 32]);
 
+impl AsRef<[u8; 32]> for Node {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
@@ -173,13 +182,12 @@ impl fmt::Debug for Node {
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
-/// Zebra stores Sapling note commitment trees as [`Frontier`][1]s while the
-/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
+/// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
+/// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
 /// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
 ///
-/// [1]: bridgetree::Frontier
-/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [3]: incrementalmerkletree::frontier::CommitmentTree
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [2]: incrementalmerkletree::frontier::CommitmentTree
 impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
@@ -218,6 +226,18 @@ impl From<jubjub::Fq> for Node {
     }
 }
 
+impl TryFrom<&[u8]> for Node {
+    type Error = &'static str;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Option::<jubjub::Fq>::from(jubjub::Fq::from_bytes(
+            bytes.try_into().map_err(|_| "wrong byte slice len")?,
+        ))
+        .map(Node::from)
+        .ok_or("invalid jubjub field element")
+    }
+}
+
 impl serde::Serialize for Node {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -251,7 +271,7 @@ pub enum NoteCommitmentTreeError {
 #[serde(into = "LegacyNoteCommitmentTree")]
 #[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a [`Frontier`](bridgetree::Frontier).
+    /// The tree represented as a [`Frontier`].
     ///
     /// A Frontier is a subset of the tree that allows to fully specify it.
     /// It consists of nodes along the rightmost (newer) branch of the tree that
@@ -310,6 +330,32 @@ impl NoteCommitmentTree {
         } else {
             Err(NoteCommitmentTreeError::FullTree)
         }
+    }
+
+    /// Returns true if the most recently appended leaf completes the subtree
+    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+        tree.position()
+            .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
+    }
+
+    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
+    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
+        incrementalmerkletree::Address::above_position(
+            TRACKED_SUBTREE_HEIGHT.into(),
+            tree.position(),
+        )
+    }
+
+    /// Returns subtree index and root if the most recently appended leaf completes the subtree
+    #[allow(clippy::unwrap_in_result)]
+    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
+        let value = self.inner.value()?;
+        Self::is_complete_subtree(value).then_some(())?;
+        let address = Self::subtree_address(value);
+        let index = address.index().try_into().expect("should fit in u16");
+        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+
+        Some((index, root))
     }
 
     /// Returns the current root of the tree, used as an anchor in Sapling
@@ -424,7 +470,13 @@ impl Eq for NoteCommitmentTree {}
 
 impl PartialEq for NoteCommitmentTree {
     fn eq(&self, other: &Self) -> bool {
-        self.hash() == other.hash()
+        if let (Some(root), Some(other_root)) = (self.cached_root(), other.cached_root()) {
+            // Use cached roots if available
+            root == other_root
+        } else {
+            // Avoid expensive root recalculations which use multiple cryptographic hashes
+            self.inner == other.inner
+        }
     }
 }
 
@@ -449,13 +501,13 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 ///
 /// The format of the serialized data is compatible with
 /// [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree) from `librustzcash` and not
-/// with [`Frontier`](bridgetree::Frontier) from the crate
+/// with [`Frontier`] from the crate
 /// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
 /// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
-/// represented as [`Frontier`](bridgetree::Frontier).
+/// represented as [`Frontier`].
 ///
 /// The formats are semantically equivalent. The primary difference between them
-/// is that in [`Frontier`](bridgetree::Frontier), the vector of parents is
+/// is that in [`Frontier`], the vector of parents is
 /// dense (we know where the gaps are from the position of the leaf in the
 /// overall tree); whereas in [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree),
 /// the vector of parent hashes is sparse with [`None`] values in the gaps.
@@ -466,7 +518,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 ///
 /// It is likely that the dense format will be used in future RPCs, in which
 /// case the current implementation will have to change and use the format
-/// compatible with [`Frontier`](bridgetree::Frontier) instead.
+/// compatible with [`Frontier`] instead.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SerializedTree(Vec<u8>);
 

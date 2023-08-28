@@ -130,7 +130,7 @@ pub struct ConnectionInfo {
     /// which will appear as the connected address to the OS and Zebra.
     pub connected_addr: ConnectedAddr,
 
-    /// The network protocol [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
+    /// The network protocol [`VersionMessage`] sent by the remote peer.
     pub remote: VersionMessage,
 
     /// The network protocol version negotiated with the remote peer.
@@ -562,7 +562,7 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 ///
-/// Returns the [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
+/// Returns the [`VersionMessage`] sent by the remote peer.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -1216,7 +1216,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     remote_services: PeerServices,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
     use futures::future::Either;
 
@@ -1244,7 +1244,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
             tracing::trace!("shutting down because Client requested shut down");
             handle_heartbeat_shutdown(
                 PeerError::ClientCancelledHeartbeatTask,
-                &mut heartbeat_ts_collector,
+                &heartbeat_ts_collector,
                 &connected_addr,
                 &remote_services,
             )
@@ -1254,7 +1254,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
             tracing::trace!("shutting down because Client was dropped");
             handle_heartbeat_shutdown(
                 PeerError::ClientDropped,
-                &mut heartbeat_ts_collector,
+                &heartbeat_ts_collector,
                 &connected_addr,
                 &remote_services,
             )
@@ -1277,7 +1277,7 @@ async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
     remote_services: PeerServices,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
     // Don't send the first heartbeat immediately - we've just completed the handshake!
     let mut interval = tokio::time::interval_at(
@@ -1296,7 +1296,7 @@ async fn send_periodic_heartbeats_run_loop(
         let heartbeat = send_one_heartbeat(&mut server_tx);
         heartbeat_timeout(
             heartbeat,
-            &mut heartbeat_ts_collector,
+            &heartbeat_ts_collector,
             &connected_addr,
             &remote_services,
         )
@@ -1373,7 +1373,7 @@ async fn send_one_heartbeat(
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout<F, T>(
     fut: F,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, BoxError>
@@ -1407,7 +1407,7 @@ where
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<T, E>
@@ -1438,7 +1438,7 @@ where
 /// Mark `connected_addr` as shut down using `address_book_updater`.
 async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
-    address_book_updater: &mut tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
     remote_services: &PeerServices,
 ) -> Result<(), BoxError> {

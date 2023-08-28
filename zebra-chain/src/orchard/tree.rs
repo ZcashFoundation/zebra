@@ -18,7 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree;
+use bridgetree::{self, NonEmptyFrontier};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
@@ -27,8 +27,11 @@ use zcash_primitives::merkle_tree::{write_commitment_tree, HashSer};
 
 use super::sinsemilla::*;
 
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+use crate::{
+    serialization::{
+        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    },
+    subtree::TRACKED_SUBTREE_HEIGHT,
 };
 
 pub mod legacy;
@@ -169,6 +172,25 @@ impl ZcashDeserialize for Root {
 /// A node of the Orchard Incremental Note Commitment Tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Node(pallas::Base);
+
+impl Node {
+    /// Calls `to_repr()` on inner value.
+    pub fn to_repr(&self) -> [u8; 32] {
+        self.0.to_repr()
+    }
+}
+
+impl TryFrom<&[u8]> for Node {
+    type Error = &'static str;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Option::<pallas::Base>::from(pallas::Base::from_repr(
+            bytes.try_into().map_err(|_| "wrong byte slice len")?,
+        ))
+        .map(Node)
+        .ok_or("invalid Pallas field element")
+    }
+}
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///
@@ -317,6 +339,32 @@ impl NoteCommitmentTree {
         }
     }
 
+    /// Returns true if the most recently appended leaf completes the subtree
+    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+        tree.position()
+            .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
+    }
+
+    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
+    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
+        incrementalmerkletree::Address::above_position(
+            TRACKED_SUBTREE_HEIGHT.into(),
+            tree.position(),
+        )
+    }
+
+    /// Returns subtree index and root if the most recently appended leaf completes the subtree
+    #[allow(clippy::unwrap_in_result)]
+    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
+        let value = self.inner.value()?;
+        Self::is_complete_subtree(value).then_some(())?;
+        let address = Self::subtree_address(value);
+        let index = address.index().try_into().expect("should fit in u16");
+        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+
+        Some((index, root))
+    }
+
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
@@ -428,7 +476,13 @@ impl Eq for NoteCommitmentTree {}
 
 impl PartialEq for NoteCommitmentTree {
     fn eq(&self, other: &Self) -> bool {
-        self.hash() == other.hash()
+        if let (Some(root), Some(other_root)) = (self.cached_root(), other.cached_root()) {
+            // Use cached roots if available
+            root == other_root
+        } else {
+            // Avoid expensive root recalculations which use multiple cryptographic hashes
+            self.inner == other.inner
+        }
     }
 }
 
