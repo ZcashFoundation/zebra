@@ -374,6 +374,7 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the range of Sapling note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    #[allow(dead_code)]
     pub fn delete_range_sapling_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let sapling_tree_cf = zebra_db
             .db
@@ -394,6 +395,7 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the range of Orchard note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    #[allow(dead_code)]
     pub fn delete_range_orchard_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let orchard_tree_cf = zebra_db
             .db

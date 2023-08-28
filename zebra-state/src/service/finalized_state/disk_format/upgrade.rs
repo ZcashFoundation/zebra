@@ -281,174 +281,56 @@ impl DbFormatChange {
         if older_disk_version < version_for_pruning_trees {
             // Prune duplicate Sapling note commitment trees.
 
-            // The last unique tree's height. Genesis is always unique.
-            let mut last_unique_height = Height(0);
-            // The last unique tree's data.
-            let mut last_unique_tree = db
+            // The last tree we checked.
+            let mut last_tree = db
                 .sapling_tree_by_height(&Height(0))
                 .expect("Checked above that the genesis block is in the database.");
 
             // Run through all the possible duplicate trees in the finalized chain.
             // The block after genesis is the first possible duplicate.
-            for (next_height, next_tree) in
-                db.sapling_tree_by_height_range(Height(1)..=initial_tip_height)
-            {
+            for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
 
-                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
-                // identical trees. We start a batch after first unique tree, so that we don't
-                // prune it. We end a batch if we encounter a tree that differs from the previous
-                // one, or if we reach the end of the possible duplicates. We get an empty batch if
-                // there are two consecutive differing trees.
-
-                // Work out if we've found a batch, and what its end is.
-                let next_unique_height = if last_unique_tree != next_tree {
-                    // We've found a unique tree that isn't in this batch.
-                    Some(next_height)
-                } else if next_height == initial_tip_height {
-                    // We've reached the end of the possible duplicates without finding a unique
-                    // tree, so the initial tip is a duplicate which must be deleted.
-                    Some(next_height.next())
-                } else {
-                    // We're in the middle of a range of duplicate trees.
-                    None
-                };
-
-                if let Some(next_unique_height) = next_unique_height {
-                    // Start the batch at height just above the height of the last unique tree.
-                    // This excludes the unique tree from the next batch so that we keep the tree
-                    // in the database. This is only a duplicate if the batch has trees in it.
-                    let first_duplicate_height = last_unique_height.next();
-
-                    // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                    let batch_size = next_unique_height - first_duplicate_height;
-
-                    // Check if we have a non-empty batch. In other words, check if there's at least
-                    // one duplicate tree between the last tree and the new one.
-                    if batch_size > 0 {
-                        let mut batch = DiskWriteBatch::new();
-
-                        // Delete the batch.
-                        //
-                        // The tree at `next_unique_height` doesn't belong to the current batch
-                        // since it differs from the trees in the batch.
-                        if batch_size == 1 {
-                            // # Optimization
-                            //
-                            // Use a faster method if we're deleting a single tree.
-                            batch.delete_sapling_tree(&db, &first_duplicate_height);
-                        } else {
-                            // This is an exclusive end range.
-                            // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                            batch.delete_range_sapling_tree(
-                                &db,
-                                &first_duplicate_height,
-                                &next_unique_height,
-                            );
-                        }
-
-                        db.write_batch(batch).expect(
-                            "Deleting Sapling note commitment trees should always succeed.",
-                        );
-                    }
-
-                    // Record the height of this unique tree, so we can start a batch after it.
-                    //
-                    // This loop terminates before we get to the tree after the initial tip, so it
-                    // doesn't matter what value we use. (It's handled by the standard write code.)
-                    last_unique_height = next_unique_height;
-
-                    // Compare against this unique tree to find the end of the next batch.
-                    last_unique_tree = next_tree;
+                // Delete any duplicate trees.
+                if tree == last_tree {
+                    let mut batch = DiskWriteBatch::new();
+                    batch.delete_sapling_tree(&db, &height);
+                    db.write_batch(batch)
+                        .expect("Deleting Sapling note commitment trees should always succeed.");
                 }
+
+                // Compare against the last tree to find unique trees.
+                last_tree = tree;
             }
 
-            // The last unique tree's height. Genesis is always unique.
-            let mut last_unique_height = Height(0);
-            // The last unique tree's data.
-            let mut last_unique_tree = db
+            // Prune duplicate Orchard note commitment trees.
+
+            // The last tree we checked.
+            let mut last_tree = db
                 .orchard_tree_by_height(&Height(0))
                 .expect("Checked above that the genesis block is in the database.");
 
             // Run through all the possible duplicate trees in the finalized chain.
             // The block after genesis is the first possible duplicate.
-            for (next_height, next_tree) in
-                db.orchard_tree_by_height_range(Height(1)..=initial_tip_height)
-            {
+            for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
 
-                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
-                // identical trees. We start a batch after first unique tree, so that we don't
-                // prune it. We end a batch if we encounter a tree that differs from the previous
-                // one, or if we reach the end of the possible duplicates. We get an empty batch if
-                // there are two consecutive differing trees.
-
-                // Work out if we've found a batch, and what its end is.
-                let next_unique_height = if last_unique_tree != next_tree {
-                    // We've found a unique tree that isn't in this batch.
-                    Some(next_height)
-                } else if next_height == initial_tip_height {
-                    // We've reached the end of the possible duplicates without finding a unique
-                    // tree, so the initial tip is a duplicate which must be deleted.
-                    Some(next_height.next())
-                } else {
-                    // We're in the middle of a range of duplicate trees.
-                    None
-                };
-
-                if let Some(next_unique_height) = next_unique_height {
-                    // Start the batch at height just above the height of the last unique tree.
-                    // This excludes the unique tree from the next batch so that we keep the tree
-                    // in the database. This is only a duplicate if the batch has trees in it.
-                    let first_duplicate_height = last_unique_height.next();
-
-                    // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                    let batch_size = next_unique_height - first_duplicate_height;
-
-                    // Check if we have a non-empty batch. In other words, check if there's at least
-                    // one duplicate tree between the last tree and the new one.
-                    if batch_size > 0 {
-                        let mut batch = DiskWriteBatch::new();
-
-                        // Delete the batch.
-                        //
-                        // The tree at `next_unique_height` doesn't belong to the current batch
-                        // since it differs from the trees in the batch.
-                        if batch_size == 1 {
-                            // # Optimization
-                            //
-                            // Use a faster method if we're deleting a single tree.
-                            batch.delete_orchard_tree(&db, &first_duplicate_height);
-                        } else {
-                            // This is an exclusive end range.
-                            // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                            batch.delete_range_orchard_tree(
-                                &db,
-                                &first_duplicate_height,
-                                &next_unique_height,
-                            );
-                        }
-
-                        db.write_batch(batch).expect(
-                            "Deleting Orchard note commitment trees should always succeed.",
-                        );
-                    }
-
-                    // Record the height of this unique tree, so we can start a batch after it.
-                    //
-                    // This loop terminates before we get to the tree after the initial tip, so it
-                    // doesn't matter what value we use. (It's handled by the standard write code.)
-                    last_unique_height = next_unique_height;
-
-                    // Compare against this unique tree to find the end of the next batch.
-                    last_unique_tree = next_tree;
+                // Delete any duplicate trees.
+                if tree == last_tree {
+                    let mut batch = DiskWriteBatch::new();
+                    batch.delete_orchard_tree(&db, &height);
+                    db.write_batch(batch)
+                        .expect("Deleting Orchard note commitment trees should always succeed.");
                 }
+
+                // Compare against the last tree to find unique trees.
+                last_tree = tree;
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
