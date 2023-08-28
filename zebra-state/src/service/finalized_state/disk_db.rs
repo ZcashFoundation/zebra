@@ -148,6 +148,8 @@ impl WriteDisk for DiskWriteBatch {
         self.batch.delete_cf(cf, key_bytes);
     }
 
+    // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+    //       see zs_range_iter() for an example of the edge cases
     fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,

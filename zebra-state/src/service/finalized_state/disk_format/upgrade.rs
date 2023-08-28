@@ -12,9 +12,7 @@ use tracing::Span;
 use zebra_chain::{
     block::Height,
     diagnostic::task::{CheckForPanics, WaitForPanics},
-    orchard,
     parameters::Network,
-    sapling,
 };
 
 use DbFormatChange::*;
@@ -283,131 +281,57 @@ impl DbFormatChange {
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
             // Prune duplicate Sapling note commitment trees.
-            let mut last_tree = db.sapling_tree_by_height(&Height(0)).expect(
-                "The Sapling note commitment tree for the genesis block should be in the database.",
-            );
-            let mut last_height = Height(1);
 
-            // We use this dummy cap in the loop below. It resolves an edge case when the pruning
-            // reaches the `initial_tip_height`.
-            let dummy_cap = Some((
-                initial_tip_height.next(),
-                Arc::new(sapling::tree::NoteCommitmentTree::default()),
-            ))
-            .into_iter();
+            // The last tree we checked.
+            let mut last_tree = db
+                .sapling_tree_by_height(&Height(0))
+                .expect("Checked above that the genesis block is in the database.");
 
-            // Run through all the trees in the finalized chain.
-            for (height, tree) in db
-                .sapling_tree_by_height_range(Height(1)..=initial_tip_height)
-                .chain(dummy_cap)
-            {
+            // Run through all the possible duplicate trees in the finalized chain.
+            // The block after genesis is the first possible duplicate.
+            for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
-                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
-                // identical trees excluding the first tree. We exclude the first tree so that we
-                // don't prune it. We get a batch if we encounter a tree that differs from the
-                // previous one. We get an empty batch if there are two consecutive differing trees.
-                // The dummy cap ensures we don't skip the last batch if the tree at
-                // `initial_tip_height` doesn't differ from the previous one.
-                if last_tree != tree || height == initial_tip_height {
-                    // Compute the size of the batch.
-                    let batch_size = height - last_height;
-                    // Check if we have a non-empty batch. In other words, check if there's at least
-                    // one duplicate tree between the last tree and the new one.
-                    if batch_size > 0 {
-                        let mut batch = DiskWriteBatch::new();
 
-                        // Delete the batch.
-                        //
-                        // The current tree at height `height` doesn't belong to the current batch
-                        // since it differs from the trees in the batch.
-                        if batch_size == 1 {
-                            // # Optimization
-                            //
-                            // Use a faster method if we're deleting a single tree.
-                            batch.delete_sapling_tree(&db, &last_height);
-                        } else {
-                            batch.delete_range_sapling_tree(&db, &last_height, &height);
-                        }
-
-                        db.write_batch(batch).expect(
-                            "Deleting Sapling note commitment trees should always succeed.",
-                        );
-                    }
-
-                    // Use the current tree to find the end of the next batch.
-                    last_tree = tree;
-                    // Start the next batch at height just above the height of the current tree.
-                    // This excludes the current tree from the next batch so that we keep the tree
-                    // in the database.
-                    last_height = height.next();
+                // Delete any duplicate trees.
+                if tree == last_tree {
+                    let mut batch = DiskWriteBatch::new();
+                    batch.delete_sapling_tree(&db, &height);
+                    db.write_batch(batch)
+                        .expect("Deleting Sapling note commitment trees should always succeed.");
                 }
+
+                // Compare against the last tree to find unique trees.
+                last_tree = tree;
             }
 
             // Prune duplicate Orchard note commitment trees.
-            let mut last_tree = db.orchard_tree_by_height(&Height(0)).expect(
-                "The Orchard note commitment tree for the genesis block should be in the database.",
-            );
-            let mut last_height = Height(1);
 
-            // We use this dummy cap in the loop below. It resolves an edge case when the pruning
-            // reaches the `initial_tip_height`.
-            let dummy_cap = Some((
-                initial_tip_height.next(),
-                Arc::new(orchard::tree::NoteCommitmentTree::default()),
-            ))
-            .into_iter();
+            // The last tree we checked.
+            let mut last_tree = db
+                .orchard_tree_by_height(&Height(0))
+                .expect("Checked above that the genesis block is in the database.");
 
-            // Run through all the trees in the finalized chain.
-            for (height, tree) in db
-                .orchard_tree_by_height_range(Height(1)..=initial_tip_height)
-                .chain(dummy_cap)
-            {
+            // Run through all the possible duplicate trees in the finalized chain.
+            // The block after genesis is the first possible duplicate.
+            for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
-                // We delete duplicate trees in batches. A batch is a (possibly empty) series of
-                // identical trees excluding the first tree. We exclude the first tree so that we
-                // don't prune it. We get a batch if we encounter a tree that differs from the
-                // previous one. We get an empty batch if there are two consecutive differing trees.
-                // The dummy cap ensures we don't skip the last batch if the tree at
-                // `initial_tip_height` doesn't differ from the previous one.
-                if last_tree != tree {
-                    // Compute the size of the batch.
-                    let batch_size = height - last_height;
-                    // Check if we have a non-empty batch. In other words, check if there's at least
-                    // one duplicate tree between the last tree and the new one.
-                    if batch_size > 0 {
-                        let mut batch = DiskWriteBatch::new();
 
-                        // Delete the batch.
-                        //
-                        // The current tree at height `height` doesn't belong to the current batch
-                        // since it differs from the trees in the batch.
-                        if batch_size == 1 {
-                            // # Optimization
-                            //
-                            // Use a faster method if we're deleting a single tree.
-                            batch.delete_orchard_tree(&db, &last_height);
-                        } else {
-                            batch.delete_range_orchard_tree(&db, &last_height, &height);
-                        }
-
-                        db.write_batch(batch).expect(
-                            "Deleting Orchard note commitment trees should always succeed.",
-                        );
-                    }
-
-                    // Use the current tree to find the end of the next batch.
-                    last_tree = tree;
-                    // Start the next batch at height just above the height of the current tree.
-                    // This excludes the current tree from the next batch so that we keep the tree
-                    // in the database.
-                    last_height = height.next();
+                // Delete any duplicate trees.
+                if tree == last_tree {
+                    let mut batch = DiskWriteBatch::new();
+                    batch.delete_orchard_tree(&db, &height);
+                    db.write_batch(batch)
+                        .expect("Deleting Orchard note commitment trees should always succeed.");
                 }
+
+                // Compare against the last tree to find unique trees.
+                last_tree = tree;
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
