@@ -92,10 +92,12 @@ We use the following rocksdb column families:
 | `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
 | `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
+| `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Orchard*                          |                        |                               |         |
 | `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
+| `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Chain*                            |                        |                               |         |
 | `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
@@ -118,6 +120,8 @@ Block and Transaction Data:
   used instead of a `BTreeSet<OutputLocation>` value, to improve database performance
 - `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
   used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
+- `NoteCommitmentSubtreeIndex`: 16 bits, big-endian, unsigned
+- `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -333,6 +337,9 @@ So they should not be used for consensus-critical checks.
   state for every height, for the specific pool. Each tree is stored
   as a "Merkle tree frontier" which is basically a (logarithmic) subset of
   the Merkle tree nodes as required to insert new items.
+
+- The `{sapling, orchard}_note_commitment_subtree` stores the completion height and
+  root for every completed level 16 note commitment subtree, for the specific pool.
 
 - `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
   state. There is always a single entry for it. The tree is stored as the set of "peaks"

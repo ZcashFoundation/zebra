@@ -10,12 +10,13 @@ use rand::random;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use zebra_chain::{
+    block::Height,
     orchard::{
-        tree::legacy::LegacyNoteCommitmentTree as LegacyOrchardNoteCommitmentTree,
+        self, tree::legacy::LegacyNoteCommitmentTree as LegacyOrchardNoteCommitmentTree,
         tree::NoteCommitmentTree as OrchardNoteCommitmentTree,
     },
     sapling::{
-        tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
+        self, tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
         tree::NoteCommitmentTree as SaplingNoteCommitmentTree,
     },
     sprout::{
@@ -23,6 +24,7 @@ use zebra_chain::{
         tree::NoteCommitmentTree as SproutNoteCommitmentTree,
         NoteCommitment as SproutNoteCommitment,
     },
+    subtree::NoteCommitmentSubtreeData,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -172,8 +174,14 @@ fn sapling_note_commitment_tree_serialization() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "0102007c3ea01a6e3a3d90cf59cd789e467044b5cd78eb2c84cc6816f960746d0e036c0162324ff2c329e99193a74d28a585a3c167a93bf41a255135529c913bd9b1e66601ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c";
+    let expected_serialized_subtree: &str =
+        "0186a0ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c";
 
-    sapling_checks(incremental_tree, expected_serialized_tree_hex);
+    sapling_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 /// Check that the sapling tree database serialization format has not changed for one commitment.
@@ -205,8 +213,14 @@ fn sapling_note_commitment_tree_serialization_one() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "010000225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b1145800012c60c7de033d7539d123fb275011edfe08d57431676981d162c816372063bc71";
+    let expected_serialized_subtree: &str =
+        "0186a02c60c7de033d7539d123fb275011edfe08d57431676981d162c816372063bc71";
 
-    sapling_checks(incremental_tree, expected_serialized_tree_hex);
+    sapling_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 /// Check that the sapling tree database serialization format has not changed when the number of
@@ -251,8 +265,14 @@ fn sapling_note_commitment_tree_serialization_pow2() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "010701f43e3aac61e5a753062d4d0508c26ceaf5e4c0c58ba3c956e104b5d2cf67c41c3a3661bc12b72646c94bc6c92796e81953985ee62d80a9ec3645a9a95740ac15025991131c5c25911b35fcea2a8343e2dfd7a4d5b45493390e0cb184394d91c349002df68503da9247dfde6585cb8c9fa94897cf21735f8fc1b32116ef474de05c01d23765f3d90dfd97817ed6d995bd253d85967f77b9f1eaef6ecbcb0ef6796812";
+    let expected_serialized_subtree =
+        "0186a0d23765f3d90dfd97817ed6d995bd253d85967f77b9f1eaef6ecbcb0ef6796812";
 
-    sapling_checks(incremental_tree, expected_serialized_tree_hex);
+    sapling_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 /// Check that the orchard tree database serialization format has not changed.
@@ -298,8 +318,14 @@ fn orchard_note_commitment_tree_serialization() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "010200ee9488053a30c596b43014105d3477e6f578c89240d1d1ee1743b77bb6adc40a01a34b69a4e4d9ccf954d46e5da1004d361a5497f511aeb4d481d23c0be177813301a0be6dab19bc2c65d8299258c16e14d48ec4d4959568c6412aa85763c222a702";
+    let expected_serialized_subtree =
+        "0186a0a0be6dab19bc2c65d8299258c16e14d48ec4d4959568c6412aa85763c222a702";
 
-    orchard_checks(incremental_tree, expected_serialized_tree_hex);
+    orchard_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 /// Check that the orchard tree database serialization format has not changed for one commitment.
@@ -333,8 +359,14 @@ fn orchard_note_commitment_tree_serialization_one() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "01000068135cf49933229099a44ec99a75e1e1cb4640f9b5bdec6b3223856fea16390a000178afd4da59c541e9c2f317f9aff654f1fb38d14dc99431cbbfa93601c7068117";
+    let expected_serialized_subtree =
+        "0186a078afd4da59c541e9c2f317f9aff654f1fb38d14dc99431cbbfa93601c7068117";
 
-    orchard_checks(incremental_tree, expected_serialized_tree_hex);
+    orchard_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 /// Check that the orchard tree database serialization format has not changed when the number of
@@ -379,8 +411,14 @@ fn orchard_note_commitment_tree_serialization_pow2() {
     // The purpose of this test is to make sure the serialization format does
     // not change by accident.
     let expected_serialized_tree_hex = "01010178315008fb2998b430a5731d6726207dc0f0ec81ea64af5cf612956901e72f0eee9488053a30c596b43014105d3477e6f578c89240d1d1ee1743b77bb6adc40a0001d3d525931005e45f5a29bc82524e871e5ee1b6d77839deb741a6e50cd99fdf1a";
+    let expected_serialized_subtree =
+        "0186a0d3d525931005e45f5a29bc82524e871e5ee1b6d77839deb741a6e50cd99fdf1a";
 
-    orchard_checks(incremental_tree, expected_serialized_tree_hex);
+    orchard_checks(
+        incremental_tree,
+        expected_serialized_tree_hex,
+        expected_serialized_subtree,
+    );
 }
 
 fn sprout_checks(incremental_tree: SproutNoteCommitmentTree, expected_serialized_tree_hex: &str) {
@@ -433,8 +471,12 @@ fn sprout_checks(incremental_tree: SproutNoteCommitmentTree, expected_serialized
     assert_eq!(re_serialized_legacy_tree, re_serialized_tree);
 }
 
-fn sapling_checks(incremental_tree: SaplingNoteCommitmentTree, expected_serialized_tree_hex: &str) {
-    let serialized_tree = incremental_tree.as_bytes();
+fn sapling_checks(
+    incremental_tree: SaplingNoteCommitmentTree,
+    expected_serialized_tree_hex: &str,
+    expected_serialized_subtree: &str,
+) {
+    let serialized_tree: Vec<u8> = incremental_tree.as_bytes();
 
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
 
@@ -481,9 +523,35 @@ fn sapling_checks(incremental_tree: SaplingNoteCommitmentTree, expected_serializ
 
     assert_eq!(serialized_tree, re_serialized_tree);
     assert_eq!(re_serialized_legacy_tree, re_serialized_tree);
+
+    // Check subtree format
+
+    let subtree = NoteCommitmentSubtreeData::new(
+        Height(100000),
+        sapling::tree::Node::from_bytes(incremental_tree.hash()),
+    );
+
+    let serialized_subtree = subtree.as_bytes();
+
+    assert_eq!(
+        hex::encode(&serialized_subtree),
+        expected_serialized_subtree
+    );
+
+    let deserialized_subtree =
+        NoteCommitmentSubtreeData::<sapling::tree::Node>::from_bytes(&serialized_subtree);
+
+    assert_eq!(
+        subtree, deserialized_subtree,
+        "(de)serialization should not modify subtree value"
+    );
 }
 
-fn orchard_checks(incremental_tree: OrchardNoteCommitmentTree, expected_serialized_tree_hex: &str) {
+fn orchard_checks(
+    incremental_tree: OrchardNoteCommitmentTree,
+    expected_serialized_tree_hex: &str,
+    expected_serialized_subtree: &str,
+) {
     let serialized_tree = incremental_tree.as_bytes();
 
     assert_eq!(hex::encode(&serialized_tree), expected_serialized_tree_hex);
@@ -531,4 +599,26 @@ fn orchard_checks(incremental_tree: OrchardNoteCommitmentTree, expected_serializ
 
     assert_eq!(serialized_tree, re_serialized_tree);
     assert_eq!(re_serialized_legacy_tree, re_serialized_tree);
+
+    // Check subtree format
+
+    let subtree = NoteCommitmentSubtreeData::new(
+        Height(100000),
+        orchard::tree::Node::from_bytes(incremental_tree.hash()),
+    );
+
+    let serialized_subtree = subtree.as_bytes();
+
+    assert_eq!(
+        hex::encode(&serialized_subtree),
+        expected_serialized_subtree
+    );
+
+    let deserialized_subtree =
+        NoteCommitmentSubtreeData::<orchard::tree::Node>::from_bytes(&serialized_subtree);
+
+    assert_eq!(
+        subtree, deserialized_subtree,
+        "(de)serialization should not modify subtree value"
+    );
 }

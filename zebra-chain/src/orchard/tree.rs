@@ -184,11 +184,19 @@ impl TryFrom<&[u8]> for Node {
     type Error = &'static str;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Option::<pallas::Base>::from(pallas::Base::from_repr(
-            bytes.try_into().map_err(|_| "wrong byte slice len")?,
-        ))
-        .map(Node)
-        .ok_or("invalid Pallas field element")
+        <[u8; 32]>::try_from(bytes)
+            .map_err(|_| "wrong byte slice len")?
+            .try_into()
+    }
+}
+
+impl TryFrom<[u8; 32]> for Node {
+    type Error = &'static str;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
+            .map(Node)
+            .ok_or("invalid Pallas field element")
     }
 }
 

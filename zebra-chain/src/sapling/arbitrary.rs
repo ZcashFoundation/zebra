@@ -119,16 +119,30 @@ fn spendauth_verification_key_bytes() -> impl Strategy<Value = ValidatingKey> {
     })
 }
 
+fn jubjub_base_strat() -> BoxedStrategy<jubjub::Base> {
+    (vec(any::<u8>(), 64))
+        .prop_map(|bytes| {
+            let bytes = bytes.try_into().expect("vec is the correct length");
+            jubjub::Base::from_bytes_wide(&bytes)
+        })
+        .boxed()
+}
+
 impl Arbitrary for tree::Root {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 64))
-            .prop_map(|bytes| {
-                let bytes = bytes.try_into().expect("vec is the correct length");
-                tree::Root(jubjub::Base::from_bytes_wide(&bytes))
-            })
-            .boxed()
+        jubjub_base_strat().prop_map(tree::Root).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for tree::Node {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        jubjub_base_strat().prop_map(tree::Node::from).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
