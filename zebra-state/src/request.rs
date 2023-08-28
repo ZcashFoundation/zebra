@@ -241,7 +241,9 @@ impl Treestate {
             note_commitment_trees: NoteCommitmentTrees {
                 sprout,
                 sapling,
+                sapling_subtree: None,
                 orchard,
+                orchard_subtree: None,
             },
             history_tree,
         }
