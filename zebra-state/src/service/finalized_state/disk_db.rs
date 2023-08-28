@@ -495,7 +495,7 @@ impl DiskDb {
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// The column families supported by the running database code.
-    const COLUMN_FAMILIES_IN_CODE: &[&'static str] = &[
+    const COLUMN_FAMILIES_IN_CODE: &'static [&'static str] = &[
         // Blocks
         "hash_by_height",
         "height_by_hash",

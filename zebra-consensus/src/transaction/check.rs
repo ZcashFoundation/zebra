@@ -435,7 +435,7 @@ fn validate_expiry_height_max(
 ) -> Result<(), TransactionError> {
     if let Some(expiry_height) = expiry_height {
         if expiry_height > Height::MAX_EXPIRY_HEIGHT {
-            return Err(TransactionError::MaximumExpiryHeight {
+            Err(TransactionError::MaximumExpiryHeight {
                 expiry_height,
                 is_coinbase,
                 block_height: *block_height,
@@ -458,7 +458,7 @@ fn validate_expiry_height_mined(
 ) -> Result<(), TransactionError> {
     if let Some(expiry_height) = expiry_height {
         if *block_height > expiry_height {
-            return Err(TransactionError::ExpiredTransaction {
+            Err(TransactionError::ExpiredTransaction {
                 expiry_height,
                 block_height: *block_height,
                 transaction_hash: transaction.hash(),
