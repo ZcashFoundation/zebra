@@ -15,7 +15,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
+    block::Height,
+    orchard,
+    parallel::tree::NoteCommitmentTrees,
+    sapling, sprout,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
 };
 
@@ -169,6 +173,22 @@ impl ZebraDb {
         self.db.zs_range_iter(&sapling_trees, range)
     }
 
+    /// Returns the Sapling note commitment subtree at this index
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+            self.db.zs_get(&sapling_subtrees, &index.into())?;
+        Some(subtree_data.with_index(index))
+    }
+
     // Orchard trees
 
     /// Returns the Orchard note commitment tree of the finalized tip or the empty tree if the state
@@ -183,8 +203,24 @@ impl ZebraDb {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Orchard note commitment tree matching the given block height, or `None` if the
-    /// height is above the finalized tip.
+    /// Returns the Orchard note commitment subtree at this index
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
+            self.db.zs_get(&orchard_subtrees, &index.into())?;
+        Some(subtree_data.with_index(index))
+    }
+
+    /// Returns the Orchard note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_height(
         &self,
@@ -230,7 +266,9 @@ impl ZebraDb {
         NoteCommitmentTrees {
             sprout: self.sprout_tree(),
             sapling: self.sapling_tree(),
+            sapling_subtree: None,
             orchard: self.orchard_tree(),
+            orchard_subtree: None,
         }
     }
 }
@@ -316,6 +354,9 @@ impl DiskWriteBatch {
         let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
+        let _sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
+        let _orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
+
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
@@ -360,6 +401,16 @@ impl DiskWriteBatch {
         {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
+
+        // TODO: Increment DATABASE_FORMAT_MINOR_VERSION and uncomment these insertions
+
+        // if let Some(subtree) = trees.sapling_subtree {
+        //     self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
+        // }
+
+        // if let Some(subtree) = trees.orchard_subtree {
+        //     self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
+        // }
 
         self.prepare_history_batch(db, finalized)
     }
