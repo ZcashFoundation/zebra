@@ -25,6 +25,7 @@ use zebra_chain::{
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
     serialization::{SerializationError, ZcashDeserialize},
+    subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
@@ -171,6 +172,30 @@ pub trait Rpc {
     /// negative heights.
     #[rpc(name = "z_gettreestate")]
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
+
+    /// Returns information about a range of Sapling & Orchard subtrees.
+    ///
+    /// zcashd reference: [`z_getsubtreesbyindex`](https://zcash.github.io/rpc/z_getsubtreesbyindex.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `pool`: (string, required) The pool from which subtrees should be returned.
+    ///           Either "sapling" or "orchard".
+    /// - `start_index`: (numeric, required) The index of the first 2^16-leaf subtree to return.
+    /// - `limit`: (numeric, optional) The maximum number of subtree values to return.
+    ///
+    /// # Notes
+    ///
+    /// While Zebra is doing its initial subtree index rebuild, subtrees will become available
+    /// starting at the chain tip. This RPC will return an error if the `start_index` subtree
+    /// exists, but has not been rebuilt yet.
+    #[rpc(name = "z_getsubtreesbyindex")]
+    fn z_get_subtrees_by_index(
+        &self,
+        pool: String,
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: NoteCommitmentSubtreeIndex,
+    ) -> BoxFuture<Result<String /* TODO : correct type */>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -1103,6 +1128,24 @@ where
                         final_state: orchard_tree,
                     },
                 },
+            })
+        }
+        .boxed()
+    }
+
+    fn z_get_subtrees_by_index(
+        &self,
+        _pool: String,
+        _start_index: NoteCommitmentSubtreeIndex,
+        _limit: NoteCommitmentSubtreeIndex,
+    ) -> BoxFuture<Result<String /* TODO : correct type */>> {
+        async move {
+            Err(Error {
+                // `zcashd` doesn't do dynamic rebuilds, so we just use the general "missing block"
+                // error code here
+                code: MISSING_BLOCK_ERROR_CODE,
+                message: "subtree has not been rebuilt yet".to_string(),
+                data: None,
             })
         }
         .boxed()
