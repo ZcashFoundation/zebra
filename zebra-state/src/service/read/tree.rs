@@ -45,7 +45,7 @@ where
 }
 
 /// Returns the Sapling
-/// [`NoteCommitmentSubtree`](NoteCommitmentSubtree) specified by an
+/// [`NoteCommitmentSubtree`] specified by an
 /// index, if it exists in the non-finalized `chain` or finalized `db`.
 #[allow(unused)]
 pub fn sapling_subtree<C>(
@@ -88,7 +88,7 @@ where
 }
 
 /// Returns the Orchard
-/// [`NoteCommitmentSubtree`](NoteCommitmentSubtree) specified by an
+/// [`NoteCommitmentSubtree`] specified by an
 /// index, if it exists in the non-finalized `chain` or finalized `db`.
 #[allow(unused)]
 pub fn orchard_subtree<C>(
