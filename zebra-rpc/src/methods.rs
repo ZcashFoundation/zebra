@@ -34,6 +34,11 @@ use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, Transactio
 
 use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
 
+// We don't use a types/ module here, because it is redundant.
+pub mod trees;
+
+use trees::GetSubtrees;
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
 
@@ -195,7 +200,7 @@ pub trait Rpc {
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
         limit: NoteCommitmentSubtreeIndex,
-    ) -> BoxFuture<Result<String /* TODO : correct type */>>;
+    ) -> BoxFuture<Result<GetSubtrees>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -1138,7 +1143,7 @@ where
         _pool: String,
         _start_index: NoteCommitmentSubtreeIndex,
         _limit: NoteCommitmentSubtreeIndex,
-    ) -> BoxFuture<Result<String /* TODO : correct type */>> {
+    ) -> BoxFuture<Result<GetSubtrees>> {
         async move {
             Err(Error {
                 // `zcashd` doesn't do dynamic rebuilds, so we just use the general "missing block"
