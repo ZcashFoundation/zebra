@@ -36,18 +36,15 @@ use zebra_test::{
 };
 
 use crate::methods::{
-    get_block_template_rpcs::{
-        self,
-        types::{
-            get_block_template::{self, GetBlockTemplateRequestMode},
-            get_mining_info,
-            hex_data::HexData,
-            long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
-            peer_info::PeerInfo,
-            submit_block,
-            subsidy::BlockSubsidy,
-            unified_address, validate_address, z_validate_address,
-        },
+    get_block_template_rpcs::types::{
+        get_block_template::{self, GetBlockTemplateRequestMode},
+        get_mining_info,
+        hex_data::HexData,
+        long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+        peer_info::PeerInfo,
+        submit_block,
+        subsidy::BlockSubsidy,
+        unified_address, validate_address, z_validate_address,
     },
     tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
@@ -100,7 +97,7 @@ pub async fn test_responses<State, ReadState>(
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let mining_config = get_block_template_rpcs::config::Config {
+    let mining_config = crate::config::mining::Config {
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
         extra_coinbase_data: None,
         debug_like_zcashd: true,

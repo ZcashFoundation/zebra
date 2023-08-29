@@ -53,11 +53,11 @@ itertools = "0.11.0"
 lazy_static = "1.4.0"
 metrics = "0.21.1"
 mset = "0.1.1"
-regex = "1.9.3"
+regex = "1.9.4"
 rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.18"
-serde = { version = "1.0.185", features = ["serde_derive"] }
+serde = { version = "1.0.188", features = ["serde_derive"] }
 tempfile = "3.8.0"
 thiserror = "1.0.47"
 
