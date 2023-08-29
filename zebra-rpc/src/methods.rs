@@ -202,7 +202,7 @@ pub trait Rpc {
         &self,
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
-        limit: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> BoxFuture<Result<GetSubtrees>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
@@ -1145,7 +1145,7 @@ where
         &self,
         pool: String,
         _start_index: NoteCommitmentSubtreeIndex,
-        _limit: NoteCommitmentSubtreeIndex,
+        _limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> BoxFuture<Result<GetSubtrees>> {
         async move {
             const POOL_LIST: &[&str] = &["sapling", "orchard"];
