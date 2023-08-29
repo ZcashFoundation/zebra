@@ -208,13 +208,18 @@ impl StartCmd {
         // And give it time to clear its queue
         tokio::task::yield_now().await;
 
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        if config.mining != zebra_rpc::config::mining::Config::default() {
+            warn!(
+                "Unused mining section in config,\
+                 compile with 'getblocktemplate-rpcs' feature to use mining RPCs"
+            );
+        }
+
         // Launch RPC server
         let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc.clone(),
-            #[cfg(feature = "getblocktemplate-rpcs")]
             config.mining.clone(),
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            (),
             build_version(),
             user_agent(),
             mempool.clone(),
