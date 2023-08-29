@@ -2,16 +2,20 @@
 
 use std::sync::Arc;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize};
 
 use crate::block::Height;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// Height at which Zebra tracks subtree roots
 pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 
-/// A subtree index
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// A note commitment subtree index, used to identify a subtree in a shielded pool.
+/// Also used to count subtrees.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);
 
 impl From<u16> for NoteCommitmentSubtreeIndex {
