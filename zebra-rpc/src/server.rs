@@ -95,10 +95,7 @@ impl RpcServer {
         AddressBook,
     >(
         config: Config,
-        #[cfg(feature = "getblocktemplate-rpcs")] mining_config: crate::config::mining::Config,
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        #[allow(unused_variables)]
-        mining_config: (),
+        mining_config: crate::config::mining::Config,
         build_version: VersionString,
         user_agent: UserAgentString,
         mempool: Buffer<Mempool, mempool::Request>,
