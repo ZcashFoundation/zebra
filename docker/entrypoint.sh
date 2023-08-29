@@ -8,7 +8,6 @@ set -e
 set -o pipefail
 
 : "${NETWORK:=Mainnet}"
-: "${RUST_LOG:-info}"
 echo "Test variables:"
 echo "NETWORK=$NETWORK"
 echo "ZEBRA_TEST_LIGHTWALLETD=$ZEBRA_TEST_LIGHTWALLETD"
