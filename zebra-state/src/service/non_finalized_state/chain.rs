@@ -693,7 +693,7 @@ impl Chain {
             .cloned()
     }
 
-    /// Returns the Sapling [`NoteCommitmentSubtree`](sapling::tree::NoteCommitmentSubtree) specified
+    /// Returns the Sapling [`NoteCommitmentSubtree`] specified
     /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn sapling_subtree_by_index(
         &self,
@@ -854,7 +854,7 @@ impl Chain {
             .map(|(_height, tree)| tree.clone())
     }
 
-    /// Returns the Orchard [`NoteCommitmentSubtree`](orchard::tree::NoteCommitmentSubtree) specified
+    /// Returns the Orchard [`NoteCommitmentSubtree`] specified
     /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn orchard_subtree(
         &self,

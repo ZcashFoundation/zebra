@@ -55,7 +55,6 @@ use crate::methods::{
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
-pub mod config;
 pub mod constants;
 pub mod get_block_template;
 pub mod types;
@@ -315,7 +314,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         network: Network,
-        mining_config: config::Config,
+        mining_config: crate::config::mining::Config,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
