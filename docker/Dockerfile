@@ -70,6 +70,9 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
 # Build arguments and variables set for tracelog levels and debug information
 #
 # We set defaults to all variables.
+ARG RUST_LOG
+ENV RUST_LOG=${RUST_LOG:-info}
+
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE=${RUST_BACKTRACE:-1}
 
