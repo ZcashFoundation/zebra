@@ -32,7 +32,7 @@ use crate::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::{get_block_template_rpcs, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
@@ -95,11 +95,7 @@ impl RpcServer {
         AddressBook,
     >(
         config: Config,
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        mining_config: get_block_template_rpcs::config::Config,
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        #[allow(unused_variables)]
-        mining_config: (),
+        mining_config: crate::config::mining::Config,
         build_version: VersionString,
         user_agent: UserAgentString,
         mempool: Buffer<Mempool, mempool::Request>,

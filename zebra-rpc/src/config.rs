@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
+pub mod mining;
+
 /// RPC configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
