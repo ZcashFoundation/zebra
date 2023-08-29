@@ -87,8 +87,7 @@ where
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
-/// Returns the Orchard
-/// [`NoteCommitmentSubtree`] specified by an
+/// Returns the Orchard [`NoteCommitmentSubtree`] specified by an
 /// index, if it exists in the non-finalized `chain` or finalized `db`.
 #[allow(unused)]
 pub fn orchard_subtree<C>(
