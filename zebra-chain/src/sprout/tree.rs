@@ -377,7 +377,13 @@ impl Eq for NoteCommitmentTree {}
 
 impl PartialEq for NoteCommitmentTree {
     fn eq(&self, other: &Self) -> bool {
-        self.hash() == other.hash()
+        if let (Some(root), Some(other_root)) = (self.cached_root(), other.cached_root()) {
+            // Use cached roots if available
+            root == other_root
+        } else {
+            // Avoid expensive root recalculations which use multiple cryptographic hashes
+            self.inner == other.inner
+        }
     }
 }
 

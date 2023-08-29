@@ -125,14 +125,37 @@ impl Arbitrary for Flags {
     type Strategy = BoxedStrategy<Self>;
 }
 
+fn pallas_base_strat() -> BoxedStrategy<pallas::Base> {
+    (vec(any::<u8>(), 64))
+        .prop_map(|bytes| {
+            let bytes = bytes.try_into().expect("vec is the correct length");
+            pallas::Base::from_uniform_bytes(&bytes)
+        })
+        .boxed()
+}
+
 impl Arbitrary for tree::Root {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 64))
-            .prop_map(|bytes| {
-                let bytes = bytes.try_into().expect("vec is the correct length");
-                Self::try_from(pallas::Base::from_uniform_bytes(&bytes).to_repr())
+        pallas_base_strat()
+            .prop_map(|base| {
+                Self::try_from(base.to_repr())
+                    .expect("a valid generated Orchard note commitment tree root")
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for tree::Node {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        pallas_base_strat()
+            .prop_map(|base| {
+                Self::try_from(base.to_repr())
                     .expect("a valid generated Orchard note commitment tree root")
             })
             .boxed()

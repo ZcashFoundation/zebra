@@ -15,6 +15,7 @@ use zebra_chain::{
     sapling,
     serialization::SerializationError,
     sprout,
+    subtree::NoteCommitmentSubtree,
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -235,13 +236,17 @@ impl Treestate {
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
+        sapling_subtree: Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>,
+        orchard_subtree: Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
         Self {
             note_commitment_trees: NoteCommitmentTrees {
                 sprout,
                 sapling,
+                sapling_subtree,
                 orchard,
+                orchard_subtree,
             },
             history_tree,
         }

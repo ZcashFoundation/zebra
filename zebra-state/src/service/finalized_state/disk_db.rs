@@ -119,7 +119,8 @@ pub trait WriteDisk {
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
 
-    /// Remove the given key range from rocksdb column family if it exists.
+    /// Deletes the given key range from rocksdb column family if it exists, including `from` and
+    /// excluding `to`.
     fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -147,6 +148,8 @@ impl WriteDisk for DiskWriteBatch {
         self.batch.delete_cf(cf, key_bytes);
     }
 
+    // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+    //       see zs_range_iter() for an example of the edge cases
     fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -464,7 +467,13 @@ impl DiskDb {
             .iterator_cf(cf, start_mode)
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
-            // Handle Excluded start and the end bound
+            // Skip excluded start bound and empty ranges. The `start_mode` already skips keys
+            // before the start bound.
+            .skip_while({
+                let range = range.clone();
+                move |(key, _value)| !range.contains(key)
+            })
+            // Take until the excluded end bound is reached, or we're after the included end bound.
             .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
     }
@@ -495,7 +504,7 @@ impl DiskDb {
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// The column families supported by the running database code.
-    const COLUMN_FAMILIES_IN_CODE: &[&'static str] = &[
+    const COLUMN_FAMILIES_IN_CODE: &'static [&'static str] = &[
         // Blocks
         "hash_by_height",
         "height_by_hash",
@@ -517,10 +526,12 @@ impl DiskDb {
         "sapling_nullifiers",
         "sapling_anchors",
         "sapling_note_commitment_tree",
+        "sapling_note_commitment_subtree",
         // Orchard
         "orchard_nullifiers",
         "orchard_anchors",
         "orchard_note_commitment_tree",
+        "orchard_note_commitment_subtree",
         // Chain
         "history_tree",
         "tip_chain_value_pool",

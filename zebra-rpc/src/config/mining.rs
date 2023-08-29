@@ -39,3 +39,16 @@ impl Default for Config {
         }
     }
 }
+
+impl Config {
+    /// Return true if `getblocktemplate-rpcs` rust feature is not turned on, false otherwise.
+    ///
+    /// This is used to ignore the mining section of the configuration if the feature is not
+    /// enabled, allowing us to log a warning when the config found is different from the default.
+    pub fn skip_getblocktemplate(&self) -> bool {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        return false;
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        return true;
+    }
+}

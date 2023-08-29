@@ -15,7 +15,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    block::Height, orchard, parallel::tree::NoteCommitmentTrees, sapling, sprout,
+    block::Height,
+    orchard,
+    parallel::tree::NoteCommitmentTrees,
+    sapling, sprout,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
 };
 
@@ -68,6 +72,8 @@ impl ZebraDb {
         self.db.zs_contains(&orchard_anchors, &orchard_anchor)
     }
 
+    // # Sprout trees
+
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sprout_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
@@ -112,7 +118,10 @@ impl ZebraDb {
             .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
     }
 
-    /// Returns the Sapling note commitment trees starting from the given block height up to the chain tip
+    // # Sapling trees
+
+    /// Returns the Sapling note commitment tree of the finalized tip or the empty tree if the state
+    /// is empty.
     pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -123,35 +132,8 @@ impl ZebraDb {
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
-    /// Returns the Orchard note commitment trees starting from the given block height up to the chain tip
-    #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_tree_by_height_range<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Height, Arc<orchard::tree::NoteCommitmentTree>)> + '_
-    where
-        R: std::ops::RangeBounds<Height>,
-    {
-        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&orchard_trees, range)
-    }
-
-    /// Returns the Sapling note commitment tree matching the given block height,
-    /// or `None` if the height is above the finalized tip.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_tree_by_height_range<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (Height, Arc<sapling::tree::NoteCommitmentTree>)> + '_
-    where
-        R: std::ops::RangeBounds<Height>,
-    {
-        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&sapling_trees, range)
-    }
-
-    /// Returns the Sapling note commitment tree matching the given block height,
-    /// or `None` if the height is above the finalized tip.
+    /// Returns the Sapling note commitment tree matching the given block height, or `None` if the
+    /// height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_height(
         &self,
@@ -178,8 +160,39 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Returns the Orchard note commitment tree of the finalized tip
-    /// or the empty tree if the state is empty.
+    /// Returns the Sapling note commitment trees in the supplied range.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<sapling::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
+        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        self.db.zs_range_iter(&sapling_trees, range)
+    }
+
+    /// Returns the Sapling note commitment subtree at this index
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+            self.db.zs_get(&sapling_subtrees, &index.into())?;
+        Some(subtree_data.with_index(index))
+    }
+
+    // Orchard trees
+
+    /// Returns the Orchard note commitment tree of the finalized tip or the empty tree if the state
+    /// is empty.
     pub fn orchard_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
@@ -188,6 +201,22 @@ impl ZebraDb {
 
         self.orchard_tree_by_height(&height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Orchard note commitment subtree at this index
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
+            self.db.zs_get(&orchard_subtrees, &index.into())?;
+        Some(subtree_data.with_index(index))
     }
 
     /// Returns the Orchard note commitment tree matching the given block height,
@@ -218,13 +247,28 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
+    /// Returns the Orchard note commitment trees in the supplied range.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<orchard::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
+        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        self.db.zs_range_iter(&orchard_trees, range)
+    }
+
     /// Returns the shielded note commitment trees of the finalized tip
     /// or the empty trees if the state is empty.
     pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
         NoteCommitmentTrees {
             sprout: self.sprout_tree(),
             sapling: self.sapling_tree(),
+            sapling_subtree: None,
             orchard: self.orchard_tree(),
+            orchard_subtree: None,
         }
     }
 }
@@ -310,6 +354,9 @@ impl DiskWriteBatch {
         let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
+        let _sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
+        let _orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
+
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
@@ -355,6 +402,16 @@ impl DiskWriteBatch {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 
+        // TODO: Increment DATABASE_FORMAT_MINOR_VERSION and uncomment these insertions
+
+        // if let Some(subtree) = trees.sapling_subtree {
+        //     self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
+        // }
+
+        // if let Some(subtree) = trees.orchard_subtree {
+        //     self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
+        // }
+
         self.prepare_history_batch(db, finalized)
     }
 
@@ -368,11 +425,14 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the range of Sapling note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    #[allow(dead_code)]
     pub fn delete_range_sapling_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let sapling_tree_cf = zebra_db
             .db
             .cf_handle("sapling_note_commitment_tree")
             .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&sapling_tree_cf, from, to);
     }
 
@@ -386,11 +446,14 @@ impl DiskWriteBatch {
     }
 
     /// Deletes the range of Orchard note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    #[allow(dead_code)]
     pub fn delete_range_orchard_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let orchard_tree_cf = zebra_db
             .db
             .cf_handle("orchard_note_commitment_tree")
             .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&orchard_tree_cf, from, to);
     }
 }

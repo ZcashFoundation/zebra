@@ -311,7 +311,7 @@ where
                     let tx = match network
                         .oneshot(req)
                         .await
-                        .map_err(|e| TransactionDownloadVerifyError::DownloadFailed(e))?
+                        .map_err(TransactionDownloadVerifyError::DownloadFailed)?
                     {
                         zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
                             TransactionDownloadVerifyError::DownloadFailed(
@@ -471,7 +471,7 @@ where
         match state
             .ready()
             .await
-            .map_err(|e| TransactionDownloadVerifyError::StateError(e))?
+            .map_err(TransactionDownloadVerifyError::StateError)?
             .call(zs::Request::Transaction(txid.mined_id()))
             .await
         {
