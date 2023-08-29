@@ -32,7 +32,10 @@ use zebra_chain::{
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
 
-use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
+use crate::{
+    constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
+    queue::Queue,
+};
 
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
@@ -1140,11 +1143,21 @@ where
 
     fn z_get_subtrees_by_index(
         &self,
-        _pool: String,
+        pool: String,
         _start_index: NoteCommitmentSubtreeIndex,
         _limit: NoteCommitmentSubtreeIndex,
     ) -> BoxFuture<Result<GetSubtrees>> {
         async move {
+            const POOL_LIST: &[&str] = &["sapling", "orchard"];
+
+            if !POOL_LIST.contains(&pool.as_str()) {
+                return Err(Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: format!("invalid pool name, must be one of: {:?}", POOL_LIST),
+                    data: None,
+                });
+            }
+
             Err(Error {
                 // `zcashd` doesn't do dynamic rebuilds, so we just use the general "missing block"
                 // error code here
