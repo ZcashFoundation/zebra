@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 This release:
 
 - Contains an automatic database upgrade that reduces the size of Zebra's
-  current cached state from approximately 276GB to 244GB. It does so by not
-  storing unneeded note commitment trees.
+  current cached state from approximately 276GB to 244GB. It does so by
+  automatically pruning unneeded note commitment trees from an existing cache.
+  New Zebra instances will also build their cache without these trees.
 -
 
 ### Changed
