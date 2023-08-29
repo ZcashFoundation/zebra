@@ -177,9 +177,6 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    // Give some time for transaction to be sent to mempool
-    std::thread::sleep(std::time::Duration::from_secs(30));
-
     // Check if some transaction is sent to mempool
     tracing::info!("waiting for mempool to verify some transactions...");
     zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
