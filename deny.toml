@@ -74,7 +74,7 @@ skip-tree = [
     # ECC crates
 
     # wait for minreq and zcash_proofs to upgrade
-    { name = "rustls", version = "=0.20.8" },
+    { name = "rustls", version = "=0.20.9" },
 
     # wait for zcash_proofs to upgrade
     { name = "webpki-roots", version = "=0.22.6" },
