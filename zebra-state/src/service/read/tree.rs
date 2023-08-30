@@ -23,6 +23,10 @@ use crate::{
     HashOrHeight,
 };
 
+// Doc-only items
+#[allow(unused_imports)]
+use zebra_chain::subtree::NoteCommitmentSubtree;
+
 /// Returns the Sapling
 /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
 /// hash or height, if it exists in the non-finalized `chain` or finalized `db`.

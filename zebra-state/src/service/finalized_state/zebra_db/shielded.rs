@@ -35,6 +35,10 @@ use crate::{
     BoxError, SemanticallyVerifiedBlock,
 };
 
+// Doc-only items
+#[allow(unused_imports)]
+use zebra_chain::subtree::NoteCommitmentSubtree;
+
 impl ZebraDb {
     // Read shielded methods
 
