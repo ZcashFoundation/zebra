@@ -1509,15 +1509,12 @@ impl Service<ReadRequest> for ReadStateService {
                     span.in_scope(move || {
                         let sapling_subtrees = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                /* TODO:
                                 read::sapling_subtrees(
                                     non_finalized_state.best_chain(),
                                     &state.db,
                                     start_index,
                                     limit,
                                 )
-                                 */
-                                Default::default()
                             },
                         );
 
@@ -1537,15 +1534,12 @@ impl Service<ReadRequest> for ReadStateService {
                     span.in_scope(move || {
                         let orchard_subtrees = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                /* TODO:
                                 read::orchard_subtrees(
                                     non_finalized_state.best_chain(),
                                     &state.db,
                                     start_index,
                                     limit,
                                 )
-                                 */
-                                Default::default()
                             },
                         );
 
