@@ -57,11 +57,8 @@
 //!
 //! The lightwalletd software is an interface service that uses zebrad or zcashd RPC methods to serve wallets or other applications with blockchain content in an efficient manner.
 //! There are several versions of lightwalled in the form of different forks. The original
-//! repo is <https://github.com/zcash/lightwalletd>, zecwallet Lite uses a custom fork: <https://github.com/adityapk00/lightwalletd>.
-//! Initially this tests were made with `adityapk00/lightwalletd` fork but changes for fast spendability support had
-//! been made to `zcash/lightwalletd` only.
-//!
-//! We expect `adityapk00/lightwalletd` to remain working with Zebra but for this tests we are using `zcash/lightwalletd`.
+//! repo is <https://github.com/zcash/lightwalletd> but Zecwallet Lite uses a custom fork: <https://github.com/adityapk00/lightwalletd>.
+//! The custom fork from adityapk00 is the one Zebra use for this tests:
 //!
 //! Zebra lightwalletd tests are not all marked as ignored but none will run unless
 //! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
