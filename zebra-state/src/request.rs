@@ -15,7 +15,7 @@ use zebra_chain::{
     sapling,
     serialization::SerializationError,
     sprout,
-    subtree::NoteCommitmentSubtree,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -849,6 +849,36 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
 
+    /// Returns a list of Sapling note commitment subtrees by their indexes,
+    /// starting at `start_index`, and returning up to `limit` subtrees.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SaplingSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::SaplingSubtrees)
+    ///
+    /// If there is no subtree at `start_index`, returns an empty list.
+    SaplingSubtrees {
+        /// The index of the first 2^16-leaf subtree to return.
+        start_index: NoteCommitmentSubtreeIndex,
+        /// The maximum number of subtree values to return.
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    },
+
+    /// Returns a list of Orchard note commitment subtrees by their indexes,
+    /// starting at `start_index`, and returning up to `limit` subtrees.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::OrchardSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::OrchardSubtrees)
+    ///
+    /// If there is no subtree at `start_index`, returns an empty list.
+    OrchardSubtrees {
+        /// The index of the first 2^16-leaf subtree to return.
+        start_index: NoteCommitmentSubtreeIndex,
+        /// The maximum number of subtree values to return.
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    },
+
     /// Looks up the balance of a set of transparent addresses.
     ///
     /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
@@ -942,6 +972,8 @@ impl ReadRequest {
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
+            ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
+            ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
