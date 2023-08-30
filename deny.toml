@@ -90,9 +90,6 @@ skip-tree = [
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
 
-    # wait for proptest-derive to upgrade proc-macro2 and syn
-    { name = "unicode-xid", version = "=0.1.0"},
-
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
