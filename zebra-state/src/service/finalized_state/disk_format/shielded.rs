@@ -80,6 +80,13 @@ impl IntoDisk for orchard::tree::Root {
     }
 }
 
+impl FromDisk for orchard::tree::Root {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
+        array.try_into().expect("finalized data must be valid")
+    }
+}
+
 impl IntoDisk for NoteCommitmentSubtreeIndex {
     type Bytes = [u8; 2];
 
@@ -88,10 +95,10 @@ impl IntoDisk for NoteCommitmentSubtreeIndex {
     }
 }
 
-impl FromDisk for orchard::tree::Root {
+impl FromDisk for NoteCommitmentSubtreeIndex {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
-        array.try_into().expect("finalized data must be valid")
+        let array: [u8; 2] = bytes.as_ref().try_into().unwrap();
+        Self(u16::from_be_bytes(array))
     }
 }
 
