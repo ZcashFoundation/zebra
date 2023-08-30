@@ -12,14 +12,17 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use zebra_chain::{
     block::Height,
     orchard,
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
 };
 
@@ -173,20 +176,58 @@ impl ZebraDb {
         self.db.zs_range_iter(&sapling_trees, range)
     }
 
-    /// Returns the Sapling note commitment subtree at this index
+    /// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// If there is no subtree at `start_index`, the returned list is empty.
+    /// Otherwise, subtrees are continuous up to the finalized tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
+    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
+    /// updates.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_subtree_by_index(
+    pub fn sapling_subtrees_by_index(
         &self,
-        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
-    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
             .unwrap();
 
-        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
-            self.db.zs_get(&sapling_subtrees, &index.into())?;
-        Some(subtree_data.with_index(index))
+        // Calculate the end bound, checking for overflow.
+        let exclusive_end_bound: Option<NoteCommitmentSubtreeIndex> = limit
+            .and_then(|limit| start_index.0.checked_add(limit.0))
+            .map(NoteCommitmentSubtreeIndex);
+
+        let list: BTreeMap<
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<sapling::tree::Node>,
+        >;
+
+        if let Some(exclusive_end_bound) = exclusive_end_bound {
+            list = self
+                .db
+                .zs_range_iter(&sapling_subtrees, start_index..exclusive_end_bound)
+                .collect();
+        } else {
+            // If there is no end bound, just return all the trees.
+            // If the end bound would overflow, just returns all the trees, because that's what
+            // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+            // the trees run out.)
+            list = self
+                .db
+                .zs_range_iter(&sapling_subtrees, start_index..)
+                .collect();
+        }
+
+        // Check that we got the start subtree.
+        if list.get(&start_index).is_some() {
+            list
+        } else {
+            BTreeMap::new()
+        }
     }
 
     // Orchard trees
@@ -201,22 +242,6 @@ impl ZebraDb {
 
         self.orchard_tree_by_height(&height)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
-    }
-
-    /// Returns the Orchard note commitment subtree at this index
-    #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_subtree_by_index(
-        &self,
-        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
-    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
-        let orchard_subtrees = self
-            .db
-            .cf_handle("orchard_note_commitment_subtree")
-            .unwrap();
-
-        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
-            self.db.zs_get(&orchard_subtrees, &index.into())?;
-        Some(subtree_data.with_index(index))
     }
 
     /// Returns the Orchard note commitment tree matching the given block height,
@@ -258,6 +283,60 @@ impl ZebraDb {
     {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
         self.db.zs_range_iter(&orchard_trees, range)
+    }
+
+    /// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// If there is no subtree at `start_index`, the returned list is empty.
+    /// Otherwise, subtrees are continuous up to the finalized tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
+    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
+    /// updates.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_subtrees_by_index(
+        &self,
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        // Calculate the end bound, checking for overflow.
+        let exclusive_end_bound: Option<NoteCommitmentSubtreeIndex> = limit
+            .and_then(|limit| start_index.0.checked_add(limit.0))
+            .map(NoteCommitmentSubtreeIndex);
+
+        let list: BTreeMap<
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<orchard::tree::Node>,
+        >;
+
+        if let Some(exclusive_end_bound) = exclusive_end_bound {
+            list = self
+                .db
+                .zs_range_iter(&orchard_subtrees, start_index..exclusive_end_bound)
+                .collect();
+        } else {
+            // If there is no end bound, just return all the trees.
+            // If the end bound would overflow, just returns all the trees, because that's what
+            // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+            // the trees run out.)
+            list = self
+                .db
+                .zs_range_iter(&orchard_subtrees, start_index..)
+                .collect();
+        }
+
+        // Check that we got the start subtree.
+        if list.get(&start_index).is_some() {
+            list
+        } else {
+            BTreeMap::new()
+        }
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
