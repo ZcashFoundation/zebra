@@ -1,7 +1,5 @@
 //! Struct representing Sapling/Orchard note commitment subtrees
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 
 use crate::block::Height;
@@ -45,9 +43,9 @@ pub struct NoteCommitmentSubtree<Node> {
 
 impl<Node> NoteCommitmentSubtree<Node> {
     /// Creates new [`NoteCommitmentSubtree`]
-    pub fn new(index: impl Into<NoteCommitmentSubtreeIndex>, end: Height, node: Node) -> Arc<Self> {
+    pub fn new(index: impl Into<NoteCommitmentSubtreeIndex>, end: Height, node: Node) -> Self {
         let index = index.into();
-        Arc::new(Self { index, end, node })
+        Self { index, end, node }
     }
 
     /// Converts struct to [`NoteCommitmentSubtreeData`].
@@ -82,7 +80,7 @@ impl<Node> NoteCommitmentSubtreeData<Node> {
     pub fn with_index(
         self,
         index: impl Into<NoteCommitmentSubtreeIndex>,
-    ) -> Arc<NoteCommitmentSubtree<Node>> {
+    ) -> NoteCommitmentSubtree<Node> {
         NoteCommitmentSubtree::new(index, self.end, self.node)
     }
 }
