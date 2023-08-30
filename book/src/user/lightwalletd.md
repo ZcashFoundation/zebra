@@ -159,7 +159,7 @@ Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/
 The final goal is to connect wallets to the lightwalletd service backed by Zebra. 
 
 For demo purposes we used [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with the [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) fork.
-[zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with [zcash/lightwalletd](https://github.com/zcash/lightwalletd) fork was not yet tested.
+We didn't test [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with [zcash/lightwalletd](https://github.com/zcash/lightwalletd) yet.
 
 Make sure both `zebrad` and `lightwalletd` are running and listening.
 
