@@ -1,8 +1,11 @@
 //! Types and functions for note commitment tree RPCs.
 //
-// TODO: move the *Tree* and *Commitment* types into this module.
+// TODO: move the *Tree and *Commitment types into this module.
 
 use zebra_chain::subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex};
+
+/// A subtree data type that can hold Sapling or Orchard subtree roots.
+pub type SubtreeRpcData = NoteCommitmentSubtreeData<String>;
 
 /// Response to a `z_getsubtreesbyindex` RPC request.
 ///
@@ -13,10 +16,10 @@ pub struct GetSubtrees {
     /// The shielded pool to which the subtrees belong.
     //
     // TODO: consider an enum with a string conversion?
-    pool: String,
+    pub pool: String,
 
     /// The index of the first subtree.
-    start_index: NoteCommitmentSubtreeIndex,
+    pub start_index: NoteCommitmentSubtreeIndex,
 
     /// A sequential list of complete subtrees, in `index` order.
     ///
@@ -24,5 +27,5 @@ pub struct GetSubtrees {
     //
     // TODO: is this needed?
     //#[serde(skip_serializing_if = "Vec::is_empty")]
-    subtrees: Vec<NoteCommitmentSubtreeData<String>>,
+    pub subtrees: Vec<SubtreeRpcData>,
 }
