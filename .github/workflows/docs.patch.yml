@@ -1,0 +1,42 @@
+name: Docs
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      # doc source files
+      - 'book/**'
+      - '**/firebase.json'
+      - '**/.firebaserc'
+      - 'katex-header.html'
+      # rustdoc source files
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - '.github/workflows/docs.yml'
+
+jobs:
+  build-docs-book:
+    name: Build and Deploy Zebra Book Docs
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  build-docs-external:
+    name: Build and Deploy Zebra External Docs
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  build-docs-internal:
+    name: Build and Deploy Zebra Internal Docs
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
