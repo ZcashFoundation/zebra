@@ -102,7 +102,13 @@ where
         // Otherwise, the subtree is already in the list, so we don't need to add it.
     }
 
-    db_list
+    // Check that we got the start subtree from the non-finalized or finalized state.
+    // (The non-finalized state doesn't do this check.)
+    if db_list.get(&start_index).is_some() {
+        db_list
+    } else {
+        BTreeMap::new()
+    }
 }
 
 /// Returns the Orchard
@@ -184,7 +190,13 @@ where
         // Otherwise, the subtree is already in the list, so we don't need to add it.
     }
 
-    db_list
+    // Check that we got the start subtree from the non-finalized or finalized state.
+    // (The non-finalized state doesn't do this check.)
+    if db_list.get(&start_index).is_some() {
+        db_list
+    } else {
+        BTreeMap::new()
+    }
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
