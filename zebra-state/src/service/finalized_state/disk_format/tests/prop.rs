@@ -218,7 +218,7 @@ fn roundtrip_amount() {
 fn roundtrip_note_commitment_subtree_index() {
     let _init_guard = zebra_test::init();
 
-    proptest!(|(mut val in any::<NoteCommitmentSubtreeIndex>())| {
+    proptest!(|(val in any::<NoteCommitmentSubtreeIndex>())| {
         assert_value_properties(val)
     });
 }
