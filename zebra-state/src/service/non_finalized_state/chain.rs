@@ -695,16 +695,30 @@ impl Chain {
             .map(|(index, subtree)| subtree.with_index(*index))
     }
 
-    /// Returns the Sapling [`NoteCommitmentSubtree`] specified
-    /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
-    pub fn sapling_subtree_by_index(
+    /// Returns a list of Sapling [`NoteCommitmentSubtree`]s at or after `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// Unlike the finalized state and `ReadRequest::SaplingSubtrees`, the returned subtrees
+    /// can start after `start_index`. These subtrees are continuous up to the tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be
+    /// used to create an inconsistent list of subtrees after concurrent non-finalized and
+    /// finalized updates.
+    pub fn sapling_subtrees_in_range(
         &self,
-        index: NoteCommitmentSubtreeIndex,
-    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+        let limit = limit
+            .map(|limit| usize::from(limit.0))
+            .unwrap_or(usize::MAX);
+
+        // Since we're working in memory, it's ok to iterate through the whole range here.
         self.sapling_subtrees
-            .iter()
-            .find(|subtree| subtree.index == index)
-            .cloned()
+            .range(start_index..)
+            .take(limit)
+            .map(|(index, subtree)| (*index, *subtree))
+            .collect()
     }
 
     /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
@@ -871,16 +885,30 @@ impl Chain {
             .map(|(index, subtree)| subtree.with_index(*index))
     }
 
-    /// Returns the Orchard [`NoteCommitmentSubtree`] specified
-    /// by an index, if it exists in the non-finalized [`Chain`].
-    pub fn orchard_subtree_by_index(
+    /// Returns a list of Orchard [`NoteCommitmentSubtree`]s at or after `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// Unlike the finalized state and `ReadRequest::OrchardSubtrees`, the returned subtrees
+    /// can start after `start_index`. These subtrees are continuous up to the tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be
+    /// used to create an inconsistent list of subtrees after concurrent non-finalized and
+    /// finalized updates.
+    pub fn orchard_subtrees_in_range(
         &self,
-        index: NoteCommitmentSubtreeIndex,
-    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>> {
+        let limit = limit
+            .map(|limit| usize::from(limit.0))
+            .unwrap_or(usize::MAX);
+
+        // Since we're working in memory, it's ok to iterate through the whole range here.
         self.orchard_subtrees
-            .iter()
-            .find(|subtree| subtree.index == index)
-            .cloned()
+            .range(start_index..)
+            .take(limit)
+            .map(|(index, subtree)| (*index, *subtree))
+            .collect()
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
