@@ -2,7 +2,7 @@
 
 Zebra's RPC methods can support a lightwalletd service backed by zebrad. We
 recommend using
-[adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because we
+[zcash/lightwalletd](https://github.com/zcash/lightwalletd) because we
 use it in testing. Other `lightwalletd` forks have limited support, see the
 [Sync lightwalletd](#sync-lightwalletd) section for more info.
 
@@ -92,14 +92,14 @@ For implementing zebra as a service please see [here](https://github.com/ZcashFo
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
-While you synchronize Zebra you can install [lightwalletd](https://github.com/adityapk00/lightwalletd).
+While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
 
 Before installing, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
 
 With go installed and in your path, download and install lightwalletd:
 
 ```console
-git clone https://github.com/adityapk00/lightwalletd
+git clone https://github.com/zcash/lightwalletd
 cd lightwalletd
 make
 make install
@@ -112,7 +112,7 @@ If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
-- `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `adityapk00/lightwalletd` fork 
+- `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `zcash/lightwalletd` fork.
     - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
     - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
     - When using testnet, use `testnet=1`
@@ -158,7 +158,8 @@ Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/
 
 The final goal is to connect wallets to the lightwalletd service backed by Zebra. 
 
-For demo purposes we use [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli).
+For demo purposes we used [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with the [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) fork.
+We didn't test [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with [zcash/lightwalletd](https://github.com/zcash/lightwalletd) yet.
 
 Make sure both `zebrad` and `lightwalletd` are running and listening.
 
