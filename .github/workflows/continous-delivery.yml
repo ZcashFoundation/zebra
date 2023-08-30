@@ -226,7 +226,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v3.5.3
+      - uses: actions/checkout@v3.6.0
         with:
           persist-credentials: false
 
@@ -328,7 +328,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v3.5.3
+      - uses: actions/checkout@v3.6.0
         with:
           persist-credentials: false
 

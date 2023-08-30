@@ -56,13 +56,13 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v3.5.3
+      - uses: actions/checkout@v3.6.0
         with:
           repository: zcash/lightwalletd
           ref: 'master'
           persist-credentials: false
 
-      - uses: actions/checkout@v3.5.3
+      - uses: actions/checkout@v3.6.0
         with:
           path: zebra
           persist-credentials: false
