@@ -14,7 +14,8 @@ pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 
 /// A note commitment subtree index, used to identify a subtree in a shielded pool.
 /// Also used to count subtrees.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(transparent)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);
 
@@ -32,6 +33,7 @@ impl From<u16> for NoteCommitmentSubtreeIndex {
 /// Subtree root of Sapling or Orchard note commitment tree,
 /// with its associated block height and subtree index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentSubtree<Node> {
     /// Index of this subtree
     pub index: NoteCommitmentSubtreeIndex,
