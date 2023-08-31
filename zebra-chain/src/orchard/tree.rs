@@ -347,6 +347,11 @@ impl NoteCommitmentTree {
         }
     }
 
+    /// Returns frontier of non-empty tree, or None.
+    pub fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
+        self.inner.value()
+    }
+
     /// Returns true if the most recently appended leaf completes the subtree
     pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
         tree.position()
