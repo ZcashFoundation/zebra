@@ -354,8 +354,8 @@ impl DiskWriteBatch {
         let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let _sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
-        let _orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
+        let sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
+        let orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
 
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
@@ -402,17 +402,30 @@ impl DiskWriteBatch {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 
-        // TODO: Increment DATABASE_FORMAT_MINOR_VERSION and uncomment these insertions
+        if let Some(subtree) = trees.sapling_subtree {
+            self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
+        }
 
-        // if let Some(subtree) = trees.sapling_subtree {
-        //     self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
-        // }
-
-        // if let Some(subtree) = trees.orchard_subtree {
-        //     self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
-        // }
+        if let Some(subtree) = trees.orchard_subtree {
+            self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
+        }
 
         self.prepare_history_batch(db, finalized)
+    }
+
+    // Sapling tree methods
+
+    /// Inserts the Sapling note commitment subtree.
+    pub fn insert_sapling_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: Arc<NoteCommitmentSubtree<sapling::tree::Node>>,
+    ) {
+        let sapling_subtree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Sapling note commitment tree at the given [`Height`].
@@ -434,6 +447,21 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&sapling_tree_cf, from, to);
+    }
+
+    // Orchard tree methods
+
+    /// Inserts the Orchard note commitment subtree.
+    pub fn insert_orchard_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: Arc<NoteCommitmentSubtree<orchard::tree::Node>>,
+    ) {
+        let orchard_subtree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].
