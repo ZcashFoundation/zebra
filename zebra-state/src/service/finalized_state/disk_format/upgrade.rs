@@ -68,7 +68,8 @@ pub struct DbFormatChangeThreadHandle {
     /// A handle that can wait for the running format change thread to finish.
     ///
     /// Panics from this thread are propagated into Zebra's state service.
-    update_task: Option<Arc<JoinHandle<()>>>,
+    /// The task returns an error if the upgrade was cancelled by a shutdown.
+    update_task: Option<Arc<JoinHandle<Result<(), CancelFormatChange>>>>,
 
     /// A channel that tells the running format thread to finish early.
     /// A channel that tells the running format thread to finish early.
@@ -161,7 +162,7 @@ impl DbFormatChange {
                     initial_tip_height,
                     upgrade_db,
                     cancel_receiver,
-                );
+                )
             })
         });
 
@@ -178,7 +179,7 @@ impl DbFormatChange {
     /// Apply this format change to the database.
     ///
     /// Format changes are launched in an independent `std::thread` by `apply_format_upgrade()`.
-    /// This thread runs until the upgrade is finished.
+    /// This thread runs until the upgrade is finished or cancelled.
     ///
     /// See `apply_format_upgrade()` for details.
     fn apply_format_change(
@@ -188,7 +189,7 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
-    ) {
+    ) -> Result<(), CancelFormatChange> {
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
             Upgrade { .. } => self.apply_format_upgrade(
@@ -197,7 +198,7 @@ impl DbFormatChange {
                 initial_tip_height,
                 upgrade_db.clone(),
                 cancel_receiver,
-            ),
+            )?,
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(&config, network);
@@ -225,18 +226,21 @@ impl DbFormatChange {
         // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
         //   still know how to make sure trees are unique
         Self::check_for_duplicate_trees(upgrade_db);
+
+        Ok(())
     }
 
     /// Apply any required format updates to the database.
     /// Format changes should be launched in an independent `std::thread`.
     ///
     /// If `cancel_receiver` gets a message, or its sender is dropped,
-    /// the format change stops running early.
+    /// the format change stops running early, and returns an error.
     ///
     /// See the format upgrade design docs for more details:
     /// <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design>
     //
     // New format upgrades must be added to the *end* of this method.
+    #[allow(clippy::unwrap_in_result)]
     fn apply_format_upgrade(
         self,
         config: Config,
@@ -244,7 +248,7 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
-    ) {
+    ) -> Result<(), CancelFormatChange> {
         let Upgrade {
             newer_running_version,
             older_disk_version,
@@ -272,7 +276,7 @@ impl DbFormatChange {
                 "empty database is fully upgraded"
             );
 
-            return;
+            return Ok(());
         };
 
         // Note commitment tree de-duplication database upgrade task.
@@ -294,7 +298,7 @@ impl DbFormatChange {
             for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
+                    return Err(CancelFormatChange);
                 }
 
                 // Delete any duplicate trees.
@@ -321,7 +325,7 @@ impl DbFormatChange {
             for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
+                    return Err(CancelFormatChange);
                 }
 
                 // Delete any duplicate trees.
@@ -351,7 +355,7 @@ impl DbFormatChange {
 
         // Check if we need to add note commitment subtrees to the database.
         if older_disk_version < version_for_adding_subtrees {
-            add_subtrees::run(initial_tip_height, &db, cancel_receiver);
+            add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
             //
@@ -375,6 +379,8 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+
+        Ok(())
     }
 
     /// Check that note commitment trees were correctly de-duplicated.

@@ -13,17 +13,20 @@ use crate::service::finalized_state::{
 };
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
+///
+/// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
+#[allow(clippy::unwrap_in_result)]
 pub fn run(
     initial_tip_height: Height,
     upgrade_db: &ZebraDb,
     cancel_receiver: mpsc::Receiver<CancelFormatChange>,
-) {
+) -> Result<(), CancelFormatChange> {
     let mut subtree_count = 0;
     let mut prev_tree: Option<_> = None;
     for (height, tree) in upgrade_db.sapling_tree_by_height_range(..=initial_tip_height) {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-            return;
+            return Err(CancelFormatChange);
         }
 
         // Empty note commitment trees can't contain subtrees.
@@ -61,7 +64,7 @@ pub fn run(
             for sapling_note_commitment in block.sapling_note_commitments() {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
+                    return Err(CancelFormatChange);
                 }
 
                 sapling_nct
@@ -98,7 +101,7 @@ pub fn run(
     for (height, tree) in upgrade_db.orchard_tree_by_height_range(..=initial_tip_height) {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-            return;
+            return Err(CancelFormatChange);
         }
 
         // Empty note commitment trees can't contain subtrees.
@@ -134,7 +137,7 @@ pub fn run(
             for orchard_note_commitment in block.orchard_note_commitments() {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return;
+                    return Err(CancelFormatChange);
                 }
 
                 orchard_nct
@@ -165,6 +168,8 @@ pub fn run(
         subtree_count += 1;
         prev_tree = Some(tree);
     }
+
+    Ok(())
 }
 
 /// Writes a Sapling note commitment subtree to `upgrade_db`.
