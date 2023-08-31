@@ -183,6 +183,8 @@ fn write_sapling_subtree(
     upgrade_db
         .write_batch(batch)
         .expect("writing sapling note commitment subtrees should always succeed.");
+
+    info!(?height, index = ?index.0, "calculated and added sapling subtree");
 }
 
 /// Writes a Orchard note commitment subtree to `upgrade_db`.
@@ -201,4 +203,6 @@ fn write_orchard_subtree(
     upgrade_db
         .write_batch(batch)
         .expect("writing orchard note commitment subtrees should always succeed.");
+
+    info!(?height, index = ?index.0, "calculated and added orchard subtree");
 }
