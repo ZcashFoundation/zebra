@@ -197,7 +197,7 @@ impl DbFormatChange {
                 network,
                 initial_tip_height,
                 upgrade_db.clone(),
-                cancel_receiver,
+                &cancel_receiver,
             )?,
 
             NewlyCreated { .. } => {
@@ -225,7 +225,8 @@ impl DbFormatChange {
         // - an empty state doesn't have any trees, so it can't have duplicate trees
         // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
         //   still know how to make sure trees are unique
-        Self::check_for_duplicate_trees(upgrade_db);
+        Self::check_for_duplicate_trees(upgrade_db.clone());
+        add_subtrees::check(&upgrade_db, &cancel_receiver)?;
 
         Ok(())
     }
@@ -247,7 +248,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
             newer_running_version,
@@ -358,9 +359,7 @@ impl DbFormatChange {
             add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            //
-            // TODO: do this check in all the same places as check_for_duplicate_trees()
-            //Self::check_for_continuous_subtrees(db);
+            add_subtrees::check(&db, cancel_receiver)?;
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
