@@ -124,7 +124,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `hash|height`: (string, required) The hash or height for the block to be returned.
+    /// - `hash | height`: (string, required) The hash or height for the block to be returned.
     /// - `verbosity`: (numeric, optional, default=1) 0 for hex encoded data, 1 for a json object,
     ///     and 2 for json object with transaction data.
     ///
