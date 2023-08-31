@@ -222,7 +222,7 @@ fn deserialize_large_transaction() {
         transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
     // Create a lock time.
-    let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
+    let lock_time = LockTime::Time(DateTime::<Utc>::from_naive_utc_and_offset(
         NaiveDateTime::from_timestamp_opt(61, 0)
             .expect("in-range number of seconds and valid nanosecond"),
         Utc,
