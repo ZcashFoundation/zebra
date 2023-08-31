@@ -34,12 +34,19 @@ pub fn run(
 
         // Blocks cannot complete multiple level 16 subtrees,
         // the subtree index can increase by a maximum of 1 every ~20 blocks.
-        if subtree_address.index() <= subtree_count {
+        // If this block does complete a subtree, the subtree is either completed by a note before
+        // the final note (so the final note is in the next subtree), or by the final note
+        // (so the final note is the end of this subtree).
+        if subtree_address.index() <= subtree_count && !tree.is_complete_subtree() {
             prev_tree = Some(tree);
             continue;
         }
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            assert_eq!(
+                index, subtree_count,
+                "trees are inserted in order with no gaps"
+            );
             write_sapling_subtree(upgrade_db, index, height, node);
         } else {
             let mut prev_tree = prev_tree
@@ -75,6 +82,10 @@ pub fn run(
                  and that the block must complete a subtree",
             );
 
+            assert_eq!(
+                index, subtree_count,
+                "trees are inserted in order with no gaps"
+            );
             write_sapling_subtree(upgrade_db, index, height, node);
         };
 
@@ -96,14 +107,19 @@ pub fn run(
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
-        if subtree_address.index() <= subtree_count {
+        // Blocks cannot complete multiple level 16 subtrees.
+        // If a block does complete a subtree, it is either inside the block, or at the end.
+        // (See the detailed comment for Sapling.)
+        if subtree_address.index() <= subtree_count && !tree.is_complete_subtree() {
             prev_tree = Some(tree);
             continue;
         }
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            assert_eq!(
+                index, subtree_count,
+                "trees are inserted in order with no gaps"
+            );
             write_orchard_subtree(upgrade_db, index, height, node);
         } else {
             let mut prev_tree = prev_tree
@@ -139,6 +155,10 @@ pub fn run(
                  and that the block must complete a subtree",
             );
 
+            assert_eq!(
+                index, subtree_count,
+                "trees are inserted in order with no gaps"
+            );
             write_orchard_subtree(upgrade_db, index, height, node);
         };
 
