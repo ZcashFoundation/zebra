@@ -51,21 +51,14 @@ pub fn run(
                 .block(height.into())
                 .expect("height with note commitment tree should have block");
 
-            let sapling_note_commitments: Vec<_> = block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.sapling_note_commitments())
-                .cloned()
-                .collect();
-
-            for sapling_note_commitment in sapling_note_commitments {
+            for sapling_note_commitment in block.sapling_note_commitments() {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
 
                 sapling_nct
-                    .append(sapling_note_commitment)
+                    .append(*sapling_note_commitment)
                     .expect("finalized notes should append successfully");
 
                 // The loop always breaks on this condition,
@@ -122,21 +115,14 @@ pub fn run(
                 .block(height.into())
                 .expect("height with note commitment tree should have block");
 
-            let orchard_note_commitments: Vec<_> = block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.orchard_note_commitments())
-                .cloned()
-                .collect();
-
-            for orchard_note_commitment in orchard_note_commitments {
+            for orchard_note_commitment in block.orchard_note_commitments() {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return;
                 }
 
                 orchard_nct
-                    .append(orchard_note_commitment)
+                    .append(*orchard_note_commitment)
                     .expect("finalized notes should append successfully");
 
                 // The loop always breaks on this condition,

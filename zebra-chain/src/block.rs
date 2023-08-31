@@ -2,6 +2,8 @@
 
 use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
+use halo2::pasta::pallas;
+
 use crate::{
     amount::NegativeAllowed,
     block::merkle::AuthDataRoot,
@@ -152,16 +154,30 @@ impl Block {
 
     /// Access the [`orchard::Nullifier`]s from all transactions in this block.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
-        // Work around a compiler panic (ICE) with flat_map():
-        // https://github.com/rust-lang/rust/issues/105044
-        #[allow(clippy::needless_collect)]
-        let nullifiers: Vec<_> = self
-            .transactions
+        self.transactions
             .iter()
             .flat_map(|transaction| transaction.orchard_nullifiers())
-            .collect();
+    }
 
-        nullifiers.into_iter()
+    /// Access the [`sprout::NoteCommitment`]s from all transactions in this block.
+    pub fn sprout_note_commitments(&self) -> impl Iterator<Item = &sprout::NoteCommitment> {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.sprout_note_commitments())
+    }
+
+    /// Access the [sapling note commitments](jubjub::Fq) from all transactions in this block.
+    pub fn sapling_note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.sapling_note_commitments())
+    }
+
+    /// Access the [orchard note commitments](pallas::Base) from all transactions in this block.
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.orchard_note_commitments())
     }
 
     /// Count how many Sapling transactions exist in a block,
