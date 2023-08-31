@@ -178,7 +178,7 @@ fn write_sapling_subtree(
 
     let mut batch = DiskWriteBatch::new();
 
-    batch.insert_sapling_subtree(upgrade_db, subtree);
+    batch.insert_sapling_subtree(upgrade_db, &subtree);
 
     upgrade_db
         .write_batch(batch)
@@ -196,7 +196,7 @@ fn write_orchard_subtree(
 
     let mut batch = DiskWriteBatch::new();
 
-    batch.insert_orchard_subtree(upgrade_db, subtree);
+    batch.insert_orchard_subtree(upgrade_db, &subtree);
 
     upgrade_db
         .write_batch(batch)

@@ -400,11 +400,11 @@ impl DiskWriteBatch {
         }
 
         if let Some(subtree) = trees.sapling_subtree {
-            self.insert_sapling_subtree(zebra_db, subtree);
+            self.insert_sapling_subtree(zebra_db, &subtree);
         }
 
         if let Some(subtree) = trees.orchard_subtree {
-            self.insert_orchard_subtree(zebra_db, subtree);
+            self.insert_orchard_subtree(zebra_db, &subtree);
         }
 
         self.prepare_history_batch(db, finalized)
@@ -416,7 +416,7 @@ impl DiskWriteBatch {
     pub fn insert_sapling_subtree(
         &mut self,
         zebra_db: &ZebraDb,
-        subtree: Arc<NoteCommitmentSubtree<sapling::tree::Node>>,
+        subtree: &NoteCommitmentSubtree<sapling::tree::Node>,
     ) {
         let sapling_subtree_cf = zebra_db
             .db
@@ -452,7 +452,7 @@ impl DiskWriteBatch {
     pub fn insert_orchard_subtree(
         &mut self,
         zebra_db: &ZebraDb,
-        subtree: Arc<NoteCommitmentSubtree<orchard::tree::Node>>,
+        subtree: &NoteCommitmentSubtree<orchard::tree::Node>,
     ) {
         let orchard_subtree_cf = zebra_db
             .db
