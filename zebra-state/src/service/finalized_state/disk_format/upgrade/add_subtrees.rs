@@ -398,10 +398,10 @@ fn write_orchard_subtree(
         .write_batch(batch)
         .expect("writing orchard note commitment subtrees should always succeed.");
 
-    // This log happens about once per second on recent machines with SSD disks.
-    if index.0 % 100 == 0 {
+    if index.0 % 300 == 0 {
         info!(?height, index = ?index.0, "calculated and added orchard subtree");
     }
+    // This log happens about 3 times per second on recent machines with SSD disks.
     debug!(?height, index = ?index.0, ?node, "calculated and added orchard subtree");
 }
 
