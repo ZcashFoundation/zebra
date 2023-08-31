@@ -354,9 +354,6 @@ impl DiskWriteBatch {
         let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
-        let orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
-
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
@@ -403,11 +400,11 @@ impl DiskWriteBatch {
         }
 
         if let Some(subtree) = trees.sapling_subtree {
-            self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
+            self.insert_sapling_subtree(zebra_db, subtree);
         }
 
         if let Some(subtree) = trees.orchard_subtree {
-            self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
+            self.insert_orchard_subtree(zebra_db, subtree);
         }
 
         self.prepare_history_batch(db, finalized)
