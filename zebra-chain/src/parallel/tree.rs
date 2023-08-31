@@ -4,7 +4,11 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::{block::Block, orchard, sapling, sprout, subtree::NoteCommitmentSubtree};
+use crate::{
+    block::Block,
+    orchard, sapling, sprout,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+};
 
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
@@ -163,7 +167,7 @@ impl NoteCommitmentTrees {
     ) -> Result<
         (
             Arc<sapling::tree::NoteCommitmentTree>,
-            Option<(u16, sapling::tree::Node)>,
+            Option<(NoteCommitmentSubtreeIndex, sapling::tree::Node)>,
         ),
         NoteCommitmentTreeError,
     > {
@@ -202,7 +206,7 @@ impl NoteCommitmentTrees {
     ) -> Result<
         (
             Arc<orchard::tree::NoteCommitmentTree>,
-            Option<(u16, orchard::tree::Node)>,
+            Option<(NoteCommitmentSubtreeIndex, orchard::tree::Node)>,
         ),
         NoteCommitmentTreeError,
     > {

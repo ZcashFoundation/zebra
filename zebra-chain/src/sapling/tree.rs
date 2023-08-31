@@ -32,7 +32,7 @@ use crate::{
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    subtree::TRACKED_SUBTREE_HEIGHT,
+    subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
 
 pub mod legacy;
@@ -361,7 +361,7 @@ impl NoteCommitmentTree {
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
     #[allow(clippy::unwrap_in_result)]
-    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
+    pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
         if !self.is_complete_subtree() {
             return None;
         }

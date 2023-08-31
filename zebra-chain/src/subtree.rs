@@ -1,6 +1,6 @@
 //! Struct representing Sapling/Orchard note commitment subtrees
 
-use std::sync::Arc;
+use std::{num::TryFromIntError, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -17,6 +17,14 @@ pub struct NoteCommitmentSubtreeIndex(pub u16);
 impl From<u16> for NoteCommitmentSubtreeIndex {
     fn from(value: u16) -> Self {
         Self(value)
+    }
+}
+
+impl TryFrom<u64> for NoteCommitmentSubtreeIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        u16::try_from(value).map(Self)
     }
 }
 

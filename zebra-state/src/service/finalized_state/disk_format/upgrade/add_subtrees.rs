@@ -2,7 +2,11 @@
 
 use std::sync::{mpsc, Arc};
 
-use zebra_chain::{block::Height, subtree::NoteCommitmentSubtree};
+use zebra_chain::{
+    block::Height,
+    orchard, sapling,
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+};
 
 use crate::service::finalized_state::{
     disk_format::upgrade::CancelFormatChange, DiskWriteBatch, ZebraDb,
@@ -35,9 +39,8 @@ pub fn run(
             continue;
         }
 
-        let (index, node) = if tree.is_complete_subtree() {
-            tree.completed_subtree_index_and_root()
-                .expect("already checked is_complete_subtree()")
+        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            write_sapling_subtree(upgrade_db, index, height, node);
         } else {
             let mut prev_tree = prev_tree
                 .take()
@@ -73,22 +76,14 @@ pub fn run(
                 }
             }
 
-            sapling_nct.completed_subtree_index_and_root().expect(
+            let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
                 "block should have completed a subtree before its final note commitment: \
                  already checked is_complete_subtree(),\
                  and that the block must complete a subtree",
-            )
+            );
+
+            write_sapling_subtree(upgrade_db, index, height, node);
         };
-
-        let subtree = NoteCommitmentSubtree::new(index, height, node);
-
-        let mut batch = DiskWriteBatch::new();
-
-        batch.insert_sapling_subtree(upgrade_db, subtree);
-
-        upgrade_db
-            .write_batch(batch)
-            .expect("writing sapling note commitment subtrees should always succeed.");
 
         subtree_count += 1;
         prev_tree = Some(tree);
@@ -115,9 +110,8 @@ pub fn run(
             continue;
         }
 
-        let (index, node) = if tree.is_complete_subtree() {
-            tree.completed_subtree_index_and_root()
-                .expect("already checked is_complete_subtree()")
+        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            write_orchard_subtree(upgrade_db, index, height, node);
         } else {
             let mut prev_tree = prev_tree
                 .take()
@@ -153,24 +147,52 @@ pub fn run(
                 }
             }
 
-            orchard_nct.completed_subtree_index_and_root().expect(
+            let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
                 "block should have completed a subtree before its final note commitment: \
                  already checked is_complete_subtree(),\
                  and that the block must complete a subtree",
-            )
+            );
+
+            write_orchard_subtree(upgrade_db, index, height, node);
         };
-
-        let subtree = NoteCommitmentSubtree::new(index, height, node);
-
-        let mut batch = DiskWriteBatch::new();
-
-        batch.insert_orchard_subtree(upgrade_db, subtree);
-
-        upgrade_db
-            .write_batch(batch)
-            .expect("writing orchard note commitment subtrees should always succeed.");
 
         subtree_count += 1;
         prev_tree = Some(tree);
     }
+}
+
+/// Writes a Sapling note commitment subtree to `upgrade_db`.
+fn write_sapling_subtree(
+    upgrade_db: &ZebraDb,
+    index: NoteCommitmentSubtreeIndex,
+    height: Height,
+    node: sapling::tree::Node,
+) {
+    let subtree = NoteCommitmentSubtree::new(index, height, node);
+
+    let mut batch = DiskWriteBatch::new();
+
+    batch.insert_sapling_subtree(upgrade_db, subtree);
+
+    upgrade_db
+        .write_batch(batch)
+        .expect("writing sapling note commitment subtrees should always succeed.");
+}
+
+/// Writes a Orchard note commitment subtree to `upgrade_db`.
+fn write_orchard_subtree(
+    upgrade_db: &ZebraDb,
+    index: NoteCommitmentSubtreeIndex,
+    height: Height,
+    node: orchard::tree::Node,
+) {
+    let subtree = NoteCommitmentSubtree::new(index, height, node);
+
+    let mut batch = DiskWriteBatch::new();
+
+    batch.insert_orchard_subtree(upgrade_db, subtree);
+
+    upgrade_db
+        .write_batch(batch)
+        .expect("writing orchard note commitment subtrees should always succeed.");
 }
