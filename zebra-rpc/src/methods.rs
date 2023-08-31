@@ -180,7 +180,7 @@ pub trait Rpc {
     #[rpc(name = "z_gettreestate")]
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
 
-    /// Returns information about a range of Sapling & Orchard subtrees.
+    /// Returns information about a range of Sapling or Orchard subtrees.
     ///
     /// zcashd reference: [`z_getsubtreesbyindex`](https://zcash.github.io/rpc/z_getsubtreesbyindex.html)
     ///
@@ -194,8 +194,9 @@ pub trait Rpc {
     /// # Notes
     ///
     /// While Zebra is doing its initial subtree index rebuild, subtrees will become available
-    /// starting at the chain tip. This RPC will return an error if the `start_index` subtree
-    /// exists, but has not been rebuilt yet.
+    /// starting at the chain tip. This RPC will return an empty list if the `start_index` subtree
+    /// exists, but has not been rebuilt yet. This matches `zcashd`'s behaviour when subtrees aren't
+    /// available yet. (But `zcashd` does its rebuild before syncing any blocks.)
     #[rpc(name = "z_getsubtreesbyindex")]
     fn z_get_subtrees_by_index(
         &self,
