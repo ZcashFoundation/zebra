@@ -1,25 +1,25 @@
 //! Fully populate the Sapling and Orchard note commitment subtrees for existing blocks in the database.
 
-use std::sync::{
-    atomic::{self, AtomicBool},
-    Arc,
-};
+use std::sync::{mpsc, Arc};
 
 use zebra_chain::{block::Height, subtree::NoteCommitmentSubtree};
 
-use crate::service::finalized_state::{DiskWriteBatch, ZebraDb};
+use crate::service::finalized_state::{
+    disk_format::upgrade::CancelFormatChange, DiskWriteBatch, ZebraDb,
+};
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
-pub fn _run(
+pub fn run(
     initial_tip_height: Height,
     upgrade_db: &ZebraDb,
-    should_cancel_format_change: Arc<AtomicBool>,
+    cancel_receiver: mpsc::Receiver<CancelFormatChange>,
 ) {
     let mut subtree_count = 0;
     let mut prev_tree: Option<_> = None;
     for (height, tree) in upgrade_db.sapling_tree_by_height_range(..=initial_tip_height) {
-        if should_cancel_format_change.load(atomic::Ordering::Relaxed) {
-            break;
+        // Return early if there is a cancel signal.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return;
         }
 
         // Blocks cannot complete multiple level 16 subtrees,
@@ -57,6 +57,11 @@ pub fn _run(
                 .collect();
 
             for sapling_note_commitment in sapling_note_commitments {
+                // Return early if there is a cancel signal.
+                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    return;
+                }
+
                 sapling_nct
                     .append(sapling_note_commitment)
                     .expect("finalized notes should append successfully");
@@ -92,8 +97,9 @@ pub fn _run(
     let mut subtree_count = 0;
     let mut prev_tree: Option<_> = None;
     for (height, tree) in upgrade_db.orchard_tree_by_height_range(..=initial_tip_height) {
-        if should_cancel_format_change.load(atomic::Ordering::Relaxed) {
-            break;
+        // Return early if there is a cancel signal.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return;
         }
 
         // Blocks cannot complete multiple level 16 subtrees,
@@ -131,6 +137,11 @@ pub fn _run(
                 .collect();
 
             for orchard_note_commitment in orchard_note_commitments {
+                // Return early if there is a cancel signal.
+                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    return;
+                }
+
                 orchard_nct
                     .append(orchard_note_commitment)
                     .expect("finalized notes should append successfully");
