@@ -41,6 +41,8 @@ use crate::methods::{
             check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
             fetch_state_tip_and_local_time, validate_block_proposal,
         },
+        // TODO: move the types/* modules directly under get_block_template_rpcs,
+        //       and combine any modules with the same names.
         types::{
             get_block_template::GetBlockTemplate,
             get_mining_info,

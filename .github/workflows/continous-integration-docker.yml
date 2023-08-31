@@ -570,7 +570,7 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
-      height_grep_text: 'current_height.*=.*Height.*\('
+      height_grep_text: 'zebra_tip_height.*=.*Height.*\('
     secrets: inherit
 
   # lightwalletd cached tip state tests
