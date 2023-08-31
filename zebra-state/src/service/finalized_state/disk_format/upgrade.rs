@@ -25,6 +25,8 @@ use crate::{
     Config,
 };
 
+mod add_subtrees;
+
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
