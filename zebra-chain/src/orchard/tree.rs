@@ -363,26 +363,30 @@ impl NoteCommitmentTree {
             .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
     }
 
-    /// Returns the subtree address at [`TRACKED_SUBTREE_HEIGHT`].
+    /// Returns the subtree index at [`TRACKED_SUBTREE_HEIGHT`].
     /// Returns `None` if the tree is empty.
-    pub fn subtree_address(&self) -> Option<incrementalmerkletree::Address> {
+    #[allow(clippy::unwrap_in_result)]
+    pub fn subtree_index(&self) -> Option<NoteCommitmentSubtreeIndex> {
         let tree = self.frontier()?;
 
-        Some(incrementalmerkletree::Address::above_position(
+        let index = incrementalmerkletree::Address::above_position(
             TRACKED_SUBTREE_HEIGHT.into(),
             tree.position(),
-        ))
+        )
+        .index()
+        .try_into()
+        .expect("fits in u16");
+
+        Some(index)
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
-    #[allow(clippy::unwrap_in_result)]
     pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
         if !self.is_complete_subtree() {
             return None;
         }
 
-        let address = self.subtree_address()?;
-        let index = address.index().try_into().expect("should fit in u16");
+        let index = self.subtree_index()?;
         let root = self.frontier()?.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
 
         Some((index, root))

@@ -27,7 +27,7 @@ pub fn run(
         }
 
         // Empty note commitment trees can't contain subtrees.
-        let Some(subtree_address) = tree.subtree_address() else {
+        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
             prev_tree = Some(tree);
             continue;
         };
@@ -37,14 +37,14 @@ pub fn run(
         // If this block does complete a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
-        if subtree_address.index() <= subtree_count && !tree.is_complete_subtree() {
+        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
             prev_tree = Some(tree);
             continue;
         }
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             assert_eq!(
-                index, subtree_count,
+                index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_sapling_subtree(upgrade_db, index, height, node);
@@ -83,7 +83,7 @@ pub fn run(
             );
 
             assert_eq!(
-                index, subtree_count,
+                index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_sapling_subtree(upgrade_db, index, height, node);
@@ -102,7 +102,7 @@ pub fn run(
         }
 
         // Empty note commitment trees can't contain subtrees.
-        let Some(subtree_address) = tree.subtree_address() else {
+        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
             prev_tree = Some(tree);
             continue;
         };
@@ -110,14 +110,14 @@ pub fn run(
         // Blocks cannot complete multiple level 16 subtrees.
         // If a block does complete a subtree, it is either inside the block, or at the end.
         // (See the detailed comment for Sapling.)
-        if subtree_address.index() <= subtree_count && !tree.is_complete_subtree() {
+        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
             prev_tree = Some(tree);
             continue;
         }
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             assert_eq!(
-                index, subtree_count,
+                index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_orchard_subtree(upgrade_db, index, height, node);
@@ -156,7 +156,7 @@ pub fn run(
             );
 
             assert_eq!(
-                index, subtree_count,
+                index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_orchard_subtree(upgrade_db, index, height, node);

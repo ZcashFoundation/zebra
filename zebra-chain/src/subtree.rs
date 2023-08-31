@@ -28,6 +28,14 @@ impl TryFrom<u64> for NoteCommitmentSubtreeIndex {
     }
 }
 
+// If we want to automatically convert NoteCommitmentSubtreeIndex to the generic integer literal
+// type, we can only implement conversion into u64. (Or u16, but not both.)
+impl From<NoteCommitmentSubtreeIndex> for u64 {
+    fn from(value: NoteCommitmentSubtreeIndex) -> Self {
+        value.0.into()
+    }
+}
+
 /// Subtree root of Sapling or Orchard note commitment tree,
 /// with its associated block height and subtree index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
