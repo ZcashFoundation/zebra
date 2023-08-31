@@ -333,32 +333,42 @@ impl NoteCommitmentTree {
     }
 
     /// Returns frontier of non-empty tree, or None.
-    pub fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
+    fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
         self.inner.value()
     }
 
     /// Returns true if the most recently appended leaf completes the subtree
-    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+    pub fn is_complete_subtree(&self) -> bool {
+        let Some(tree) = self.frontier() else {
+            // An empty tree can't be a complete subtree.
+            return false;
+        };
+
         tree.position()
             .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
     }
 
-    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
-    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
-        incrementalmerkletree::Address::above_position(
+    /// Returns the subtree address at [`TRACKED_SUBTREE_HEIGHT`].
+    /// Returns `None` if the tree is empty.
+    pub fn subtree_address(&self) -> Option<incrementalmerkletree::Address> {
+        let tree = self.frontier()?;
+
+        Some(incrementalmerkletree::Address::above_position(
             TRACKED_SUBTREE_HEIGHT.into(),
             tree.position(),
-        )
+        ))
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
     #[allow(clippy::unwrap_in_result)]
     pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
-        let value = self.inner.value()?;
-        Self::is_complete_subtree(value).then_some(())?;
-        let address = Self::subtree_address(value);
+        if !self.is_complete_subtree() {
+            return None;
+        }
+
+        let address = self.subtree_address()?;
         let index = address.index().try_into().expect("should fit in u16");
-        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+        let root = self.frontier()?.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
 
         Some((index, root))
     }

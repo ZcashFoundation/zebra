@@ -5,10 +5,7 @@ use std::sync::{
     Arc,
 };
 
-use zebra_chain::{
-    block::Height, orchard::tree::NoteCommitmentTree as OrchardNoteCommitmentTree,
-    sapling::tree::NoteCommitmentTree as SaplingNoteCommitmentTree, subtree::NoteCommitmentSubtree,
-};
+use zebra_chain::{block::Height, subtree::NoteCommitmentSubtree};
 
 use crate::service::finalized_state::{DiskWriteBatch, ZebraDb};
 
@@ -25,20 +22,19 @@ pub fn _run(
             break;
         }
 
-        let Some(frontier) = tree.frontier() else {
+        // Blocks cannot complete multiple level 16 subtrees,
+        // the subtree index can increase by a maximum of 1 every ~20 blocks.
+        let Some(subtree_address) = tree.subtree_address() else {
             prev_tree = Some(tree);
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
-        let subtree_address = SaplingNoteCommitmentTree::subtree_address(frontier);
         if subtree_address.index() <= subtree_count {
             prev_tree = Some(tree);
             continue;
         }
 
-        let (index, node) = if SaplingNoteCommitmentTree::is_complete_subtree(frontier) {
+        let (index, node) = if tree.is_complete_subtree() {
             tree.completed_subtree_index_and_root()
                 .expect("already checked is_complete_subtree()")
         } else {
@@ -65,17 +61,18 @@ pub fn _run(
                     .append(sapling_note_commitment)
                     .expect("finalized notes should append successfully");
 
-                if sapling_nct
-                    .frontier()
-                    .map_or(false, SaplingNoteCommitmentTree::is_complete_subtree)
-                {
+                // The loop always breaks on this condition,
+                // because we checked the block has enough commitments,
+                // and that the final commitment in the block doesn't complete a subtree.
+                if sapling_nct.is_complete_subtree() {
                     break;
                 }
             }
 
-            sapling_nct
-                .completed_subtree_index_and_root()
-                .expect("already checked is_complete_subtree()")
+            sapling_nct.completed_subtree_index_and_root().expect(
+                "already checked is_complete_subtree(),\
+                     and that the block must complete a subtree",
+            )
         };
 
         let subtree = NoteCommitmentSubtree::new(index, height, node);
@@ -99,20 +96,19 @@ pub fn _run(
             break;
         }
 
-        let Some(frontier) = tree.frontier() else {
+        // Blocks cannot complete multiple level 16 subtrees,
+        // the subtree index can increase by a maximum of 1 every ~20 blocks.
+        let Some(subtree_address) = tree.subtree_address() else {
             prev_tree = Some(tree);
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
-        let subtree_address = OrchardNoteCommitmentTree::subtree_address(frontier);
         if subtree_address.index() <= subtree_count {
             prev_tree = Some(tree);
             continue;
         }
 
-        let (index, node) = if OrchardNoteCommitmentTree::is_complete_subtree(frontier) {
+        let (index, node) = if tree.is_complete_subtree() {
             tree.completed_subtree_index_and_root()
                 .expect("already checked is_complete_subtree()")
         } else {
@@ -139,17 +135,18 @@ pub fn _run(
                     .append(orchard_note_commitment)
                     .expect("finalized notes should append successfully");
 
-                if orchard_nct
-                    .frontier()
-                    .map_or(false, OrchardNoteCommitmentTree::is_complete_subtree)
-                {
+                // The loop always breaks on this condition,
+                // because we checked the block has enough commitments,
+                // and that the final commitment in the block doesn't complete a subtree.
+                if orchard_nct.is_complete_subtree() {
                     break;
                 }
             }
 
-            orchard_nct
-                .completed_subtree_index_and_root()
-                .expect("already checked is_complete_subtree()")
+            orchard_nct.completed_subtree_index_and_root().expect(
+                "already checked is_complete_subtree(),\
+                     and that the block must complete a subtree",
+            )
         };
 
         let subtree = NoteCommitmentSubtree::new(index, height, node);
