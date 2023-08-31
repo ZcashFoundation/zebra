@@ -22,13 +22,14 @@ pub fn run(
             return;
         }
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
+        // Empty note commitment trees can't contain subtrees.
         let Some(subtree_address) = tree.subtree_address() else {
             prev_tree = Some(tree);
             continue;
         };
 
+        // Blocks cannot complete multiple level 16 subtrees,
+        // the subtree index can increase by a maximum of 1 every ~20 blocks.
         if subtree_address.index() <= subtree_count {
             prev_tree = Some(tree);
             continue;
@@ -75,8 +76,9 @@ pub fn run(
             }
 
             sapling_nct.completed_subtree_index_and_root().expect(
-                "already checked is_complete_subtree(),\
-                     and that the block must complete a subtree",
+                "block should have completed a subtree before its final note commitment: \
+                 already checked is_complete_subtree(),\
+                 and that the block must complete a subtree",
             )
         };
 
@@ -102,13 +104,14 @@ pub fn run(
             return;
         }
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
+        // Empty note commitment trees can't contain subtrees.
         let Some(subtree_address) = tree.subtree_address() else {
             prev_tree = Some(tree);
             continue;
         };
 
+        // Blocks cannot complete multiple level 16 subtrees,
+        // the subtree index can increase by a maximum of 1 every ~20 blocks.
         if subtree_address.index() <= subtree_count {
             prev_tree = Some(tree);
             continue;
@@ -155,8 +158,9 @@ pub fn run(
             }
 
             orchard_nct.completed_subtree_index_and_root().expect(
-                "already checked is_complete_subtree(),\
-                     and that the block must complete a subtree",
+                "block should have completed a subtree before its final note commitment: \
+                 already checked is_complete_subtree(),\
+                 and that the block must complete a subtree",
             )
         };
 
