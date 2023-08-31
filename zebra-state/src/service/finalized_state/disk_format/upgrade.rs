@@ -275,7 +275,7 @@ impl DbFormatChange {
             return;
         };
 
-        // Start of a database upgrade task.
+        // Note commitment tree de-duplication database upgrade task.
 
         let version_for_pruning_trees =
             Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
@@ -337,7 +337,7 @@ impl DbFormatChange {
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(db);
+            Self::check_for_duplicate_trees(db.clone());
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
@@ -348,7 +348,28 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
-        // End of a database upgrade task.
+        // Note commitment subtree creation database upgrade task.
+
+        let version_for_adding_subtrees =
+            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
+
+        // Check if we need to add note commitment subtrees to the database.
+        if older_disk_version < version_for_adding_subtrees {
+            add_subtrees::run(initial_tip_height, &db, cancel_receiver);
+
+            // Before marking the state as upgraded, check that the upgrade completed successfully.
+            //
+            // TODO: do this check in all the same places as check_for_duplicate_trees()
+            //Self::check_for_continuous_subtrees(db);
+
+            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
+            // database is marked, so the upgrade MUST be complete at this point.
+            info!(
+                ?newer_running_version,
+                "Zebra automatically upgraded the database format to:"
+            );
+            Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
+        }
 
         // # New Upgrades Usually Go Here
         //
