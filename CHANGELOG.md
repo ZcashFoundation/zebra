@@ -5,22 +5,39 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.1.0) - 2023-07-18
+## [Zebra 1.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.2.0) - 2023-09-04
 
 ### Highlights
 
 This release:
 
-- Contains an automatic database upgrade that reduces the size of Zebra's
-  current cached state from approximately 276GB to 244GB. It does so by
-  automatically pruning unneeded note commitment trees from an existing cache.
-  New Zebra instances will also build their cache without these trees.
--
+- Starts our work implementing "spend before sync" algorithm for lightwalletd.
+- Contains an automatic database upgrade that reduces the size of Zebra's current cached state from approximately 276GB to 244GB. It does so by automatically pruning unneeded note commitment trees from an existing cache. New Zebra instances will also build their cache without these trees.
 
 ### Changed
 
 - Deduplicate note commitment trees stored in the finalized state ([#7312]()https://github.com/ZcashFoundation/zebra/pull/7312, [#7379](https://github.com/ZcashFoundation/zebra/pull/7379))
 - Insert only the first tree in each series of identical trees into finalized state ([#7266](https://github.com/ZcashFoundation/zebra/pull/7266))
+- Our testing framework now uses the ECC lightwalletd fork ([#7307](https://github.com/ZcashFoundation/zebra/pull/7307)). This was needed to start the work of implementating fast spendability. The ECC repo is now the supported implementation in Zebra, documentation was changed to reflect this. ([#7427](https://github.com/ZcashFoundation/zebra/pull/7427))
+
+### Security
+
+- Use the correct state version for databases without a state version file ([#7385](https://github.com/ZcashFoundation/zebra/pull/7385))
+
+### Added
+
+- Documentation for mining with Docker ([#7179](https://github.com/ZcashFoundation/zebra/pull/7179))
+- Note tree sizes field to `getblock` RPC method ([#7278](https://github.com/ZcashFoundation/zebra/pull/7278))
+- Note commitment subtree types to zebra-chain ([#7371](https://github.com/ZcashFoundation/zebra/pull/7371))
+- Note subtree index handling to zebra-state, but don't write them to the finalized state yet ([#7334](https://github.com/ZcashFoundation/zebra/pull/7334))
+
+### Fixed
+
+- Consolidate firebase hosting in production project ([#7313](https://github.com/ZcashFoundation/zebra/pull/7313))
+- Log a warning instead of panicking for unused mining configs ([#7290](https://github.com/ZcashFoundation/zebra/pull/7290))
+- Remove all unrequired docker arguments from CI/CD pipelines ([#7231](https://github.com/ZcashFoundation/zebra/pull/7231))
+- Avoid expensive note commitment tree root recalculations in eq() methods ([#7386](https://github.com/ZcashFoundation/zebra/pull/7386))
+
 
 ## [Zebra 1.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.1.0) - 2023-07-18
 
