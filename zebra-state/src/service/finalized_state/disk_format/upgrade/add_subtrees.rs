@@ -39,12 +39,10 @@ pub fn run(
             tree.completed_subtree_index_and_root()
                 .expect("already checked is_complete_subtree()")
         } else {
-            let mut sapling_nct = Arc::try_unwrap(
-                prev_tree
-                    .take()
-                    .expect("should have some previous sapling frontier"),
-            )
-            .unwrap_or_else(|shared_tree| (*shared_tree).clone());
+            let mut prev_tree = prev_tree
+                .take()
+                .expect("should have some previous sapling frontier");
+            let sapling_nct = Arc::make_mut(&mut prev_tree);
 
             let block = upgrade_db
                 .block(height.into())
@@ -121,12 +119,10 @@ pub fn run(
             tree.completed_subtree_index_and_root()
                 .expect("already checked is_complete_subtree()")
         } else {
-            let mut orchard_nct = Arc::try_unwrap(
-                prev_tree
-                    .take()
-                    .expect("should have some previous orchard frontier"),
-            )
-            .unwrap_or_else(|shared_tree| (*shared_tree).clone());
+            let mut prev_tree = prev_tree
+                .take()
+                .expect("should have some previous orchard frontier");
+            let orchard_nct = Arc::make_mut(&mut prev_tree);
 
             let block = upgrade_db
                 .block(height.into())
