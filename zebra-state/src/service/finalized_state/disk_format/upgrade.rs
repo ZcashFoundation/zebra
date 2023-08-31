@@ -341,10 +341,6 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            info!(
-                ?newer_running_version,
-                "Zebra automatically upgraded the database format to:"
-            );
             Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
         }
 
@@ -364,12 +360,13 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            info!(
-                ?newer_running_version,
-                "Zebra automatically upgraded the database format to:"
-            );
             Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
         }
+
+        info!(
+            ?newer_running_version,
+            "Zebra automatically upgraded the database format to:"
+        );
 
         // # New Upgrades Usually Go Here
         //
