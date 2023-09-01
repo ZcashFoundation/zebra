@@ -191,14 +191,20 @@ pub fn check(db: &ZebraDb) {
 ///
 /// If a note commitment subtree is missing or incorrect.
 fn check_sapling_subtrees(db: &ZebraDb) -> bool {
-    let Some(NoteCommitmentSubtreeIndex(last_subtree_index)) = db.sapling_tree().subtree_index()
+    let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
+        db.sapling_tree().subtree_index()
     else {
         return true;
     };
 
+    // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
+    if db.sapling_tree().is_complete_subtree() {
+        first_incomplete_subtree_index += 1;
+    }
+
     let mut is_valid = true;
-    for index in 0..last_subtree_index {
-        // Check that there's a continuous range of subtrees from index [0, last_subtree_index)
+    for index in 0..first_incomplete_subtree_index {
+        // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             warn!(index, "missing subtree");
             is_valid = false;
@@ -295,14 +301,20 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
 ///
 /// If a note commitment subtree is missing or incorrect.
 fn check_orchard_subtrees(db: &ZebraDb) -> bool {
-    let Some(NoteCommitmentSubtreeIndex(last_subtree_index)) = db.orchard_tree().subtree_index()
+    let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
+        db.orchard_tree().subtree_index()
     else {
         return true;
     };
 
+    // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
+    if db.orchard_tree().is_complete_subtree() {
+        first_incomplete_subtree_index += 1;
+    }
+
     let mut is_valid = true;
-    for index in 0..last_subtree_index {
-        // Check that there's a continuous range of subtrees from index [0, last_subtree_index)
+    for index in 0..first_incomplete_subtree_index {
+        // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             warn!(index, "missing subtree");
             is_valid = false;
