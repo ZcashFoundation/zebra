@@ -18,26 +18,32 @@ This release:
 
 - Deduplicate note commitment trees stored in the finalized state ([#7312]()https://github.com/ZcashFoundation/zebra/pull/7312, [#7379](https://github.com/ZcashFoundation/zebra/pull/7379))
 - Insert only the first tree in each series of identical trees into finalized state ([#7266](https://github.com/ZcashFoundation/zebra/pull/7266))
-- Our testing framework now uses the ECC lightwalletd fork ([#7307](https://github.com/ZcashFoundation/zebra/pull/7307)). This was needed to start the work of implementating fast spendability. The ECC repo is now the supported implementation in Zebra, documentation was changed to reflect this. ([#7427](https://github.com/ZcashFoundation/zebra/pull/7427))
+- Our testing framework now uses the ECC lightwalletd fork ([#7307](https://github.com/ZcashFoundation/zebra/pull/7307)). This was needed to start the work of implementing fast spendability. The ECC repo is now the supported implementation in Zebra, documentation was changed to reflect this. ([#7427](https://github.com/ZcashFoundation/zebra/pull/7427))
 
-### Security
+### Breaking Changes
 
-- Use the correct state version for databases without a state version file ([#7385](https://github.com/ZcashFoundation/zebra/pull/7385))
+`zebrad` 1.2.0 cached states are incompatible with previous `zebrad` versions:
+
+- `zebrad` 1.2.0 upgrades the cached state format. The new format is incompatible with previous `zebrad` versions. After upgrading to this Zebra version, don't downgrade to an earlier version.
+- When earlier versions try to use states upgraded by `zebrad` 1.2.0:
+    - `zebrad` versions 1.0.0 and 1.0.1 will respond to some `z_gettreestate` RPC requests with incorrect empty `final_state` fields
+    - pre-release `zebrad` versions can panic when verifying shielded transactions, updating the state, or responding to RPC requests
 
 ### Added
 
 - Documentation for mining with Docker ([#7179](https://github.com/ZcashFoundation/zebra/pull/7179))
 - Note tree sizes field to `getblock` RPC method ([#7278](https://github.com/ZcashFoundation/zebra/pull/7278))
 - Note commitment subtree types to zebra-chain ([#7371](https://github.com/ZcashFoundation/zebra/pull/7371))
-- Note subtree index handling to zebra-state, but don't write them to the finalized state yet ([#7334](https://github.com/ZcashFoundation/zebra/pull/7334))
+- Note subtree index handling to zebra-state, but we're not writing subtrees to the finalized state yet ([#7334](https://github.com/ZcashFoundation/zebra/pull/7334))
 
 ### Fixed
 
-- Consolidate firebase hosting in production project ([#7313](https://github.com/ZcashFoundation/zebra/pull/7313))
 - Log a warning instead of panicking for unused mining configs ([#7290](https://github.com/ZcashFoundation/zebra/pull/7290))
 - Remove all unrequired docker arguments from CI/CD pipelines ([#7231](https://github.com/ZcashFoundation/zebra/pull/7231))
 - Avoid expensive note commitment tree root recalculations in eq() methods ([#7386](https://github.com/ZcashFoundation/zebra/pull/7386))
-
+- Use the correct state version for databases without a state version file ([#7385](https://github.com/ZcashFoundation/zebra/pull/7385))
+- Avoid temporary failures verifying the first non-finalized block or attempting to fork the chain before the final checkpoint ([#6810](https://github.com/ZcashFoundation/zebra/pull/6810))
+- If a database format change is cancelled, also cancel the format check, and don't mark the database as upgraded ([#7442](https://github.com/ZcashFoundation/zebra/pull/7442))
 
 ## [Zebra 1.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.1.0) - 2023-07-18
 
