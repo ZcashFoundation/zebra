@@ -226,7 +226,7 @@ impl DbFormatChange {
         // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
         //   still know how to make sure trees are unique
         Self::check_for_duplicate_trees(upgrade_db.clone());
-        add_subtrees::check(&upgrade_db, &cancel_receiver)?;
+        add_subtrees::check(&upgrade_db);
 
         Ok(())
     }
@@ -359,7 +359,7 @@ impl DbFormatChange {
             add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            add_subtrees::check(&db, cancel_receiver)?;
+            add_subtrees::check(&db);
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.

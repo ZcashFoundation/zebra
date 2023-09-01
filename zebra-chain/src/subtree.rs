@@ -11,7 +11,7 @@ use crate::block::Height;
 pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 
 /// A subtree index
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);
 
 impl From<u16> for NoteCommitmentSubtreeIndex {

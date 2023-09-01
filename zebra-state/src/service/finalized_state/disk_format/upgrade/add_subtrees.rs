@@ -179,184 +179,218 @@ pub fn run(
 /// # Panics
 ///
 /// If a note commitment subtree is missing or incorrect.
-pub fn check(
-    upgrade_db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
-) -> Result<(), CancelFormatChange> {
+pub fn check(db: &ZebraDb) {
+    if !check_sapling_subtrees(db) || !check_orchard_subtrees(db) {
+        panic!("missing or bad subtree(s)");
+    }
+}
+
+/// Check that Sapling note commitment subtrees were correctly added.
+///
+/// # Panics
+///
+/// If a note commitment subtree is missing or incorrect.
+fn check_sapling_subtrees(db: &ZebraDb) -> bool {
+    let Some(NoteCommitmentSubtreeIndex(last_subtree_index)) = db.sapling_tree().subtree_index()
+    else {
+        return true;
+    };
+
     let mut is_valid = true;
-
-    let mut subtree_count = 0;
-    let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.sapling_tree_by_height_range(..) {
-        // Return early if there is a cancel signal.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
-        }
-
-        // Empty note commitment trees can't contain subtrees.
-        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
-            prev_tree = Some(tree);
+    for index in 0..last_subtree_index {
+        // Check that there's a continuous range of subtrees from index [0, last_subtree_index)
+        let Some(subtree) = db.sapling_subtree_by_index(index) else {
+            warn!(index, "missing subtree");
+            is_valid = false;
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
-        // If this block does complete a subtree, the subtree is either completed by a note before
-        // the final note (so the final note is in the next subtree), or by the final note
-        // (so the final note is the end of this subtree).
-        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
-            prev_tree = Some(tree);
+        // Check that there was a sapling note at the subtree's end height.
+        let Some(tree) = db.sapling_tree_by_height(&subtree.end) else {
+            warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+            is_valid = false;
             continue;
-        }
+        };
 
+        // Check the index and root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
-
-            if !sapling_subtree_exists(upgrade_db, index, height, node) {
-                error!(?height, ?index, "missing sapling subtree");
+            if subtree.index != index {
+                warn!("completed subtree indexes should match");
                 is_valid = false;
             }
-        } else {
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous sapling frontier");
-            let sapling_nct = Arc::make_mut(&mut prev_tree);
 
-            let block = upgrade_db
-                .block(height.into())
-                .expect("height with note commitment tree should have block");
-
-            for sapling_note_commitment in block.sapling_note_commitments() {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                sapling_nct
-                    .append(*sapling_note_commitment)
-                    .expect("finalized notes should append successfully");
-
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if sapling_nct.is_complete_subtree() {
-                    break;
-                }
-            }
-
-            let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(),\
-                 and that the block must complete a subtree",
-            );
-
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
-
-            if !sapling_subtree_exists(upgrade_db, index, height, node) {
-                error!(?height, ?index, "missing sapling subtree");
+            if subtree.node != node {
+                warn!("completed subtree roots should match");
                 is_valid = false;
             }
-        };
+        }
+        // Check that the final note has a greater subtree index if it didn't complete a subtree.
+        else {
+            let Some(prev_tree) = db.sapling_tree_by_height(&subtree.end.previous()) else {
+                warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+                is_valid = false;
+                continue;
+            };
 
-        subtree_count += 1;
-        prev_tree = Some(tree);
+            let prev_subtree_index = prev_tree.subtree_index();
+            let subtree_index = tree.subtree_index();
+            if subtree_index <= prev_subtree_index {
+                warn!(
+                    ?subtree_index,
+                    ?prev_subtree_index,
+                    "note commitment tree at end height should have incremented subtree index"
+                );
+                is_valid = false;
+            }
+        }
     }
 
     let mut subtree_count = 0;
-    let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.orchard_tree_by_height_range(..) {
-        // Return early if there is a cancel signal.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
-        }
-
-        // Empty note commitment trees can't contain subtrees.
-        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
-            prev_tree = Some(tree);
+    for (index, height, tree) in db
+        .sapling_tree_by_height_range(..)
+        .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
+        .filter_map(|(subtree_index, height, tree)| {
+            if tree.is_complete_subtree() || subtree_index.0 == subtree_count + 1 {
+                subtree_count += 1;
+                Some((subtree_index, height, tree))
+            } else {
+                None
+            }
+        })
+    {
+        let Some(subtree) = db.sapling_subtree_by_index(index) else {
+            warn!(?index, "missing subtree");
+            is_valid = false;
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees.
-        // If a block does complete a subtree, it is either inside the block, or at the end.
-        // (See the detailed comment for Sapling.)
-        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
-            prev_tree = Some(tree);
-            continue;
+        if subtree.index != index {
+            warn!("completed subtree indexes should match");
+            is_valid = false;
         }
 
-        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
+        if subtree.end != height {
+            warn!(?subtree.end, "bad subtree end height");
+            is_valid = false;
+        }
 
-            if !orchard_subtree_exists(upgrade_db, index, height, node) {
-                error!(?height, ?index, "missing orchard subtree");
+        if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
+            if subtree.node != node {
+                warn!("completed subtree roots should match");
                 is_valid = false;
             }
-        } else {
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous orchard frontier");
-            let orchard_nct = Arc::make_mut(&mut prev_tree);
-
-            let block = upgrade_db
-                .block(height.into())
-                .expect("height with note commitment tree should have block");
-
-            for orchard_note_commitment in block.orchard_note_commitments() {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                orchard_nct
-                    .append(*orchard_note_commitment)
-                    .expect("finalized notes should append successfully");
-
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if orchard_nct.is_complete_subtree() {
-                    break;
-                }
-            }
-
-            let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(),\
-                 and that the block must complete a subtree",
-            );
-
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
-
-            if !orchard_subtree_exists(upgrade_db, index, height, node) {
-                error!(?height, ?index, "missing orchard subtree");
-                is_valid = false;
-            }
-        };
-
-        subtree_count += 1;
-        prev_tree = Some(tree);
+        }
     }
 
     if !is_valid {
-        panic!(
-            "found duplicate sapling or orchard trees \
-                     after running de-duplicate tree upgrade"
-        );
+        warn!("missing or bad sapling subtrees");
     }
 
-    Ok(())
+    is_valid
+}
+
+/// Check that Orchard note commitment subtrees were correctly added.
+///
+/// # Panics
+///
+/// If a note commitment subtree is missing or incorrect.
+fn check_orchard_subtrees(db: &ZebraDb) -> bool {
+    let Some(NoteCommitmentSubtreeIndex(last_subtree_index)) = db.orchard_tree().subtree_index()
+    else {
+        return true;
+    };
+
+    let mut is_valid = true;
+    for index in 0..last_subtree_index {
+        // Check that there's a continuous range of subtrees from index [0, last_subtree_index)
+        let Some(subtree) = db.orchard_subtree_by_index(index) else {
+            warn!(index, "missing subtree");
+            is_valid = false;
+            continue;
+        };
+
+        // Check that there was a orchard note at the subtree's end height.
+        let Some(tree) = db.orchard_tree_by_height(&subtree.end) else {
+            warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+            is_valid = false;
+            continue;
+        };
+
+        // Check the index and root if the orchard note commitment tree at this height is a complete subtree.
+        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            if subtree.index != index {
+                warn!("completed subtree indexes should match");
+                is_valid = false;
+            }
+
+            if subtree.node != node {
+                warn!("completed subtree roots should match");
+                is_valid = false;
+            }
+        }
+        // Check that the final note has a greater subtree index if it didn't complete a subtree.
+        else {
+            let Some(prev_tree) = db.orchard_tree_by_height(&subtree.end.previous()) else {
+                warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+                is_valid = false;
+                continue;
+            };
+
+            let prev_subtree_index = prev_tree.subtree_index();
+            let subtree_index = tree.subtree_index();
+            if subtree_index <= prev_subtree_index {
+                warn!(
+                    ?subtree_index,
+                    ?prev_subtree_index,
+                    "note commitment tree at end height should have incremented subtree index"
+                );
+                is_valid = false;
+            }
+        }
+    }
+
+    let mut subtree_count = 0;
+    for (index, height, tree) in db
+        .orchard_tree_by_height_range(..)
+        .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
+        .filter_map(|(subtree_index, height, tree)| {
+            if tree.is_complete_subtree() || subtree_index.0 == subtree_count + 1 {
+                subtree_count += 1;
+                Some((subtree_index, height, tree))
+            } else {
+                None
+            }
+        })
+    {
+        let Some(subtree) = db.orchard_subtree_by_index(index) else {
+            warn!(?index, "missing subtree");
+            is_valid = false;
+            continue;
+        };
+
+        if subtree.index != index {
+            warn!("completed subtree indexes should match");
+            is_valid = false;
+        }
+
+        if subtree.end != height {
+            warn!(?subtree.end, "bad subtree end height");
+            is_valid = false;
+        }
+
+        if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
+            if subtree.node != node {
+                warn!("completed subtree roots should match");
+                is_valid = false;
+            }
+        }
+    }
+
+    if !is_valid {
+        warn!("missing or bad orchard subtrees");
+    }
+
+    is_valid
 }
 
 /// Writes a Sapling note commitment subtree to `upgrade_db`.
@@ -405,26 +439,4 @@ fn write_orchard_subtree(
     }
     // This log happens about 3 times per second on recent machines with SSD disks.
     debug!(?height, index = ?index.0, ?node, "calculated and added orchard subtree");
-}
-
-/// Checks that a Sapling note commitment subtree exists in `upgrade_db`.
-fn sapling_subtree_exists(
-    upgrade_db: &ZebraDb,
-    index: NoteCommitmentSubtreeIndex,
-    height: Height,
-    node: sapling::tree::Node,
-) -> bool {
-    upgrade_db.sapling_subtree_by_index(index)
-        == Some(NoteCommitmentSubtree::new(index, height, node))
-}
-
-/// Checks that a Orchard note commitment subtree exists in `upgrade_db`.
-fn orchard_subtree_exists(
-    upgrade_db: &ZebraDb,
-    index: NoteCommitmentSubtreeIndex,
-    height: Height,
-    node: orchard::tree::Node,
-) -> bool {
-    upgrade_db.orchard_subtree_by_index(index)
-        == Some(NoteCommitmentSubtree::new(index, height, node))
 }
