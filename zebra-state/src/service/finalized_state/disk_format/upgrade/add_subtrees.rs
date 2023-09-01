@@ -206,14 +206,14 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
     for index in 0..first_incomplete_subtree_index {
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
-            warn!(index, "missing subtree");
+            error!(index, "missing subtree");
             is_valid = false;
             continue;
         };
 
         // Check that there was a sapling note at the subtree's end height.
         let Some(tree) = db.sapling_tree_by_height(&subtree.end) else {
-            warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+            error!(?subtree.end, "missing note commitment tree at subtree completion height");
             is_valid = false;
             continue;
         };
@@ -221,19 +221,19 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
         // Check the index and root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.index != index {
-                warn!("completed subtree indexes should match");
+                error!("completed subtree indexes should match");
                 is_valid = false;
             }
 
             if subtree.node != node {
-                warn!("completed subtree roots should match");
+                error!("completed subtree roots should match");
                 is_valid = false;
             }
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Some(prev_tree) = db.sapling_tree_by_height(&subtree.end.previous()) else {
-                warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+                error!(?subtree.end, "missing note commitment tree at subtree completion height");
                 is_valid = false;
                 continue;
             };
@@ -241,7 +241,7 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
             let prev_subtree_index = prev_tree.subtree_index();
             let subtree_index = tree.subtree_index();
             if subtree_index <= prev_subtree_index {
-                warn!(
+                error!(
                     ?subtree_index,
                     ?prev_subtree_index,
                     "note commitment tree at end height should have incremented subtree index"
@@ -265,31 +265,31 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
         })
     {
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
-            warn!(?index, "missing subtree");
+            error!(?index, "missing subtree");
             is_valid = false;
             continue;
         };
 
         if subtree.index != index {
-            warn!("completed subtree indexes should match");
+            error!("completed subtree indexes should match");
             is_valid = false;
         }
 
         if subtree.end != height {
-            warn!(?subtree.end, "bad subtree end height");
+            error!(?subtree.end, "bad subtree end height");
             is_valid = false;
         }
 
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.node != node {
-                warn!("completed subtree roots should match");
+                error!("completed subtree roots should match");
                 is_valid = false;
             }
         }
     }
 
     if !is_valid {
-        warn!("missing or bad sapling subtrees");
+        error!("missing or bad sapling subtrees");
     }
 
     is_valid
@@ -316,14 +316,14 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
     for index in 0..first_incomplete_subtree_index {
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
-            warn!(index, "missing subtree");
+            error!(index, "missing subtree");
             is_valid = false;
             continue;
         };
 
         // Check that there was a orchard note at the subtree's end height.
         let Some(tree) = db.orchard_tree_by_height(&subtree.end) else {
-            warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+            error!(?subtree.end, "missing note commitment tree at subtree completion height");
             is_valid = false;
             continue;
         };
@@ -331,19 +331,19 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
         // Check the index and root if the orchard note commitment tree at this height is a complete subtree.
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.index != index {
-                warn!("completed subtree indexes should match");
+                error!("completed subtree indexes should match");
                 is_valid = false;
             }
 
             if subtree.node != node {
-                warn!("completed subtree roots should match");
+                error!("completed subtree roots should match");
                 is_valid = false;
             }
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Some(prev_tree) = db.orchard_tree_by_height(&subtree.end.previous()) else {
-                warn!(?subtree.end, "missing note commitment tree at subtree completion height");
+                error!(?subtree.end, "missing note commitment tree at subtree completion height");
                 is_valid = false;
                 continue;
             };
@@ -351,7 +351,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
             let prev_subtree_index = prev_tree.subtree_index();
             let subtree_index = tree.subtree_index();
             if subtree_index <= prev_subtree_index {
-                warn!(
+                error!(
                     ?subtree_index,
                     ?prev_subtree_index,
                     "note commitment tree at end height should have incremented subtree index"
@@ -375,31 +375,31 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
         })
     {
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
-            warn!(?index, "missing subtree");
+            error!(?index, "missing subtree");
             is_valid = false;
             continue;
         };
 
         if subtree.index != index {
-            warn!("completed subtree indexes should match");
+            error!("completed subtree indexes should match");
             is_valid = false;
         }
 
         if subtree.end != height {
-            warn!(?subtree.end, "bad subtree end height");
+            error!(?subtree.end, "bad subtree end height");
             is_valid = false;
         }
 
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.node != node {
-                warn!("completed subtree roots should match");
+                error!("completed subtree roots should match");
                 is_valid = false;
             }
         }
     }
 
     if !is_valid {
-        warn!("missing or bad orchard subtrees");
+        error!("missing or bad orchard subtrees");
     }
 
     is_valid
