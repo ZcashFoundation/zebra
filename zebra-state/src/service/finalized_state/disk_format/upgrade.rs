@@ -25,7 +25,7 @@ use crate::{
     Config,
 };
 
-mod add_subtrees;
+pub(crate) mod add_subtrees;
 
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -220,11 +220,12 @@ impl DbFormatChange {
             }
         }
 
-        // This check should pass for all format changes:
-        // - upgrades should de-duplicate trees if needed (and they already do this check)
-        // - an empty state doesn't have any trees, so it can't have duplicate trees
-        // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
-        //   still know how to make sure trees are unique
+        // These checks should pass for all format changes:
+        // - upgrades should produce a valid format (and they already do that check)
+        // - an empty state should pass all the format checks
+        // - since the running Zebra code knows how to upgrade the database to this format,
+        //   downgrades using this running code still know how to create a valid database
+        //   (unless a future upgrade breaks these format checks)
         Self::check_for_duplicate_trees(upgrade_db.clone());
         add_subtrees::check(&upgrade_db);
 
