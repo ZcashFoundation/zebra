@@ -22,6 +22,7 @@ use bridgetree::{self, NonEmptyFrontier};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
+use num_integer::Integer;
 use thiserror::Error;
 use zcash_primitives::merkle_tree::{write_commitment_tree, HashSer};
 
@@ -379,6 +380,20 @@ impl NoteCommitmentTree {
         .expect("fits in u16");
 
         Some(index)
+    }
+
+    /// Looks for the last subtree root in ommers
+    ///
+    /// Returns subtree root if it's in the ommers.
+    pub fn try_find_last_subtree_root(&self) -> Option<Node> {
+        let value: &NonEmptyFrontier<Node> = self.frontier()?;
+        let index = self.subtree_index()?.0;
+        index.is_odd().then(|| {
+            *value
+                .ommers()
+                .get(TRACKED_SUBTREE_HEIGHT as usize - 1)
+                .expect("should have level 16 ommer if is right level 16 subtree child")
+        })
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree

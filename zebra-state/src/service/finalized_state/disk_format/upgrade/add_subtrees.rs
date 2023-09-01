@@ -51,44 +51,51 @@ pub fn run(
             write_sapling_subtree(upgrade_db, index, height, node);
             subtree_count += 1;
         } else if end_of_block_subtree_index.0 > subtree_count {
-            // If the leaf at the end of the block is in the next subtree,
-            // we need to calculate that subtree root based on the tree from the previous block.
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous sapling frontier");
-            let sapling_nct = Arc::make_mut(&mut prev_tree);
+            let (index, node) = if let Some(node) = tree.try_find_last_subtree_root() {
+                (subtree_count.into(), node)
+            } else {
+                // If the leaf at the end of the block is in the next subtree,
+                // we need to calculate that subtree root based on the tree from the previous block.
+                let mut prev_tree = prev_tree
+                    .take()
+                    .expect("should have some previous sapling frontier");
+                let sapling_nct = Arc::make_mut(&mut prev_tree);
 
-            let block = upgrade_db
-                .block(height.into())
-                .expect("height with note commitment tree should have block");
+                let block = upgrade_db
+                    .block(height.into())
+                    .expect("height with note commitment tree should have block");
 
-            for sapling_note_commitment in block.sapling_note_commitments() {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
+                for sapling_note_commitment in block.sapling_note_commitments() {
+                    // Return early if there is a cancel signal.
+                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                        return Err(CancelFormatChange);
+                    }
+
+                    sapling_nct
+                        .append(*sapling_note_commitment)
+                        .expect("finalized notes should append successfully");
+
+                    // The loop always breaks on this condition,
+                    // because we checked the block has enough commitments,
+                    // and that the final commitment in the block doesn't complete a subtree.
+                    if sapling_nct.is_complete_subtree() {
+                        break;
+                    }
                 }
 
-                sapling_nct
-                    .append(*sapling_note_commitment)
-                    .expect("finalized notes should append successfully");
-
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if sapling_nct.is_complete_subtree() {
-                    break;
-                }
-            }
-
-            let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
+                let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
+                    "block should have completed a subtree before its final note commitment: \
                  already checked is_complete_subtree(), and that the block must complete a subtree",
-            );
+                );
 
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
+                assert_eq!(
+                    index.0, subtree_count,
+                    "trees are inserted in order with no gaps"
+                );
+
+                (index, node)
+            };
+
             write_sapling_subtree(upgrade_db, index, height, node);
             subtree_count += 1;
         }
@@ -126,44 +133,51 @@ pub fn run(
             write_orchard_subtree(upgrade_db, index, height, node);
             subtree_count += 1;
         } else if end_of_block_subtree_index.0 > subtree_count {
-            // If the leaf at the end of the block is in the next subtree,
-            // we need to calculate that subtree root based on the tree from the previous block.
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous orchard frontier");
-            let orchard_nct = Arc::make_mut(&mut prev_tree);
+            let (index, node) = if let Some(node) = tree.try_find_last_subtree_root() {
+                (subtree_count.into(), node)
+            } else {
+                // If the leaf at the end of the block is in the next subtree,
+                // we need to calculate that subtree root based on the tree from the previous block.
+                let mut prev_tree = prev_tree
+                    .take()
+                    .expect("should have some previous orchard frontier");
+                let orchard_nct = Arc::make_mut(&mut prev_tree);
 
-            let block = upgrade_db
-                .block(height.into())
-                .expect("height with note commitment tree should have block");
+                let block = upgrade_db
+                    .block(height.into())
+                    .expect("height with note commitment tree should have block");
 
-            for orchard_note_commitment in block.orchard_note_commitments() {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
+                for orchard_note_commitment in block.orchard_note_commitments() {
+                    // Return early if there is a cancel signal.
+                    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                        return Err(CancelFormatChange);
+                    }
+
+                    orchard_nct
+                        .append(*orchard_note_commitment)
+                        .expect("finalized notes should append successfully");
+
+                    // The loop always breaks on this condition,
+                    // because we checked the block has enough commitments,
+                    // and that the final commitment in the block doesn't complete a subtree.
+                    if orchard_nct.is_complete_subtree() {
+                        break;
+                    }
                 }
 
-                orchard_nct
-                    .append(*orchard_note_commitment)
-                    .expect("finalized notes should append successfully");
-
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if orchard_nct.is_complete_subtree() {
-                    break;
-                }
-            }
-
-            let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
+                let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
+                    "block should have completed a subtree before its final note commitment: \
                  already checked is_complete_subtree(), and that the block must complete a subtree",
-            );
+                );
 
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
+                assert_eq!(
+                    index.0, subtree_count,
+                    "trees are inserted in order with no gaps"
+                );
+
+                (index, node)
+            };
+
             write_orchard_subtree(upgrade_db, index, height, node);
             subtree_count += 1;
         }
