@@ -364,6 +364,7 @@ impl NoteCommitmentTree {
     }
 
     /// Returns the subtree index at [`TRACKED_SUBTREE_HEIGHT`].
+    /// This is the number of complete or incomplete subtrees that are currently in the tree.
     /// Returns `None` if the tree is empty.
     #[allow(clippy::unwrap_in_result)]
     pub fn subtree_index(&self) -> Option<NoteCommitmentSubtreeIndex> {
