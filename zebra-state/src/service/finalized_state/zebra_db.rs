@@ -60,7 +60,10 @@ pub struct ZebraDb {
 impl ZebraDb {
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared high-level typed database wrapper.
-    pub fn new(config: &Config, network: Network) -> ZebraDb {
+    ///
+    /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
+    /// This argument is only used when running tests, it is ignored in production code.
+    pub fn new(config: &Config, network: Network, debug_skip_format_upgrades: bool) -> ZebraDb {
         let running_version = database_format_version_in_code();
         let disk_version = database_format_version_on_disk(config, network)
             .expect("unable to read database format version file");
@@ -84,7 +87,12 @@ impl ZebraDb {
         // a while to start, and new blocks can be committed as soon as we return from this method.
         let initial_tip_height = db.finalized_tip_height();
 
-        // Start any required format changes.
+        // Always do format upgrades & checks in production code.
+        if cfg!(test) && debug_skip_format_upgrades {
+            return db;
+        }
+
+        // Start any required format changes, and do format checks.
         //
         // TODO: should debug_stop_at_height wait for these upgrades, or not?
         if let Some(format_change) = format_change {
