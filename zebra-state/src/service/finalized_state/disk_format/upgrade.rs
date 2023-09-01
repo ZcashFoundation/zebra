@@ -366,11 +366,6 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
         }
 
-        info!(
-            ?newer_running_version,
-            "Zebra automatically upgraded the database format to:"
-        );
-
         // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
@@ -378,6 +373,11 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+
+        info!(
+            ?newer_running_version,
+            "Zebra automatically upgraded the database format to:"
+        );
 
         Ok(())
     }
