@@ -180,7 +180,9 @@ pub fn run(
 ///
 /// If a note commitment subtree is missing or incorrect.
 pub fn check(db: &ZebraDb) {
-    if !check_sapling_subtrees(db) || !check_orchard_subtrees(db) {
+    let check_sapling_subtrees = check_sapling_subtrees(db);
+    let check_orchard_subtrees = check_orchard_subtrees(db);
+    if !check_sapling_subtrees || !check_orchard_subtrees {
         panic!("missing or bad subtree(s)");
     }
 }
@@ -256,7 +258,8 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
         .sapling_tree_by_height_range(..)
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
         .filter_map(|(subtree_index, height, tree)| {
-            if tree.is_complete_subtree() || subtree_index.0 == subtree_count + 1 {
+            if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
+                let subtree_index = subtree_count;
                 subtree_count += 1;
                 Some((subtree_index, height, tree))
             } else {
@@ -270,13 +273,14 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
             continue;
         };
 
-        if subtree.index != index {
+        if subtree.index.0 != index {
             error!("completed subtree indexes should match");
             is_valid = false;
         }
 
         if subtree.end != height {
-            error!(?subtree.end, "bad subtree end height");
+            let is_complete = tree.is_complete_subtree();
+            error!(?subtree.end, ?height, ?index, ?is_complete, "bad sapling subtree end height");
             is_valid = false;
         }
 
@@ -289,7 +293,10 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
     }
 
     if !is_valid {
-        error!("missing or bad sapling subtrees");
+        error!(
+            ?subtree_count,
+            first_incomplete_subtree_index, "missing or bad sapling subtrees"
+        );
     }
 
     is_valid
@@ -366,7 +373,8 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
         .orchard_tree_by_height_range(..)
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
         .filter_map(|(subtree_index, height, tree)| {
-            if tree.is_complete_subtree() || subtree_index.0 == subtree_count + 1 {
+            if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
+                let subtree_index = subtree_count;
                 subtree_count += 1;
                 Some((subtree_index, height, tree))
             } else {
@@ -380,13 +388,14 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
             continue;
         };
 
-        if subtree.index != index {
+        if subtree.index.0 != index {
             error!("completed subtree indexes should match");
             is_valid = false;
         }
 
         if subtree.end != height {
-            error!(?subtree.end, "bad subtree end height");
+            let is_complete = tree.is_complete_subtree();
+            error!(?subtree.end, ?height, ?index, ?is_complete, "bad orchard subtree end height");
             is_valid = false;
         }
 
@@ -399,7 +408,10 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
     }
 
     if !is_valid {
-        error!("missing or bad orchard subtrees");
+        error!(
+            ?subtree_count,
+            first_incomplete_subtree_index, "missing or bad orchard subtrees"
+        );
     }
 
     is_valid
