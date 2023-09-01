@@ -36,22 +36,23 @@ pub fn run(
         };
 
         // Blocks cannot complete multiple level 16 subtrees,
-        // the subtree index can increase by a maximum of 1 every ~20 blocks.
+        // so the subtree index can increase by a maximum of 1 every ~20 blocks.
         // If this block does complete a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
-        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
-            prev_tree = Some(tree);
-            continue;
-        }
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            // If the leaf at the end of the block is the final leaf in a subtree,
+            // we already have that subtree root available in the tree.
             assert_eq!(
                 index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_sapling_subtree(upgrade_db, index, height, node);
-        } else {
+            subtree_count += 1;
+        } else if end_of_block_subtree_index.0 > subtree_count {
+            // If the leaf at the end of the block is in the next subtree,
+            // we need to calculate that subtree root based on the tree from the previous block.
             let mut prev_tree = prev_tree
                 .take()
                 .expect("should have some previous sapling frontier");
@@ -81,8 +82,7 @@ pub fn run(
 
             let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
                 "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(),\
-                 and that the block must complete a subtree",
+                 already checked is_complete_subtree(), and that the block must complete a subtree",
             );
 
             assert_eq!(
@@ -90,9 +90,9 @@ pub fn run(
                 "trees are inserted in order with no gaps"
             );
             write_sapling_subtree(upgrade_db, index, height, node);
-        };
+            subtree_count += 1;
+        }
 
-        subtree_count += 1;
         prev_tree = Some(tree);
     }
 
@@ -110,21 +110,24 @@ pub fn run(
             continue;
         };
 
-        // Blocks cannot complete multiple level 16 subtrees.
-        // If a block does complete a subtree, it is either inside the block, or at the end.
-        // (See the detailed comment for Sapling.)
-        if end_of_block_subtree_index.0 <= subtree_count && !tree.is_complete_subtree() {
-            prev_tree = Some(tree);
-            continue;
-        }
+        // Blocks cannot complete multiple level 16 subtrees,
+        // so the subtree index can increase by a maximum of 1 every ~20 blocks.
+        // If this block does complete a subtree, the subtree is either completed by a note before
+        // the final note (so the final note is in the next subtree), or by the final note
+        // (so the final note is the end of this subtree).
 
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            // If the leaf at the end of the block is the final leaf in a subtree,
+            // we already have that subtree root available in the tree.
             assert_eq!(
                 index.0, subtree_count,
                 "trees are inserted in order with no gaps"
             );
             write_orchard_subtree(upgrade_db, index, height, node);
-        } else {
+            subtree_count += 1;
+        } else if end_of_block_subtree_index.0 > subtree_count {
+            // If the leaf at the end of the block is in the next subtree,
+            // we need to calculate that subtree root based on the tree from the previous block.
             let mut prev_tree = prev_tree
                 .take()
                 .expect("should have some previous orchard frontier");
@@ -154,8 +157,7 @@ pub fn run(
 
             let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
                 "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(),\
-                 and that the block must complete a subtree",
+                 already checked is_complete_subtree(), and that the block must complete a subtree",
             );
 
             assert_eq!(
@@ -163,9 +165,9 @@ pub fn run(
                 "trees are inserted in order with no gaps"
             );
             write_orchard_subtree(upgrade_db, index, height, node);
-        };
+            subtree_count += 1;
+        }
 
-        subtree_count += 1;
         prev_tree = Some(tree);
     }
 
