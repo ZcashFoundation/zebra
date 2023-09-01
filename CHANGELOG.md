@@ -39,7 +39,6 @@ This release:
 ### Fixed
 
 - Log a warning instead of panicking for unused mining configs ([#7290](https://github.com/ZcashFoundation/zebra/pull/7290))
-- Remove all unrequired docker arguments from CI/CD pipelines ([#7231](https://github.com/ZcashFoundation/zebra/pull/7231))
 - Avoid expensive note commitment tree root recalculations in eq() methods ([#7386](https://github.com/ZcashFoundation/zebra/pull/7386))
 - Use the correct state version for databases without a state version file ([#7385](https://github.com/ZcashFoundation/zebra/pull/7385))
 - Avoid temporary failures verifying the first non-finalized block or attempting to fork the chain before the final checkpoint ([#6810](https://github.com/ZcashFoundation/zebra/pull/6810))
