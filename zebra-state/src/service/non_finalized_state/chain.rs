@@ -3,7 +3,7 @@
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::{Deref, RangeInclusive},
     sync::Arc,
 };
@@ -20,7 +20,7 @@ use zebra_chain::{
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction::*,
     transaction::{self, Transaction},
     transparent,
@@ -135,7 +135,8 @@ pub struct Chain {
     /// This extra root is removed when the first non-finalized block is committed.
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// A list of Sapling subtrees completed in the non-finalized state
-    pub(crate) sapling_subtrees: VecDeque<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>,
+    pub(crate) sapling_subtrees:
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
 
     /// The Orchard anchors created by `blocks`.
     ///
@@ -148,7 +149,8 @@ pub struct Chain {
     /// This extra root is removed when the first non-finalized block is committed.
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
     /// A list of Orchard subtrees completed in the non-finalized state
-    pub(crate) orchard_subtrees: VecDeque<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>,
+    pub(crate) orchard_subtrees:
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
     // Nullifiers
     //
@@ -351,11 +353,11 @@ impl Chain {
             .expect("The treestate must be present for the root height.");
 
         if treestate.note_commitment_trees.sapling_subtree.is_some() {
-            self.sapling_subtrees.pop_front();
+            self.sapling_subtrees.pop_first();
         }
 
         if treestate.note_commitment_trees.orchard_subtree.is_some() {
-            self.orchard_subtrees.pop_front();
+            self.orchard_subtrees.pop_first();
         }
 
         // Remove the lowest height block from `self.blocks`.
@@ -678,31 +680,45 @@ impl Chain {
             .map(|(_height, tree)| tree.clone())
     }
 
-    /// Returns the Sapling [`NoteCommitmentSubtree`] specified
-    /// by an index, if it exists in the non-finalized [`Chain`].
+    /// Returns the Sapling [`NoteCommitmentSubtree`] that was completed at a block with
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn sapling_subtree(
         &self,
         hash_or_height: HashOrHeight,
-    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.sapling_subtrees
             .iter()
-            .find(|subtree| subtree.end == height)
-            .cloned()
+            .find(|(_index, subtree)| subtree.end == height)
+            .map(|(index, subtree)| subtree.with_index(*index))
     }
 
-    /// Returns the Sapling [`NoteCommitmentSubtree`] specified
-    /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
-    pub fn sapling_subtree_by_index(
+    /// Returns a list of Sapling [`NoteCommitmentSubtree`]s at or after `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// Unlike the finalized state and `ReadRequest::SaplingSubtrees`, the returned subtrees
+    /// can start after `start_index`. These subtrees are continuous up to the tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be
+    /// used to create an inconsistent list of subtrees after concurrent non-finalized and
+    /// finalized updates.
+    pub fn sapling_subtrees_in_range(
         &self,
-        index: NoteCommitmentSubtreeIndex,
-    ) -> Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>> {
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+        let limit = limit
+            .map(|limit| usize::from(limit.0))
+            .unwrap_or(usize::MAX);
+
+        // Since we're working in memory, it's ok to iterate through the whole range here.
         self.sapling_subtrees
-            .iter()
-            .find(|subtree| subtree.index == index)
-            .cloned()
+            .range(start_index..)
+            .take(limit)
+            .map(|(index, subtree)| (*index, *subtree))
+            .collect()
     }
 
     /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
@@ -854,31 +870,45 @@ impl Chain {
             .map(|(_height, tree)| tree.clone())
     }
 
-    /// Returns the Orchard [`NoteCommitmentSubtree`] specified
-    /// by a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    /// Returns the Orchard [`NoteCommitmentSubtree`] that was completed at a block with
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn orchard_subtree(
         &self,
         hash_or_height: HashOrHeight,
-    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+    ) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.orchard_subtrees
             .iter()
-            .find(|subtree| subtree.end == height)
-            .cloned()
+            .find(|(_index, subtree)| subtree.end == height)
+            .map(|(index, subtree)| subtree.with_index(*index))
     }
 
-    /// Returns the Orchard [`NoteCommitmentSubtree`] specified
-    /// by an index, if it exists in the non-finalized [`Chain`].
-    pub fn orchard_subtree_by_index(
+    /// Returns a list of Orchard [`NoteCommitmentSubtree`]s at or after `start_index`.
+    /// If `limit` is provided, the list is limited to `limit` entries.
+    ///
+    /// Unlike the finalized state and `ReadRequest::OrchardSubtrees`, the returned subtrees
+    /// can start after `start_index`. These subtrees are continuous up to the tip.
+    ///
+    /// There is no API for retrieving single subtrees by index, because it can accidentally be
+    /// used to create an inconsistent list of subtrees after concurrent non-finalized and
+    /// finalized updates.
+    pub fn orchard_subtrees_in_range(
         &self,
-        index: NoteCommitmentSubtreeIndex,
-    ) -> Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>> {
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>> {
+        let limit = limit
+            .map(|limit| usize::from(limit.0))
+            .unwrap_or(usize::MAX);
+
+        // Since we're working in memory, it's ok to iterate through the whole range here.
         self.orchard_subtrees
-            .iter()
-            .find(|subtree| subtree.index == index)
-            .cloned()
+            .range(start_index..)
+            .take(limit)
+            .map(|(index, subtree)| (*index, *subtree))
+            .collect()
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
@@ -1354,10 +1384,12 @@ impl Chain {
         self.add_orchard_tree_and_anchor(height, nct.orchard);
 
         if let Some(subtree) = nct.sapling_subtree {
-            self.sapling_subtrees.push_back(subtree)
+            self.sapling_subtrees
+                .insert(subtree.index, subtree.into_data());
         }
         if let Some(subtree) = nct.orchard_subtree {
-            self.orchard_subtrees.push_back(subtree)
+            self.orchard_subtrees
+                .insert(subtree.index, subtree.into_data());
         }
 
         let sapling_root = self.sapling_note_commitment_tree().root();
