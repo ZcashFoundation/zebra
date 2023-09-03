@@ -7,6 +7,7 @@ use zebra_chain::{
     block::{self, Block},
     orchard, sapling,
     serialization::DateTime32,
+    subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
 };
@@ -164,6 +165,18 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::OrchardTree`] with the specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
+    /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
+    /// subtrees.
+    SaplingSubtrees(
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
+    ),
+
+    /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
+    /// subtrees.
+    OrchardSubtrees(
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
+    ),
+
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
     AddressBalance(Amount<NonNegative>),
 
@@ -270,6 +283,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
+            | ReadResponse::SaplingSubtrees(_)
+            | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_) => {

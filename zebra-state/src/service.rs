@@ -1502,6 +1502,56 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::SaplingSubtrees { start_index, limit } => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let sapling_subtrees = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::sapling_subtrees(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    start_index,
+                                    limit,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::SaplingSubtrees");
+
+                        Ok(ReadResponse::SaplingSubtrees(sapling_subtrees))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::OrchardSubtrees { start_index, limit } => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let orchard_subtrees = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::orchard_subtrees(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    start_index,
+                                    limit,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::OrchardSubtrees");
+
+                        Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
                 let state = self.clone();
