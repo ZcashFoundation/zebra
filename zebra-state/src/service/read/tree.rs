@@ -74,7 +74,7 @@ where
     // In that case, we ignore all the trees in `chain` after the first inconsistent tree,
     // because we know they will be inconsistent as well. (It is cryptographically impossible
     // for tree roots to be equal once the leaves have diverged.)
-    let mut db_list = db.sapling_subtrees_by_index(start_index, limit);
+    let mut db_list = db.sapling_subtree_list_by_index_for_rpc(start_index, limit);
 
     // If there's no chain, then we have the complete list.
     let Some(chain) = chain else {
@@ -162,7 +162,7 @@ where
     // In that case, we ignore all the trees in `chain` after the first inconsistent tree,
     // because we know they will be inconsistent as well. (It is cryptographically impossible
     // for tree roots to be equal once the leaves have diverged.)
-    let mut db_list = db.orchard_subtrees_by_index(start_index, limit);
+    let mut db_list = db.orchard_subtree_list_by_index_for_rpc(start_index, limit);
 
     // If there's no chain, then we have the complete list.
     let Some(chain) = chain else {

@@ -186,7 +186,7 @@ impl ZebraDb {
     ///
     /// This method should not be used to get subtrees for RPC responses,
     /// because those subtree lists require that the start subtree is present in the list.
-    /// Instead, use `sapling_subtrees_by_index()`.
+    /// Instead, use `sapling_subtree_list_by_index_for_rpc()`.
     #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn sapling_subtree_by_index(
         &self,
@@ -214,7 +214,7 @@ impl ZebraDb {
     /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
     /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_subtrees_by_index(
+    pub fn sapling_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
@@ -319,7 +319,7 @@ impl ZebraDb {
     ///
     /// This method should not be used to get subtrees for RPC responses,
     /// because those subtree lists require that the start subtree is present in the list.
-    /// Instead, use `orchard_subtrees_by_index()`.
+    /// Instead, use `orchard_subtree_list_by_index_for_rpc()`.
     #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn orchard_subtree_by_index(
         &self,
@@ -347,7 +347,7 @@ impl ZebraDb {
     /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
     /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_subtrees_by_index(
+    pub fn orchard_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
