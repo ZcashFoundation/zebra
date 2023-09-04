@@ -61,7 +61,7 @@ where
 /// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
 /// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
 /// diverged.)
-/// 2. There is no API for retrieving single subtrees, because it can accidentally be used to create
+/// 2. APIs that return single subtrees can't be used here, because they can create
 /// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
@@ -147,8 +147,8 @@ where
 /// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
 /// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
 /// diverged.)
-/// 2. There is no API for retrieving single subtrees, because it can accidentally be used to create
-/// an inconsistent list of subtrees.
+/// 2. APIs that return single subtrees can't be used here, because they can create
+/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
 pub fn orchard_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
