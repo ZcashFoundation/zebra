@@ -39,7 +39,7 @@ pub use find::{
     find_chain_hashes, find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
     non_finalized_state_contains_block_hash, tip, tip_height,
 };
-pub use tree::{orchard_tree, sapling_tree};
+pub use tree::{orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use difficulty::get_block_template_chain_info;

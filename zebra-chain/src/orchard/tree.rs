@@ -20,6 +20,7 @@ use std::{
 use bitvec::prelude::*;
 use bridgetree::{self, NonEmptyFrontier};
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use hex::ToHex;
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -170,13 +171,23 @@ impl ZcashDeserialize for Root {
 }
 
 /// A node of the Orchard Incremental Note Commitment Tree.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Node(pallas::Base);
 
 impl Node {
     /// Calls `to_repr()` on inner value.
     pub fn to_repr(&self) -> [u8; 32] {
         self.0.to_repr()
+    }
+
+    /// Return the node bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays note commitment tree nodes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0.to_repr();
+        reversed_bytes.reverse();
+        reversed_bytes
     }
 }
 
@@ -197,6 +208,40 @@ impl TryFrom<[u8; 32]> for Node {
         Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
             .map(Node)
             .ok_or("invalid Pallas field element")
+    }
+}
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("orchard::Node")
+            .field(&self.encode_hex::<String>())
+            .finish()
+    }
+}
+
+impl ToHex for &Node {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for Node {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
     }
 }
 

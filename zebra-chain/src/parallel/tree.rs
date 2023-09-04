@@ -20,13 +20,13 @@ pub struct NoteCommitmentTrees {
     pub sapling: Arc<sapling::tree::NoteCommitmentTree>,
 
     /// The sapling note commitment subtree.
-    pub sapling_subtree: Option<Arc<NoteCommitmentSubtree<sapling::tree::Node>>>,
+    pub sapling_subtree: Option<NoteCommitmentSubtree<sapling::tree::Node>>,
 
     /// The orchard note commitment tree.
     pub orchard: Arc<orchard::tree::NoteCommitmentTree>,
 
     /// The orchard note commitment subtree.
-    pub orchard_subtree: Option<Arc<NoteCommitmentSubtree<orchard::tree::Node>>>,
+    pub orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
 }
 
 /// Note commitment tree errors.
