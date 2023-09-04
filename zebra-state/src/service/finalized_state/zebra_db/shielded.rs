@@ -180,15 +180,39 @@ impl ZebraDb {
         self.db.zs_range_iter(&sapling_trees, range)
     }
 
+    /// Returns the Sapling note commitment subtree at this `index`.
+    ///
+    /// # Correctness
+    ///
+    /// This method should not be used to get subtrees for RPC responses,
+    /// because those subtree lists require that the start subtree is present in the list.
+    /// Instead, use `sapling_subtrees_by_index()`.
+    #[allow(clippy::unwrap_in_result)]
+    pub(in super::super) fn sapling_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+            self.db.zs_get(&sapling_subtrees, &index.into())?;
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
     /// If `limit` is provided, the list is limited to `limit` entries.
     ///
     /// If there is no subtree at `start_index`, the returned list is empty.
     /// Otherwise, subtrees are continuous up to the finalized tip.
     ///
-    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
-    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
-    /// updates.
+    /// # Correctness
+    ///
+    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
+    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_subtrees_by_index(
         &self,
@@ -289,15 +313,39 @@ impl ZebraDb {
         self.db.zs_range_iter(&orchard_trees, range)
     }
 
+    /// Returns the Orchard note commitment subtree at this `index`.
+    ///
+    /// # Correctness
+    ///
+    /// This method should not be used to get subtrees for RPC responses,
+    /// because those subtree lists require that the start subtree is present in the list.
+    /// Instead, use `orchard_subtrees_by_index()`.
+    #[allow(clippy::unwrap_in_result)]
+    pub(in super::super) fn orchard_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
+            self.db.zs_get(&orchard_subtrees, &index.into())?;
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
     /// If `limit` is provided, the list is limited to `limit` entries.
     ///
     /// If there is no subtree at `start_index`, the returned list is empty.
     /// Otherwise, subtrees are continuous up to the finalized tip.
     ///
-    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
-    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
-    /// updates.
+    /// # Correctness
+    ///
+    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
+    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_subtrees_by_index(
         &self,
