@@ -180,17 +180,41 @@ impl ZebraDb {
         self.db.zs_range_iter(&sapling_trees, range)
     }
 
+    /// Returns the Sapling note commitment subtree at this `index`.
+    ///
+    /// # Correctness
+    ///
+    /// This method should not be used to get subtrees for RPC responses,
+    /// because those subtree lists require that the start subtree is present in the list.
+    /// Instead, use `sapling_subtree_list_by_index_for_rpc()`.
+    #[allow(clippy::unwrap_in_result)]
+    pub(in super::super) fn sapling_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+            self.db.zs_get(&sapling_subtrees, &index.into())?;
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
     /// If `limit` is provided, the list is limited to `limit` entries.
     ///
     /// If there is no subtree at `start_index`, the returned list is empty.
     /// Otherwise, subtrees are continuous up to the finalized tip.
     ///
-    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
-    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
-    /// updates.
+    /// # Correctness
+    ///
+    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
+    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_subtrees_by_index(
+    pub fn sapling_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
@@ -289,17 +313,41 @@ impl ZebraDb {
         self.db.zs_range_iter(&orchard_trees, range)
     }
 
+    /// Returns the Orchard note commitment subtree at this `index`.
+    ///
+    /// # Correctness
+    ///
+    /// This method should not be used to get subtrees for RPC responses,
+    /// because those subtree lists require that the start subtree is present in the list.
+    /// Instead, use `orchard_subtree_list_by_index_for_rpc()`.
+    #[allow(clippy::unwrap_in_result)]
+    pub(in super::super) fn orchard_subtree_by_index(
+        &self,
+        index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
+    ) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        let subtree_data: NoteCommitmentSubtreeData<orchard::tree::Node> =
+            self.db.zs_get(&orchard_subtrees, &index.into())?;
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
     /// If `limit` is provided, the list is limited to `limit` entries.
     ///
     /// If there is no subtree at `start_index`, the returned list is empty.
     /// Otherwise, subtrees are continuous up to the finalized tip.
     ///
-    /// There is no API for retrieving single subtrees by index, because it can accidentally be used
-    /// to create an inconsistent list of subtrees after concurrent non-finalized and finalized
-    /// updates.
+    /// # Correctness
+    ///
+    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
+    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_subtrees_by_index(
+    pub fn orchard_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
@@ -437,9 +485,6 @@ impl DiskWriteBatch {
         let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
         let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        let _sapling_subtree_cf = db.cf_handle("sapling_note_commitment_subtree").unwrap();
-        let _orchard_subtree_cf = db.cf_handle("orchard_note_commitment_subtree").unwrap();
-
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
@@ -485,17 +530,30 @@ impl DiskWriteBatch {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
         }
 
-        // TODO: Increment DATABASE_FORMAT_MINOR_VERSION and uncomment these insertions
+        if let Some(subtree) = trees.sapling_subtree {
+            self.insert_sapling_subtree(zebra_db, &subtree);
+        }
 
-        // if let Some(subtree) = trees.sapling_subtree {
-        //     self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
-        // }
-
-        // if let Some(subtree) = trees.orchard_subtree {
-        //     self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
-        // }
+        if let Some(subtree) = trees.orchard_subtree {
+            self.insert_orchard_subtree(zebra_db, &subtree);
+        }
 
         self.prepare_history_batch(db, finalized)
+    }
+
+    // Sapling tree methods
+
+    /// Inserts the Sapling note commitment subtree.
+    pub fn insert_sapling_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: &NoteCommitmentSubtree<sapling::tree::Node>,
+    ) {
+        let sapling_subtree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&sapling_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Sapling note commitment tree at the given [`Height`].
@@ -517,6 +575,21 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&sapling_tree_cf, from, to);
+    }
+
+    // Orchard tree methods
+
+    /// Inserts the Orchard note commitment subtree.
+    pub fn insert_orchard_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: &NoteCommitmentSubtree<orchard::tree::Node>,
+    ) {
+        let orchard_subtree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].
