@@ -66,7 +66,7 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::{DiskWriteBatch, WriteDisk, MAX_ON_DISK_HEIGHT},
+    finalized_state::MAX_ON_DISK_HEIGHT,
     init_test, init_test_services, ReadStateService,
 };
 
