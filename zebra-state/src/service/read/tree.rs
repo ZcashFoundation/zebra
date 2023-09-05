@@ -49,12 +49,19 @@ where
 }
 
 /// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
-/// If `limit` is provided, the list is limited to `limit` entries.
 ///
-/// If there is no subtree at `start_index` in the non-finalized `chain` or finalized `db`,
-/// the returned list is empty. Otherwise, subtrees are continuous and consistent up to the tip.
+/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
+/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
 ///
-/// There is no API for retrieving single subtrees, because it can accidentally be used to create
+/// # Correctness
+///
+/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
+/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
+/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
+/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
+/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
+/// diverged.)
+/// 2. APIs that return single subtrees can't be used here, because they can create
 /// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
@@ -65,15 +72,6 @@ pub fn sapling_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
-    // # Correctness
-    //
-    // After `chain` was cloned, the StateService can commit additional blocks to the finalized
-    // state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is
-    // a different fork to `db`, then the trees can be inconsistent.
-    //
-    // In that case, we ignore all the trees in `chain` after the first inconsistent tree,
-    // because we know they will be inconsistent as well. (It is cryptographically impossible
-    // for tree roots to be equal once the leaves have diverged.)
     let mut db_list = db.sapling_subtrees_by_index(start_index, limit);
 
     // If there's no chain, then we have the complete list.
@@ -137,13 +135,20 @@ where
 }
 
 /// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
-/// If `limit` is provided, the list is limited to `limit` entries.
 ///
-/// If there is no subtree at `start_index` in the non-finalized `chain` or finalized `db`,
-/// the returned list is empty. Otherwise, subtrees are continuous and consistent up to the tip.
+/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
+/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
 ///
-/// There is no API for retrieving single subtrees, because it can accidentally be used to create
-/// an inconsistent list of subtrees.
+/// # Correctness
+///
+/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
+/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
+/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
+/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
+/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
+/// diverged.)
+/// 2. APIs that return single subtrees can't be used here, because they can create
+/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
 pub fn orchard_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -153,15 +158,6 @@ pub fn orchard_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
-    // # Correctness
-    //
-    // After `chain` was cloned, the StateService can commit additional blocks to the finalized
-    // state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is
-    // a different fork to `db`, then the trees can be inconsistent.
-    //
-    // In that case, we ignore all the trees in `chain` after the first inconsistent tree,
-    // because we know they will be inconsistent as well. (It is cryptographically impossible
-    // for tree roots to be equal once the leaves have diverged.)
     let mut db_list = db.orchard_subtrees_by_index(start_index, limit);
 
     // If there's no chain, then we have the complete list.
