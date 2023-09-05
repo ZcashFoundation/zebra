@@ -190,6 +190,9 @@ pub async fn run() -> Result<()> {
     // check that lightwalletd queries the mempool.
     zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
+    // Give some time for ...
+    std::thread::sleep(std::time::Duration::from_secs(30));
+
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
 
