@@ -42,10 +42,7 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_D
 
 pub(super) use zebra_db::ZebraDb;
 
-#[cfg(not(any(test, feature = "proptest-impl")))]
-pub(super) use disk_db::DiskWriteBatch;
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use disk_db::{DiskWriteBatch, WriteDisk};
+use disk_db::DiskWriteBatch;
 
 /// The finalized part of the chain state, stored in the db.
 ///
