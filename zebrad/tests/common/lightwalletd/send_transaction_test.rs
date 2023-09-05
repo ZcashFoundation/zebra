@@ -188,7 +188,7 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     // check that lightwalletd queries the mempool.
-    zebrad.expect_stdout_line_matches("answered mempool request req=TransactionIds")?;
+    zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
