@@ -45,8 +45,9 @@ pub enum NetworkUpgrade {
     Canopy,
     /// The Zcash protocol after the Nu5 upgrade.
     ///
-    /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, and
-    /// other changes. The Nu5 code name has not been chosen yet.
+    /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, non-malleable transaction
+    /// IDs, and other changes. There is no special code name for Nu5.
+    #[serde(rename = "NU5")]
     Nu5,
 }
 
