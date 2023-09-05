@@ -1,5 +1,7 @@
 //! Struct representing Sapling/Orchard note commitment subtrees
 
+use std::num::TryFromIntError;
+
 use serde::{Deserialize, Serialize};
 
 use crate::block::Height;
@@ -20,6 +22,22 @@ pub struct NoteCommitmentSubtreeIndex(pub u16);
 impl From<u16> for NoteCommitmentSubtreeIndex {
     fn from(value: u16) -> Self {
         Self(value)
+    }
+}
+
+impl TryFrom<u64> for NoteCommitmentSubtreeIndex {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        u16::try_from(value).map(Self)
+    }
+}
+
+// If we want to automatically convert NoteCommitmentSubtreeIndex to the generic integer literal
+// type, we can only implement conversion into u64. (Or u16, but not both.)
+impl From<NoteCommitmentSubtreeIndex> for u64 {
+    fn from(value: NoteCommitmentSubtreeIndex) -> Self {
+        value.0.into()
     }
 }
 

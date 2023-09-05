@@ -682,6 +682,11 @@ impl Chain {
 
     /// Returns the Sapling [`NoteCommitmentSubtree`] that was completed at a block with
     /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    ///
+    /// # Concurrency
+    ///
+    /// This method should not be used to get subtrees in concurrent code by height,
+    /// because the same heights in different chain forks can have different subtrees.
     pub fn sapling_subtree(
         &self,
         hash_or_height: HashOrHeight,
@@ -872,6 +877,11 @@ impl Chain {
 
     /// Returns the Orchard [`NoteCommitmentSubtree`] that was completed at a block with
     /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    ///
+    /// # Concurrency
+    ///
+    /// This method should not be used to get subtrees in concurrent code by height,
+    /// because the same heights in different chain forks can have different subtrees.
     pub fn orchard_subtree(
         &self,
         hash_or_height: HashOrHeight,
