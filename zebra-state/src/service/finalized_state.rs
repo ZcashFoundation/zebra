@@ -98,7 +98,7 @@ impl FinalizedState {
         network: Network,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
-        let db = ZebraDb::new(config, network);
+        let db = ZebraDb::new(config, network, false);
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
