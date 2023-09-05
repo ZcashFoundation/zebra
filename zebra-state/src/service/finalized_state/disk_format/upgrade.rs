@@ -25,6 +25,8 @@ use crate::{
     Config,
 };
 
+pub(crate) mod add_subtrees;
+
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
@@ -195,7 +197,7 @@ impl DbFormatChange {
                 network,
                 initial_tip_height,
                 upgrade_db.clone(),
-                cancel_receiver,
+                &cancel_receiver,
             )?,
 
             NewlyCreated { .. } => {
@@ -218,12 +220,14 @@ impl DbFormatChange {
             }
         }
 
-        // This check should pass for all format changes:
-        // - upgrades should de-duplicate trees if needed (and they already do this check)
-        // - an empty state doesn't have any trees, so it can't have duplicate trees
-        // - since this Zebra code knows how to de-duplicate trees, downgrades using this code
-        //   still know how to make sure trees are unique
-        Self::check_for_duplicate_trees(upgrade_db);
+        // These checks should pass for all format changes:
+        // - upgrades should produce a valid format (and they already do that check)
+        // - an empty state should pass all the format checks
+        // - since the running Zebra code knows how to upgrade the database to this format,
+        //   downgrades using this running code still know how to create a valid database
+        //   (unless a future upgrade breaks these format checks)
+        Self::check_for_duplicate_trees(upgrade_db.clone());
+        add_subtrees::check(&upgrade_db);
 
         Ok(())
     }
@@ -245,7 +249,7 @@ impl DbFormatChange {
         network: Network,
         initial_tip_height: Option<Height>,
         db: ZebraDb,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
             newer_running_version,
@@ -277,7 +281,7 @@ impl DbFormatChange {
             return Ok(());
         };
 
-        // Start of a database upgrade task.
+        // Note commitment tree de-duplication database upgrade task.
 
         let version_for_pruning_trees =
             Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
@@ -339,11 +343,28 @@ impl DbFormatChange {
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(db);
+            Self::check_for_duplicate_trees(db.clone());
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
             Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
+        }
+
+        // Note commitment subtree creation database upgrade task.
+
+        let version_for_adding_subtrees =
+            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
+
+        // Check if we need to add note commitment subtrees to the database.
+        if older_disk_version < version_for_adding_subtrees {
+            add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
+
+            // Before marking the state as upgraded, check that the upgrade completed successfully.
+            add_subtrees::check(&db);
+
+            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
+            // database is marked, so the upgrade MUST be complete at this point.
+            Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
         }
 
         // # New Upgrades Usually Go Here
@@ -353,6 +374,7 @@ impl DbFormatChange {
         // Run the latest format upgrade code after the other upgrades are complete,
         // then mark the format as upgraded. The code should check `cancel_receiver`
         // every time it runs its inner update loop.
+
         info!(
             ?newer_running_version,
             "Zebra automatically upgraded the database format to:"
