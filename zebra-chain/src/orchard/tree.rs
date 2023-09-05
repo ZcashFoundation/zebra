@@ -182,12 +182,9 @@ impl Node {
 
     /// Return the node bytes in big-endian byte-order suitable for printing out byte by byte.
     ///
-    /// Zebra displays note commitment tree nodes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
+    /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0.to_repr();
-        reversed_bytes.reverse();
-        reversed_bytes
+        self.to_repr()
     }
 }
 
