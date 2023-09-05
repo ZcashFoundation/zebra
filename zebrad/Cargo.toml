@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -142,18 +142,18 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.28" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.28" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.28" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.28" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.28" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.28" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.29" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.29" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.29" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.29" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.29" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.28", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.29", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.4.0", features = ["cargo"] }
+clap = { version = "4.4.2", features = ["cargo"] }
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
@@ -233,7 +233,7 @@ abscissa_core = { version = "0.7.0", features = ["testing"] }
 hex = "0.4.3"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
-regex = "1.9.4"
+regex = "1.9.5"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.105", features = ["preserve_order"] }

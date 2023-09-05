@@ -19,6 +19,7 @@ use std::{
 
 use bitvec::prelude::*;
 use bridgetree::{self, NonEmptyFrontier};
+use hex::ToHex;
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
@@ -174,9 +175,46 @@ impl AsRef<[u8; 32]> for Node {
     }
 }
 
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
+        f.debug_tuple("sapling::Node")
+            .field(&self.encode_hex::<String>())
+            .finish()
+    }
+}
+
+impl Node {
+    /// Return the node bytes in little-endian byte order suitable for printing out byte by byte.
+    ///
+    /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        self.0
+    }
+}
+
+impl ToHex for &Node {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for Node {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
     }
 }
 

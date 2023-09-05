@@ -6,7 +6,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Height},
     orchard, sapling, sprout,
-    subtree::NoteCommitmentSubtreeData,
+    subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -212,6 +212,15 @@ fn roundtrip_amount() {
     let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<Amount::<NonNegative>>())| assert_value_properties(val));
+}
+
+#[test]
+fn roundtrip_note_commitment_subtree_index() {
+    let _init_guard = zebra_test::init();
+
+    proptest!(|(val in any::<NoteCommitmentSubtreeIndex>())| {
+        assert_value_properties(val)
+    });
 }
 
 // Sprout

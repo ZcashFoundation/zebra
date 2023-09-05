@@ -25,13 +25,21 @@ use zebra_chain::{
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
     serialization::{SerializationError, ZcashDeserialize},
+    subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
 
-use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
+use crate::{
+    constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
+    methods::trees::{GetSubtrees, SubtreeRpcData},
+    queue::Queue,
+};
+
+// We don't use a types/ module here, because it is redundant.
+pub mod trees;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -124,7 +132,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `hash|height`: (string, required) The hash or height for the block to be returned.
+    /// - `hash | height`: (string, required) The hash or height for the block to be returned.
     /// - `verbosity`: (numeric, optional, default=1) 0 for hex encoded data, 1 for a json object,
     ///     and 2 for json object with transaction data.
     ///
@@ -171,6 +179,31 @@ pub trait Rpc {
     /// negative heights.
     #[rpc(name = "z_gettreestate")]
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
+
+    /// Returns information about a range of Sapling or Orchard subtrees.
+    ///
+    /// zcashd reference: [`z_getsubtreesbyindex`](https://zcash.github.io/rpc/z_getsubtreesbyindex.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `pool`: (string, required) The pool from which subtrees should be returned.
+    ///           Either "sapling" or "orchard".
+    /// - `start_index`: (numeric, required) The index of the first 2^16-leaf subtree to return.
+    /// - `limit`: (numeric, optional) The maximum number of subtree values to return.
+    ///
+    /// # Notes
+    ///
+    /// While Zebra is doing its initial subtree index rebuild, subtrees will become available
+    /// starting at the chain tip. This RPC will return an empty list if the `start_index` subtree
+    /// exists, but has not been rebuilt yet. This matches `zcashd`'s behaviour when subtrees aren't
+    /// available yet. (But `zcashd` does its rebuild before syncing any blocks.)
+    #[rpc(name = "z_getsubtreesbyindex")]
+    fn z_get_subtrees_by_index(
+        &self,
+        pool: String,
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BoxFuture<Result<GetSubtrees>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -1104,6 +1137,88 @@ where
                     },
                 },
             })
+        }
+        .boxed()
+    }
+
+    fn z_get_subtrees_by_index(
+        &self,
+        pool: String,
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> BoxFuture<Result<GetSubtrees>> {
+        let mut state = self.state.clone();
+
+        async move {
+            const POOL_LIST: &[&str] = &["sapling", "orchard"];
+
+            if pool == "sapling" {
+                let request = zebra_state::ReadRequest::SaplingSubtrees { start_index, limit };
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let subtrees = match response {
+                    zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
+                    _ => unreachable!("unmatched response to a subtrees request"),
+                };
+
+                let subtrees = subtrees
+                    .values()
+                    .map(|subtree| SubtreeRpcData {
+                        node: subtree.node.encode_hex(),
+                        end: subtree.end,
+                    })
+                    .collect();
+
+                Ok(GetSubtrees {
+                    pool,
+                    start_index,
+                    subtrees,
+                })
+            } else if pool == "orchard" {
+                let request = zebra_state::ReadRequest::OrchardSubtrees { start_index, limit };
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let subtrees = match response {
+                    zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
+                    _ => unreachable!("unmatched response to a subtrees request"),
+                };
+
+                let subtrees = subtrees
+                    .values()
+                    .map(|subtree| SubtreeRpcData {
+                        node: subtree.node.encode_hex(),
+                        end: subtree.end,
+                    })
+                    .collect();
+
+                Ok(GetSubtrees {
+                    pool,
+                    start_index,
+                    subtrees,
+                })
+            } else {
+                Err(Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: format!("invalid pool name, must be one of: {:?}", POOL_LIST),
+                    data: None,
+                })
+            }
         }
         .boxed()
     }

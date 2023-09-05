@@ -31,6 +31,13 @@ impl FromDisk for ValueBalance<NonNegative> {
     }
 }
 
+// The following implementations for history trees use `serde` and
+// `bincode`. `serde` serializations depend on the inner structure of the type.
+// They should not be used in new code. (This is an issue for any derived serialization format.)
+//
+// We explicitly use `bincode::DefaultOptions`  to disallow trailing bytes; see
+// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct HistoryTreeParts {
     network: Network,

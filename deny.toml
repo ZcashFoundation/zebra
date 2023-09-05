@@ -74,7 +74,7 @@ skip-tree = [
     # ECC crates
 
     # wait for minreq and zcash_proofs to upgrade
-    { name = "rustls", version = "=0.20.8" },
+    { name = "rustls", version = "=0.20.9" },
 
     # wait for zcash_proofs to upgrade
     { name = "webpki-roots", version = "=0.22.6" },
@@ -89,9 +89,6 @@ skip-tree = [
 
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
-
-    # wait for proptest-derive to upgrade proc-macro2 and syn
-    { name = "unicode-xid", version = "=0.1.0"},
 
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.

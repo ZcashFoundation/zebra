@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.28"
+version = "1.0.0-beta.29"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Test harnesses and test vectors for Zebra"
 license = "MIT OR Apache-2.0"
@@ -22,7 +22,7 @@ insta = "1.31.0"
 proptest = "1.2.0"
 once_cell = "1.18.0"
 rand = "0.8.5"
-regex = "1.9.4"
+regex = "1.9.5"
 
 tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
 tower = { version = "0.4.13", features = ["util"] }
