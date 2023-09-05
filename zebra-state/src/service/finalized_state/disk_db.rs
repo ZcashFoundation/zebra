@@ -95,7 +95,7 @@ pub struct DiskDb {
 //       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
 #[derive(Default)]
-pub struct DiskWriteBatch {
+pub(crate) struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
 }
@@ -605,7 +605,7 @@ impl DiskDb {
     // Low-level write methods are located in the WriteDisk trait
 
     /// Writes `batch` to the database.
-    pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
+    pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         self.db.write(batch.batch)
     }
 
