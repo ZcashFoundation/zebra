@@ -72,7 +72,7 @@ pub fn sapling_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
-    let mut db_list = db.sapling_subtrees_by_index(start_index, limit);
+    let mut db_list = db.sapling_subtree_list_by_index_for_rpc(start_index, limit);
 
     // If there's no chain, then we have the complete list.
     let Some(chain) = chain else {
@@ -158,7 +158,7 @@ pub fn orchard_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
-    let mut db_list = db.orchard_subtrees_by_index(start_index, limit);
+    let mut db_list = db.orchard_subtree_list_by_index_for_rpc(start_index, limit);
 
     // If there's no chain, then we have the complete list.
     let Some(chain) = chain else {
