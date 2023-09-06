@@ -35,7 +35,7 @@ use crate::common::{
 ///
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
-pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
+pub const LAUNCH_DELAY: Duration = Duration::from_secs(20);
 
 /// After we launch `zebrad`, wait this long in extended tests.
 /// See [`LAUNCH_DELAY`] for details.
@@ -52,7 +52,7 @@ pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 ///
 /// We use a longer time to make sure the first node has launched before the second starts,
 /// even if CI is under load.
-pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
+pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(20);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
