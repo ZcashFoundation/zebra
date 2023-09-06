@@ -154,7 +154,7 @@ zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.29", optional = t
 
 abscissa_core = "0.7.0"
 clap = { version = "4.4.2", features = ["cargo"] }
-chrono = { version = "0.4.28", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.29", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
@@ -173,7 +173,7 @@ color-eyre = { version = "0.6.2", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"

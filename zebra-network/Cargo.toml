@@ -43,7 +43,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 bitflags = "2.4.0"
 byteorder = "1.4.3"
 bytes = "1.4.0"
-chrono = { version = "0.4.28", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.29", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
@@ -58,7 +58,7 @@ rayon = "1.7.0"
 regex = "1.9.5"
 serde = { version = "1.0.188", features = ["serde_derive"] }
 tempfile = "3.8.0"
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 
 futures = "0.3.28"
 tokio = { version = "1.32.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
