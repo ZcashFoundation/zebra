@@ -256,7 +256,9 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
     let mut subtree_count = 0;
     for (index, height, tree) in db
         .sapling_tree_by_height_range(..)
+        // Exclude empty sapling tree and add subtree indexes
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
+        // Exclude heights that don't complete a subtree and count completed subtrees
         .filter_map(|(subtree_index, height, tree)| {
             if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
                 let subtree_index = subtree_count;
@@ -267,23 +269,21 @@ fn check_sapling_subtrees(db: &ZebraDb) -> bool {
             }
         })
     {
+        // Check that there's an entry for every completed sapling subtree root in all sapling trees
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             error!(?index, "missing subtree");
             is_valid = false;
             continue;
         };
 
-        if subtree.index.0 != index {
-            error!("completed subtree indexes should match");
-            is_valid = false;
-        }
-
+        // Check that the subtree end height matches that in the sapling trees.
         if subtree.end != height {
             let is_complete = tree.is_complete_subtree();
             error!(?subtree.end, ?height, ?index, ?is_complete, "bad sapling subtree end height");
             is_valid = false;
         }
 
+        // Check the root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.node != node {
                 error!("completed subtree roots should match");
@@ -371,7 +371,9 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
     let mut subtree_count = 0;
     for (index, height, tree) in db
         .orchard_tree_by_height_range(..)
+        // Exclude empty orchard tree and add subtree indexes
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
+        // Exclude heights that don't complete a subtree and count completed subtree
         .filter_map(|(subtree_index, height, tree)| {
             if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
                 let subtree_index = subtree_count;
@@ -382,23 +384,21 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
             }
         })
     {
+        // Check that there's an entry for every completed orchard subtree root in all orchard trees
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             error!(?index, "missing subtree");
             is_valid = false;
             continue;
         };
 
-        if subtree.index.0 != index {
-            error!("completed subtree indexes should match");
-            is_valid = false;
-        }
-
+        // Check that the subtree end height matches that in the orchard trees.
         if subtree.end != height {
             let is_complete = tree.is_complete_subtree();
             error!(?subtree.end, ?height, ?index, ?is_complete, "bad orchard subtree end height");
             is_valid = false;
         }
 
+        // Check the root if the orchard note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.node != node {
                 error!("completed subtree roots should match");
