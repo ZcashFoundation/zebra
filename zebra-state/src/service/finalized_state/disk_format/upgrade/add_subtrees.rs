@@ -2,6 +2,8 @@
 
 use std::sync::{mpsc, Arc};
 
+use itertools::Itertools;
+
 use zebra_chain::{
     block::Height,
     orchard, sapling,
@@ -22,21 +24,31 @@ pub fn run(
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
     let mut subtree_count = 0;
-    let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.sapling_tree_by_height_range(..=initial_tip_height) {
+
+    for ((_prev_height, mut prev_tree), (height, tree)) in upgrade_db
+        .sapling_tree_by_height_range(..=initial_tip_height)
+        .tuple_windows()
+    {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
         // Empty note commitment trees can't contain subtrees.
-        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
-            prev_tree = Some(tree);
-            continue;
-        };
+        // Since:
+        // - the empty genesis tree is the first tree,
+        // - the next tree after genesis contains at least one note commitment,
+        // - the first window contains the genesis tree as the previous tree, and
+        // - trees are deduplicated, so each tree only appears once;
+        // we will never see an empty tree as the current `tree`.
+        let end_of_block_subtree_index = tree.subtree_index().expect(
+            "the genesis tree is the only empty tree, and it is the prev_tree in the first window",
+        );
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // so the subtree index can increase by a maximum of 1 every ~20 blocks.
+        // Due to the 2^16 limit on sapling outputs, blocks cannot complete multiple level 16
+        // subtrees. Currently, with 2MB blocks and v4/v5 sapling output sizes, the subtree index
+        // can increase by a maximum of 1 every ~20 blocks.
+        //
         // If this block does complete a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
@@ -53,9 +65,6 @@ pub fn run(
         } else if end_of_block_subtree_index.0 > subtree_count {
             // If the leaf at the end of the block is in the next subtree,
             // we need to calculate that subtree root based on the tree from the previous block.
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous sapling frontier");
             let sapling_nct = Arc::make_mut(&mut prev_tree);
 
             let block = upgrade_db
@@ -92,8 +101,6 @@ pub fn run(
             write_sapling_subtree(upgrade_db, index, height, node);
             subtree_count += 1;
         }
-
-        prev_tree = Some(tree);
     }
 
     let mut subtree_count = 0;
