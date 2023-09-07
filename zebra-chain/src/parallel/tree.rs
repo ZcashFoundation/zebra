@@ -185,7 +185,7 @@ impl NoteCommitmentTrees {
 
     /// Update the orchard note commitment tree.
     #[allow(clippy::unwrap_in_result)]
-    fn update_orchard_note_commitment_tree(
+    pub fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
         orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<

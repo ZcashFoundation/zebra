@@ -1,6 +1,6 @@
 //! Fully populate the Sapling and Orchard note commitment subtrees for existing blocks in the database.
 
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 use itertools::Itertools;
 
@@ -92,79 +92,71 @@ pub fn run(
         }
     }
 
-    let mut subtree_count = 0;
-    let mut prev_tree: Option<_> = None;
-    for (height, tree) in upgrade_db.orchard_tree_by_height_range(..=initial_tip_height) {
+    for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
+        .orchard_tree_by_height_range(..=initial_tip_height)
+        .tuple_windows()
+        // The first block with orchard notes can't complete a subtree, see below for details.
+        .skip(1)
+    {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        // Empty note commitment trees can't contain subtrees.
-        let Some(end_of_block_subtree_index) = tree.subtree_index() else {
-            prev_tree = Some(tree);
-            continue;
-        };
+        // Zebra stores exactly one note commitment tree for every block with orchard notes.
+        // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
+        //
+        // The consensus rules limit blocks to less than 2^16 orchard outputs. So a block can't
+        // complete multiple level 16 subtrees (or complete an entire subtree by itself).
+        // Currently, with 2MB blocks and v5 orchard output sizes, the subtree index can
+        // increase by 1 every ~20 full blocks.
 
-        // Blocks cannot complete multiple level 16 subtrees,
-        // so the subtree index can increase by a maximum of 1 every ~20 blocks.
-        // If this block does complete a subtree, the subtree is either completed by a note before
+        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
+        // But we skip the empty genesis tree in the iterator, and all other trees must have notes.
+        let before_block_subtree_index = prev_tree
+            .subtree_index()
+            .expect("already skipped empty tree");
+        let end_of_block_subtree_index = tree.subtree_index().expect("already skipped empty tree");
+
+        // If this block completed a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
-
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             // If the leaf at the end of the block is the final leaf in a subtree,
             // we already have that subtree root available in the tree.
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
             write_orchard_subtree(upgrade_db, index, height, node);
-            subtree_count += 1;
-        } else if end_of_block_subtree_index.0 > subtree_count {
+            continue;
+        } else if end_of_block_subtree_index > before_block_subtree_index {
             // If the leaf at the end of the block is in the next subtree,
             // we need to calculate that subtree root based on the tree from the previous block.
-            let mut prev_tree = prev_tree
-                .take()
-                .expect("should have some previous orchard frontier");
-            let orchard_nct = Arc::make_mut(&mut prev_tree);
+            let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+
+            assert!(
+                remaining_notes > 0,
+                "just checked for complete subtrees above"
+            );
 
             let block = upgrade_db
                 .block(height.into())
                 .expect("height with note commitment tree should have block");
+            let orchard_note_commitments = block
+                .orchard_note_commitments()
+                .take(remaining_notes)
+                .cloned()
+                .collect();
 
-            for orchard_note_commitment in block.orchard_note_commitments() {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
+            // This takes less than 1 second per tree, so we don't need to make it cancellable.
+            let (_orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
+                prev_tree,
+                orchard_note_commitments,
+            )
+            .expect("finalized notes should append successfully");
 
-                orchard_nct
-                    .append(*orchard_note_commitment)
-                    .expect("finalized notes should append successfully");
+            let (index, node) =
+                subtree.expect("already checked that the block completed a subtree");
 
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if orchard_nct.is_complete_subtree() {
-                    break;
-                }
-            }
-
-            let (index, node) = orchard_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(), and that the block must complete a subtree",
-            );
-
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
             write_orchard_subtree(upgrade_db, index, height, node);
-            subtree_count += 1;
         }
-
-        prev_tree = Some(tree);
     }
 
     Ok(())

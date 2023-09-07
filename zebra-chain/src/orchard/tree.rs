@@ -423,6 +423,42 @@ impl NoteCommitmentTree {
         Some(index)
     }
 
+    /// Returns the number of leaf nodes required to complete the subtree at
+    /// [`TRACKED_SUBTREE_HEIGHT`].
+    ///
+    /// Returns `2^TRACKED_SUBTREE_HEIGHT` if the tree is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn remaining_subtree_leaf_nodes(&self) -> usize {
+        let remaining = match self.frontier() {
+            // If the subtree has at least one leaf node, the remaining number of nodes can be
+            // calculated using the maximum subtree position and the current position.
+            Some(tree) => {
+                let max_position = incrementalmerkletree::Address::above_position(
+                    TRACKED_SUBTREE_HEIGHT.into(),
+                    tree.position(),
+                )
+                .max_position();
+
+                max_position - tree.position().into()
+            }
+            // If the subtree has no nodes, the remaining number of nodes is the number of nodes in
+            // a subtree.
+            None => {
+                // This position is guaranteed to be in the first subtree.
+                let first_position = 0.into();
+
+                let subtree_address = incrementalmerkletree::Address::above_position(
+                    TRACKED_SUBTREE_HEIGHT.into(),
+                    first_position,
+                );
+
+                subtree_address.position_range_end() - subtree_address.position_range_start().into()
+            }
+        };
+
+        u64::from(remaining).try_into().expect("fits in usize")
+    }
+
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
     pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
         if !self.is_complete_subtree() {
