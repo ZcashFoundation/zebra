@@ -25,11 +25,13 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
-    for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
+    for (prev_tree, height, tree) in upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
         .tuple_windows()
         // The first block with sapling notes can't complete a subtree, see below for details.
-        .skip(1)
+        .filter_map(|((prev_height, prev_tree), (height, tree))| {
+            prev_height.is_min().then_some((prev_tree, height, tree))
+        })
     {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
