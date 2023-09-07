@@ -6,7 +6,9 @@ use itertools::Itertools;
 
 use zebra_chain::{
     block::Height,
-    orchard, sapling,
+    orchard,
+    parallel::tree::NoteCommitmentTrees,
+    sapling,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
 
@@ -23,7 +25,7 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
-    for ((_prev_height, mut prev_tree), (height, tree)) in upgrade_db
+    for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
         .tuple_windows()
         // The first block with sapling notes can't complete a subtree, see below for details.
@@ -60,8 +62,7 @@ pub fn run(
         } else if end_of_block_subtree_index > before_block_subtree_index {
             // If the leaf at the end of the block is in the next subtree,
             // we need to calculate that subtree root based on the tree from the previous block.
-            let sapling_nct = Arc::make_mut(&mut prev_tree);
-            let remaining_notes = sapling_nct.remaining_subtree_leaf_nodes();
+            let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
 
             assert!(
                 remaining_notes > 0,
@@ -71,21 +72,21 @@ pub fn run(
             let block = upgrade_db
                 .block(height.into())
                 .expect("height with note commitment tree should have block");
+            let sapling_note_commitments = block
+                .sapling_note_commitments()
+                .take(remaining_notes)
+                .cloned()
+                .collect();
 
-            for sapling_note_commitment in block.sapling_note_commitments().take(remaining_notes) {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
+            // This takes less than 1 second per tree, so we don't need to make it cancellable.
+            let (_sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
+                prev_tree,
+                sapling_note_commitments,
+            )
+            .expect("finalized notes should append successfully");
 
-                sapling_nct
-                    .append(*sapling_note_commitment)
-                    .expect("finalized notes should append successfully");
-            }
-
-            let (index, node) = sapling_nct
-                .completed_subtree_index_and_root()
-                .expect("already checked that the block completed a subtree");
+            let (index, node) =
+                subtree.expect("already checked that the block completed a subtree");
 
             write_sapling_subtree(upgrade_db, index, height, node);
         }

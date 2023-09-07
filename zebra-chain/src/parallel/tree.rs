@@ -146,7 +146,7 @@ impl NoteCommitmentTrees {
 
     /// Update the sapling note commitment tree.
     #[allow(clippy::unwrap_in_result)]
-    fn update_sapling_note_commitment_tree(
+    pub fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
         sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
     ) -> Result<
