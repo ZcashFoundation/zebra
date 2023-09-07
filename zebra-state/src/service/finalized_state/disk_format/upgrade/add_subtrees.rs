@@ -1,6 +1,6 @@
 //! Fully populate the Sapling and Orchard note commitment subtrees for existing blocks in the database.
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
 use itertools::Itertools;
 
@@ -55,45 +55,7 @@ pub fn run(
             return Err(CancelFormatChange);
         }
 
-        // If this block completed a subtree, the subtree is either completed by a note before
-        // the final note (so the final note is in the next subtree), or by the final note
-        // (so the final note is the end of this subtree).
-        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-            // If the leaf at the end of the block is the final leaf in a subtree,
-            // we already have that subtree root available in the tree.
-            write_sapling_subtree(upgrade_db, index, end_height, node);
-            continue;
-        } else {
-            // If the leaf at the end of the block is in the next subtree,
-            // we need to calculate that subtree root based on the tree from the previous block.
-            let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
-
-            assert!(
-                remaining_notes > 0,
-                "just checked for complete subtrees above"
-            );
-
-            let block = upgrade_db
-                .block(end_height.into())
-                .expect("height with note commitment tree should have block");
-            let sapling_note_commitments = block
-                .sapling_note_commitments()
-                .take(remaining_notes)
-                .cloned()
-                .collect();
-
-            // This takes less than 1 second per tree, so we don't need to make it cancellable.
-            let (_sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
-                prev_tree,
-                sapling_note_commitments,
-            )
-            .expect("finalized notes should append successfully");
-
-            let (index, node) =
-                subtree.expect("already checked that the block completed a subtree");
-
-            write_sapling_subtree(upgrade_db, index, end_height, node);
-        }
+        calculate_and_write_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
     }
 
     for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
@@ -407,6 +369,59 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
     }
 
     is_valid
+}
+
+/// Calculates and writes a Sapling note commitment subtree to `upgrade_db`.
+///
+/// `tree` must be a note commitment tree containing a recently completed subtree,
+/// which was not already completed in `prev_tree`.
+///
+/// # Panics
+///
+/// If `tree` does not contain a recently completed subtree.
+fn calculate_and_write_sapling_subtree(
+    upgrade_db: &ZebraDb,
+    prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
+    end_height: Height,
+    tree: Arc<sapling::tree::NoteCommitmentTree>,
+) {
+    // If this block completed a subtree, the subtree is either completed by a note before
+    // the final note (so the final note is in the next subtree), or by the final note
+    // (so the final note is the end of this subtree).
+    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+        // If the leaf at the end of the block is the final leaf in a subtree,
+        // we already have that subtree root available in the tree.
+        write_sapling_subtree(upgrade_db, index, end_height, node);
+    } else {
+        // If the leaf at the end of the block is in the next subtree,
+        // we need to calculate that subtree root based on the tree from the previous block.
+        let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+
+        assert!(
+            remaining_notes > 0,
+            "tree must contain a recently completed subtree"
+        );
+
+        let block = upgrade_db
+            .block(end_height.into())
+            .expect("height with note commitment tree should have block");
+        let sapling_note_commitments = block
+            .sapling_note_commitments()
+            .take(remaining_notes)
+            .cloned()
+            .collect();
+
+        // This takes less than 1 second per tree, so we don't need to make it cancellable.
+        let (_sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
+            prev_tree,
+            sapling_note_commitments,
+        )
+        .expect("finalized notes should append successfully");
+
+        let (index, node) = subtree.expect("already checked that the block completed a subtree");
+
+        write_sapling_subtree(upgrade_db, index, end_height, node);
+    }
 }
 
 /// Writes a Sapling note commitment subtree to `upgrade_db`.
