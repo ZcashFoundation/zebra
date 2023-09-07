@@ -26,56 +26,40 @@ pub fn run(
     for ((_prev_height, mut prev_tree), (height, tree)) in upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
         .tuple_windows()
+        // The first block with sapling notes can't complete a subtree, see below for details.
+        .skip(1)
     {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let before_block_subtree_index = prev_tree.subtree_index();
-
-        // Empty note commitment trees can't contain subtrees.
-        // Since:
-        // - the empty genesis tree is the first tree,
-        // - the next tree after genesis contains at least one note commitment,
-        // - the first window contains the genesis tree as the previous tree, and
-        // - trees are deduplicated, so each tree only appears once;
-        // we will never see an empty tree as the current `tree`.
-        let end_of_block_subtree_index = tree.subtree_index().expect(
-            "the genesis tree is the only empty tree, and it is the prev_tree in the first window",
-        );
-
-        // Due to the 2^16 limit on sapling outputs, blocks cannot complete multiple level 16
-        // subtrees. Currently, with 2MB blocks and v4/v5 sapling output sizes, the subtree index
-        // can increase by a maximum of 1 every ~20 blocks.
+        // Zebra stores exactly one note commitment tree for every block with sapling notes.
+        // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
         //
-        // If this block does complete a subtree, the subtree is either completed by a note before
+        // The consensus rules limit blocks to less than 2^16 sapling outputs. So a block can't
+        // complete multiple level 16 subtrees (or complete an entire subtree by itself).
+        // Currently, with 2MB blocks and v4/v5 sapling output sizes, the subtree index can
+        // increase by 1 every ~20 full blocks.
+
+        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
+        // But we skip the empty genesis tree in the iterator, and all other trees must have notes.
+        let before_block_subtree_index = prev_tree
+            .subtree_index()
+            .expect("already skipped empty tree");
+        let end_of_block_subtree_index = tree.subtree_index().expect("already skipped empty tree");
+
+        // If this block completed a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
-
-        // If the leaf at the end of the block is the final leaf in a subtree,
-        // we already have that subtree root available in the tree.
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+            // If the leaf at the end of the block is the final leaf in a subtree,
+            // we already have that subtree root available in the tree.
             write_sapling_subtree(upgrade_db, index, height, node);
             continue;
-        }
-
-        // If the first block completes a subtree, then we have just written that subtree.
-        // If it doesn't, then the previous tree for every new subtree has a valid subtree index.
-        //
-        // The only subtree that doesn't have a valid index is genesis, and we've either:
-        // - just used genesis as the previous tree of a new tree in the code above, or
-        // - genesis isn't the previous tree of a new tree at all, so it can be ignored.
-        //
-        // (The first case can't happen for sapling in v4/v5 transactions, because its outputs are
-        // too large. But it might matter for future transaction formats or shielded pools.)
-        let Some(before_block_subtree_index) = before_block_subtree_index else {
-            continue;
-        };
-
-        // If the leaf at the end of the block is in the next subtree,
-        // we need to calculate that subtree root based on the tree from the previous block.
-        if end_of_block_subtree_index > before_block_subtree_index {
+        } else if end_of_block_subtree_index > before_block_subtree_index {
+            // If the leaf at the end of the block is in the next subtree,
+            // we need to calculate that subtree root based on the tree from the previous block.
             let sapling_nct = Arc::make_mut(&mut prev_tree);
             let remaining_notes = sapling_nct.remaining_subtree_leaf_nodes();
 
