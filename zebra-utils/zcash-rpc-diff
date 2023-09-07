@@ -58,7 +58,10 @@ ZCASHD_VERSION=$(cat "$ZCASHD_RELEASE_INFO" | grep '"build"' | cut -d: -f2 | cut
              tr 'A-Z' 'a-z')
 ZCASHD="$ZCASHD_NAME $ZCASHD_VERSION"
 
-echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
+echo
+
+echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD (zcash.conf port)."
+echo "Using '$($ZCASH_CLI -version | head -1)' via command '$ZCASH_CLI'."
 
 echo
 
