@@ -25,33 +25,35 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
-    for (prev_tree, height, tree) in upgrade_db
+    // Zebra stores exactly one note commitment tree for every block with sapling notes.
+    // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
+    //
+    // The consensus rules limit blocks to less than 2^16 sapling and 2^16 orchard outputs. So a
+    // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
+    // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
+    // increase by 1 every ~20 full blocks.
+    //
+    // Therefore, the first block with shielded note can't complete a subtree, which means we can
+    // skip the (genesis block, first shielded block) tree pair.
+
+    // Generate a list of subtrees, with note commitment trees, end heights, and the previous tree.
+    let subtrees = upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
+        // The first block with sapling notes can't complete a subtree, see above for details.
+        .filter(|(height, _tree)| !height.is_min())
+        // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        // The first block with sapling notes can't complete a subtree, see below for details.
-        .filter_map(|((prev_height, prev_tree), (height, tree))| {
-            prev_height.is_min().then_some((prev_tree, height, tree))
-        })
-    {
+        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
+        // But since we skip the empty genesis tree, all trees must have valid indexes.
+        // So we don't need to unwrap the optional values for this comparison to be correct.
+        .filter(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+
+    for (prev_tree, end_height, tree) in subtrees {
         // Return early if there is a cancel signal.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
-
-        // Zebra stores exactly one note commitment tree for every block with sapling notes.
-        // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
-        //
-        // The consensus rules limit blocks to less than 2^16 sapling outputs. So a block can't
-        // complete multiple level 16 subtrees (or complete an entire subtree by itself).
-        // Currently, with 2MB blocks and v4/v5 sapling output sizes, the subtree index can
-        // increase by 1 every ~20 full blocks.
-
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But we skip the empty genesis tree in the iterator, and all other trees must have notes.
-        let before_block_subtree_index = prev_tree
-            .subtree_index()
-            .expect("already skipped empty tree");
-        let end_of_block_subtree_index = tree.subtree_index().expect("already skipped empty tree");
 
         // If this block completed a subtree, the subtree is either completed by a note before
         // the final note (so the final note is in the next subtree), or by the final note
@@ -59,9 +61,9 @@ pub fn run(
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             // If the leaf at the end of the block is the final leaf in a subtree,
             // we already have that subtree root available in the tree.
-            write_sapling_subtree(upgrade_db, index, height, node);
+            write_sapling_subtree(upgrade_db, index, end_height, node);
             continue;
-        } else if end_of_block_subtree_index > before_block_subtree_index {
+        } else {
             // If the leaf at the end of the block is in the next subtree,
             // we need to calculate that subtree root based on the tree from the previous block.
             let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
@@ -72,7 +74,7 @@ pub fn run(
             );
 
             let block = upgrade_db
-                .block(height.into())
+                .block(end_height.into())
                 .expect("height with note commitment tree should have block");
             let sapling_note_commitments = block
                 .sapling_note_commitments()
@@ -90,7 +92,7 @@ pub fn run(
             let (index, node) =
                 subtree.expect("already checked that the block completed a subtree");
 
-            write_sapling_subtree(upgrade_db, index, height, node);
+            write_sapling_subtree(upgrade_db, index, end_height, node);
         }
     }
 
@@ -411,10 +413,10 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
 fn write_sapling_subtree(
     upgrade_db: &ZebraDb,
     index: NoteCommitmentSubtreeIndex,
-    height: Height,
+    end_height: Height,
     node: sapling::tree::Node,
 ) {
-    let subtree = NoteCommitmentSubtree::new(index, height, node);
+    let subtree = NoteCommitmentSubtree::new(index, end_height, node);
 
     let mut batch = DiskWriteBatch::new();
 
@@ -425,20 +427,20 @@ fn write_sapling_subtree(
         .expect("writing sapling note commitment subtrees should always succeed.");
 
     if index.0 % 100 == 0 {
-        info!(?height, index = ?index.0, "calculated and added sapling subtree");
+        info!(?end_height, index = ?index.0, "calculated and added sapling subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(?height, index = ?index.0, ?node, "calculated and added sapling subtree");
+    debug!(?end_height, index = ?index.0, ?node, "calculated and added sapling subtree");
 }
 
 /// Writes a Orchard note commitment subtree to `upgrade_db`.
 fn write_orchard_subtree(
     upgrade_db: &ZebraDb,
     index: NoteCommitmentSubtreeIndex,
-    height: Height,
+    end_height: Height,
     node: orchard::tree::Node,
 ) {
-    let subtree = NoteCommitmentSubtree::new(index, height, node);
+    let subtree = NoteCommitmentSubtree::new(index, end_height, node);
 
     let mut batch = DiskWriteBatch::new();
 
@@ -449,8 +451,8 @@ fn write_orchard_subtree(
         .expect("writing orchard note commitment subtrees should always succeed.");
 
     if index.0 % 300 == 0 {
-        info!(?height, index = ?index.0, "calculated and added orchard subtree");
+        info!(?end_height, index = ?index.0, "calculated and added orchard subtree");
     }
     // This log happens about 3 times per second on recent machines with SSD disks.
-    debug!(?height, index = ?index.0, ?node, "calculated and added orchard subtree");
+    debug!(?end_height, index = ?index.0, ?node, "calculated and added orchard subtree");
 }
