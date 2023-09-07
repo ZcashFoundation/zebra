@@ -33,6 +33,11 @@ fi
 ZEBRAD_RPC_PORT=$1
 shift
 
+echo "Using '$($ZCASH_CLI -version | head -1)' via command '$ZCASH_CLI'."
+echo "Using bash shell '$BASH_VERSION' launched from '$SHELL'."
+
+echo
+
 # Use an easily identified temp directory name,
 # but fall back to the default temp name if `mktemp` does not understand `--suffix`.
 ZCASH_RPC_TMP_DIR=$(mktemp --suffix=.rpc-diff -d 2>/dev/null || mktemp -d)
@@ -58,7 +63,7 @@ ZCASHD_VERSION=$(cat "$ZCASHD_RELEASE_INFO" | grep '"build"' | cut -d: -f2 | cut
              tr 'A-Z' 'a-z')
 ZCASHD="$ZCASHD_NAME $ZCASHD_VERSION"
 
-echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
+echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD (zcash.conf port)."
 
 echo
 
