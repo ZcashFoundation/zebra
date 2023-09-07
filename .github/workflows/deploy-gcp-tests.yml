@@ -793,7 +793,7 @@ jobs:
     needs: [ logs-canopy ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: zfnd-runner-set
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
