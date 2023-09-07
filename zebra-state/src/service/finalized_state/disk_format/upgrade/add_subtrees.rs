@@ -23,8 +23,6 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
-    let mut subtree_count = 0;
-
     for ((_prev_height, mut prev_tree), (height, tree)) in upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
         .tuple_windows()
@@ -33,6 +31,8 @@ pub fn run(
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
+
+        let before_block_subtree_index = prev_tree.subtree_index();
 
         // Empty note commitment trees can't contain subtrees.
         // Since:
@@ -53,18 +53,29 @@ pub fn run(
         // the final note (so the final note is in the next subtree), or by the final note
         // (so the final note is the end of this subtree).
 
+        // If the leaf at the end of the block is the final leaf in a subtree,
+        // we already have that subtree root available in the tree.
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-            // If the leaf at the end of the block is the final leaf in a subtree,
-            // we already have that subtree root available in the tree.
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
             write_sapling_subtree(upgrade_db, index, height, node);
-            subtree_count += 1;
-        } else if end_of_block_subtree_index.0 > subtree_count {
-            // If the leaf at the end of the block is in the next subtree,
-            // we need to calculate that subtree root based on the tree from the previous block.
+            continue;
+        }
+
+        // If the first block completes a subtree, then we have just written that subtree.
+        // If it doesn't, then the previous tree for every new subtree has a valid subtree index.
+        //
+        // The only subtree that doesn't have a valid index is genesis, and we've either:
+        // - just used genesis as the previous tree of a new tree in the code above, or
+        // - genesis isn't the previous tree of a new tree at all, so it can be ignored.
+        //
+        // (The first case can't happen for sapling in v4/v5 transactions, because its outputs are
+        // too large. But it might matter for future transaction formats or shielded pools.)
+        let Some(before_block_subtree_index) = before_block_subtree_index else {
+            continue;
+        };
+
+        // If the leaf at the end of the block is in the next subtree,
+        // we need to calculate that subtree root based on the tree from the previous block.
+        if end_of_block_subtree_index > before_block_subtree_index {
             let sapling_nct = Arc::make_mut(&mut prev_tree);
 
             let block = upgrade_db
@@ -94,12 +105,7 @@ pub fn run(
                  already checked is_complete_subtree(), and that the block must complete a subtree",
             );
 
-            assert_eq!(
-                index.0, subtree_count,
-                "trees are inserted in order with no gaps"
-            );
             write_sapling_subtree(upgrade_db, index, height, node);
-            subtree_count += 1;
         }
     }
 
