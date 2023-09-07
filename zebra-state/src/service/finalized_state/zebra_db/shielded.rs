@@ -167,7 +167,7 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Returns the Sapling note commitment trees in the supplied range.
+    /// Returns the Sapling note commitment trees in the supplied range, in increasing height order.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_height_range<R>(
         &self,
@@ -300,7 +300,7 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Returns the Orchard note commitment trees in the supplied range.
+    /// Returns the Orchard note commitment trees in the supplied range, in increasing height order.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_height_range<R>(
         &self,
