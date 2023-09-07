@@ -77,12 +77,18 @@ pub fn run(
         // we need to calculate that subtree root based on the tree from the previous block.
         if end_of_block_subtree_index > before_block_subtree_index {
             let sapling_nct = Arc::make_mut(&mut prev_tree);
+            let remaining_notes = sapling_nct.remaining_subtree_leaf_nodes();
+
+            assert!(
+                remaining_notes > 0,
+                "just checked for complete subtrees above"
+            );
 
             let block = upgrade_db
                 .block(height.into())
                 .expect("height with note commitment tree should have block");
 
-            for sapling_note_commitment in block.sapling_note_commitments() {
+            for sapling_note_commitment in block.sapling_note_commitments().take(remaining_notes) {
                 // Return early if there is a cancel signal.
                 if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
@@ -91,19 +97,11 @@ pub fn run(
                 sapling_nct
                     .append(*sapling_note_commitment)
                     .expect("finalized notes should append successfully");
-
-                // The loop always breaks on this condition,
-                // because we checked the block has enough commitments,
-                // and that the final commitment in the block doesn't complete a subtree.
-                if sapling_nct.is_complete_subtree() {
-                    break;
-                }
             }
 
-            let (index, node) = sapling_nct.completed_subtree_index_and_root().expect(
-                "block should have completed a subtree before its final note commitment: \
-                 already checked is_complete_subtree(), and that the block must complete a subtree",
-            );
+            let (index, node) = sapling_nct
+                .completed_subtree_index_and_root()
+                .expect("already checked that the block completed a subtree");
 
             write_sapling_subtree(upgrade_db, index, height, node);
         }
