@@ -109,7 +109,7 @@ jobs:
   setup-without-cached-state:
     name: Setup ${{ inputs.test_id }} test
     if: ${{ !inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -204,7 +204,7 @@ jobs:
     needs: [ setup-without-cached-state ]
     # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
     if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -268,7 +268,7 @@ jobs:
   setup-with-cached-state:
     name: Setup ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     outputs:
       cached_disk_name: ${{ steps.get-disk-name.outputs.cached_disk_name }}
     permissions:
@@ -448,7 +448,7 @@ jobs:
     needs: [ setup-with-cached-state ]
     # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
     if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
