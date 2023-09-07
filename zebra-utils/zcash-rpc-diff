@@ -62,6 +62,7 @@ echo
 
 echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD (zcash.conf port)."
 echo "Using '$($ZCASH_CLI -version | head -1)' via command '$ZCASH_CLI'."
+echo "Using bash shell '$BASH_VERSION' launched from '$SHELL'."
 
 echo
 
