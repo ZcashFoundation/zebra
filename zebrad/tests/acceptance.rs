@@ -2606,3 +2606,83 @@ async fn state_format_test(
     }
     Ok(())
 }
+
+/// Test that fixed responses at zcashd for the `z_getsubtreesbyindex` method are the same as zebrad responses.
+///
+/// Require scyncronized zebrad cache state to query high heights.
+#[tokio::test]
+#[ignore]
+async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
+    use serde_json::Value;
+
+    let _init_guard = zebra_test::init();
+
+    // We're only using cached Zebra state here, so this test type is the most similar
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
+    let network = Network::Mainnet;
+
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, true)?
+    {
+        tracing::info!("running fully synced zebrad RPC test");
+
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
+    };
+
+    // Wait for zebrad to load the full cached blockchain, locally this can take up to 3 minutes.
+    std::thread::sleep(Duration::from_secs(180));
+
+    // Create an http client
+    let client = RpcRequestClient::new(zebra_rpc_address.expect(""));
+
+    // Create test vector matrix
+    let zcashd_test_vectors = vec![
+        (
+            "test_mainnet_sapling_0_1.json".to_string(),
+            "[\"sapling\", 0, 1]".to_string(),
+        ),
+        (
+            "test_mainnet_orchard_0_1.json".to_string(),
+            "[\"orchard\", 0, 1]".to_string(),
+        ),
+    ];
+
+    for i in zcashd_test_vectors {
+        // Call rpc
+        let res = client.call("z_getsubtreesbyindex", i.1).await?;
+        assert!(res.status().is_success());
+
+        // Parse results from RPC call
+        let body = res.bytes().await;
+        let parsed: Value = serde_json::from_slice(&body.expect("Response is valid json"))?;
+        let response_results = parsed["result"].to_string().replace(['\n', ' '], "");
+
+        // Get and parse results from file
+        let test_file_path = PathBuf::from(format!(
+            "../zebra-test/src/vectors/z_getsubtreesbyindex/{}",
+            i.0
+        ));
+        let test_string =
+            fs::read_to_string(test_file_path).expect("Should have been able to read the file");
+        let stored_results = test_string.replace(['\n', ' '], "");
+
+        // Compare
+        // TODO: Chainge this to `assert_eq!` when json files get populated with the zcashd data.
+        assert!(response_results != stored_results);
+    }
+
+    zebrad.kill(false)?;
+
+    let output = zebrad.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
