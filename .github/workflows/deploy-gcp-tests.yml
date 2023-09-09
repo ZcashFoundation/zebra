@@ -136,6 +136,17 @@ jobs:
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -209,6 +220,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -268,6 +290,17 @@ jobs:
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -431,6 +464,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -556,6 +600,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -622,6 +677,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -677,6 +743,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -730,6 +807,17 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -794,6 +882,17 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -883,6 +982,17 @@ jobs:
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
           LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.5.1
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
