@@ -144,6 +144,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -225,6 +230,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -292,6 +302,11 @@ jobs:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -463,6 +478,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -596,6 +616,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -670,6 +695,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -733,6 +763,11 @@ jobs:
           name: google_compute_engine
           known_hosts: unnecessary
 
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -794,6 +829,11 @@ jobs:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -866,6 +906,11 @@ jobs:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -963,6 +1008,11 @@ jobs:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: |
+          sudo apt install openssh-client \
+          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
