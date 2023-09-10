@@ -146,7 +146,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -232,7 +232,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -305,7 +305,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -480,7 +480,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -618,7 +618,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -697,7 +697,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -765,7 +765,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -832,7 +832,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -909,7 +909,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -1011,7 +1011,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt install openssh-client \
+          sudo apt-get update && sudo apt-get install openssh-client \
           && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
