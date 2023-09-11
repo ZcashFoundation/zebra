@@ -63,7 +63,7 @@ bs58 = { version = "0.5.0", features = ["check"] }
 byteorder = "1.4.3"
 equihash = "0.2.0"
 group = "0.13.0"
-incrementalmerkletree = "0.4.0"
+incrementalmerkletree = "0.5.0"
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.45"
@@ -78,7 +78,7 @@ x25519-dalek = { version = "2.0.0-rc.3", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
-orchard = "0.5.0"
+orchard = "0.6.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
 zcash_note_encryption = "0.4.0"
