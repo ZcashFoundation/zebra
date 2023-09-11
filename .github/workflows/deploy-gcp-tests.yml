@@ -104,10 +104,10 @@ env:
   CACHED_STATE_UPDATE_LIMIT: 576
 
 jobs:
-  # set up the test, if it doesn't use any cached state
+  # set up and launch the test, if it doesn't use any cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
-  setup-without-cached-state:
-    name: Setup ${{ inputs.test_id }} test
+  launch-without-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     if: ${{ !inputs.needs_zebra_state }}
     runs-on: zfnd-runners
     permissions:
@@ -200,53 +200,6 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  # launch the test, if it doesn't use any cached state
-  launch-without-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    needs: [ setup-without-cached-state ]
-    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
-    if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
-    runs-on: zfnd-runners
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v4.0.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
         run: |
@@ -266,11 +219,10 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-
-  # set up the test, if it uses cached state
+  # set up and launch the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
-  setup-with-cached-state:
-    name: Setup ${{ inputs.test_id }} test
+  launch-with-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
     runs-on: zfnd-runners
     outputs:
@@ -448,53 +400,6 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  # launch the test, if it uses cached state
-  launch-with-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    needs: [ setup-with-cached-state ]
-    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
-    if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
-    runs-on: zfnd-runners
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v4.0.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
       #
@@ -592,7 +497,7 @@ jobs:
     name: Run ${{ inputs.test_id }} test
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # We also keep the setup dependencies, so a re-run of this job will re-run the setup jobs.
-    needs: [ setup-with-cached-state, setup-without-cached-state, launch-with-cached-state, launch-without-cached-state ]
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
@@ -707,7 +612,7 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result, setup-with-cached-state ]
+    needs: [ test-result, launch-with-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -951,8 +856,8 @@ jobs:
         run: |
           ORIGINAL_HEIGHT="0"
 
-          if [[ -n "${{ format('{0}', needs.setup-with-cached-state.outputs.cached_disk_name) }}" ]]; then
-              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=${{ needs.setup-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
+          if [[ -n "${{ format('{0}', needs.launch-with-cached-state.outputs.cached_disk_name) }}" ]]; then
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=${{ needs.launch-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
               ORIGINAL_HEIGHT=${ORIGINAL_HEIGHT:-0}
               echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
           fi
