@@ -131,7 +131,7 @@ message GetSubtreeRootsArg {
 
 
 // Response type for `GetSubtreeRoots`.
-// The actual reponse contains a stream of `SubtreeRoot`s.
+// The actual response contains a stream of `SubtreeRoot`s.
 message SubtreeRoot {
     bytes rootHash = 2;                     // The 32-byte Merkle root of the subtree.
     bytes completingBlockHash = 3;          // The hash of the block that completed this subtree.
