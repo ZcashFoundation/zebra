@@ -50,7 +50,8 @@ use crate::common::{
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{
             connect_to_lightwalletd, Address, AddressList, BlockId, BlockRange, ChainSpec, Empty,
-            GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
+            GetAddressUtxosArg, GetSubtreeRootsArg, ShieldedProtocol,
+            TransparentAddressBlockFilter, TxFilter,
         },
     },
     test_type::TestType::UpdateCachedState,
@@ -336,6 +337,74 @@ pub async fn run() -> Result<()> {
         treestate.tree,
         *zebra_test::vectors::SAPLING_TREESTATE_MAINNET_419201_STRING
     );
+
+    // Call `z_getsubtreesbyindex` separately for
+
+    // ... Sapling.
+    let mut subtrees = rpc_client
+        .get_subtree_roots(GetSubtreeRootsArg {
+            start_index: 0u32,
+            shielded_protocol: ShieldedProtocol::Sapling.into(),
+            max_entries: 2u32,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(_subtree) = subtrees.message().await? {
+        match counter {
+            0 => {
+                // TODO: add asserts that check:
+                // 1. The subtree hash.
+                // 2. The completing block hash.
+                // 3. The completing block height.
+            }
+            1 => {
+                // TODO: add asserts that check:
+                // 1. The subtree hash.
+                // 2. The completing block hash.
+                // 3. The completing block height.
+            }
+            _ => {
+                panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Sapling subtrees.")
+            }
+        }
+        counter += 1;
+    }
+    assert_eq!(counter, 2);
+
+    // ... Orchard.
+    let mut subtrees = rpc_client
+        .get_subtree_roots(GetSubtreeRootsArg {
+            start_index: 0u32,
+            shielded_protocol: ShieldedProtocol::Orchard.into(),
+            max_entries: 2u32,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(_subtree) = subtrees.message().await? {
+        match counter {
+            0 => {
+                // TODO: add asserts that check:
+                // 1. The subtree hash.
+                // 2. The completing block hash.
+                // 3. The completing block height.
+            }
+            1 => {
+                // TODO: add asserts that check:
+                // 1. The subtree hash.
+                // 2. The completing block hash.
+                // 3. The completing block height.
+            }
+            _ => {
+                panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Orchard subtrees.")
+            }
+        }
+        counter += 1;
+    }
+    assert_eq!(counter, 2);
 
     // Call `GetAddressUtxos` with the ZF funding stream address that will always have utxos
     let utxos = rpc_client
