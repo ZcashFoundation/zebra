@@ -599,7 +599,7 @@ jobs:
       is_long_test: true
       needs_zebra_state: true
       needs_lwd_state: false
-      saves_to_disk: true
+      saves_to_disk: false
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
