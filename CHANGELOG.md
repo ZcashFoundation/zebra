@@ -14,12 +14,6 @@ This release:
 - Starts our work implementing "spend before sync" algorithm for lightwalletd.
 - Contains an automatic database upgrade that reduces the size of Zebra's current cached state from approximately 276GB to 244GB. It does so by automatically pruning unneeded note commitment trees from an existing cache. New Zebra instances will also build their cache without these trees.
 
-### Changed
-
-- Deduplicate note commitment trees stored in the finalized state ([#7312]()https://github.com/ZcashFoundation/zebra/pull/7312, [#7379](https://github.com/ZcashFoundation/zebra/pull/7379))
-- Insert only the first tree in each series of identical trees into finalized state ([#7266](https://github.com/ZcashFoundation/zebra/pull/7266))
-- Our testing framework now uses the ECC lightwalletd fork ([#7307](https://github.com/ZcashFoundation/zebra/pull/7307)). This was needed to start the work of implementing fast spendability. The ECC repo is now the supported implementation in Zebra, documentation was changed to reflect this. ([#7427](https://github.com/ZcashFoundation/zebra/pull/7427))
-
 ### Breaking Changes
 
 `zebrad` 1.2.0 cached states are incompatible with previous `zebrad` versions:
@@ -28,6 +22,12 @@ This release:
 - When earlier versions try to use states upgraded by `zebrad` 1.2.0:
     - `zebrad` versions 1.0.0 and 1.0.1 will respond to some `z_gettreestate` RPC requests with incorrect empty `final_state` fields
     - pre-release `zebrad` versions can panic when verifying shielded transactions, updating the state, or responding to RPC requests
+
+### Changed
+
+- Deduplicate note commitment trees stored in the finalized state ([#7312](https://github.com/ZcashFoundation/zebra/pull/7312), [#7379](https://github.com/ZcashFoundation/zebra/pull/7379))
+- Insert only the first tree in each series of identical trees into finalized state ([#7266](https://github.com/ZcashFoundation/zebra/pull/7266))
+- Our testing framework now uses the ECC lightwalletd fork ([#7307](https://github.com/ZcashFoundation/zebra/pull/7307)). This was needed to start the work of implementing fast spendability. The ECC repo is now the supported implementation in Zebra, documentation was changed to reflect this. ([#7427](https://github.com/ZcashFoundation/zebra/pull/7427))
 
 ### Added
 

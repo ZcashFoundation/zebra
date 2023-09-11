@@ -39,7 +39,7 @@ proptest-impl = [
 ]
 
 [dependencies]
-chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.29", default-features = false, features = ["clock", "std"] }
 futures = "0.3.28"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
@@ -82,7 +82,7 @@ insta = { version = "1.31.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.2.0"
 
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

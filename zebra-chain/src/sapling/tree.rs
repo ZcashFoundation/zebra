@@ -33,7 +33,7 @@ use crate::{
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    subtree::TRACKED_SUBTREE_HEIGHT,
+    subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
 
 pub mod legacy;
@@ -370,28 +370,48 @@ impl NoteCommitmentTree {
         }
     }
 
+    /// Returns frontier of non-empty tree, or None.
+    fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
+        self.inner.value()
+    }
+
     /// Returns true if the most recently appended leaf completes the subtree
-    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+    pub fn is_complete_subtree(&self) -> bool {
+        let Some(tree) = self.frontier() else {
+            // An empty tree can't be a complete subtree.
+            return false;
+        };
+
         tree.position()
             .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
     }
 
-    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
-    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
-        incrementalmerkletree::Address::above_position(
+    /// Returns the subtree index at [`TRACKED_SUBTREE_HEIGHT`].
+    /// This is the number of complete or incomplete subtrees that are currently in the tree.
+    /// Returns `None` if the tree is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn subtree_index(&self) -> Option<NoteCommitmentSubtreeIndex> {
+        let tree = self.frontier()?;
+
+        let index = incrementalmerkletree::Address::above_position(
             TRACKED_SUBTREE_HEIGHT.into(),
             tree.position(),
         )
+        .index()
+        .try_into()
+        .expect("fits in u16");
+
+        Some(index)
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
-    #[allow(clippy::unwrap_in_result)]
-    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
-        let value = self.inner.value()?;
-        Self::is_complete_subtree(value).then_some(())?;
-        let address = Self::subtree_address(value);
-        let index = address.index().try_into().expect("should fit in u16");
-        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+    pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
+        if !self.is_complete_subtree() {
+            return None;
+        }
+
+        let index = self.subtree_index()?;
+        let root = self.frontier()?.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
 
         Some((index, root))
     }

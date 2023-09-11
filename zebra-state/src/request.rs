@@ -849,14 +849,13 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
 
-    /// Returns a list of Sapling note commitment subtrees by their indexes,
-    /// starting at `start_index`, and returning up to `limit` subtrees.
+    /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
+    /// `start_index`, and returning up to `limit` subtrees.
     ///
     /// Returns
     ///
     /// * [`ReadResponse::SaplingSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::SaplingSubtrees)
-    ///
-    /// If there is no subtree at `start_index`, returns an empty list.
+    /// * An empty list if there is no subtree at `start_index`.
     SaplingSubtrees {
         /// The index of the first 2^16-leaf subtree to return.
         start_index: NoteCommitmentSubtreeIndex,
@@ -864,14 +863,13 @@ pub enum ReadRequest {
         limit: Option<NoteCommitmentSubtreeIndex>,
     },
 
-    /// Returns a list of Orchard note commitment subtrees by their indexes,
-    /// starting at `start_index`, and returning up to `limit` subtrees.
+    /// Returns a list of Orchard note commitment subtrees by their indexes, starting at
+    /// `start_index`, and returning up to `limit` subtrees.
     ///
     /// Returns
     ///
     /// * [`ReadResponse::OrchardSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::OrchardSubtrees)
-    ///
-    /// If there is no subtree at `start_index`, returns an empty list.
+    /// * An empty list if there is no subtree at `start_index`.
     OrchardSubtrees {
         /// The index of the first 2^16-leaf subtree to return.
         start_index: NoteCommitmentSubtreeIndex,
