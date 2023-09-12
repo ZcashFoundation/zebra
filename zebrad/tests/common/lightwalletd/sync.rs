@@ -179,6 +179,10 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let mut lightwalletd_next_height = 1;
 
         // Only go forward on getting next height from lightwalletd logs if we find the line we are interested in.
+        //
+        // TODO: move this blocking code out of the async executor.
+        // The executor could block all tasks and futures while this code is running.
+        // That's ok for now, but it might cause test hangs or failures if we spawn tasks, select(), or join().
         if let Ok(line) = lightwalletd.expect_stdout_line_matches("Waiting for block: [0-9]+") {
             let line_json: serde_json::Value = serde_json::from_str(line.as_str())
                 .expect("captured lightwalletd logs are always valid json");
