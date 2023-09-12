@@ -1,6 +1,5 @@
 ---
 source: zebrad/tests/acceptance.rs
-assertion_line: 2658
 expression: parsed
 ---
 {
