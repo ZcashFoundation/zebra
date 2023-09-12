@@ -35,6 +35,7 @@
 //! purposes.
 
 use color_eyre::eyre::Result;
+use hex_literal::hex;
 
 use zebra_chain::{
     block::Block,
@@ -351,19 +352,21 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     let mut counter = 0;
-    while let Some(_subtree) = subtrees.message().await? {
+    while let Some(subtree) = subtrees.message().await? {
         match counter {
             0 => {
-                // TODO: add asserts that check:
-                // 1. The subtree hash.
-                // 2. The completing block hash.
-                // 3. The completing block height.
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+                );
+                assert_eq!(subtree.completing_block_height, 558822u64);
             }
             1 => {
-                // TODO: add asserts that check:
-                // 1. The subtree hash.
-                // 2. The completing block hash.
-                // 3. The completing block height.
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("03654c3eacbb9b93e122cf6d77b606eae29610f4f38a477985368197fd68e02d")
+                );
+                assert_eq!(subtree.completing_block_height, 670209u64);
             }
             _ => {
                 panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Sapling subtrees.")
@@ -384,19 +387,21 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     let mut counter = 0;
-    while let Some(_subtree) = subtrees.message().await? {
+    while let Some(subtree) = subtrees.message().await? {
         match counter {
             0 => {
-                // TODO: add asserts that check:
-                // 1. The subtree hash.
-                // 2. The completing block hash.
-                // 3. The completing block height.
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+                );
+                assert_eq!(subtree.completing_block_height, 1707429u64);
             }
             1 => {
-                // TODO: add asserts that check:
-                // 1. The subtree hash.
-                // 2. The completing block hash.
-                // 3. The completing block height.
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("8c47d0ca43f323ac573ee57c90af4ced484682827248ca5f3eead95eb6415a14")
+                );
+                assert_eq!(subtree.completing_block_height, 1708132u64);
             }
             _ => {
                 panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Orchard subtrees.")
