@@ -492,7 +492,6 @@ jobs:
   # Then check the result of the test.
   #
   # If `inputs.is_long_test` is `true`, the timeout is 5 days, otherwise it's 3 hours.
-  # Otherwise, it mostly runs in the "logs" jobs.
   test-result:
     name: Run ${{ inputs.test_id }} test
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
