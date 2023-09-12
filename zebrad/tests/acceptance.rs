@@ -2621,9 +2621,12 @@ async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
     let test_type = TestType::UpdateZebraCachedStateWithRpc;
     let network = Network::Mainnet;
 
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, true)?
-    {
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+        network,
+        "rpc_z_getsubtreesbyindex_zcashd_test_vectors",
+        test_type,
+        true,
+    )? {
         tracing::info!("running fully synced zebrad RPC test");
 
         zebrad_and_address
@@ -2632,46 +2635,30 @@ async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
         return Ok(());
     };
 
-    // Wait for zebrad to load the full cached blockchain, locally this can take up to 3 minutes.
-    std::thread::sleep(Duration::from_secs(180));
+    // Wait for zebrad to load the full cached blockchain.
+    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     // Create an http client
-    let client = RpcRequestClient::new(zebra_rpc_address.expect(""));
+    let client =
+        RpcRequestClient::new(zebra_rpc_address.expect("already checked that address is valid"));
 
     // Create test vector matrix
     let zcashd_test_vectors = vec![
         (
-            "test_mainnet_sapling_0_1.json".to_string(),
-            "[\"sapling\", 0, 1]".to_string(),
+            "z_getsubtreesbyindex_mainnet_sapling_0_1".to_string(),
+            r#"["sapling", 0, 1]"#.to_string(),
         ),
         (
-            "test_mainnet_orchard_0_1.json".to_string(),
-            "[\"orchard\", 0, 1]".to_string(),
+            "z_getsubtreesbyindex_mainnet_orchard_0_1".to_string(),
+            r#"["orchard", 0, 1]"#.to_string(),
         ),
     ];
 
     for i in zcashd_test_vectors {
-        // Call rpc
         let res = client.call("z_getsubtreesbyindex", i.1).await?;
-        assert!(res.status().is_success());
-
-        // Parse results from RPC call
         let body = res.bytes().await;
         let parsed: Value = serde_json::from_slice(&body.expect("Response is valid json"))?;
-        let response_results = parsed["result"].to_string().replace(['\n', ' '], "");
-
-        // Get and parse results from file
-        let test_file_path = PathBuf::from(format!(
-            "../zebra-test/src/vectors/z_getsubtreesbyindex/{}",
-            i.0
-        ));
-        let test_string =
-            fs::read_to_string(test_file_path).expect("Should have been able to read the file");
-        let stored_results = test_string.replace(['\n', ' '], "");
-
-        // Compare
-        // TODO: Chainge this to `assert_eq!` when json files get populated with the zcashd data.
-        assert!(response_results != stored_results);
+        insta::assert_json_snapshot!(i.0, parsed);
     }
 
     zebrad.kill(false)?;
