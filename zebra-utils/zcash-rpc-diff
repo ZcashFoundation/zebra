@@ -22,6 +22,8 @@ JQ="${JQ:-jq}"
 # - Use `-rpccookiefile=your/cookie/file` for a cookie file.
 # - Use `-rpcpassword=your-password` for a password.
 ZCASHD_EXTRA_ARGS="${ZCASHD_EXTRA_ARGS:-}"
+# We show this many lines of data, removing excess lines from the middle of the output.
+OUTPUT_DATA_LINE_LIMIT="${OUTPUT_DATA_LINE_LIMIT:-40}"
 
 if [ $# -lt 2 ]; then
     usage
@@ -30,6 +32,11 @@ fi
 
 ZEBRAD_RPC_PORT=$1
 shift
+
+echo "Using '$($ZCASH_CLI -version | head -1)' via command '$ZCASH_CLI'."
+echo "Using bash shell '$BASH_VERSION' launched from '$SHELL'."
+
+echo
 
 # Use an easily identified temp directory name,
 # but fall back to the default temp name if `mktemp` does not understand `--suffix`.
@@ -56,7 +63,7 @@ ZCASHD_VERSION=$(cat "$ZCASHD_RELEASE_INFO" | grep '"build"' | cut -d: -f2 | cut
              tr 'A-Z' 'a-z')
 ZCASHD="$ZCASHD_NAME $ZCASHD_VERSION"
 
-echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
+echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD (zcash.conf port)."
 
 echo
 
@@ -114,8 +121,15 @@ $DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" \
     && ( \
         echo "RPC responses were identical"; \
         echo ; \
-        echo "$ZEBRAD_RESPONSE:"; \
-        cat "$ZEBRAD_RESPONSE"; \
+        echo "$ZEBRAD_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
+        export ZEBRAD_RESPONSE=$ZEBRAD_RESPONSE
+        if [[ $(cat "$ZEBRAD_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
+            cat "$ZEBRAD_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+            echo "..."; \
+            cat "$ZEBRAD_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+        else \
+            cat "$ZEBRAD_RESPONSE"; \
+        fi; \
         )
 
 EXIT_STATUS=$?
@@ -159,8 +173,15 @@ $DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" \
     && ( \
         echo "RPC check responses were identical"; \
         echo ; \
-        echo "$ZEBRAD_CHECK_RESPONSE:"; \
-        cat "$ZEBRAD_CHECK_RESPONSE"; \
+        echo "$ZEBRAD_CHECK_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
+        export ZEBRAD_CHECK_RESPONSE=$ZEBRAD_CHECK_RESPONSE
+        if [[ $(cat "$ZEBRAD_CHECK_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
+            cat "$ZEBRAD_CHECK_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+            echo "..."; \
+            cat "$ZEBRAD_CHECK_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+        else \
+            cat "$ZEBRAD_CHECK_RESPONSE"; \
+        fi; \
         )
 
 CHECK_EXIT_STATUS=$?
@@ -194,8 +215,15 @@ if [ "$1" == "getaddressbalance" ]; then
         && ( \
              echo "RPC balances were identical"; \
              echo ; \
-             echo "$ZEBRAD_NUM_RESPONSE:"; \
-             cat "$ZEBRAD_NUM_RESPONSE"; \
+             echo "$ZEBRAD_NUM_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
+             export ZEBRAD_NUM_RESPONSE=$ZEBRAD_NUM_RESPONSE
+             if [[ $(cat "$ZEBRAD_NUM_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
+                 cat "$ZEBRAD_NUM_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+                 echo "..."; \
+                 cat "$ZEBRAD_NUM_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+             else \
+                 cat "$ZEBRAD_NUM_RESPONSE"; \
+             fi; \
         )
 
     COMPARE_EXIT_STATUS=$?

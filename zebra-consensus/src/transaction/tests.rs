@@ -2141,7 +2141,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     // Note that modifying the JoinSplit data invalidates the tx signatures. The signatures are
     // checked concurrently with the ZK proofs, and when a signature check finishes before the proof
     // check, the verifier reports an invalid signature instead of invalid proof. This race
-    // condition happens only occasionaly, so we run the verifier in a loop with a small iteration
+    // condition happens only occasionally, so we run the verifier in a loop with a small iteration
     // threshold until it returns the correct error.
     let mut i = 1;
     let result = loop {

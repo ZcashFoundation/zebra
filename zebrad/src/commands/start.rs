@@ -217,6 +217,7 @@ impl StartCmd {
         }
 
         // Launch RPC server
+        info!("spawning RPC server");
         let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc.clone(),
             config.mining.clone(),
@@ -232,6 +233,7 @@ impl StartCmd {
         );
 
         // Start concurrent tasks which don't add load to other tasks
+        info!("spawning block gossip task");
         let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
@@ -241,16 +243,20 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        info!("spawning mempool queue checker task");
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
+        info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
             mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set.clone())
                 .in_current_span(),
         );
 
+        info!("spawning delete old databases task");
         let mut old_databases_task_handle =
             zebra_state::check_and_delete_old_databases(config.state.clone());
 
+        info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
                 config.network.network,
@@ -260,6 +266,7 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
             sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
         );
@@ -270,6 +277,7 @@ impl StartCmd {
         tokio::task::yield_now().await;
 
         // The crawler only activates immediately in tests that use mempool debug mode
+        info!("spawning mempool crawler task");
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
             &config.mempool,
             peer_set,
@@ -278,6 +286,7 @@ impl StartCmd {
             chain_tip_change,
         );
 
+        info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         info!("spawned initial Zebra tasks");
@@ -410,7 +419,7 @@ impl StartCmd {
             }
         };
 
-        info!("exiting Zebra because an ongoing task exited: stopping other tasks");
+        info!("exiting Zebra because an ongoing task exited: asking other tasks to stop");
 
         // ongoing tasks
         rpc_task_handle.abort();
@@ -433,8 +442,11 @@ impl StartCmd {
         //
         // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
         if let Some(rpc_server) = rpc_server {
+            info!("waiting for RPC server to shut down");
             rpc_server.shutdown_blocking();
         }
+
+        info!("exiting Zebra: all tasks have been asked to stop, waiting for remaining tasks to finish");
 
         exit_status
     }
