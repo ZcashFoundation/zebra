@@ -574,10 +574,21 @@ fn calculate_sapling_subtree(
             tree.subtree_index()
                 .expect("current block must have a subtree")
                 .0,
-            "tree must have been completed by the current block"
+            "subtree must have been completed by the current block"
         );
-        assert!(remaining_notes > 0, "just checked for a complete tree");
-        assert!(!is_complete, "just checked for a complete tree");
+        assert!(
+            tree.remaining_subtree_leaf_nodes() > 0,
+            "just checked for a complete subtree in the current block"
+        );
+        assert!(
+            !tree.is_complete_subtree(),
+            "just checked for a complete tree"
+        );
+
+        // If the previous tree was complete, then the current tree can't also complete a subtree,
+        // due to the consensus limit on the number of outputs in a block.
+        assert!(remaining_notes > 0, "the caller should supply a complete subtree, so the previous tree can't also be complete");
+        assert!(!is_complete, "the caller should supply a complete subtree, so the previous tree can't also be complete");
 
         let block = read_db
             .block(end_height.into())
