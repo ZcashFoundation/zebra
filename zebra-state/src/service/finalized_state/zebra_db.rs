@@ -129,6 +129,11 @@ impl ZebraDb {
         db
     }
 
+    /// Returns the configured network for this database.
+    pub fn network(&self) -> Network {
+        self.db.network()
+    }
+
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
         self.db.path()

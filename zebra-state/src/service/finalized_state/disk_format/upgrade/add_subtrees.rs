@@ -38,7 +38,7 @@ pub fn run(
     // Therefore, the first block with shielded note can't complete a subtree, which means we can
     // skip the (genesis block, first shielded block) tree pair.
 
-    // Generate a list of subtrees, with note commitment trees, end heights, and the previous tree.
+    // Generate a list of sapling subtree inputs: previous tree, current tree, and end height.
     let subtrees = upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
         // The first block with sapling notes can't complete a subtree, see above for details.
@@ -61,71 +61,27 @@ pub fn run(
         write_sapling_subtree(upgrade_db, subtree);
     }
 
-    for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
+    // Generate a list of orchard subtree inputs: previous tree, current tree, and end height.
+    let subtrees = upgrade_db
         .orchard_tree_by_height_range(..=initial_tip_height)
+        // The first block with orchard notes can't complete a subtree, see above for details.
+        .filter(|(height, _tree)| !height.is_min())
+        // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        // The first block with orchard notes can't complete a subtree, see below for details.
-        .skip(1)
-    {
-        // Return early if there is a cancel signal.
+        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
+        // But since we skip the empty genesis tree, all trees must have valid indexes.
+        // So we don't need to unwrap the optional values for this comparison to be correct.
+        .filter(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+
+    for (prev_tree, end_height, tree) in subtrees {
+        // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        // Zebra stores exactly one note commitment tree for every block with orchard notes.
-        // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
-        //
-        // The consensus rules limit blocks to less than 2^16 orchard outputs. So a block can't
-        // complete multiple level 16 subtrees (or complete an entire subtree by itself).
-        // Currently, with 2MB blocks and v5 orchard output sizes, the subtree index can
-        // increase by 1 every ~20 full blocks.
-
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But we skip the empty genesis tree in the iterator, and all other trees must have notes.
-        let before_block_subtree_index = prev_tree
-            .subtree_index()
-            .expect("already skipped empty tree");
-        let end_of_block_subtree_index = tree.subtree_index().expect("already skipped empty tree");
-
-        // If this block completed a subtree, the subtree is either completed by a note before
-        // the final note (so the final note is in the next subtree), or by the final note
-        // (so the final note is the end of this subtree).
-        if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-            // If the leaf at the end of the block is the final leaf in a subtree,
-            // we already have that subtree root available in the tree.
-            write_orchard_subtree(upgrade_db, index, height, node);
-            continue;
-        } else if end_of_block_subtree_index > before_block_subtree_index {
-            // If the leaf at the end of the block is in the next subtree,
-            // we need to calculate that subtree root based on the tree from the previous block.
-            let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
-
-            assert!(
-                remaining_notes > 0,
-                "just checked for complete subtrees above"
-            );
-
-            let block = upgrade_db
-                .block(height.into())
-                .expect("height with note commitment tree should have block");
-            let orchard_note_commitments = block
-                .orchard_note_commitments()
-                .take(remaining_notes)
-                .cloned()
-                .collect();
-
-            // This takes less than 1 second per tree, so we don't need to make it cancellable.
-            let (_orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
-                prev_tree,
-                orchard_note_commitments,
-            )
-            .expect("finalized notes should append successfully");
-
-            let (index, node) =
-                subtree.expect("already checked that the block completed a subtree");
-
-            write_orchard_subtree(upgrade_db, index, height, node);
-        }
+        let subtree = calculate_orchard_subtree(upgrade_db, prev_tree, end_height, tree);
+        write_orchard_subtree(upgrade_db, subtree);
     }
 
     Ok(())
@@ -585,26 +541,6 @@ fn calculate_sapling_subtree(
     }
 }
 
-/// Writes a Sapling note commitment subtree to `upgrade_db`.
-fn write_sapling_subtree(
-    upgrade_db: &ZebraDb,
-    subtree: NoteCommitmentSubtree<sapling::tree::Node>,
-) {
-    let mut batch = DiskWriteBatch::new();
-
-    batch.insert_sapling_subtree(upgrade_db, &subtree);
-
-    upgrade_db
-        .write_batch(batch)
-        .expect("writing sapling note commitment subtrees should always succeed.");
-
-    if subtree.index.0 % 100 == 0 {
-        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
-    }
-    // This log happens about once per second on recent machines with SSD disks.
-    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
-}
-
 /// Calculates a Orchard note commitment subtree, reading blocks from `read_db` if needed.
 ///
 /// `tree` must be a note commitment tree containing a recently completed subtree,
@@ -662,15 +598,31 @@ fn calculate_orchard_subtree(
     }
 }
 
+/// Writes a Sapling note commitment subtree to `upgrade_db`.
+fn write_sapling_subtree(
+    upgrade_db: &ZebraDb,
+    subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+) {
+    let mut batch = DiskWriteBatch::new();
+
+    batch.insert_sapling_subtree(upgrade_db, &subtree);
+
+    upgrade_db
+        .write_batch(batch)
+        .expect("writing sapling note commitment subtrees should always succeed.");
+
+    if subtree.index.0 % 100 == 0 {
+        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
+    }
+    // This log happens about once per second on recent machines with SSD disks.
+    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
+}
+
 /// Writes a Orchard note commitment subtree to `upgrade_db`.
 fn write_orchard_subtree(
     upgrade_db: &ZebraDb,
-    index: NoteCommitmentSubtreeIndex,
-    end_height: Height,
-    node: orchard::tree::Node,
+    subtree: NoteCommitmentSubtree<orchard::tree::Node>,
 ) {
-    let subtree = NoteCommitmentSubtree::new(index, end_height, node);
-
     let mut batch = DiskWriteBatch::new();
 
     batch.insert_orchard_subtree(upgrade_db, &subtree);
@@ -679,9 +631,9 @@ fn write_orchard_subtree(
         .write_batch(batch)
         .expect("writing orchard note commitment subtrees should always succeed.");
 
-    if index.0 % 300 == 0 {
-        info!(?end_height, index = ?index.0, "calculated and added orchard subtree");
+    if subtree.index.0 % 100 == 0 {
+        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added orchard subtree");
     }
-    // This log happens about 3 times per second on recent machines with SSD disks.
-    debug!(?end_height, index = ?index.0, ?node, "calculated and added orchard subtree");
+    // This log happens about once per second on recent machines with SSD disks.
+    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added orchard subtree");
 }
