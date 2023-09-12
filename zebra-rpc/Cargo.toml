@@ -39,7 +39,7 @@ proptest-impl = [
 ]
 
 [dependencies]
-chrono = { version = "0.4.29", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.30", default-features = false, features = ["clock", "std"] }
 futures = "0.3.28"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
@@ -51,7 +51,7 @@ jsonrpc-http-server = "18.0.0"
 num_cpus = "1.16.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.105", features = ["preserve_order"] }
+serde_json = { version = "1.0.106", features = ["preserve_order"] }
 indexmap = { version = "2.0.0", features = ["serde"] }
 
 tokio = { version = "1.32.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }

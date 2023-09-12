@@ -42,8 +42,8 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 [dependencies]
 bitflags = "2.4.0"
 byteorder = "1.4.3"
-bytes = "1.4.0"
-chrono = { version = "0.4.29", default-features = false, features = ["clock", "std"] }
+bytes = "1.5.0"
+chrono = { version = "0.4.30", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
@@ -91,7 +91,7 @@ proptest-derive = "0.4.0"
 
 static_assertions = "1.1.0"
 tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
-toml = "0.7.6"
+toml = "0.7.8"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
