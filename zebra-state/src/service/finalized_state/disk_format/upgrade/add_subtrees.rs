@@ -2,12 +2,14 @@
 
 use std::sync::{mpsc, Arc};
 
+use hex_literal::hex;
 use itertools::Itertools;
 
 use zebra_chain::{
     block::Height,
     orchard,
     parallel::tree::NoteCommitmentTrees,
+    parameters::Network::*,
     sapling,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
@@ -15,6 +17,22 @@ use zebra_chain::{
 use crate::service::finalized_state::{
     disk_format::upgrade::CancelFormatChange, DiskWriteBatch, ZebraDb,
 };
+
+/// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
+fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node> {
+    // This test vector was generated using the command:
+    // ```sh
+    // zcash-cli z_getsubtreesbyindex sapling 0 1
+    // ```
+    NoteCommitmentSubtree {
+        index: 0.into(),
+        node: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+            .as_slice()
+            .try_into()
+            .expect("test vector is valid"),
+        end: Height(558822),
+    }
+}
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
 ///
@@ -25,6 +43,9 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
+    // Creating this test vector involves a cryptographic check, so only do it once.
+    let first_sapling_mainnet_subtree = first_sapling_mainnet_subtree();
+
     // Zebra stores exactly one note commitment tree for every block with sapling notes.
     // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
     //
@@ -56,6 +77,12 @@ pub fn run(
         }
 
         let subtree = calculate_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
+
+        // TODO: split this out into a quick check method
+        if upgrade_db.network() == Mainnet && subtree.index == first_sapling_mainnet_subtree.index {
+            assert_eq!(subtree, first_sapling_mainnet_subtree)
+        }
+
         write_sapling_subtree(upgrade_db, subtree);
     }
 
