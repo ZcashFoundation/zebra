@@ -128,6 +128,7 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the sprout note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     fn update_sprout_note_commitment_tree(
         mut sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sprout_note_commitments: Vec<sprout::NoteCommitment>,
@@ -145,6 +146,7 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the sapling note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
     pub fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
@@ -187,6 +189,7 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the orchard note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
     pub fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,

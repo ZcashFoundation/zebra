@@ -603,6 +603,11 @@ fn calculate_sapling_subtree(
             .cloned()
             .collect();
 
+        // The update method modifies the tree inside the Arc if it only has one reference.
+        // This is usually ok, but during reverse iteration, we want re-use the original previous
+        // tree as the next current tree. Cloning the Arc preserves the original tree data.
+        let _force_inner_clone_of_prev_tree = prev_tree.clone();
+
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
         let (sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
             prev_tree,
@@ -671,10 +676,21 @@ fn calculate_orchard_subtree(
             tree.subtree_index()
                 .expect("current block must have a subtree")
                 .0,
-            "tree must have been completed by the current block"
+            "subtree must have been completed by the current block"
         );
-        assert!(remaining_notes > 0, "just checked for a complete tree");
-        assert!(!is_complete, "just checked for a complete tree");
+        assert!(
+            tree.remaining_subtree_leaf_nodes() > 0,
+            "just checked for a complete subtree in the current block"
+        );
+        assert!(
+            !tree.is_complete_subtree(),
+            "just checked for a complete tree"
+        );
+
+        // If the previous tree was complete, then the current tree can't also complete a subtree,
+        // due to the consensus limit on the number of outputs in a block.
+        assert!(remaining_notes > 0, "the caller should supply a complete subtree, so the previous tree can't also be complete");
+        assert!(!is_complete, "the caller should supply a complete subtree, so the previous tree can't also be complete");
 
         let block = read_db
             .block(end_height.into())
@@ -684,6 +700,11 @@ fn calculate_orchard_subtree(
             .take(remaining_notes)
             .cloned()
             .collect();
+
+        // The update method modifies the tree inside the Arc if it only has one reference.
+        // This is usually ok, but during reverse iteration, we want re-use the original previous
+        // tree as the next current tree. Cloning the Arc preserves the original tree data.
+        let _force_inner_clone_of_prev_tree = prev_tree.clone();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
         let (orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
