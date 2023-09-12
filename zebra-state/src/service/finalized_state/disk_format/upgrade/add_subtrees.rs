@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc};
 
 use hex_literal::hex;
 use itertools::Itertools;
+use tracing::instrument;
 
 use zebra_chain::{
     block::Height,
@@ -25,6 +26,7 @@ use crate::service::finalized_state::{
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
+#[instrument(skip(upgrade_db, cancel_receiver))]
 pub fn run(
     initial_tip_height: Height,
     upgrade_db: &ZebraDb,
@@ -105,6 +107,7 @@ pub fn run(
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
+#[instrument(skip(upgrade_db, cancel_receiver))]
 pub fn reset(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
@@ -547,6 +550,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 ///
 /// If `tree` does not contain a recently completed subtree.
 #[must_use = "subtree should be written to the database after it is calculated"]
+#[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_sapling_subtree(
     read_db: &ZebraDb,
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
@@ -639,6 +643,7 @@ fn calculate_sapling_subtree(
 ///
 /// If `tree` does not contain a recently completed subtree.
 #[must_use = "subtree should be written to the database after it is calculated"]
+#[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_orchard_subtree(
     read_db: &ZebraDb,
     prev_tree: Arc<orchard::tree::NoteCommitmentTree>,
