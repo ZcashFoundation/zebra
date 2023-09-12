@@ -190,6 +190,10 @@ impl DbFormatChange {
         upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        // These quick checks should pass for all format changes.
+        // (See the detailed comment at the end of this method.)
+        add_subtrees::quick_check(&upgrade_db);
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
             Upgrade { .. } => self.apply_format_upgrade(
