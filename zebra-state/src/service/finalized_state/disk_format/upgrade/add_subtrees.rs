@@ -52,7 +52,7 @@ pub fn run(
     //
     // Otherwise, wallets that sync during the upgrade will be missing some notes.
 
-    // Generate a list of sapling subtree inputs: previous tree, current tree, and end height.
+    // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
         .sapling_tree_by_reversed_height_range(..=initial_tip_height)
         // The first block with sapling notes can't complete a subtree, see above for details.
@@ -60,23 +60,28 @@ pub fn run(
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (_prev_height, prev_tree))| (prev_tree, end_height, tree))
+        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+            (prev_end_height, prev_tree, end_height, tree)
+        })
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
-        .filter(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+        .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
+            tree.subtree_index() > prev_tree.subtree_index()
+        });
 
-    for (prev_tree, end_height, tree) in subtrees {
+    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree = calculate_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
+        let subtree =
+            calculate_sapling_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
         write_sapling_subtree(upgrade_db, subtree);
     }
 
-    // Generate a list of orchard subtree inputs: previous tree, current tree, and end height.
+    // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
         .orchard_tree_by_reversed_height_range(..=initial_tip_height)
         // The first block with orchard notes can't complete a subtree, see above for details.
@@ -84,19 +89,24 @@ pub fn run(
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (_prev_height, prev_tree))| (prev_tree, end_height, tree))
+        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+            (prev_end_height, prev_tree, end_height, tree)
+        })
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
-        .filter(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+        .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
+            tree.subtree_index() > prev_tree.subtree_index()
+        });
 
-    for (prev_tree, end_height, tree) in subtrees {
+    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree = calculate_orchard_subtree(upgrade_db, prev_tree, end_height, tree);
+        let subtree =
+            calculate_orchard_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
         write_orchard_subtree(upgrade_db, subtree);
     }
 
@@ -219,13 +229,17 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
+            (prev_end_height, prev_tree, end_height, tree)
+        })
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
-        .find(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+        .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
+            tree.subtree_index() > prev_tree.subtree_index()
+        });
 
-    let Some((prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -234,7 +248,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_sapling_mainnet_subtree();
 
-    let db_subtree = calculate_sapling_subtree(db, prev_tree, end_height, tree);
+    let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -270,13 +284,17 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
+            (prev_end_height, prev_tree, end_height, tree)
+        })
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
-        .find(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+        .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
+            tree.subtree_index() > prev_tree.subtree_index()
+        });
 
-    let Some((prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -285,7 +303,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_orchard_mainnet_subtree();
 
-    let db_subtree = calculate_orchard_subtree(db, prev_tree, end_height, tree);
+    let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -540,37 +558,38 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
 /// Calculates a Sapling note commitment subtree, reading blocks from `read_db` if needed.
 ///
-/// `tree` must be a note commitment tree containing a recently completed subtree,
-/// which was not already completed in `prev_tree`.
+/// `tree` must be a note commitment tree that starts a new subtree.
+/// The subtree can be completed at the end of `prev_tree`, or before the end of `tree`.
 ///
-/// `prev_tree` is only used to rebuild the subtree, if it was completed inside the block.
-/// If the subtree was completed by the final note commitment in the block, `prev_tree` is unused.
+/// `prev_tree` is only used to rebuild the subtree if it was completed before the end of `tree`.
 ///
 /// # Panics
 ///
-/// If `tree` does not contain a recently completed subtree.
+/// If `tree` does not start a new subtree.
 #[must_use = "subtree should be written to the database after it is calculated"]
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_sapling_subtree(
     read_db: &ZebraDb,
+    prev_end_height: Height,
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<sapling::tree::Node> {
-    // If this block completed a subtree, the subtree is either completed by a note before
-    // the final note (so the final note is in the next subtree), or by the final note
-    // (so the final note is the end of this subtree).
-    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-        // If the leaf at the end of the block is the final leaf in a subtree,
+    // If this block starts a new subtree, that subtree is either completed by:
+    // - a note in this block (so the final note is before the end of this block), or
+    // - the final note in the previous block.
+    if let Some((index, node)) = prev_tree.completed_subtree_index_and_root() {
+        // If the leaf at the end of the previous block is the final leaf in a subtree,
         // we already have that subtree root available in the tree.
-        NoteCommitmentSubtree::new(index, end_height, node)
+        NoteCommitmentSubtree::new(index, prev_end_height, node)
     } else {
-        // If the leaf at the end of the block is in the next subtree,
-        // we need to calculate that subtree root based on the tree from the previous block.
+        // If the leaf at the end of this block is in the next subtree,
+        // we need to calculate the subtree root based on the tree from the previous block.
+
+        // TODO: move these checks into a separate function
         let prev_position = prev_tree
             .position()
             .expect("previous block must have a partial subtree");
-
         let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
@@ -651,6 +670,7 @@ fn calculate_sapling_subtree(
              remaining: {current_remaining_notes}"
         );
 
+        // Get the missing notes needed to complete the subtree.
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
@@ -699,37 +719,38 @@ fn calculate_sapling_subtree(
 
 /// Calculates a Orchard note commitment subtree, reading blocks from `read_db` if needed.
 ///
-/// `tree` must be a note commitment tree containing a recently completed subtree,
-/// which was not already completed in `prev_tree`.
+/// `tree` must be a note commitment tree that starts a new subtree.
+/// The subtree can be completed at the end of `prev_tree`, or before the end of `tree`.
 ///
-/// `prev_tree` is only used to rebuild the subtree, if it was completed inside the block.
-/// If the subtree was completed by the final note commitment in the block, `prev_tree` is unused.
+/// `prev_tree` is only used to rebuild the subtree if it was completed before the end of `tree`.
 ///
 /// # Panics
 ///
-/// If `tree` does not contain a recently completed subtree.
+/// If `tree` does not start a new subtree.
 #[must_use = "subtree should be written to the database after it is calculated"]
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_orchard_subtree(
     read_db: &ZebraDb,
+    prev_end_height: Height,
     prev_tree: Arc<orchard::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<orchard::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<orchard::tree::Node> {
-    // If this block completed a subtree, the subtree is either completed by a note before
-    // the final note (so the final note is in the next subtree), or by the final note
-    // (so the final note is the end of this subtree).
-    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
-        // If the leaf at the end of the block is the final leaf in a subtree,
+    // If this block starts a new subtree, that subtree is either completed by:
+    // - a note in this block (so the final note is before the end of this block), or
+    // - the final note in the previous block.
+    if let Some((index, node)) = prev_tree.completed_subtree_index_and_root() {
+        // If the leaf at the end of the previous block is the final leaf in a subtree,
         // we already have that subtree root available in the tree.
-        NoteCommitmentSubtree::new(index, end_height, node)
+        NoteCommitmentSubtree::new(index, prev_end_height, node)
     } else {
-        // If the leaf at the end of the block is in the next subtree,
-        // we need to calculate that subtree root based on the tree from the previous block.
+        // If the leaf at the end of this block is in the next subtree,
+        // we need to calculate the subtree root based on the tree from the previous block.
+
+        // TODO: move these checks into a separate function
         let prev_position = prev_tree
             .position()
             .expect("previous block must have a partial subtree");
-
         let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
@@ -810,6 +831,7 @@ fn calculate_orchard_subtree(
              remaining: {current_remaining_notes}"
         );
 
+        // Get the missing notes needed to complete the subtree.
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
