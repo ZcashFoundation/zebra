@@ -50,12 +50,13 @@ pub fn run(
         .filter(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
 
     for (prev_tree, end_height, tree) in subtrees {
-        // Return early if there is a cancel signal.
+        // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        calculate_and_write_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
+        let subtree = calculate_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
+        write_sapling_subtree(upgrade_db, subtree);
     }
 
     for ((_prev_height, prev_tree), (height, tree)) in upgrade_db
@@ -371,27 +372,31 @@ fn check_orchard_subtrees(db: &ZebraDb) -> bool {
     is_valid
 }
 
-/// Calculates and writes a Sapling note commitment subtree to `upgrade_db`.
+/// Calculates a Sapling note commitment subtree, reading blocks from `read_db` if needed.
 ///
 /// `tree` must be a note commitment tree containing a recently completed subtree,
 /// which was not already completed in `prev_tree`.
 ///
+/// `prev_tree` is only used to rebuild the subtree, if it was completed inside the block.
+/// If the subtree was completed by the final note commitment in the block, `prev_tree` is unused.
+///
 /// # Panics
 ///
 /// If `tree` does not contain a recently completed subtree.
-fn calculate_and_write_sapling_subtree(
-    upgrade_db: &ZebraDb,
+#[must_use = "subtree should be written to the database after it is calculated"]
+fn calculate_sapling_subtree(
+    read_db: &ZebraDb,
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
-) {
+) -> NoteCommitmentSubtree<sapling::tree::Node> {
     // If this block completed a subtree, the subtree is either completed by a note before
     // the final note (so the final note is in the next subtree), or by the final note
     // (so the final note is the end of this subtree).
     if let Some((index, node)) = tree.completed_subtree_index_and_root() {
         // If the leaf at the end of the block is the final leaf in a subtree,
         // we already have that subtree root available in the tree.
-        write_sapling_subtree(upgrade_db, index, end_height, node);
+        NoteCommitmentSubtree::new(index, end_height, node)
     } else {
         // If the leaf at the end of the block is in the next subtree,
         // we need to calculate that subtree root based on the tree from the previous block.
@@ -402,7 +407,7 @@ fn calculate_and_write_sapling_subtree(
             "tree must contain a recently completed subtree"
         );
 
-        let block = upgrade_db
+        let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
         let sapling_note_commitments = block
@@ -420,19 +425,15 @@ fn calculate_and_write_sapling_subtree(
 
         let (index, node) = subtree.expect("already checked that the block completed a subtree");
 
-        write_sapling_subtree(upgrade_db, index, end_height, node);
+        NoteCommitmentSubtree::new(index, end_height, node)
     }
 }
 
 /// Writes a Sapling note commitment subtree to `upgrade_db`.
 fn write_sapling_subtree(
     upgrade_db: &ZebraDb,
-    index: NoteCommitmentSubtreeIndex,
-    end_height: Height,
-    node: sapling::tree::Node,
+    subtree: NoteCommitmentSubtree<sapling::tree::Node>,
 ) {
-    let subtree = NoteCommitmentSubtree::new(index, end_height, node);
-
     let mut batch = DiskWriteBatch::new();
 
     batch.insert_sapling_subtree(upgrade_db, &subtree);
@@ -441,11 +442,11 @@ fn write_sapling_subtree(
         .write_batch(batch)
         .expect("writing sapling note commitment subtrees should always succeed.");
 
-    if index.0 % 100 == 0 {
-        info!(?end_height, index = ?index.0, "calculated and added sapling subtree");
+    if subtree.index.0 % 100 == 0 {
+        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(?end_height, index = ?index.0, ?node, "calculated and added sapling subtree");
+    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
 }
 
 /// Writes a Orchard note commitment subtree to `upgrade_db`.
