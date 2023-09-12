@@ -146,8 +146,8 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -257,8 +257,8 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -491,17 +491,16 @@ jobs:
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
   # Then check the result of the test.
   #
-  # If `inputs.is_long_test` is `false`, the Rust test harness mostly runs in this job.
+  # If `inputs.is_long_test` is `true`, the timeout is 5 days, otherwise it's 3 hours.
   # Otherwise, it mostly runs in the "logs" jobs.
   test-result:
     name: Run ${{ inputs.test_id }} test
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
-    # We also keep the setup dependencies, so a re-run of this job will re-run the setup jobs.
     needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
-    timeout-minutes: 7200 # 5 days
+    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     runs-on: zfnd-runners
     permissions:
       contents: 'read'
@@ -527,8 +526,8 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -659,8 +658,8 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client \
-          && ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
