@@ -375,6 +375,18 @@ impl NoteCommitmentTree {
         self.inner.value()
     }
 
+    /// Returns the position of the most recently appended leaf in the tree.
+    ///
+    /// This method is used for debugging, use `incrementalmerkletree::Address` for tree operations.
+    pub fn position(&self) -> Option<u64> {
+        let Some(tree) = self.frontier() else {
+            // An empty tree doesn't have a previous leaf.
+            return None;
+        };
+
+        Some(tree.position().into())
+    }
+
     /// Returns true if the most recently appended leaf completes the subtree
     pub fn is_complete_subtree(&self) -> bool {
         let Some(tree) = self.frontier() else {

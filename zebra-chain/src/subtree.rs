@@ -1,6 +1,6 @@
 //! Struct representing Sapling/Orchard note commitment subtrees
 
-use std::num::TryFromIntError;
+use std::{fmt, num::TryFromIntError};
 
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,12 @@ pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(transparent)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);
+
+impl fmt::Display for NoteCommitmentSubtreeIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.to_string())
+    }
+}
 
 impl From<u16> for NoteCommitmentSubtreeIndex {
     fn from(value: u16) -> Self {

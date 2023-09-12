@@ -567,39 +567,96 @@ fn calculate_sapling_subtree(
     } else {
         // If the leaf at the end of the block is in the next subtree,
         // we need to calculate that subtree root based on the tree from the previous block.
-        let index = prev_tree
+        let prev_position = prev_tree
+            .position()
+            .expect("previous block must have a partial subtree");
+
+        let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
-        let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
-        let is_complete = prev_tree.is_complete_subtree();
+        let prev_remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+        let prev_is_complete = prev_tree.is_complete_subtree();
+
+        let current_position = tree.position().expect("current block must have a subtree");
+
+        let current_index = tree
+            .subtree_index()
+            .expect("current block must have a subtree");
+        let current_remaining_notes = tree.remaining_subtree_leaf_nodes();
 
         assert_eq!(
-            index.0 + 1,
-            tree.subtree_index()
-                .expect("current block must have a subtree")
-                .0,
-            "subtree must have been completed by the current block"
+            prev_index.0 + 1,
+            current_index.0,
+            "subtree must have been completed by the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
         assert!(
-            tree.remaining_subtree_leaf_nodes() > 0,
-            "just checked for a complete subtree in the current block"
+            current_remaining_notes > 0,
+            "just checked for a complete subtree in the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
         assert!(
             !tree.is_complete_subtree(),
-            "just checked for a complete tree"
+            "just checked for a complete subtree in the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
 
         // If the previous tree was complete, then the current tree can't also complete a subtree,
         // due to the consensus limit on the number of outputs in a block.
-        assert!(remaining_notes > 0, "the caller should supply a complete subtree, so the previous tree can't also be complete");
-        assert!(!is_complete, "the caller should supply a complete subtree, so the previous tree can't also be complete");
+        assert!(
+            prev_remaining_notes > 0,
+            "the caller should supply a complete subtree, \
+             so the previous tree can't also be complete:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
+        );
+        assert!(
+            !prev_is_complete,
+            "the caller should supply a complete subtree, \
+             so the previous tree can't also be complete:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
+        );
 
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
         let sapling_note_commitments = block
             .sapling_note_commitments()
-            .take(remaining_notes)
+            .take(prev_remaining_notes)
             .cloned()
             .collect();
 
@@ -620,15 +677,19 @@ fn calculate_sapling_subtree(
                 "already checked that the block completed a subtree:\n\
                  updated subtree:\n\
                  index: {:?}\n\
+                 position: {:?}\n\
                  remaining notes: {}\n\
-                 is complete: {}\n\
-                 original subtree:\n\
-                 index: {index:?}\n\
-                 remaining notes: {remaining_notes}\n\
-                 is complete: {is_complete}\n",
+                 original previous subtree:\n\
+                 index: {prev_index}\n\
+                 position: {prev_position}\n\
+                 remaining: {prev_remaining_notes}\n\
+                 original current subtree:\n\
+                 index: {current_index}\n\
+                 position: {current_position}\n\
+                 remaining: {current_remaining_notes}",
                 sapling_nct.subtree_index(),
+                sapling_nct.position(),
                 sapling_nct.remaining_subtree_leaf_nodes(),
-                sapling_nct.is_complete_subtree(),
             )
         });
 
@@ -665,39 +726,96 @@ fn calculate_orchard_subtree(
     } else {
         // If the leaf at the end of the block is in the next subtree,
         // we need to calculate that subtree root based on the tree from the previous block.
-        let index = prev_tree
+        let prev_position = prev_tree
+            .position()
+            .expect("previous block must have a partial subtree");
+
+        let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
-        let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
-        let is_complete = prev_tree.is_complete_subtree();
+        let prev_remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+        let prev_is_complete = prev_tree.is_complete_subtree();
+
+        let current_position = tree.position().expect("current block must have a subtree");
+
+        let current_index = tree
+            .subtree_index()
+            .expect("current block must have a subtree");
+        let current_remaining_notes = tree.remaining_subtree_leaf_nodes();
 
         assert_eq!(
-            index.0 + 1,
-            tree.subtree_index()
-                .expect("current block must have a subtree")
-                .0,
-            "subtree must have been completed by the current block"
+            prev_index.0 + 1,
+            current_index.0,
+            "subtree must have been completed by the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
         assert!(
-            tree.remaining_subtree_leaf_nodes() > 0,
-            "just checked for a complete subtree in the current block"
+            current_remaining_notes > 0,
+            "just checked for a complete subtree in the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
         assert!(
             !tree.is_complete_subtree(),
-            "just checked for a complete tree"
+            "just checked for a complete subtree in the current block:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
         );
 
         // If the previous tree was complete, then the current tree can't also complete a subtree,
         // due to the consensus limit on the number of outputs in a block.
-        assert!(remaining_notes > 0, "the caller should supply a complete subtree, so the previous tree can't also be complete");
-        assert!(!is_complete, "the caller should supply a complete subtree, so the previous tree can't also be complete");
+        assert!(
+            prev_remaining_notes > 0,
+            "the caller should supply a complete subtree, \
+             so the previous tree can't also be complete:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
+        );
+        assert!(
+            !prev_is_complete,
+            "the caller should supply a complete subtree, \
+             so the previous tree can't also be complete:\n\
+             previous subtree:\n\
+             index: {prev_index}\n\
+             position: {prev_position}\n\
+             remaining: {prev_remaining_notes}\n\
+             current subtree:\n\
+             index: {current_index}\n\
+             position: {current_position}\n\
+             remaining: {current_remaining_notes}"
+        );
 
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
         let orchard_note_commitments = block
             .orchard_note_commitments()
-            .take(remaining_notes)
+            .take(prev_remaining_notes)
             .cloned()
             .collect();
 
@@ -718,15 +836,19 @@ fn calculate_orchard_subtree(
                 "already checked that the block completed a subtree:\n\
                  updated subtree:\n\
                  index: {:?}\n\
+                 position: {:?}\n\
                  remaining notes: {}\n\
-                 is complete: {}\n\
-                 original subtree:\n\
-                 index: {index:?}\n\
-                 remaining notes: {remaining_notes}\n\
-                 is complete: {is_complete}\n",
+                 original previous subtree:\n\
+                 index: {prev_index}\n\
+                 position: {prev_position}\n\
+                 remaining: {prev_remaining_notes}\n\
+                 original current subtree:\n\
+                 index: {current_index}\n\
+                 position: {current_position}\n\
+                 remaining: {current_remaining_notes}",
                 orchard_nct.subtree_index(),
+                orchard_nct.position(),
                 orchard_nct.remaining_subtree_leaf_nodes(),
-                orchard_nct.is_complete_subtree(),
             )
         });
 
