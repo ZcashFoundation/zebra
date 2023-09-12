@@ -120,10 +120,10 @@ impl ZebraDb {
             // (There's no format change here, so the format change checks won't run.)
             //
             // Do the quick checks first, then the slower checks.
-            add_subtrees::quick_check(&upgrade_db);
+            upgrade::add_subtrees::quick_check(&db);
 
             DbFormatChange::check_for_duplicate_trees(db.clone());
-            upgrade::add_subtrees::check(&db.clone());
+            upgrade::add_subtrees::check(&db);
         }
 
         db

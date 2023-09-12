@@ -18,22 +18,6 @@ use crate::service::finalized_state::{
     disk_format::upgrade::CancelFormatChange, DiskWriteBatch, ZebraDb,
 };
 
-/// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
-fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node> {
-    // This test vector was generated using the command:
-    // ```sh
-    // zcash-cli z_getsubtreesbyindex sapling 0 1
-    // ```
-    NoteCommitmentSubtree {
-        index: 0.into(),
-        node: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
-            .as_slice()
-            .try_into()
-            .expect("test vector is valid"),
-        end: Height(558822),
-    }
-}
-
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
@@ -155,19 +139,68 @@ pub fn run(
 /// # Panics
 ///
 /// If a note commitment subtree is missing or incorrect.
-fn quick_check(db: &ZebraDb) {
+pub fn quick_check(db: &ZebraDb) {
+    let sapling_result = quick_check_sapling_subtrees(db);
+    let orchard_result = quick_check_orchard_subtrees(db);
+
+    if sapling_result.is_err() || orchard_result.is_err() {
+        // TODO: when the check functions are refactored so they are called from a single function,
+        //       move this panic into that function, but still log a detailed message here
+        panic!(
+            "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
+        );
+    }
+}
+
+/// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
+fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node> {
+    // This test vector was generated using the command:
+    // ```sh
+    // zcash-cli z_getsubtreesbyindex sapling 0 1
+    // ```
+    NoteCommitmentSubtree {
+        index: 0.into(),
+        node: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+            .as_slice()
+            .try_into()
+            .expect("test vector is valid"),
+        end: Height(558822),
+    }
+}
+
+/// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
+fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node> {
+    // This test vector was generated using the command:
+    // ```sh
+    // zcash-cli z_getsubtreesbyindex orchard 0 1
+    // ```
+    NoteCommitmentSubtree {
+        index: 0.into(),
+        node: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+            .as_slice()
+            .try_into()
+            .expect("test vector is valid"),
+        end: Height(1707429),
+    }
+}
+
+/// Quickly check that the first calculated sapling subtree is correct.
+///
+/// This allows us to fail the upgrade quickly in tests and during development,
+/// rather than waiting ~20 minutes to see if it failed.
+///
+/// Returns an error if a note commitment subtree is missing or incorrect.
+fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // We check the first sapling tree on mainnet, so skip this check if it isn't available.
-    let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
+    let Some(NoteCommitmentSubtreeIndex(first_incomplete_subtree_index)) =
         db.sapling_tree().subtree_index()
     else {
-        return;
+        return Ok(());
     };
 
     if first_incomplete_subtree_index == 0 || db.network() != Mainnet {
-        return;
+        return Ok(());
     }
-
-    let mut result = Ok(());
 
     // Find the first complete subtree, with its note commitment tree, end height, and the previous tree.
     let first_complete_subtree = db
@@ -183,8 +216,9 @@ fn quick_check(db: &ZebraDb) {
         .find(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
 
     let Some((prev_tree, end_height, tree)) = first_complete_subtree else {
-        result = Err("iterator did not find complete subtree, but the tree has it");
+        let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
+        return result;
     };
 
     // Creating this test vector involves a cryptographic check, so only do it once.
@@ -193,13 +227,63 @@ fn quick_check(db: &ZebraDb) {
     let db_subtree = calculate_sapling_subtree(db, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
-        result = Err("first subtree did not match expected test vector");
+        let result = Err("first subtree did not match expected test vector");
         error!(?result, ?db_subtree, ?expected_subtree);
+        return result;
     }
 
-    if result.is_err() {
-        panic!("incorrect first sapling subtree: {result}");
+    Ok(())
+}
+
+/// Quickly check that the first calculated orchard subtree is correct.
+///
+/// This allows us to fail the upgrade quickly in tests and during development,
+/// rather than waiting ~20 minutes to see if it failed.
+///
+/// Returns an error if a note commitment subtree is missing or incorrect.
+fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
+    // We check the first orchard tree on mainnet, so skip this check if it isn't available.
+    let Some(NoteCommitmentSubtreeIndex(first_incomplete_subtree_index)) =
+        db.orchard_tree().subtree_index()
+    else {
+        return Ok(());
+    };
+
+    if first_incomplete_subtree_index == 0 || db.network() != Mainnet {
+        return Ok(());
     }
+
+    // Find the first complete subtree, with its note commitment tree, end height, and the previous tree.
+    let first_complete_subtree = db
+        .orchard_tree_by_height_range(..)
+        // The first block with orchard notes can't complete a subtree, see above for details.
+        .filter(|(height, _tree)| !height.is_min())
+        // We need both the tree and its previous tree for each shielded block.
+        .tuple_windows()
+        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
+        // But since we skip the empty genesis tree, all trees must have valid indexes.
+        // So we don't need to unwrap the optional values for this comparison to be correct.
+        .find(|(prev_tree, _end_height, tree)| tree.subtree_index() > prev_tree.subtree_index());
+
+    let Some((prev_tree, end_height, tree)) = first_complete_subtree else {
+        let result = Err("iterator did not find complete subtree, but the tree has it");
+        error!(?result);
+        return result;
+    };
+
+    // Creating this test vector involves a cryptographic check, so only do it once.
+    let expected_subtree = first_orchard_mainnet_subtree();
+
+    let db_subtree = calculate_orchard_subtree(db, prev_tree, end_height, tree);
+
+    if db_subtree != expected_subtree {
+        let result = Err("first subtree did not match expected test vector");
+        error!(?result, ?db_subtree, ?expected_subtree);
+        return result;
+    }
+
+    Ok(())
 }
 
 /// Check that note commitment subtrees were correctly added.
@@ -519,6 +603,63 @@ fn write_sapling_subtree(
     }
     // This log happens about once per second on recent machines with SSD disks.
     debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
+}
+
+/// Calculates a Orchard note commitment subtree, reading blocks from `read_db` if needed.
+///
+/// `tree` must be a note commitment tree containing a recently completed subtree,
+/// which was not already completed in `prev_tree`.
+///
+/// `prev_tree` is only used to rebuild the subtree, if it was completed inside the block.
+/// If the subtree was completed by the final note commitment in the block, `prev_tree` is unused.
+///
+/// # Panics
+///
+/// If `tree` does not contain a recently completed subtree.
+#[must_use = "subtree should be written to the database after it is calculated"]
+fn calculate_orchard_subtree(
+    read_db: &ZebraDb,
+    prev_tree: Arc<orchard::tree::NoteCommitmentTree>,
+    end_height: Height,
+    tree: Arc<orchard::tree::NoteCommitmentTree>,
+) -> NoteCommitmentSubtree<orchard::tree::Node> {
+    // If this block completed a subtree, the subtree is either completed by a note before
+    // the final note (so the final note is in the next subtree), or by the final note
+    // (so the final note is the end of this subtree).
+    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+        // If the leaf at the end of the block is the final leaf in a subtree,
+        // we already have that subtree root available in the tree.
+        NoteCommitmentSubtree::new(index, end_height, node)
+    } else {
+        // If the leaf at the end of the block is in the next subtree,
+        // we need to calculate that subtree root based on the tree from the previous block.
+        let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+
+        assert!(
+            remaining_notes > 0,
+            "tree must contain a recently completed subtree"
+        );
+
+        let block = read_db
+            .block(end_height.into())
+            .expect("height with note commitment tree should have block");
+        let orchard_note_commitments = block
+            .orchard_note_commitments()
+            .take(remaining_notes)
+            .cloned()
+            .collect();
+
+        // This takes less than 1 second per tree, so we don't need to make it cancellable.
+        let (_orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
+            prev_tree,
+            orchard_note_commitments,
+        )
+        .expect("finalized notes should append successfully");
+
+        let (index, node) = subtree.expect("already checked that the block completed a subtree");
+
+        NoteCommitmentSubtree::new(index, end_height, node)
+    }
 }
 
 /// Writes a Orchard note commitment subtree to `upgrade_db`.
