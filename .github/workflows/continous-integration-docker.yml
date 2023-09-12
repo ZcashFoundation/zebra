@@ -637,7 +637,7 @@ jobs:
       needs_zebra_state: true
       needs_lwd_state: true
       # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
-      saves_to_disk: false
+      saves_to_disk: true
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
