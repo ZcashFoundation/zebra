@@ -357,7 +357,7 @@ impl DbFormatChange {
         // Note commitment subtree creation database upgrade task.
 
         let version_for_adding_subtrees =
-            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
+            Version::parse("25.2.1").expect("Hardcoded version string should be valid.");
 
         // Check if we need to add note commitment subtrees to the database.
         if older_disk_version < version_for_adding_subtrees {
