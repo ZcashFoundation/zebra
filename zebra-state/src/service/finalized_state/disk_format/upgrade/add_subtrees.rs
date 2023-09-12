@@ -563,12 +563,21 @@ fn calculate_sapling_subtree(
     } else {
         // If the leaf at the end of the block is in the next subtree,
         // we need to calculate that subtree root based on the tree from the previous block.
+        let index = prev_tree
+            .subtree_index()
+            .expect("previous block must have a partial subtree");
         let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+        let is_complete = prev_tree.is_complete_subtree();
 
-        assert!(
-            remaining_notes > 0,
-            "tree must contain a recently completed subtree"
+        assert_eq!(
+            index.0 + 1,
+            tree.subtree_index()
+                .expect("current block must have a subtree")
+                .0,
+            "tree must have been completed by the current block"
         );
+        assert!(remaining_notes > 0, "just checked for a complete tree");
+        assert!(!is_complete, "just checked for a complete tree");
 
         let block = read_db
             .block(end_height.into())
@@ -580,13 +589,28 @@ fn calculate_sapling_subtree(
             .collect();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
-        let (_sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
+        let (sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
             prev_tree,
             sapling_note_commitments,
         )
         .expect("finalized notes should append successfully");
 
-        let (index, node) = subtree.expect("already checked that the block completed a subtree");
+        let (index, node) = subtree.unwrap_or_else(|| {
+            panic!(
+                "already checked that the block completed a subtree:\n\
+                 updated subtree:\n\
+                 index: {:?}\n\
+                 remaining notes: {}\n\
+                 is complete: {}\n\
+                 original subtree:\n\
+                 index: {index:?}\n\
+                 remaining notes: {remaining_notes}\n\
+                 is complete: {is_complete}\n",
+                sapling_nct.subtree_index(),
+                sapling_nct.remaining_subtree_leaf_nodes(),
+                sapling_nct.is_complete_subtree(),
+            )
+        });
 
         NoteCommitmentSubtree::new(index, end_height, node)
     }
@@ -620,12 +644,21 @@ fn calculate_orchard_subtree(
     } else {
         // If the leaf at the end of the block is in the next subtree,
         // we need to calculate that subtree root based on the tree from the previous block.
+        let index = prev_tree
+            .subtree_index()
+            .expect("previous block must have a partial subtree");
         let remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
+        let is_complete = prev_tree.is_complete_subtree();
 
-        assert!(
-            remaining_notes > 0,
-            "tree must contain a recently completed subtree"
+        assert_eq!(
+            index.0 + 1,
+            tree.subtree_index()
+                .expect("current block must have a subtree")
+                .0,
+            "tree must have been completed by the current block"
         );
+        assert!(remaining_notes > 0, "just checked for a complete tree");
+        assert!(!is_complete, "just checked for a complete tree");
 
         let block = read_db
             .block(end_height.into())
@@ -637,13 +670,28 @@ fn calculate_orchard_subtree(
             .collect();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
-        let (_orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
+        let (orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
             prev_tree,
             orchard_note_commitments,
         )
         .expect("finalized notes should append successfully");
 
-        let (index, node) = subtree.expect("already checked that the block completed a subtree");
+        let (index, node) = subtree.unwrap_or_else(|| {
+            panic!(
+                "already checked that the block completed a subtree:\n\
+                 updated subtree:\n\
+                 index: {:?}\n\
+                 remaining notes: {}\n\
+                 is complete: {}\n\
+                 original subtree:\n\
+                 index: {index:?}\n\
+                 remaining notes: {remaining_notes}\n\
+                 is complete: {is_complete}\n",
+                orchard_nct.subtree_index(),
+                orchard_nct.remaining_subtree_leaf_nodes(),
+                orchard_nct.is_complete_subtree(),
+            )
+        });
 
         NoteCommitmentSubtree::new(index, end_height, node)
     }
