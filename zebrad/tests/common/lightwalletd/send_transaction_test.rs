@@ -192,7 +192,6 @@ pub async fn run() -> Result<()> {
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
-
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
         let hash = transaction::Hash::from_bytes_in_display_order(&hash);
