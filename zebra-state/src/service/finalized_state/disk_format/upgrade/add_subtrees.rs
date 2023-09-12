@@ -20,6 +20,9 @@ use crate::service::finalized_state::{
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
 ///
+/// Trees are added to the database in reverse height order, so that wallets can sync correctly
+/// while the upgrade is running.
+///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
 pub fn run(
@@ -27,6 +30,8 @@ pub fn run(
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
+    // # Consensus
+    //
     // Zebra stores exactly one note commitment tree for every block with sapling notes.
     // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
     //
@@ -37,15 +42,23 @@ pub fn run(
     //
     // Therefore, the first block with shielded note can't complete a subtree, which means we can
     // skip the (genesis block, first shielded block) tree pair.
+    //
+    // # Compatibility
+    //
+    // Because wallets search backwards from the chain tip, subtrees need to be added to the
+    // database in reverse height order. (Tip first, genesis last.)
+    //
+    // Otherwise, wallets that sync during the upgrade will be missing some notes.
 
     // Generate a list of sapling subtree inputs: previous tree, current tree, and end height.
     let subtrees = upgrade_db
-        .sapling_tree_by_height_range(..=initial_tip_height)
+        .sapling_tree_by_reversed_height_range(..=initial_tip_height)
         // The first block with sapling notes can't complete a subtree, see above for details.
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        // Because the iterator is reversed, the larger tree is first.
+        .map(|((end_height, tree), (_prev_height, prev_tree))| (prev_tree, end_height, tree))
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
@@ -63,12 +76,13 @@ pub fn run(
 
     // Generate a list of orchard subtree inputs: previous tree, current tree, and end height.
     let subtrees = upgrade_db
-        .orchard_tree_by_height_range(..=initial_tip_height)
+        .orchard_tree_by_reversed_height_range(..=initial_tip_height)
         // The first block with orchard notes can't complete a subtree, see above for details.
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((_prev_height, prev_tree), (end_height, tree))| (prev_tree, end_height, tree))
+        // Because the iterator is reversed, the larger tree is first.
+        .map(|((end_height, tree), (_prev_height, prev_tree))| (prev_tree, end_height, tree))
         // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
