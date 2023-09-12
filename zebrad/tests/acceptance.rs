@@ -1835,7 +1835,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
 
         if test_type.needs_lightwalletd_cached_state() {
             lightwalletd
-                .expect_stdout_line_matches("Done reading [0-9]{1,7} blocks from disk cache")?;
+                .expect_stdout_line_matches("Done reading [0-9]{7} blocks from disk cache")?;
         } else if !test_type.allow_lightwalletd_cached_state() {
             // Timeout the test if we're somehow accidentally using a cached state in our temp dir
             lightwalletd.expect_stdout_line_matches("Done reading 0 blocks from disk cache")?;
