@@ -356,11 +356,19 @@ impl DbFormatChange {
 
         // Note commitment subtree creation database upgrade task.
 
-        let version_for_adding_subtrees =
+        let latest_version_for_adding_subtrees =
             Version::parse("25.2.1").expect("Hardcoded version string should be valid.");
 
+        let first_version_for_adding_subtrees =
+            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
+
         // Check if we need to add note commitment subtrees to the database.
-        if older_disk_version < version_for_adding_subtrees {
+        if older_disk_version < latest_version_for_adding_subtrees {
+            if older_disk_version >= first_version_for_adding_subtrees {
+                // Clear previous upgrade data that might be different from this upgrade's data.
+                add_subtrees::reset(initial_tip_height, &db, cancel_receiver)?;
+            }
+
             add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
@@ -368,7 +376,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
+            Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, &config, network);
         }
 
         // # New Upgrades Usually Go Here

@@ -101,6 +101,43 @@ pub fn run(
     Ok(())
 }
 
+/// Reset data from previous upgrades. This data can be complete or incomplete.
+///
+/// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
+#[allow(clippy::unwrap_in_result)]
+pub fn reset(
+    _initial_tip_height: Height,
+    upgrade_db: &ZebraDb,
+    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+) -> Result<(), CancelFormatChange> {
+    // Return early if the upgrade is cancelled.
+    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        return Err(CancelFormatChange);
+    }
+
+    // This doesn't delete the maximum index, but the consensus rules make that subtree impossible.
+    // (Adding a note to a full note commitment tree is an error.)
+    //
+    // TODO: convert zs_delete_range() to take std::ops::RangeBounds, and delete the upper bound.
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_range_sapling_subtree(upgrade_db, 0.into(), u16::MAX.into());
+    upgrade_db
+        .write_batch(batch)
+        .expect("deleting old sapling note commitment subtrees is a valid database operation");
+
+    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        return Err(CancelFormatChange);
+    }
+
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_range_orchard_subtree(upgrade_db, 0.into(), u16::MAX.into());
+    upgrade_db
+        .write_batch(batch)
+        .expect("deleting old orchard note commitment subtrees is a valid database operation");
+
+    Ok(())
+}
+
 /// Quickly check that the first calculated subtree is correct.
 ///
 /// This allows us to fail the upgrade quickly in tests and during development,

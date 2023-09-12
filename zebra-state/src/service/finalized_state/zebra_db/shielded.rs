@@ -603,6 +603,23 @@ impl DiskWriteBatch {
         self.zs_delete_range(&sapling_tree_cf, from, to);
     }
 
+    /// Deletes the range of Sapling subtrees at the given [`NoteCommitmentSubtreeIndex`]es.
+    /// Doesn't delete the upper bound.
+    pub fn delete_range_sapling_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        from: NoteCommitmentSubtreeIndex,
+        to: NoteCommitmentSubtreeIndex,
+    ) {
+        let sapling_subtree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&sapling_subtree_cf, from, to);
+    }
+
     // Orchard tree methods
 
     /// Inserts the Orchard note commitment subtree.
@@ -637,5 +654,22 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&orchard_tree_cf, from, to);
+    }
+
+    /// Deletes the range of Orchard subtrees at the given [`NoteCommitmentSubtreeIndex`]es.
+    /// Doesn't delete the upper bound.
+    pub fn delete_range_orchard_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        from: NoteCommitmentSubtreeIndex,
+        to: NoteCommitmentSubtreeIndex,
+    ) {
+        let orchard_subtree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&orchard_subtree_cf, from, to);
     }
 }
