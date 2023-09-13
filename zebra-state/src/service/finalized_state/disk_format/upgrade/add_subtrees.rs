@@ -183,7 +183,8 @@ pub fn check(db: &ZebraDb) {
     let check_sapling_subtrees = check_sapling_subtrees(db);
     let check_orchard_subtrees = check_orchard_subtrees(db);
     if !check_sapling_subtrees || !check_orchard_subtrees {
-        panic!("missing or bad subtree(s)");
+        // TODO: make this a panic before releasing the subtree change (#7532)
+        error!("missing or bad subtree(s)");
     }
 }
 
