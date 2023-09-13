@@ -130,7 +130,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
@@ -177,13 +177,9 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    // The timing of verification logs are unreliable, so we've disabled this check for now.
-    //
-    // TODO: when lightwalletd starts returning transactions again:
-    //       re-enable this check, find a better way to check, or delete this commented-out check
-    //
-    //tracing::info!("waiting for mempool to verify some transactions...");
-    //zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    // Check if some transaction is sent to mempool
+    tracing::info!("waiting for mempool to verify some transactions...");
+    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client
@@ -191,8 +187,8 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // We'd like to check that lightwalletd queries the mempool, but it looks like it doesn't do it after each GetMempoolTx request.
-    //zebrad.expect_stdout_line_matches("answered mempool request req=TransactionIds")?;
+    // check that lightwalletd queries the mempool.
+    zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
@@ -209,14 +205,15 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L529-L531
-    //
-    // TODO: re-enable it when lightwalletd starts returning transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    // TODO: This test is working locally in some environments, failing in others, failing always in the CI.
+    // https://github.com/ZcashFoundation/zebra/issues/7529
+    //assert!(
+    //    counter >= 1,
+    //    "all transactions from future blocks failed to send to an isolated mempool"
+    //);
     assert_eq!(
         counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
+        "developers: should fail if `get_mempool_tx` start working."
     );
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
@@ -226,18 +223,17 @@ pub async fn run() -> Result<()> {
     let mut counter = 0;
     while let Some(_tx) = transaction_stream.message().await? {
         // TODO: check tx.data or tx.height here?
-
         counter += 1;
     }
 
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
-    //
-    // TODO: re-enable it when lightwalletd starts streaming transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    // TODO: This is not working, found out why.
+    //assert!(
+    //    counter >= 1,
+    //    "all transactions from future blocks failed to send to an isolated mempool"
+    //);
     assert_eq!(
         counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
+        "developers: should fail if `get_mempool_stream` start working."
     );
 
     Ok(())
