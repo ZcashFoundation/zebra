@@ -115,16 +115,7 @@ CI sync jobs near the tip will take different amounts of time as:
 To fix a CI sync timeout, follow these steps until the timeouts are fixed:
 1. Check for recent PRs that could have caused a performance decrease
 2. [Update Zebra's checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints)
-3. Wait for a full or update sync to finish with the new checkpoints
-
-4. The GitHub actions job limit is 6 hours, so the ideal job time is 4-5 hours.
-   If any GitHub actions job times out, or takes over 5 hours:
-
-    a. [Split the job based on the sync height](https://github.com/ZcashFoundation/zebra/pull/4961/files#diff-4c3718f100312ddc9472f5d4ab2ee0a50a46f2af21352a25fca849734e3f7514R732), or
-
-    b. Adjust the sync heights in existing jobs.
-
-5. If a Rust test fails with "command did not log any matches for the given regex, within the ... timeout":
+3. If a Rust test fails with "command did not log any matches for the given regex, within the ... timeout":
 
     a. If it's the full sync test, [increase the full sync timeout](https://github.com/ZcashFoundation/zebra/pull/5129/files)
 
