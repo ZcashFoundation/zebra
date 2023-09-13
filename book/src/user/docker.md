@@ -68,51 +68,51 @@ miner_address = "t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"
 
 #### Configuration
 
-- **FEATURES**: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
+- `FEATURES`: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
 
 #### Logging
 
-- **RUST_LOG**: Sets the trace log level. Example: `"debug"`
-- **RUST_BACKTRACE**: Enables or disables backtraces. Example: `"full"`
-- **RUST_LIB_BACKTRACE**: Enables or disables library backtraces. Example: `1`
-- **COLORBT_SHOW_HIDDEN**: Enables or disables showing hidden backtraces. Example: `1`
+- `RUST_LOG`: Sets the trace log level. Example: `"debug"`
+- `RUST_BACKTRACE`: Enables or disables backtraces. Example: `"full"`
+- `RUST_LIB_BACKTRACE`: Enables or disables library backtraces. Example: `1`
+- `COLORBT_SHOW_HIDDEN`: Enables or disables showing hidden backtraces. Example: `1`
 
 #### Tests
 
-- **TEST_FEATURES**: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
-- **ZEBRA_SKIP_IPV6_TESTS**: Skips IPv6 tests. Example: `1`
-- **ENTRYPOINT_FEATURES**: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
+- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
+- `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
+- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
 
 #### CI/CD
 
-- **SHORT_SHA**: Represents the short SHA of the commit. Example: `"a1b2c3d"`
+- `SHORT_SHA`: Represents the short SHA of the commit. Example: `"a1b2c3d"`
 
 ### Run time variables
 
 #### Network
 
-- **NETWORK**: Specifies the network type. Example: `"Mainnet"`
+- `NETWORK`: Specifies the network type. Example: `"Mainnet"`
 
 #### Zebra Configuration
 
-- **ZEBRA_CHECKPOINT_SYNC**: Enables or disables checkpoint sync. Example: `true`
-- **ZEBRA_LISTEN_ADDR**: Address for Zebra to listen on. Example: `"0.0.0.0"`
-- **ZEBRA_CACHED_STATE_DIR**: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
+- `ZEBRA_CHECKPOINT_SYNC`: Enables or disables checkpoint sync. Example: `true`
+- `ZEBRA_LISTEN_ADDR`: Address for Zebra to listen on. Example: `"0.0.0.0"`
+- `ZEBRA_CACHED_STATE_DIR`: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
 
 #### Mining Configuration
 
-- **RPC_LISTEN_ADDR**: Address for RPC to listen on. Example: `"0.0.0.0"`
-- **RPC_PORT**: Port for RPC. Example: `8232`
-- **MINER_ADDRESS**: Address for the miner. Example: `"t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"`
+- `RPC_LISTEN_ADDR`: Address for RPC to listen on. Example: `"0.0.0.0"`
+- `RPC_PORT`: Port for RPC. Example: `8232`
+- `MINER_ADDRESS`: Address for the miner. Example: `"t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"`
 
 #### Other Configuration
 
-- **METRICS_ENDPOINT_ADDR**: Address for metrics endpoint. Example: `"0.0.0.0"`
-- **METRICS_ENDPOINT_PORT**: Port for metrics endpoint. Example: `9999`
-- **LOG_FILE**: Path to the log file. Example: `"/path/to/log/file.log"`
-- **LOG_COLOR**: Enables or disables log color. Example: `false`
-- **TRACING_ENDPOINT_ADDR**: Address for tracing endpoint. Example: `"0.0.0.0"`
-- **TRACING_ENDPOINT_PORT**: Port for tracing endpoint. Example: `3000`
+- `METRICS_ENDPOINT_ADDR`: Address for metrics endpoint. Example: `"0.0.0.0"`
+- `METRICS_ENDPOINT_PORT`: Port for metrics endpoint. Example: `9999`
+- `LOG_FILE`: Path to the log file. Example: `"/path/to/log/file.log"`
+- `LOG_COLOR`: Enables or disables log color. Example: `false`
+- `TRACING_ENDPOINT_ADDR`: Address for tracing endpoint. Example: `"0.0.0.0"`
+- `TRACING_ENDPOINT_PORT`: Port for tracing endpoint. Example: `3000`
 
 ## Registries
 
