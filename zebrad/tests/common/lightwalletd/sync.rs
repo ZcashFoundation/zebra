@@ -11,11 +11,7 @@ use tempfile::TempDir;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::prelude::*;
 
-use crate::common::{
-    launch::ZebradTestDirExt,
-    lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-    test_type::TestType,
-};
+use crate::common::{launch::ZebradTestDirExt, test_type::TestType};
 
 /// The amount of time we wait between each tip check.
 pub const TIP_CHECK_RATE_LIMIT: Duration = Duration::from_secs(60);
@@ -110,7 +106,7 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
         }
 
         tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip...");
-        while !are_zebrad_and_lightwalletd_tips_synced(lightwalletd_rpc_port, zebra_rpc_address)? {
+        while !are_zebrad_and_lightwalletd_tips_synced(zebra_rpc_address, lightwalletd_mut)? {
             let previous_check = Instant::now();
 
             // To improve performance, only check the tips occasionally
@@ -171,22 +167,41 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
 /// Returns `Ok(true)` if zebrad and lightwalletd are both at the same height.
 #[tracing::instrument]
 pub fn are_zebrad_and_lightwalletd_tips_synced(
-    lightwalletd_rpc_port: u16,
     zebra_rpc_address: SocketAddr,
+    lightwalletd: &mut TestChild<TempDir>,
 ) -> Result<bool> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
     rt.block_on(async {
-        let mut lightwalletd_grpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+        // We are going to try getting the current lightwalletd height by reading the lightwalletd logs.
+        let mut lightwalletd_next_height = 1;
 
-        // Get the block tip from lightwalletd
-        let lightwalletd_tip_block = lightwalletd_grpc_client
-            .get_latest_block(ChainSpec {})
-            .await?
-            .into_inner();
-        let lightwalletd_tip_height = lightwalletd_tip_block.height;
+        // Only go forward on getting next height from lightwalletd logs if we find the line we are interested in.
+        //
+        // TODO: move this blocking code out of the async executor.
+        // The executor could block all tasks and futures while this code is running.
+        // That's ok for now, but it might cause test hangs or failures if we spawn tasks, select(), or join().
+        if let Ok(line) = lightwalletd.expect_stdout_line_matches("Waiting for block: [0-9]+") {
+            let line_json: serde_json::Value = serde_json::from_str(line.as_str())
+                .expect("captured lightwalletd logs are always valid json");
+            let msg = line_json["msg"]
+                .as_str()
+                .expect("`msg` field is always a valid string");
+
+            // Block number is the last word of the message. We rely on that specific for this to work.
+            let last = msg
+                .split(' ')
+                .last()
+                .expect("always possible to get the last word of a separated by space string");
+            lightwalletd_next_height = last
+                .parse()
+                .expect("the last word is always the block number so it can be parsed to i32 ");
+        }
+
+        // The last height in lightwalletd is the one the program is expecting minus one.
+        let lightwalletd_tip_height = (lightwalletd_next_height - 1) as u64;
 
         // Get the block tip from zebrad
         let client = RpcRequestClient::new(zebra_rpc_address);

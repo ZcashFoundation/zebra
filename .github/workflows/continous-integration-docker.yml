@@ -606,7 +606,7 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Adding block to cache '
+      height_grep_text: 'Waiting for block: '
     secrets: inherit
     # We want to prevent multiple lightwalletd full syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
@@ -636,14 +636,14 @@ jobs:
       test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
-      # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
-      saves_to_disk: false
+      saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Adding block to cache '
+      height_grep_text: 'Waiting for block: '
     secrets: inherit
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
