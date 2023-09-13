@@ -106,7 +106,7 @@ itertools = "0.11.0"
 rayon = "1.7.0"
 
 # ZF deps
-ed25519-zebra = "4.0.1"
+ed25519-zebra = "4.0.3"
 redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
