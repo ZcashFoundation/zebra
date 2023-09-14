@@ -33,7 +33,7 @@ You're able to specify various parameters when building or launching the Docker 
 For example, if we'd like to enable mining on the image, we'd build it using the following `build-arg`:
 
 ```shell
-docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries getblocktemplate-rpcs'  --tag local/zebra.mining:latest .
+docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries getblocktemplate-rpcs' --tag local/zebra.mining:latest .
 ```
 
 To increase the log output we can optionally add these `build-arg`s:
@@ -42,10 +42,10 @@ To increase the log output we can optionally add these `build-arg`s:
 --build-arg RUST_BACKTRACE=full --build-arg RUST_LOG=debug --build-arg COLORBT_SHOW_HIDDEN=1
 ```
 
-And after our image has been built, we can run it in the `Mainnet` with the following command:
+And after our image has been built, we can run it on `Mainnet` with the following command:
 
 ```shell
-docker run -e NETWORK="Mainnet" -e RPC_PORT="8232" -e MINER_ADDRESS="t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc" -p 8232:8232 local/zebra.mining
+docker run --env NETWORK="Mainnet" --env RPC_PORT="8232" --env MINER_ADDRESS="t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc" -p 8232:8232 local/zebra.mining
 ```
 
 Based on our actual `entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
