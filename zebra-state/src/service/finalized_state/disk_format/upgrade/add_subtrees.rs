@@ -40,7 +40,7 @@ pub fn run(
     // The consensus rules limit blocks to less than 2^16 sapling and 2^16 orchard outputs. So a
     // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
     // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
-    // increase by 1 every ~20 full blocks.
+    // increase by at most 1 every ~20 blocks.
     //
     // Therefore, the first block with shielded note can't complete a subtree, which means we can
     // skip the (genesis block, first shielded block) tree pair.
@@ -898,7 +898,7 @@ fn write_sapling_subtree(
     debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
 }
 
-/// Writes a Orchard note commitment subtree to `upgrade_db`.
+/// Writes an Orchard note commitment subtree to `upgrade_db`.
 fn write_orchard_subtree(
     upgrade_db: &ZebraDb,
     subtree: NoteCommitmentSubtree<orchard::tree::Node>,

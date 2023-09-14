@@ -445,7 +445,7 @@ impl DiskDb {
     ///
     /// Holding this iterator open might delay block commit transactions.
     ///
-    /// This code is coped from `zs_range_iter()`, but with the mode reversed.
+    /// This code is copied from `zs_range_iter()`, but with the mode reversed.
     pub fn zs_reverse_range_iter<C, K, V, R>(
         &self,
         cf: &C,
