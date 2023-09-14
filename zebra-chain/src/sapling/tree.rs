@@ -445,7 +445,13 @@ impl NoteCommitmentTree {
                     first_position,
                 );
 
-                subtree_address.position_range_end() - subtree_address.position_range_start().into()
+                assert_eq!(
+                    subtree_address.position_range_start(),
+                    0.into(),
+                    "address is not in the first subtree"
+                );
+
+                subtree_address.position_range_end()
             }
         };
 
