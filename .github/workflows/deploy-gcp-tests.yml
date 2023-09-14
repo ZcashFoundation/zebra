@@ -291,6 +291,8 @@ jobs:
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
+      #
+      # TODO: move this script into a file, and call it from find-cached-disks.yml as well.
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         run: |
@@ -853,14 +855,19 @@ jobs:
       - name: Get original cached state height from google cloud
         run: |
           ORIGINAL_HEIGHT="0"
+          ORIGINAL_DISK_NAME="${{ format('{0}', needs.launch-with-cached-state.outputs.cached_disk_name) }}"
 
-          if [[ -n "${{ format('{0}', needs.launch-with-cached-state.outputs.cached_disk_name) }}" ]]; then
-              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=${{ needs.launch-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
+          if [[ -n "$ORIGINAL_DISK_NAME" ]]; then
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=$ORIGINAL_DISK_NAME" --format="value(labels.height)")
               ORIGINAL_HEIGHT=${ORIGINAL_HEIGHT:-0}
-              echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
+              echo "$ORIGINAL_DISK_NAME height: $ORIGINAL_HEIGHT"
+          else
+              ORIGINAL_DISK_NAME="new-disk"
+              echo "newly created disk, original height set to 0"
           fi
 
           echo "ORIGINAL_HEIGHT=$ORIGINAL_HEIGHT" >> "$GITHUB_ENV"
+          echo "ORIGINAL_DISK_NAME=$ORIGINAL_DISK_NAME" >> "$GITHUB_ENV"
 
       # Create an image from the state disk, which will be used for any tests that start
       # after it is created. These tests can be in the same workflow, or in a different PR.
@@ -901,9 +908,9 @@ jobs:
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
-              echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT"
+              echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
 
   # delete the Google Cloud instance for this test
