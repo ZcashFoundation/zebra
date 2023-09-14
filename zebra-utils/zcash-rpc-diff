@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 # Sends a `zcash-cli` command to a Zebra and zcashd instance,
 # and compares the results.
@@ -22,8 +22,11 @@ JQ="${JQ:-jq}"
 # - Use `-rpccookiefile=your/cookie/file` for a cookie file.
 # - Use `-rpcpassword=your-password` for a password.
 ZCASHD_EXTRA_ARGS="${ZCASHD_EXTRA_ARGS:-}"
-# We show this many lines of data, removing excess lines from the middle of the output.
+# We show this many lines of data, removing excess lines from the middle or end of the output.
 OUTPUT_DATA_LINE_LIMIT="${OUTPUT_DATA_LINE_LIMIT:-40}"
+# When checking different mempools, we show this many different transactions.
+MEMPOOL_TX_LIMIT="${MEMPOOL_TX_LIMIT:-5}"
+
 
 if [ $# -lt 2 ]; then
     usage
@@ -115,24 +118,27 @@ echo
 
 echo
 
-echo "Response diff between $ZEBRAD and $ZCASHD:"
+echo "Response diff between $ZEBRAD and $ZCASHD (limited to ${OUTPUT_DATA_LINE_LIMIT} lines):"
 
-$DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" \
-    && ( \
-        echo "RPC responses were identical"; \
-        echo ; \
-        echo "$ZEBRAD_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
-        export ZEBRAD_RESPONSE=$ZEBRAD_RESPONSE
-        if [[ $(cat "$ZEBRAD_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
-            cat "$ZEBRAD_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
-            echo "..."; \
-            cat "$ZEBRAD_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
-        else \
-            cat "$ZEBRAD_RESPONSE"; \
-        fi; \
-        )
+RESPONSE_DIFF="$ZCASH_RPC_TMP_DIR/diff-$1.json"
 
+$DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" > "$RESPONSE_DIFF"
 EXIT_STATUS=$?
+cat "$RESPONSE_DIFF" | head -$OUTPUT_DATA_LINE_LIMIT
+
+if [[ "$EXIT_STATUS" -eq "0" ]]; then
+    echo "RPC responses were identical"
+    echo
+    echo "$ZEBRAD_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"
+    export ZEBRAD_RESPONSE=$ZEBRAD_RESPONSE
+    if [[ $(cat "$ZEBRAD_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then
+        cat "$ZEBRAD_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+        echo "..."
+        cat "$ZEBRAD_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+    else
+        cat "$ZEBRAD_RESPONSE"
+    fi
+fi
 
 # Consistency checks between RPCs
 #
@@ -167,24 +173,27 @@ $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" > "$ZCASHD_CHECK_RESPONSE"
 
 echo
 
-echo "$1 diff between $ZEBRAD and $ZCASHD:"
+echo "$1 diff between $ZEBRAD and $ZCASHD (limited to ${OUTPUT_DATA_LINE_LIMIT} lines):"
 
-$DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" \
-    && ( \
-        echo "RPC check responses were identical"; \
-        echo ; \
-        echo "$ZEBRAD_CHECK_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
-        export ZEBRAD_CHECK_RESPONSE=$ZEBRAD_CHECK_RESPONSE
-        if [[ $(cat "$ZEBRAD_CHECK_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
-            cat "$ZEBRAD_CHECK_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
-            echo "..."; \
-            cat "$ZEBRAD_CHECK_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
-        else \
-            cat "$ZEBRAD_CHECK_RESPONSE"; \
-        fi; \
-        )
+CHECK_DIFF="$ZCASH_RPC_TMP_DIR/diff-$1.json"
 
+$DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" > "$CHECK_DIFF"
 CHECK_EXIT_STATUS=$?
+cat "$CHECK_DIFF" | head -$OUTPUT_DATA_LINE_LIMIT
+
+if [[ "$CHECK_EXIT_STATUS" -eq "0" ]]; then
+    echo "RPC check responses were identical"
+    echo
+    echo "$ZEBRAD_CHECK_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"
+    export ZEBRAD_CHECK_RESPONSE=$ZEBRAD_CHECK_RESPONSE
+    if [[ $(cat "$ZEBRAD_CHECK_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then
+        cat "$ZEBRAD_CHECK_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+        echo "..."
+        cat "$ZEBRAD_CHECK_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+    else
+        cat "$ZEBRAD_CHECK_RESPONSE"
+    fi
+fi
 
 if [ "$1" == "getaddressbalance" ]; then
     echo
@@ -238,11 +247,11 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     set TRANSACTION_HEX_FILE
     set TRANSACTION_DECODED
 
-    ZEBRAD_TRANSACTION_IDS=$(cat "$ZEBRAD_RESPONSE" | $JQ -r 'join(" ")')
-    ZCASHD_TRANSACTION_IDS=$(cat "$ZCASHD_RESPONSE" | $JQ -r 'join(" ")')
+    ZEBRAD_TRANSACTION_IDS=$(cat "$ZEBRAD_RESPONSE" | $JQ -r 'join("\n")' | head -$MEMPOOL_TX_LIMIT)
+    ZCASHD_TRANSACTION_IDS=$(cat "$ZCASHD_RESPONSE" | $JQ -r 'join("\n")' | head -$MEMPOOL_TX_LIMIT)
 
     echo
-    echo "# Dumping transactions from zebrad mempool"
+    echo "# Dumping transactions from zebrad mempool (limited to ${MEMPOOL_TX_LIMIT})"
     echo
 
     for TRANSACTION_ID in $ZEBRAD_TRANSACTION_IDS; do
@@ -250,19 +259,19 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
 
         $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
-        echo "## Displaying transaction $TRANSACTION_ID from zebrad"
+        echo "## Displaying transaction $TRANSACTION_ID from zebrad (limited to ${OUTPUT_DATA_LINE_LIMIT} lines)"
         echo
 
         # read the proposal data from a file, to avoid command-line length limits
         TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
             $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
-        echo $TRANSACTION_DECODED | $JQ
+        echo $TRANSACTION_DECODED | $JQ | head -$OUTPUT_DATA_LINE_LIMIT
         echo
     done
 
     echo
-    echo "# Dumping transactions from zcashd mempool"
+    echo "# Dumping transactions from zcashd mempool  (limited to ${MEMPOOL_TX_LIMIT})"
     echo
 
     for TRANSACTION_ID in $ZCASHD_TRANSACTION_IDS; do
@@ -270,14 +279,14 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
 
         $ZCASH_CLI $ZCASHD_EXTRA_ARGS getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
-        echo "## Displaying transaction $TRANSACTION_ID from zcashd"
+        echo "## Displaying transaction $TRANSACTION_ID from zcashd (limited to ${OUTPUT_DATA_LINE_LIMIT} lines)"
         echo
 
         # read the proposal data from a file, to avoid command-line length limits
         TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
             $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
-        echo $TRANSACTION_DECODED | $JQ
+        echo $TRANSACTION_DECODED | $JQ | head -$OUTPUT_DATA_LINE_LIMIT
         echo
     done
 

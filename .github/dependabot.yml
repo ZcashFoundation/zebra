@@ -22,6 +22,7 @@ updates:
             - "orchard"
             - "halo2*"
             - "incrementalmerkletree"
+            - "bridgetree"
             - "equihash"
             # addresses
             - "bs58"
