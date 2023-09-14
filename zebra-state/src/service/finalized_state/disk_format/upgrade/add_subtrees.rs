@@ -70,14 +70,13 @@ pub fn run(
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
+    for (_prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree =
-            calculate_sapling_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
+        let subtree = calculate_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
         write_sapling_subtree(upgrade_db, subtree);
     }
 
@@ -99,14 +98,13 @@ pub fn run(
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
+    for (_prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree =
-            calculate_orchard_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
+        let subtree = calculate_orchard_subtree(upgrade_db, prev_tree, end_height, tree);
         write_orchard_subtree(upgrade_db, subtree);
     }
 
@@ -239,7 +237,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((_prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -248,7 +246,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_sapling_mainnet_subtree();
 
-    let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
+    let db_subtree = calculate_sapling_subtree(db, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -294,7 +292,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((_prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -303,7 +301,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_orchard_mainnet_subtree();
 
-    let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
+    let db_subtree = calculate_orchard_subtree(db, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -558,33 +556,32 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
 /// Calculates a Sapling note commitment subtree, reading blocks from `read_db` if needed.
 ///
-/// `tree` must be a note commitment tree that starts a new subtree.
-/// The subtree can be completed at the end of `prev_tree`, or before the end of `tree`.
+/// The subtree must be completed by a note commitment in the block at `end_height`.
+/// `tree` is the tree for that block, and `prev_tree` is the tree for the previous block.
 ///
-/// `prev_tree` is only used to rebuild the subtree if it was completed before the end of `tree`.
+/// `prev_tree` is only used to rebuild the subtree if it was completed without using the last
+/// note commitment in the block at `end_height`.
 ///
 /// # Panics
 ///
-/// If `tree` does not start a new subtree.
+/// If a subtree is not completed by a note commitment in the block at `end_height`.
 #[must_use = "subtree should be written to the database after it is calculated"]
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_sapling_subtree(
     read_db: &ZebraDb,
-    prev_end_height: Height,
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<sapling::tree::Node> {
-    // If this block starts a new subtree, that subtree is either completed by:
-    // - a note in this block (so the final note is before the end of this block), or
-    // - the final note in the previous block.
-    if let Some((index, node)) = prev_tree.completed_subtree_index_and_root() {
-        // If the leaf at the end of the previous block is the final leaf in a subtree,
+    // If a subtree is completed by a note commentment in the block at `end_height`,
+    // then that subtree can be completed in two different ways:
+    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+        // If the subtree is completed by the last note commitment in that block,
         // we already have that subtree root available in the tree.
-        NoteCommitmentSubtree::new(index, prev_end_height, node)
+        NoteCommitmentSubtree::new(index, end_height, node)
     } else {
-        // If the leaf at the end of this block is in the next subtree,
-        // we need to calculate the subtree root based on the tree from the previous block.
+        // If the subtree is completed without using the last note commitment in the block,
+        // we need to calculate the subtree root, starting with the tree from the previous block.
 
         // TODO: move these checks into a separate function
         let prev_position = prev_tree
@@ -597,11 +594,11 @@ fn calculate_sapling_subtree(
         let prev_is_complete = prev_tree.is_complete_subtree();
 
         let current_position = tree.position().expect("current block must have a subtree");
-
         let current_index = tree
             .subtree_index()
             .expect("current block must have a subtree");
         let current_remaining_notes = tree.remaining_subtree_leaf_nodes();
+        let current_is_complete = tree.is_complete_subtree();
 
         assert_eq!(
             prev_index.0 + 1,
@@ -629,7 +626,7 @@ fn calculate_sapling_subtree(
              remaining: {current_remaining_notes}"
         );
         assert!(
-            !tree.is_complete_subtree(),
+            !current_is_complete,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
              index: {prev_index}\n\
@@ -719,33 +716,32 @@ fn calculate_sapling_subtree(
 
 /// Calculates a Orchard note commitment subtree, reading blocks from `read_db` if needed.
 ///
-/// `tree` must be a note commitment tree that starts a new subtree.
-/// The subtree can be completed at the end of `prev_tree`, or before the end of `tree`.
+/// The subtree must be completed by a note commitment in the block at `end_height`.
+/// `tree` is the tree for that block, and `prev_tree` is the tree for the previous block.
 ///
-/// `prev_tree` is only used to rebuild the subtree if it was completed before the end of `tree`.
+/// `prev_tree` is only used to rebuild the subtree if it was completed without using the last
+/// note commitment in the block at `end_height`.
 ///
 /// # Panics
 ///
-/// If `tree` does not start a new subtree.
+/// If a subtree is not completed by a note commitment in the block at `end_height`.
 #[must_use = "subtree should be written to the database after it is calculated"]
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_orchard_subtree(
     read_db: &ZebraDb,
-    prev_end_height: Height,
     prev_tree: Arc<orchard::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<orchard::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<orchard::tree::Node> {
-    // If this block starts a new subtree, that subtree is either completed by:
-    // - a note in this block (so the final note is before the end of this block), or
-    // - the final note in the previous block.
-    if let Some((index, node)) = prev_tree.completed_subtree_index_and_root() {
-        // If the leaf at the end of the previous block is the final leaf in a subtree,
+    // If a subtree is completed by a note commentment in the block at `end_height`,
+    // then that subtree can be completed in two different ways:
+    if let Some((index, node)) = tree.completed_subtree_index_and_root() {
+        // If the subtree is completed by the last note commitment in that block,
         // we already have that subtree root available in the tree.
-        NoteCommitmentSubtree::new(index, prev_end_height, node)
+        NoteCommitmentSubtree::new(index, end_height, node)
     } else {
-        // If the leaf at the end of this block is in the next subtree,
-        // we need to calculate the subtree root based on the tree from the previous block.
+        // If the subtree is completed without using the last note commitment in the block,
+        // we need to calculate the subtree root, starting with the tree from the previous block.
 
         // TODO: move these checks into a separate function
         let prev_position = prev_tree
@@ -758,11 +754,11 @@ fn calculate_orchard_subtree(
         let prev_is_complete = prev_tree.is_complete_subtree();
 
         let current_position = tree.position().expect("current block must have a subtree");
-
         let current_index = tree
             .subtree_index()
             .expect("current block must have a subtree");
         let current_remaining_notes = tree.remaining_subtree_leaf_nodes();
+        let current_is_complete = tree.is_complete_subtree();
 
         assert_eq!(
             prev_index.0 + 1,
@@ -790,7 +786,7 @@ fn calculate_orchard_subtree(
              remaining: {current_remaining_notes}"
         );
         assert!(
-            !tree.is_complete_subtree(),
+            !current_is_complete,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
              index: {prev_index}\n\
