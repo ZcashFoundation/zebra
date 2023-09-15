@@ -19,7 +19,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk,
-    constants::DATABASE_FORMAT_VERSION,
+    constants::{latest_version_for_adding_subtrees, DATABASE_FORMAT_VERSION},
     database_format_version_in_code, database_format_version_on_disk,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
     Config,
@@ -90,7 +90,7 @@ impl DbFormatChange {
     pub fn new(running_version: Version, disk_version: Option<Version>) -> Option<Self> {
         let Some(disk_version) = disk_version else {
             info!(
-                ?running_version,
+                %running_version,
                 "creating new database with the current format"
             );
 
@@ -100,8 +100,8 @@ impl DbFormatChange {
         match disk_version.cmp(&running_version) {
             Ordering::Less => {
                 info!(
-                    ?running_version,
-                    ?disk_version,
+                    %running_version,
+                    %disk_version,
                     "trying to open older database format: launching upgrade task"
                 );
 
@@ -112,8 +112,8 @@ impl DbFormatChange {
             }
             Ordering::Greater => {
                 info!(
-                    ?running_version,
-                    ?disk_version,
+                    %running_version,
+                    %disk_version,
                     "trying to open newer database format: data should be compatible"
                 );
 
@@ -123,7 +123,7 @@ impl DbFormatChange {
                 })
             }
             Ordering::Equal => {
-                info!(?running_version, "trying to open current database format");
+                info!(%running_version, "trying to open current database format");
 
                 None
             }
@@ -269,16 +269,16 @@ impl DbFormatChange {
         let Some(initial_tip_height) = initial_tip_height else {
             // If the database is empty, then the RocksDb format doesn't need any changes.
             info!(
-                ?newer_running_version,
-                ?older_disk_version,
+                %newer_running_version,
+                %older_disk_version,
                 "marking empty database as upgraded"
             );
 
             Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
 
             info!(
-                ?newer_running_version,
-                ?older_disk_version,
+                %newer_running_version,
+                %older_disk_version,
                 "empty database is fully upgraded"
             );
 
@@ -356,9 +356,7 @@ impl DbFormatChange {
 
         // Note commitment subtree creation database upgrade task.
 
-        let latest_version_for_adding_subtrees =
-            Version::parse("25.2.1").expect("Hardcoded version string should be valid.");
-
+        let latest_version_for_adding_subtrees = latest_version_for_adding_subtrees();
         let first_version_for_adding_subtrees =
             Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
 
@@ -388,7 +386,7 @@ impl DbFormatChange {
         // every time it runs its inner update loop.
 
         info!(
-            ?newer_running_version,
+            %newer_running_version,
             "Zebra automatically upgraded the database format to:"
         );
 
@@ -486,8 +484,8 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?disk_version,
+            %running_version,
+            disk_version = %disk_version.map_or("None".to_string(), |version| version.to_string()),
             "marked database format as newly created"
         );
     }
@@ -547,9 +545,10 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?format_upgrade_version,
-            ?disk_version,
+            %running_version,
+            %disk_version,
+            // The wallet_grpc_test needs this to be the last field, so the regex matches correctly
+            %format_upgrade_version,
             "marked database format as upgraded"
         );
     }
@@ -586,8 +585,8 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?disk_version,
+            %running_version,
+            %disk_version,
             "marked database format as downgraded"
         );
     }
