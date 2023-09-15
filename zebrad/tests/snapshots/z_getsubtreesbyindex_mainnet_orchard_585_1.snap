@@ -1,0 +1,18 @@
+---
+source: zebrad/tests/acceptance.rs
+expression: parsed
+---
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pool": "orchard",
+    "start_index": 585,
+    "subtrees": [
+      {
+        "root": "43c86869520ada7a2cd0deeecf3650f337f90bd4328b16144b0a278ad9fdaa08",
+        "end_height": 2000126
+      }
+    ]
+  },
+  "id": 123
+}

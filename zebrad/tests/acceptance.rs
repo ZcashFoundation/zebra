@@ -2649,8 +2649,28 @@ async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
             r#"["sapling", 0, 1]"#.to_string(),
         ),
         (
+            "z_getsubtreesbyindex_mainnet_sapling_0_11".to_string(),
+            r#"["sapling", 0, 11]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_17_1".to_string(),
+            r#"["sapling", 17, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_1090_6".to_string(),
+            r#"["sapling", 1090, 6]"#.to_string(),
+        ),
+        (
             "z_getsubtreesbyindex_mainnet_orchard_0_1".to_string(),
             r#"["orchard", 0, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_338_1".to_string(),
+            r#"["orchard", 338, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_585_1".to_string(),
+            r#"["orchard", 585, 1]"#.to_string(),
         ),
     ];
 
