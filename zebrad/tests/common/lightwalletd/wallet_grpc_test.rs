@@ -43,6 +43,7 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
+use zebra_state::latest_version_for_adding_subtrees;
 
 use crate::common::{
     launch::spawn_zebrad_for_rpc,
