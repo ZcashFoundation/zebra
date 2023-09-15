@@ -387,6 +387,47 @@ impl NoteCommitmentTree {
         Some(tree.position().into())
     }
 
+    /// Returns true if this tree has a new subtree, when compared with `prev_tree`.
+    pub fn contains_new_subtree(&self, prev_tree: &Self) -> bool {
+        // A new subtree was completed by the last note commitment in this tree.
+        if self.is_complete_subtree() {
+            return true;
+        }
+
+        // Use -1 for the index of the subtree with no notes, so the comparisons are valid.
+        let index = self.subtree_index().map_or(-1, |index| i32::from(index.0));
+        let prev_index = prev_tree
+            .subtree_index()
+            .map_or(-1, |index| i32::from(index.0));
+
+        // If the index is equal or lower, there can't be any new subtrees.
+        if index <= prev_index {
+            return false;
+        }
+
+        // This calculation can't overflow, because we're using i32 for u16 values.
+        let index_difference = index - prev_index;
+
+        // There are multiple new subtrees.
+        if index_difference > 1 {
+            return true;
+        }
+
+        // There is one new subtree somewhere in the trees. It is either:
+        // - a new subtree at the end of the previous tree, or
+        // - a new subtree in this tree (but not at the end).
+        //
+        // This happens because the subtree index only increases when the first note is added to
+        // the new subtree. So we need to exclude subtrees completed by the last note commitment in
+        // the previous tree.
+        if prev_tree.is_complete_subtree() {
+            return false;
+        }
+
+        // A new subtree was completed by a note commitment that isn't in the previous tree.
+        true
+    }
+
     /// Returns true if the most recently appended leaf completes the subtree
     pub fn is_complete_subtree(&self) -> bool {
         let Some(tree) = self.frontier() else {

@@ -65,16 +65,7 @@ pub fn run(
         })
         // Find new subtrees.
         .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            // The subtree is completed by the last note commitment in this block.
-            tree.is_complete_subtree() ||
-            // The subtree is completed by a note commitment before the last one in this block.
-            // We need to exclude subtrees completed at the end of the previous block
-            // because they also increase the subtree index.
-            //
-            // Empty note commitment trees can't contain subtrees, so they have invalid subtree
-            // indexes. But we have already skipped the empty genesis tree, so all trees have valid
-            // indexes. So this comparison is correct even if we don't unwrap the indexes.
-            (tree.subtree_index() > prev_tree.subtree_index() && !prev_tree.is_complete_subtree())
+            tree.contains_new_subtree(prev_tree)
         });
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
@@ -101,16 +92,7 @@ pub fn run(
         })
         // Find new subtrees.
         .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            // The subtree is completed by the last note commitment in this block.
-            tree.is_complete_subtree() ||
-            // The subtree is completed by a note commitment before the last one in this block.
-            // We need to exclude subtrees completed at the end of the previous block
-            // because they also increase the subtree index.
-            //
-            // Empty note commitment trees can't contain subtrees, so they have invalid subtree
-            // indexes. But we have already skipped the empty genesis tree, so all trees have valid
-            // indexes. So this comparison is correct even if we don't unwrap the indexes.
-            (tree.subtree_index() > prev_tree.subtree_index() && !prev_tree.is_complete_subtree())
+            tree.contains_new_subtree(prev_tree)
         });
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
@@ -695,6 +677,9 @@ fn calculate_sapling_subtree(
         );
 
         // Get the missing notes needed to complete the subtree.
+        //
+        // TODO: consider just reading the block's transactions from the database file,
+        //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
@@ -703,11 +688,6 @@ fn calculate_sapling_subtree(
             .take(prev_remaining_notes)
             .cloned()
             .collect();
-
-        // The update method modifies the tree inside the Arc if it only has one reference.
-        // This is usually ok, but during reverse iteration, we want re-use the original previous
-        // tree as the next current tree. Cloning the Arc preserves the original tree data.
-        let _force_inner_clone_of_prev_tree = prev_tree.clone();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
         let (sapling_nct, subtree) = NoteCommitmentTrees::update_sapling_note_commitment_tree(
@@ -868,6 +848,9 @@ fn calculate_orchard_subtree(
         );
 
         // Get the missing notes needed to complete the subtree.
+        //
+        // TODO: consider just reading the block's transactions from the database file,
+        //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
             .expect("height with note commitment tree should have block");
@@ -876,11 +859,6 @@ fn calculate_orchard_subtree(
             .take(prev_remaining_notes)
             .cloned()
             .collect();
-
-        // The update method modifies the tree inside the Arc if it only has one reference.
-        // This is usually ok, but during reverse iteration, we want re-use the original previous
-        // tree as the next current tree. Cloning the Arc preserves the original tree data.
-        let _force_inner_clone_of_prev_tree = prev_tree.clone();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
         let (orchard_nct, subtree) = NoteCommitmentTrees::update_orchard_note_commitment_tree(
