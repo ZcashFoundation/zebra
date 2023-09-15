@@ -207,7 +207,7 @@ fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node>
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
 fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first sapling tree on mainnet, so skip this check if it isn't available.
+    // We check the first sapling subtree on mainnet, so skip this check if it isn't available.
     let Some(NoteCommitmentSubtreeIndex(first_incomplete_subtree_index)) =
         db.sapling_tree().subtree_index()
     else {
@@ -232,7 +232,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
         .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.subtree_index() > prev_tree.subtree_index()
+            tree.contains_new_subtree(prev_tree)
         });
 
     let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
@@ -262,7 +262,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
 fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first orchard tree on mainnet, so skip this check if it isn't available.
+    // We check the first orchard subtree on mainnet, so skip this check if it isn't available.
     let Some(NoteCommitmentSubtreeIndex(first_incomplete_subtree_index)) =
         db.orchard_tree().subtree_index()
     else {
@@ -287,7 +287,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         // But since we skip the empty genesis tree, all trees must have valid indexes.
         // So we don't need to unwrap the optional values for this comparison to be correct.
         .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.subtree_index() > prev_tree.subtree_index()
+            tree.contains_new_subtree(prev_tree)
         });
 
     let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
@@ -316,6 +316,9 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 ///
 /// If a note commitment subtree is missing or incorrect.
 pub fn check(db: &ZebraDb) {
+    // This check is partly redundant, but we want to make sure it's never missed.
+    quick_check(db);
+
     let sapling_result = check_sapling_subtrees(db);
     let orchard_result = check_orchard_subtrees(db);
 
