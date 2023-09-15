@@ -402,6 +402,11 @@ pub async fn run() -> Result<()> {
             %latest_version_for_adding_subtrees,
             "waiting for zebrad subtree state upgrade..."
         );
+        //
+        // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
+        // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
+        // If it happens for a later upgrade, this code can be removed, as long as all the
+        // lightwalletd cached states are version 25.2.2 or later.
         zebrad.expect_stdout_line_matches(&format!("marked database format as upgraded.*format_upgrade_version.*=.*{latest_version_for_adding_subtrees}"))?;
     }
 
