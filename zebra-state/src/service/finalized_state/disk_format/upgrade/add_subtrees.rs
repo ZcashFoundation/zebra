@@ -63,11 +63,18 @@ pub fn run(
         .map(|((end_height, tree), (prev_end_height, prev_tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But since we skip the empty genesis tree, all trees must have valid indexes.
-        // So we don't need to unwrap the optional values for this comparison to be correct.
+        // Find new subtrees.
         .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.subtree_index() > prev_tree.subtree_index()
+            // The subtree is completed by the last note commitment in this block.
+            tree.is_complete_subtree() ||
+            // The subtree is completed by a note commitment before the last one in this block.
+            // We need to exclude subtrees completed at the end of the previous block
+            // because they also increase the subtree index.
+            //
+            // Empty note commitment trees can't contain subtrees, so they have invalid subtree
+            // indexes. But we have already skipped the empty genesis tree, so all trees have valid
+            // indexes. So this comparison is correct even if we don't unwrap the indexes.
+            (tree.subtree_index() > prev_tree.subtree_index() && !prev_tree.is_complete_subtree())
         });
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
@@ -92,11 +99,18 @@ pub fn run(
         .map(|((end_height, tree), (prev_end_height, prev_tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But since we skip the empty genesis tree, all trees must have valid indexes.
-        // So we don't need to unwrap the optional values for this comparison to be correct.
+        // Find new subtrees.
         .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.subtree_index() > prev_tree.subtree_index()
+            // The subtree is completed by the last note commitment in this block.
+            tree.is_complete_subtree() ||
+            // The subtree is completed by a note commitment before the last one in this block.
+            // We need to exclude subtrees completed at the end of the previous block
+            // because they also increase the subtree index.
+            //
+            // Empty note commitment trees can't contain subtrees, so they have invalid subtree
+            // indexes. But we have already skipped the empty genesis tree, so all trees have valid
+            // indexes. So this comparison is correct even if we don't unwrap the indexes.
+            (tree.subtree_index() > prev_tree.subtree_index() && !prev_tree.is_complete_subtree())
         });
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
