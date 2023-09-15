@@ -398,7 +398,8 @@ pub async fn run() -> Result<()> {
         tracing::info!(
             ?test_type,
             ?zebra_rpc_address,
-            latest_version_for_adding_subtrees,
+            %state_format_change,
+            %latest_version_for_adding_subtrees,
             "waiting for zebrad subtree state upgrade..."
         );
         zebrad.expect_stdout_line_matches(&format!("marked database format as upgraded.*format_upgrade_version.*=.*{latest_version_for_adding_subtrees}"))?;
