@@ -360,10 +360,10 @@ impl DbFormatChange {
         let first_version_for_adding_subtrees =
             Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
 
-        // Check if we need to add note commitment subtrees to the database.
+        // Check if we need to add or fix note commitment subtrees in the database.
         if older_disk_version < latest_version_for_adding_subtrees {
             if older_disk_version >= first_version_for_adding_subtrees {
-                // Clear previous upgrade data that might be different from this upgrade's data.
+                // Clear previous upgrade data, because it was incorrect.
                 add_subtrees::reset(initial_tip_height, &db, cancel_receiver)?;
             }
 
