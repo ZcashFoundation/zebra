@@ -121,10 +121,10 @@ sections in the book for more details.
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
 
-- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring)
-- `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging)
-- `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics)
 - `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html)
+- `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
+- `progress-bar` [experimental progress bars](https://zfnd.org/experimental-zebra-progress-bars/)
+- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
 
 You can combine multiple features by listing them as parameters of the `--features` flag:
 
