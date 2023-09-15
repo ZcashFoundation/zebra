@@ -44,23 +44,15 @@ pub fn run(
     //
     // Therefore, the first block with shielded note can't complete a subtree, which means we can
     // skip the (genesis block, first shielded block) tree pair.
-    //
-    // # Compatibility
-    //
-    // Because wallets search backwards from the chain tip, subtrees need to be added to the
-    // database in reverse height order. (Tip first, genesis last.)
-    //
-    // Otherwise, wallets that sync during the upgrade will be missing some notes.
 
     // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
-        .sapling_tree_by_reversed_height_range(..=initial_tip_height)
+        .sapling_tree_by_height_range(..=initial_tip_height)
         // The first block with sapling notes can't complete a subtree, see above for details.
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
         // Find new subtrees.
@@ -81,13 +73,12 @@ pub fn run(
 
     // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
-        .orchard_tree_by_reversed_height_range(..=initial_tip_height)
+        .orchard_tree_by_height_range(..=initial_tip_height)
         // The first block with orchard notes can't complete a subtree, see above for details.
         .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
         // Find new subtrees.
