@@ -12,7 +12,6 @@
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
     - [Optional Features](#optional-features)
-  - [Network Ports](#network-ports)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
@@ -138,17 +137,6 @@ documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags)
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
 
-### Network Ports
-
-Zebra uses the following inbound and outbound TCP ports:
-
-- 8233 on Mainnet
-- 18233 on Testnet
-
-Please see the [Network
-Requirements](https://zebra.zfnd.org/user/requirements.html#network-requirements-and-ports)
-section of the Zebra book for more details.
-
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
@@ -164,7 +152,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
-
 
 ## Future Work
 
