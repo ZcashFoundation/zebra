@@ -70,13 +70,14 @@ pub fn run(
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    for (_prev_end_height, prev_tree, end_height, tree) in subtrees {
+    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree = calculate_sapling_subtree(upgrade_db, prev_tree, end_height, tree);
+        let subtree =
+            calculate_sapling_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
         write_sapling_subtree(upgrade_db, subtree);
     }
 
@@ -98,13 +99,14 @@ pub fn run(
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    for (_prev_end_height, prev_tree, end_height, tree) in subtrees {
+    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        let subtree = calculate_orchard_subtree(upgrade_db, prev_tree, end_height, tree);
+        let subtree =
+            calculate_orchard_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
         write_orchard_subtree(upgrade_db, subtree);
     }
 
@@ -237,7 +239,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    let Some((_prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -246,7 +248,7 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_sapling_mainnet_subtree();
 
-    let db_subtree = calculate_sapling_subtree(db, prev_tree, end_height, tree);
+    let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -292,7 +294,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             tree.subtree_index() > prev_tree.subtree_index()
         });
 
-    let Some((_prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
+    let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
         error!(?result);
         return result;
@@ -301,7 +303,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_orchard_mainnet_subtree();
 
-    let db_subtree = calculate_orchard_subtree(db, prev_tree, end_height, tree);
+    let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -554,7 +556,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     result
 }
 
-/// Calculates a Sapling note commitment subtree, reading blocks from `read_db` if needed.
+/// Calculates a note commitment subtree for Sapling, reading blocks from `read_db` if needed.
 ///
 /// The subtree must be completed by a note commitment in the block at `end_height`.
 /// `tree` is the tree for that block, and `prev_tree` is the tree for the previous block.
@@ -569,6 +571,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_sapling_subtree(
     read_db: &ZebraDb,
+    prev_end_height: Height,
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
@@ -605,10 +608,12 @@ fn calculate_sapling_subtree(
             current_index.0,
             "subtree must have been completed by the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -617,10 +622,12 @@ fn calculate_sapling_subtree(
             current_remaining_notes > 0,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -629,10 +636,12 @@ fn calculate_sapling_subtree(
             !current_is_complete,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -645,10 +654,12 @@ fn calculate_sapling_subtree(
             "the caller should supply a complete subtree, \
              so the previous tree can't also be complete:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -658,10 +669,12 @@ fn calculate_sapling_subtree(
             "the caller should supply a complete subtree, \
              so the previous tree can't also be complete:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -697,10 +710,12 @@ fn calculate_sapling_subtree(
                  position: {:?}\n\
                  remaining notes: {}\n\
                  original previous subtree:\n\
+                 height: {prev_end_height:?}\n\
                  index: {prev_index}\n\
                  position: {prev_position}\n\
                  remaining: {prev_remaining_notes}\n\
                  original current subtree:\n\
+                 height: {end_height:?}\n\
                  index: {current_index}\n\
                  position: {current_position}\n\
                  remaining: {current_remaining_notes}",
@@ -714,7 +729,7 @@ fn calculate_sapling_subtree(
     }
 }
 
-/// Calculates a Orchard note commitment subtree, reading blocks from `read_db` if needed.
+/// Calculates a note commitment subtree for Orchard, reading blocks from `read_db` if needed.
 ///
 /// The subtree must be completed by a note commitment in the block at `end_height`.
 /// `tree` is the tree for that block, and `prev_tree` is the tree for the previous block.
@@ -729,6 +744,7 @@ fn calculate_sapling_subtree(
 #[instrument(skip(read_db, prev_tree, tree))]
 fn calculate_orchard_subtree(
     read_db: &ZebraDb,
+    prev_end_height: Height,
     prev_tree: Arc<orchard::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<orchard::tree::NoteCommitmentTree>,
@@ -765,10 +781,12 @@ fn calculate_orchard_subtree(
             current_index.0,
             "subtree must have been completed by the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -777,10 +795,12 @@ fn calculate_orchard_subtree(
             current_remaining_notes > 0,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -789,10 +809,12 @@ fn calculate_orchard_subtree(
             !current_is_complete,
             "just checked for a complete subtree in the current block:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -805,10 +827,12 @@ fn calculate_orchard_subtree(
             "the caller should supply a complete subtree, \
              so the previous tree can't also be complete:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -818,10 +842,12 @@ fn calculate_orchard_subtree(
             "the caller should supply a complete subtree, \
              so the previous tree can't also be complete:\n\
              previous subtree:\n\
+             height: {prev_end_height:?}\n\
              index: {prev_index}\n\
              position: {prev_position}\n\
              remaining: {prev_remaining_notes}\n\
              current subtree:\n\
+             height: {end_height:?}\n\
              index: {current_index}\n\
              position: {current_position}\n\
              remaining: {current_remaining_notes}"
@@ -857,10 +883,12 @@ fn calculate_orchard_subtree(
                  position: {:?}\n\
                  remaining notes: {}\n\
                  original previous subtree:\n\
+                 height: {prev_end_height:?}\n\
                  index: {prev_index}\n\
                  position: {prev_position}\n\
                  remaining: {prev_remaining_notes}\n\
                  original current subtree:\n\
+                 height: {end_height:?}\n\
                  index: {current_index}\n\
                  position: {current_position}\n\
                  remaining: {current_remaining_notes}",
