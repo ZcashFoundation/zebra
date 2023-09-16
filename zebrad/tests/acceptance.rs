@@ -2609,7 +2609,7 @@ async fn state_format_test(
 /// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
 #[tokio::test]
 #[ignore]
-async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
+async fn rpc_z_getsubtreesbyindex_sync_snapshots() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
@@ -2618,11 +2618,11 @@ async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
 
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
         network,
-        "rpc_z_getsubtreesbyindex_zcashd_test_vectors",
+        "rpc_z_getsubtreesbyindex_sync_snapshots",
         test_type,
         true,
     )? {
-        tracing::info!("running fully synced zebrad RPC test");
+        tracing::info!("running fully synced zebrad z_getsubtreesbyindex RPC test");
 
         zebrad_and_address
     } else {

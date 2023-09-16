@@ -86,7 +86,7 @@ case "$1" in
             # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
             cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored fully_synced_rpc_test
-            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored rpc_z_getsubtreesbyindex_zcashd_test_vectors
+            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored rpc_z_getsubtreesbyindex_sync_snapshots
         elif [[ "$TEST_LWD_FULL_SYNC" -eq "1" ]]; then
             # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
