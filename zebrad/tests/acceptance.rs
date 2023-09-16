@@ -151,6 +151,7 @@ use color_eyre::{
     Help,
 };
 use semver::Version;
+use serde_json::Value;
 
 use zebra_chain::{
     block::{self, Height},
@@ -1418,8 +1419,6 @@ async fn rpc_endpoint_parallel_threads() -> Result<()> {
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
 #[tracing::instrument]
 async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
-    use serde_json::Value;
-
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -2607,14 +2606,10 @@ async fn state_format_test(
     Ok(())
 }
 
-/// Test that fixed responses at zcashd for the `z_getsubtreesbyindex` method are the same as zebrad responses.
-///
-/// Require scyncronized zebrad cache state to query high heights.
+/// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
 #[tokio::test]
 #[ignore]
 async fn rpc_z_getsubtreesbyindex_zcashd_test_vectors() -> Result<()> {
-    use serde_json::Value;
-
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
