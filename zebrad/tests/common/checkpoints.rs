@@ -20,6 +20,7 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_state::database_format_version_in_code;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
@@ -27,6 +28,7 @@ use zebra_test::{
 };
 
 use crate::common::{
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
     test_type::TestType::*,
@@ -76,6 +78,9 @@ pub async fn run(network: Network) -> Result<()> {
         // Skip the test, we don't have the required cached state
         return Ok(());
     };
+
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
 
@@ -147,7 +152,7 @@ pub async fn run(network: Network) -> Result<()> {
     );
     println!("\n\n");
 
-    let (_zebra_checkpoints, _zebrad) = wait_for_zebra_checkpoints_generation(
+    let (_zebra_checkpoints, mut zebrad) = wait_for_zebra_checkpoints_generation(
         zebra_checkpoints,
         zebrad,
         zebra_tip_height,
@@ -162,6 +167,19 @@ pub async fn run(network: Network) -> Result<()> {
         ?last_checkpoint,
         "finished generating Zebra checkpoints",
     );
+
+    // Before we write a cached state image, wait for a database upgrade.
+    // Currently we only write an image for testnet, but waiting also improves test coverage.
+    //
+    // TODO: this line will hang if the state upgrade finishes before zebra is synced.
+    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
+    // If it happens for a later upgrade, this code can be moved earlier in the test,
+    // as long as all the cached states are version 25.2.2 or later.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        database_format_version_in_code(),
+    )?;
 
     Ok(())
 }

@@ -388,8 +388,8 @@ pub async fn run() -> Result<()> {
     //
     // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
     // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-    // If it happens for a later upgrade, this code can be removed, as long as all the
-    // lightwalletd cached states are version 25.2.2 or later.
+    // If it happens for a later upgrade, this code can be moved earlier in the test,
+    // as long as all the cached states are version 25.2.2 or later.
     wait_for_state_version_upgrade(
         &mut zebrad,
         &state_version_message,
