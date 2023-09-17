@@ -46,6 +46,7 @@ use zebra_chain::{
 use zebra_state::latest_version_for_adding_subtrees;
 
 use crate::common::{
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -98,17 +99,8 @@ pub async fn run() -> Result<()> {
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
-    tracing::info!(
-        ?test_type,
-        "launched zebrad, waiting for zebrad to open the state database..."
-    );
-    // Zebra logs one of these lines on startup, depending on the disk and running formats.
-    let state_format_change = zebrad.expect_stdout_line_matches(
-        "(creating new database with the current format)|\
-         (trying to open older database format)|\
-         (trying to open newer database format)|\
-         (trying to open current database format)",
-    )?;
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
     tracing::info!(
         ?test_type,
@@ -393,24 +385,18 @@ pub async fn run() -> Result<()> {
     );
 
     // Before we call `z_getsubtreesbyindex`, we might need to wait for a database upgrade.
-    if state_format_change.contains("launching upgrade task") {
-        let latest_version_for_adding_subtrees = latest_version_for_adding_subtrees();
-        tracing::info!(
-            ?test_type,
-            ?zebra_rpc_address,
-            %state_format_change,
-            %latest_version_for_adding_subtrees,
-            "waiting for zebrad subtree state upgrade..."
-        );
-        //
-        // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
-        // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-        // If it happens for a later upgrade, this code can be removed, as long as all the
-        // lightwalletd cached states are version 25.2.2 or later.
-        zebrad.expect_stdout_line_matches(&format!("marked database format as upgraded.*format_upgrade_version.*=.*{latest_version_for_adding_subtrees}"))?;
-    }
+    //
+    // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
+    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
+    // If it happens for a later upgrade, this code can be removed, as long as all the
+    // lightwalletd cached states are version 25.2.2 or later.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        latest_version_for_adding_subtrees(),
+    )?;
 
-    // Call `z_getsubtreesbyindex` separately for
+    // Call `z_getsubtreesbyindex` separately for...
 
     // ... Sapling.
     let mut subtrees = rpc_client

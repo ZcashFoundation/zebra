@@ -547,7 +547,8 @@ impl DbFormatChange {
         info!(
             %running_version,
             %disk_version,
-            // The wallet_grpc_test needs this to be the last field, so the regex matches correctly
+            // wait_for_state_version_upgrade() needs this to be the last field,
+            // so the regex matches correctly
             %format_upgrade_version,
             "marked database format as upgraded"
         );
