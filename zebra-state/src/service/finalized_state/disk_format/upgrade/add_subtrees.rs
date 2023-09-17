@@ -579,13 +579,30 @@ fn calculate_sapling_subtree(
         // TODO: move the assertion/panic log string formatting into a separate function?
         let prev_position = prev_tree
             .position()
-            .expect("previous block must have a partial subtree");
+            .expect(&format!(
+                "previous block must have a partial subtree:\n\
+                previous subtree:\n\
+                height: {prev_end_height:?}\n\
+                current subtree:\n\
+                height: {end_height:?}"
+            ));
         let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
         let prev_remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
 
-        let current_position = tree.position().expect("current block must have a subtree");
+        let current_position = tree
+            .position()
+            .expect(&format!(
+                "current block must have a subtree:\n\
+                previous subtree:\n\
+                height: {prev_end_height:?}\n\
+                index: {prev_index}\n\
+                position: {prev_position}\n\
+                remaining: {prev_remaining_notes}\n\
+                current subtree:\n\
+                height: {end_height:?}"
+            ));
         let current_index = tree
             .subtree_index()
             .expect("current block must have a subtree");
@@ -687,13 +704,30 @@ fn calculate_orchard_subtree(
         // TODO: move the assertion/panic log string formatting into a separate function?
         let prev_position = prev_tree
             .position()
-            .expect("previous block must have a partial subtree");
+            .expect(&format!(
+                "previous block must have a partial subtree:\n\
+                previous subtree:\n\
+                height: {prev_end_height:?}\n\
+                current subtree:\n\
+                height: {end_height:?}"
+            ));
         let prev_index = prev_tree
             .subtree_index()
             .expect("previous block must have a partial subtree");
         let prev_remaining_notes = prev_tree.remaining_subtree_leaf_nodes();
 
-        let current_position = tree.position().expect("current block must have a subtree");
+        let current_position = tree
+            .position()
+            .expect(&format!(
+                "current block must have a subtree:\n\
+                previous subtree:\n\
+                height: {prev_end_height:?}\n\
+                index: {prev_index}\n\
+                position: {prev_position}\n\
+                remaining: {prev_remaining_notes}\n\
+                current subtree:\n\
+                height: {end_height:?}"
+            ));
         let current_index = tree
             .subtree_index()
             .expect("current block must have a subtree");
