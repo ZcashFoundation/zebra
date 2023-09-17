@@ -41,15 +41,10 @@ pub fn run(
     // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
     // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
     // increase by at most 1 every ~20 blocks.
-    //
-    // Therefore, the first block with shielded note can't complete a subtree, which means we can
-    // skip the (genesis block, first shielded block) tree pair.
 
     // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
         .sapling_tree_by_height_range(..=initial_tip_height)
-        // The first block with sapling notes can't complete a subtree, see above for details.
-        .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         .map(|((prev_end_height, prev_tree), (end_height, tree))| {
@@ -74,8 +69,6 @@ pub fn run(
     // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
         .orchard_tree_by_height_range(..=initial_tip_height)
-        // The first block with orchard notes can't complete a subtree, see above for details.
-        .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         .map(|((prev_end_height, prev_tree), (end_height, tree))| {
@@ -209,19 +202,14 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    // Find the first complete subtree, with its note commitment tree, end height, and the previous tree.
+    // Find the first complete subtree: previous and current trees, and their end heights.
     let first_complete_subtree = db
         .sapling_tree_by_height_range(..)
-        // The first block with sapling notes can't complete a subtree, see above for details.
-        .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         .map(|((prev_end_height, prev_tree), (end_height, tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But since we skip the empty genesis tree, all trees must have valid indexes.
-        // So we don't need to unwrap the optional values for this comparison to be correct.
         .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
             tree.contains_new_subtree(prev_tree)
         });
@@ -264,19 +252,14 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    // Find the first complete subtree, with its note commitment tree, end height, and the previous tree.
+    // Find the first complete subtree: previous and current trees, and their end heights.
     let first_complete_subtree = db
         .orchard_tree_by_height_range(..)
-        // The first block with orchard notes can't complete a subtree, see above for details.
-        .filter(|(height, _tree)| !height.is_min())
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
         .map(|((prev_end_height, prev_tree), (end_height, tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
-        // Empty note commitment trees can't contain subtrees, so they have invalid subtree indexes.
-        // But since we skip the empty genesis tree, all trees must have valid indexes.
-        // So we don't need to unwrap the optional values for this comparison to be correct.
         .find(|(_prev_end_height, prev_tree, _end_height, tree)| {
             tree.contains_new_subtree(prev_tree)
         });

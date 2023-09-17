@@ -387,7 +387,7 @@ impl NoteCommitmentTree {
         Some(tree.position().into())
     }
 
-    /// Returns true if this tree has a new subtree, when compared with `prev_tree`.
+    /// Returns true if this tree has at least one new subtree, when compared with `prev_tree`.
     pub fn contains_new_subtree(&self, prev_tree: &Self) -> bool {
         // A new subtree was completed by the last note commitment in this tree.
         if self.is_complete_subtree() {
@@ -408,11 +408,13 @@ impl NoteCommitmentTree {
         // This calculation can't overflow, because we're using i32 for u16 values.
         let index_difference = index - prev_index;
 
-        // There are multiple new subtrees.
+        // There are multiple new subtrees, or one new subtree and a spurious index difference.
         if index_difference > 1 {
             return true;
         }
 
+        // Check for spurious index differences.
+        //
         // There is one new subtree somewhere in the trees. It is either:
         // - a new subtree at the end of the previous tree, or
         // - a new subtree in this tree (but not at the end).
@@ -420,7 +422,10 @@ impl NoteCommitmentTree {
         // This happens because the subtree index only increases when the first note is added to
         // the new subtree. So we need to exclude subtrees completed by the last note commitment in
         // the previous tree.
-        if prev_tree.is_complete_subtree() {
+        //
+        // We also need to exclude empty previous subtrees, because the index changes to zero when
+        // the first note is added, but a subtree wasn't completed.
+        if prev_tree.is_complete_subtree() || prev_index == -1 {
             return false;
         }
 
