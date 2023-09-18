@@ -166,7 +166,7 @@ pub async fn run(network: Network) -> Result<()> {
     );
     println!("\n\n");
 
-    let (_zebra_checkpoints, mut zebrad) = wait_for_zebra_checkpoints_generation(
+    let (_zebra_checkpoints, _zebrad) = wait_for_zebra_checkpoints_generation(
         zebra_checkpoints,
         zebrad,
         zebra_tip_height,
