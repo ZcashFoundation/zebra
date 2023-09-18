@@ -389,11 +389,6 @@ impl NoteCommitmentTree {
 
     /// Returns true if this tree has at least one new subtree, when compared with `prev_tree`.
     pub fn contains_new_subtree(&self, prev_tree: &Self) -> bool {
-        // A new subtree was completed by the last note commitment in this tree.
-        if self.is_complete_subtree() {
-            return true;
-        }
-
         // Use -1 for the index of the subtree with no notes, so the comparisons are valid.
         let index = self.subtree_index().map_or(-1, |index| i32::from(index.0));
         let prev_index = prev_tree
@@ -419,9 +414,9 @@ impl NoteCommitmentTree {
         // - a new subtree at the end of the previous tree, or
         // - a new subtree in this tree (but not at the end).
         //
-        // This happens because the subtree index only increases when the first note is added to
-        // the new subtree. So we need to exclude subtrees completed by the last note commitment in
-        // the previous tree.
+        // Spurious index differences happen because the subtree index only increases when the
+        // first note is added to the new subtree. So we need to exclude subtrees completed by the
+        // last note commitment in the previous tree.
         //
         // We also need to exclude empty previous subtrees, because the index changes to zero when
         // the first note is added, but a subtree wasn't completed.
@@ -483,12 +478,10 @@ impl NoteCommitmentTree {
             // If the subtree has no nodes, the remaining number of nodes is the number of nodes in
             // a subtree.
             None => {
-                // This position is guaranteed to be in the first subtree.
-                let first_position = 0.into();
-
                 let subtree_address = incrementalmerkletree::Address::above_position(
                     TRACKED_SUBTREE_HEIGHT.into(),
-                    first_position,
+                    // This position is guaranteed to be in the first subtree.
+                    0.into(),
                 );
 
                 assert_eq!(

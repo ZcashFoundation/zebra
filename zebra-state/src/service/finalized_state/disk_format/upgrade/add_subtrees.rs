@@ -351,7 +351,7 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Some(prev_tree) = db.sapling_tree_by_height(&subtree.end.previous()) else {
-                result = Err("missing note commitment tree at subtree completion height");
+                result = Err("missing note commitment tree below subtree completion height");
                 error!(?result, ?subtree.end);
                 continue;
             };
@@ -463,7 +463,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Some(prev_tree) = db.orchard_tree_by_height(&subtree.end.previous()) else {
-                result = Err("missing note commitment tree at subtree completion height");
+                result = Err("missing note commitment tree below subtree completion height");
                 error!(?result, ?subtree.end);
                 continue;
             };
@@ -549,7 +549,7 @@ fn calculate_sapling_subtree(
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<sapling::tree::Node> {
-    // If a subtree is completed by a note commentment in the block at `end_height`,
+    // If a subtree is completed by a note commitment in the block at `end_height`,
     // then that subtree can be completed in two different ways:
     if let Some((index, node)) = tree.completed_subtree_index_and_root() {
         // If the subtree is completed by the last note commitment in that block,
@@ -674,7 +674,7 @@ fn calculate_orchard_subtree(
     end_height: Height,
     tree: Arc<orchard::tree::NoteCommitmentTree>,
 ) -> NoteCommitmentSubtree<orchard::tree::Node> {
-    // If a subtree is completed by a note commentment in the block at `end_height`,
+    // If a subtree is completed by a note commitment in the block at `end_height`,
     // then that subtree can be completed in two different ways:
     if let Some((index, node)) = tree.completed_subtree_index_and_root() {
         // If the subtree is completed by the last note commitment in that block,
