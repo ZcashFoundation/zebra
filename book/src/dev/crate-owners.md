@@ -46,6 +46,8 @@ Zcash Foundation crates should have:
 
 When an individual owner leaves the foundation, they should be [replaced with another individual owner](https://doc.rust-lang.org/cargo/reference/publishing.html#cargo-owner).
 
+New crate owners should go to [crates.io/me](https://crates.io/me) to accept the invitation, then they will appear on the list of owners.
+
 Here are some example commands for changing owners:
 
 To change owners of deleted/placeholder Zebra crates:
