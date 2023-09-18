@@ -28,12 +28,15 @@ See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) fo
 
 ## Advanced usage
 
-You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like mining.
+You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
 
-For example, if we'd like to enable mining on the image, we'd build it using the following `build-arg`:
+For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
+
+> [!WARNING]
+> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
 ```shell
-docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries getblocktemplate-rpcs' --tag local/zebra.mining:latest .
+docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries prometheus' --tag local/zebra.mining:latest .
 ```
 
 To increase the log output we can optionally add these `build-arg`s:
@@ -42,13 +45,13 @@ To increase the log output we can optionally add these `build-arg`s:
 --build-arg RUST_BACKTRACE=full --build-arg RUST_LOG=debug --build-arg COLORBT_SHOW_HIDDEN=1
 ```
 
-And after our image has been built, we can run it on `Mainnet` with the following command:
+And after our image has been built, we can run it on `Mainnet` with the following command, which will expose the metrics endpoint on port `9999` and force the logs to be colored:
 
 ```shell
-docker run --env NETWORK="Mainnet" --env RPC_PORT="8232" --env MINER_ADDRESS="t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc" -p 8232:8232 local/zebra.mining
+docker run --env LOG_COLOR="true" -p 9999:9999 local/zebra.mining
 ```
 
-Based on our actual `entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
+Based on our actual `runtime-entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
 
 ```toml
 [network]
@@ -56,12 +59,8 @@ network = "Mainnet"
 listen_addr = "0.0.0.0"
 [state]
 cache_dir = "/var/cache/zebrad-cache"
-[rpc]
-listen_addr = "0.0.0.0:8232"
-[tracing]
-use_color = false
-[mining]
-miner_address = "t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"
+[metrics]
+endpoint_addr = "127.0.0.1:9999"
 ```
 
 ### Build time arguments
@@ -81,7 +80,7 @@ miner_address = "t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"
 
 - `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 - `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
-- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
+- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `runtime-entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
 
 #### CI/CD
 
