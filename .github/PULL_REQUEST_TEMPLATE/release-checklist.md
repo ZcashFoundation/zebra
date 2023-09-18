@@ -75,14 +75,8 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 
 ### Update Crate Versions
 
-<details>
-
-<summary>If you're publishing crates for the first time, click this triangle for extra steps</summary>
-
-- [ ] Install `cargo-release`: `cargo install cargo-release`
-- [ ] Make sure you are  an owner of the crate or [a member of the Zebra crates.io `owners` group on GitHub](https://github.com/orgs/ZcashFoundation/teams/owners)
-
-</details>
+If you're publishing crates for the first time, [log in to crates.io](https://github.com/ZcashFoundation/zebra/blob/doc-crate-own/book/src/dev/crate-owners.md#logging-in-to-cratesio),
+and make sure you're a member of owners group.
 
 Check that the release will work:
 - [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
@@ -145,7 +139,7 @@ The end of support height is calculated from the current blockchain height:
 
 ## Publish Crates
 
-- [ ] Run `cargo login`
+- [ ] [Run `cargo login`](https://github.com/ZcashFoundation/zebra/blob/doc-crate-own/book/src/dev/crate-owners.md#logging-in-to-cratesio)
 - [ ] Run `cargo clean` in the zebra repo (optional)
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
