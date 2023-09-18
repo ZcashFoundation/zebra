@@ -6,7 +6,7 @@ Zcash Foundation crates are controlled by the [`ZcashFoundation/owners`](https:/
 The latest list of Zebra and FROST crates is [available on crates.io](https://crates.io/teams/github:zcashfoundation:owners).
 
 The Zebra repository can be used to publish the crates in this list that match these patterns:
-- starts with `zebra` (including `zebrad`)
+- starts with `zebra` (including `zebrad` and the `zebra` placeholder)
 - starts with `tower`
 
 We also depend on these separate ZF crates: 
@@ -54,15 +54,19 @@ To change owners of deleted/placeholder Zebra crates:
 ```sh
 $ mkdir placeholders
 $ cd placeholders
-$ for crate in tower-batch-cpu zebra zebra-cli zebra-client; do cargo new $crate; pushd $crate; cargo owner --add oxarbitrage; popd; done
+$ for crate in tower-batch-cpu zebra zebra-cli zebra-client; do cargo new $crate; pushd $crate; cargo owner --add oxarbitrage; cargo owner --remove dconnolly; popd; done
      Created binary (application) `zebra-cli` package
 ~/zebra-cli ~
     Updating crates.io index
        Owner user oxarbitrage has been invited to be an owner of crate zebra-cli
+    Updating crates.io index
+       Owner removing ["dconnolly"] from crate zebra-cli
 ~
 ~/zebra-client ~
     Updating crates.io index
        Owner user oxarbitrage has been invited to be an owner of crate zebra-client
+    Updating crates.io index
+       Owner removing ["dconnolly"] from crate zebra-client
 ~
 ...
 ```
@@ -74,20 +78,27 @@ $ cd zcash_script
 $ cargo owner --add oxarbitrage
     Updating crates.io index
        Owner user oxarbitrage has been invited to be an owner of crate zcash_script
+$ cargo owner --remove dconnolly
+    Updating crates.io index
+       Owner removing ["dconnolly"] from crate zcash_script
 ```
 
 To change owners of current Zebra crates:
 ```sh
 $ git clone https://github.com/ZcashFoundation/zebra
 $ cd zebra
-$ for crate in tower-* zebra*; do pushd $crate; cargo owner --add oxarbitrage; popd; done
+$ for crate in tower-* zebra*; do pushd $crate; cargo owner --add oxarbitrage; cargo owner --remove dconnolly; popd; done
 ~/zebra/tower-batch-control ~/zebra
     Updating crates.io index
        Owner user oxarbitrage already has a pending invitation to be an owner of crate tower-batch-control
+    Updating crates.io index
+       Owner removing ["dconnolly"] from crate tower-batch-control
 ~/zebra
 ~/zebra/tower-fallback ~/zebra
     Updating crates.io index
        Owner user oxarbitrage has been invited to be an owner of crate tower-fallback
+    Updating crates.io index
+       Owner removing ["dconnolly"] from crate tower-fallback
 ~/zebra
 ...
 ```
