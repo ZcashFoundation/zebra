@@ -62,6 +62,7 @@ $ for crate in tower-batch-cpu zebra zebra-cli zebra-client; do cargo new $crate
     Updating crates.io index
        Owner removing ["dconnolly"] from crate zebra-cli
 ~
+     Created binary (application) `zebra-client` package
 ~/zebra-client ~
     Updating crates.io index
        Owner user oxarbitrage has been invited to be an owner of crate zebra-client
