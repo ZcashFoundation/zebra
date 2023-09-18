@@ -21,6 +21,9 @@ use crate::service::finalized_state::{
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
 ///
+/// Trees are added to the database in reverse height order, so that wallets can sync correctly
+/// while the upgrade is running.
+///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
 #[instrument(skip(upgrade_db, cancel_receiver))]
