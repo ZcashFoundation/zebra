@@ -395,9 +395,14 @@ impl NoteCommitmentTree {
             .subtree_index()
             .map_or(-1, |index| i32::from(index.0));
 
-        // If the index is equal or lower, there can't be any new subtrees.
-        if index <= prev_index {
+        // There can't be any new subtrees if the current index is strictly lower.
+        if index < prev_index {
             return false;
+        }
+
+        // If the indexes are equal, there can only be a new subtree if `self` just completed it.
+        if index == prev_index && self.is_complete_subtree() {
+            return true;
         }
 
         // This calculation can't overflow, because we're using i32 for u16 values.
