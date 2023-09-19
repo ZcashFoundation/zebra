@@ -4,7 +4,7 @@ The goal here is to export block data from Zebra into an [elasticsearch](https:/
 
 **Attention:** This is an experimental feature tested only in the Zcash Testnet.
 
-Elasticsearch support for zebra was introduced to Zebra in [pull request #6274](https://github.com/ZcashFoundation/zebra/pull/6274).
+Elasticsearch support was introduced to Zebra in [pull request #6274](https://github.com/ZcashFoundation/zebra/pull/6274).
 
 ## Download, build and run Elasticsearch
 
