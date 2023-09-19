@@ -32,9 +32,14 @@ Zebra can generate [flamegraphs] of tracing spans.
 Activate flamegraphs using the `flamegraph` compile-time feature,
 and the [`flamegraph`][flamegraph] runtime config option.
 
-[tracing_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html
-[filter]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html#structfield.filter
-[flamegraph]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html#structfield.flamegraph
+## Sentry Production Monitoring
+
+Compile Zebra with `--features sentry` to monitor it using [Sentry][sentry] in production.
+
+[tracing_section]: https://doc.zebra.zfnd.org/zebrad/components/tracing/struct.Config.html
+[filter]: https://doc.zebra.zfnd.org/zebrad/components/tracing/struct.Config.html#structfield.filter
+[flamegraph]: https://doc.zebra.zfnd.org/zebrad/components/tracing/struct.Config.html#structfield.flamegraph
 [flamegraphs]: http://www.brendangregg.com/flamegraphs.html
 [systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
-[use_journald]: https://doc.zebra.zfnd.org/zebrad/config/struct.TracingSection.html#structfield.use_journald
+[use_journald]: https://doc.zebra.zfnd.org/zebrad/components/tracing/struct.Config.html#structfield.use_journald
+[sentry]: https://sentry.io/welcome/

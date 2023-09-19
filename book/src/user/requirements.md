@@ -54,7 +54,3 @@ so some version upgrades might require a full download of the whole chain.
 Zebra needs some peers which have a round-trip latency of 2 seconds or less. If
 this is a problem for you, please [open a
 ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
-
-## Sentry Production Monitoring
-
-Compile Zebra with `--features sentry` to monitor it using Sentry in production.
