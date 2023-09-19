@@ -5740,6 +5740,7 @@ dependencies = [
  "futures",
  "halo2_proofs",
  "hex",
+ "hex-literal",
  "howudoin",
  "indexmap 2.0.0",
  "insta",

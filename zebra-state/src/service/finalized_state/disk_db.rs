@@ -64,6 +64,9 @@ pub struct DiskDb {
     // This configuration cannot be modified after the database is initialized,
     // because some clones would have different values.
     //
+    /// The configured network for this database.
+    network: Network,
+
     /// The configured temporary database setting.
     ///
     /// If true, the database files are deleted on drop.
@@ -247,6 +250,10 @@ pub trait ReadDisk {
 impl PartialEq for DiskDb {
     fn eq(&self, other: &Self) -> bool {
         if self.db.path() == other.db.path() {
+            assert_eq!(
+                self.network, other.network,
+                "database with same path but different network configs",
+            );
             assert_eq!(
                 self.ephemeral, other.ephemeral,
                 "database with same path but different ephemeral configs",
@@ -569,6 +576,7 @@ impl DiskDb {
                 info!("Opened Zebra state cache at {}", path.display());
 
                 let db = DiskDb {
+                    network,
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
                 };
@@ -588,6 +596,11 @@ impl DiskDb {
     }
 
     // Accessor methods
+
+    /// Returns the configured network for this database.
+    pub fn network(&self) -> Network {
+        self.network
+    }
 
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
