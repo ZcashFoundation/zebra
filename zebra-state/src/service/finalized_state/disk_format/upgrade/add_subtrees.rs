@@ -21,6 +21,9 @@ use crate::service::finalized_state::{
 
 /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
 ///
+/// Trees are added to the database in reverse height order, so that wallets can sync correctly
+/// while the upgrade is running.
+///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
 #[instrument(skip(upgrade_db, cancel_receiver))]
@@ -38,13 +41,21 @@ pub fn run(
     // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
     // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
     // increase by at most 1 every ~20 blocks.
+    //
+    // # Compatibility
+    //
+    // Because wallets search backwards from the chain tip, subtrees need to be added to the
+    // database in reverse height order. (Tip first, genesis last.)
+    //
+    // Otherwise, wallets that sync during the upgrade will be missing some notes.
 
     // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
-        .sapling_tree_by_height_range(..=initial_tip_height)
+        .sapling_tree_by_reversed_height_range(..=initial_tip_height)
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
+        // Because the iterator is reversed, the larger tree is first.
+        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
         // Find new subtrees.
@@ -65,10 +76,11 @@ pub fn run(
 
     // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
     let subtrees = upgrade_db
-        .orchard_tree_by_height_range(..=initial_tip_height)
+        .orchard_tree_by_reversed_height_range(..=initial_tip_height)
         // We need both the tree and its previous tree for each shielded block.
         .tuple_windows()
-        .map(|((prev_end_height, prev_tree), (end_height, tree))| {
+        // Because the iterator is reversed, the larger tree is first.
+        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
             (prev_end_height, prev_tree, end_height, tree)
         })
         // Find new subtrees.
