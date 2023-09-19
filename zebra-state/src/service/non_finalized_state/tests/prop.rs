@@ -624,6 +624,10 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.sapling_trees_by_height = chain2.sapling_trees_by_height.clone();
                 chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
 
+                // note commitment subtrees
+                chain1.sapling_subtrees = chain2.sapling_subtrees.clone();
+                chain1.orchard_subtrees = chain2.orchard_subtrees.clone();
+
                 // history trees
                 chain1.history_trees_by_height = chain2.history_trees_by_height.clone();
 

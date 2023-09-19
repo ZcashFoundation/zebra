@@ -12,7 +12,6 @@
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
     - [Optional Features](#optional-features)
-  - [Network Ports](#network-ports)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
@@ -121,10 +120,11 @@ sections in the book for more details.
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
 
-- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring)
-- `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging)
-- `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics)
 - `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html)
+- `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
+- `progress-bar` [experimental progress bars](https://zfnd.org/experimental-zebra-progress-bars/)
+- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
+- `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
 
 You can combine multiple features by listing them as parameters of the `--features` flag:
 
@@ -137,17 +137,6 @@ documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags)
 
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
-
-### Network Ports
-
-Zebra uses the following inbound and outbound TCP ports:
-
-- 8233 on Mainnet
-- 18233 on Testnet
-
-Please see the [Network
-Requirements](https://zebra.zfnd.org/user/requirements.html#network-requirements-and-ports)
-section of the Zebra book for more details.
 
 ## Known Issues
 
@@ -164,7 +153,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
-
 
 ## Future Work
 

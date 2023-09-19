@@ -281,6 +281,10 @@ impl Chain {
             // history trees
             self.history_trees_by_height == other.history_trees_by_height &&
 
+            // note commitment subtrees
+            self.sapling_subtrees == other.sapling_subtrees &&
+            self.orchard_subtrees == other.orchard_subtrees &&
+
             // anchors
             self.sprout_anchors == other.sprout_anchors &&
             self.sprout_anchors_by_height == other.sprout_anchors_by_height &&
