@@ -2607,9 +2607,11 @@ async fn state_format_test(
 }
 
 /// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
+///
+/// This test name must have the same prefix as the `fully_synced_rpc_test`, so they can be run in the same test job.
 #[tokio::test]
 #[ignore]
-async fn rpc_z_getsubtreesbyindex_sync_snapshots() -> Result<()> {
+async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
