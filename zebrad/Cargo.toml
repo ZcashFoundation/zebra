@@ -154,7 +154,7 @@ zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.29", optional = t
 
 abscissa_core = "0.7.0"
 clap = { version = "4.4.4", features = ["cargo"] }
-chrono = { version = "0.4.30", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.31", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
@@ -190,7 +190,7 @@ num-integer = "0.1.45"
 rand = "0.8.5"
 
 # prod feature sentry
-sentry = { version = "0.31.6", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { version = "0.31.7", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
