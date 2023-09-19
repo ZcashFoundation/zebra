@@ -2052,9 +2052,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.16"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73c0fefcb6d409a6587c07515951495d482006f89a21daa0f2f783aa4fd5e027"
+checksum = "c50453ec3a6555fad17b1cd1a80d16af5bc7cb35094f64e429fd46549018c6a3"
 dependencies = [
  "ahash",
  "is-terminal",
@@ -3146,12 +3146,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa8473a65b88506c106c28ae905ca4a2b83a2993640467a41bb3080627ddfd2c"
+checksum = "f4fdd22f3b9c31b53c060df4a0613a1c7f062d4115a2b984dd15b1858f7e340d"
 dependencies = [
  "bytes",
- "prost-derive 0.12.0",
+ "prost-derive 0.12.1",
 ]
 
 [[package]]
@@ -3168,7 +3168,7 @@ dependencies = [
  "once_cell",
  "petgraph",
  "prettyplease",
- "prost 0.12.0",
+ "prost 0.12.1",
  "prost-types 0.12.0",
  "regex",
  "syn 2.0.29",
@@ -3191,9 +3191,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56075c27b20ae524d00f247b8a4dc333e5784f889fe63099f8e626bc8d73486c"
+checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -3217,7 +3217,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cebe0a918c97f86c217b0f76fd754e966f8b9f41595095cf7d74cb4e59d730f6"
 dependencies = [
- "prost 0.12.0",
+ "prost 0.12.1",
 ]
 
 [[package]]
@@ -4556,7 +4556,7 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost 0.12.0",
+ "prost 0.12.1",
  "tokio",
  "tokio-stream",
  "tower",
@@ -5849,7 +5849,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-derive",
- "prost 0.12.0",
+ "prost 0.12.1",
  "rand 0.8.5",
  "rayon",
  "regex",
