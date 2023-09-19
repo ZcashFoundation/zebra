@@ -517,7 +517,16 @@ impl Block {
                         }
                     }
                     // update history tree for the next block
-                    if history_tree.is_none() {
+                    if let Some(history_tree) = history_tree.as_mut() {
+                        history_tree
+                            .push(
+                                current.network,
+                                Arc::new(block.clone()),
+                                sapling_tree.root(),
+                                orchard_tree.root(),
+                            )
+                            .unwrap();
+                    } else {
                         history_tree = Some(
                             HistoryTree::from_block(
                                 current.network,
@@ -527,17 +536,6 @@ impl Block {
                             )
                             .unwrap(),
                         );
-                    } else {
-                        history_tree
-                            .as_mut()
-                            .unwrap()
-                            .push(
-                                current.network,
-                                Arc::new(block.clone()),
-                                sapling_tree.root(),
-                                orchard_tree.root(),
-                            )
-                            .unwrap();
                     }
                 }
 

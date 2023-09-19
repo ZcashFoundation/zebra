@@ -15,11 +15,12 @@ use tempfile::TempDir;
 
 use zebra_chain::{
     block::{Height, HeightDiff, TryIntoHeight},
-    parameters::Network,
+    parameters::Network::{self, *},
     transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_state::database_format_version_in_code;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
@@ -27,6 +28,7 @@ use zebra_test::{
 };
 
 use crate::common::{
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
     test_type::TestType::*,
@@ -76,6 +78,23 @@ pub async fn run(network: Network) -> Result<()> {
         // Skip the test, we don't have the required cached state
         return Ok(());
     };
+
+    // Wait for the upgrade if needed.
+    // Currently we only write an image for testnet, which is quick.
+    // (Mainnet would need to wait at the end of this function, if the upgrade is long.)
+    if network == Testnet {
+        let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
+        // Before we write a cached state image, wait for a database upgrade.
+        //
+        // TODO: this line will hang if the state upgrade is slower than the RPC server spawn.
+        // But that is unlikely, because both 25.1 and 25.2 are quick on testnet.
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+        )?;
+    }
 
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
 
