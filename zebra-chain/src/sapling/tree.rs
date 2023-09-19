@@ -421,7 +421,12 @@ impl NoteCommitmentTree {
             return self.is_complete_subtree();
         }
 
-        // If `self` is the next index, check for spurious index differences.
+        // If `self` is the next index, check if the last note completed a subtree.
+        if self.is_complete_subtree() {
+            return true;
+        }
+
+        // Then check for spurious index differences.
         //
         // There is one new subtree somewhere in the trees. It is either:
         // - a new subtree at the end of the previous tree, or
