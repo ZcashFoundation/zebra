@@ -43,8 +43,10 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
+use zebra_state::latest_version_for_adding_subtrees;
 
 use crate::common::{
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -97,6 +99,9 @@ pub async fn run() -> Result<()> {
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
     tracing::info!(
         ?test_type,
         ?zebra_rpc_address,
@@ -119,7 +124,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
@@ -339,7 +344,59 @@ pub async fn run() -> Result<()> {
         *zebra_test::vectors::SAPLING_TREESTATE_MAINNET_419201_STRING
     );
 
-    // Call `z_getsubtreesbyindex` separately for
+    // Call `GetAddressUtxos` with the ZF funding stream address that will always have utxos
+    let utxos = rpc_client
+        .get_address_utxos(GetAddressUtxosArg {
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
+            start_height: 1,
+            max_entries: 1,
+        })
+        .await?
+        .into_inner();
+
+    // As we requested one entry we should get a response of length 1
+    assert_eq!(utxos.address_utxos.len(), 1);
+
+    // Call `GetAddressUtxosStream` with the ZF funding stream address that will always have utxos
+    let mut utxos_zf = rpc_client
+        .get_address_utxos_stream(GetAddressUtxosArg {
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
+            start_height: 1,
+            max_entries: 2,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(_utxos) = utxos_zf.message().await? {
+        counter += 1;
+    }
+    // As we are in a "in sync" chain we know there are more than 2 utxos for this address
+    // but we will receive the max of 2 from the stream response because we used a limit of 2 `max_entries`.
+    assert_eq!(2, counter);
+
+    // Call `GetLightdInfo`
+    let lightd_info = rpc_client.get_lightd_info(Empty {}).await?.into_inner();
+
+    // Make sure the subversion field is zebra the user agent
+    assert_eq!(
+        lightd_info.zcashd_subversion,
+        zebrad::application::user_agent()
+    );
+
+    // Before we call `z_getsubtreesbyindex`, we might need to wait for a database upgrade.
+    //
+    // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
+    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
+    // If it happens for a later upgrade, this code can be moved earlier in the test,
+    // as long as all the cached states are version 25.2.2 or later.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        latest_version_for_adding_subtrees(),
+    )?;
+
+    // Call `z_getsubtreesbyindex` separately for...
 
     // ... Sapling.
     let mut subtrees = rpc_client
@@ -410,46 +467,6 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
     assert_eq!(counter, 2);
-
-    // Call `GetAddressUtxos` with the ZF funding stream address that will always have utxos
-    let utxos = rpc_client
-        .get_address_utxos(GetAddressUtxosArg {
-            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
-            start_height: 1,
-            max_entries: 1,
-        })
-        .await?
-        .into_inner();
-
-    // As we requested one entry we should get a response of length 1
-    assert_eq!(utxos.address_utxos.len(), 1);
-
-    // Call `GetAddressUtxosStream` with the ZF funding stream address that will always have utxos
-    let mut utxos_zf = rpc_client
-        .get_address_utxos_stream(GetAddressUtxosArg {
-            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
-            start_height: 1,
-            max_entries: 2,
-        })
-        .await?
-        .into_inner();
-
-    let mut counter = 0;
-    while let Some(_utxos) = utxos_zf.message().await? {
-        counter += 1;
-    }
-    // As we are in a "in sync" chain we know there are more than 2 utxos for this address
-    // but we will receive the max of 2 from the stream response because we used a limit of 2 `max_entries`.
-    assert_eq!(2, counter);
-
-    // Call `GetLightdInfo`
-    let lightd_info = rpc_client.get_lightd_info(Empty {}).await?.into_inner();
-
-    // Make sure the subversion field is zebra the user agent
-    assert_eq!(
-        lightd_info.zcashd_subversion,
-        zebrad::application::user_agent()
-    );
 
     Ok(())
 }

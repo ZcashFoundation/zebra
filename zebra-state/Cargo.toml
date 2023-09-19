@@ -48,6 +48,7 @@ chrono = { version = "0.4.30", default-features = false, features = ["clock", "s
 dirs = "5.0.1"
 futures = "0.3.28"
 hex = "0.4.3"
+hex-literal = "0.4.1"
 indexmap = "2.0.0"
 itertools = "0.11.0"
 lazy_static = "1.4.0"
@@ -69,7 +70,7 @@ tracing = "0.1.37"
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.106", package = "serde_json", optional = true }
+serde_json = { version = "1.0.107", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29", features = ["async-error"] }
 

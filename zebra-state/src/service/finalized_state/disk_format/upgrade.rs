@@ -19,7 +19,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk,
-    constants::DATABASE_FORMAT_VERSION,
+    constants::{latest_version_for_adding_subtrees, DATABASE_FORMAT_VERSION},
     database_format_version_in_code, database_format_version_on_disk,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
     Config,
@@ -90,7 +90,7 @@ impl DbFormatChange {
     pub fn new(running_version: Version, disk_version: Option<Version>) -> Option<Self> {
         let Some(disk_version) = disk_version else {
             info!(
-                ?running_version,
+                %running_version,
                 "creating new database with the current format"
             );
 
@@ -100,8 +100,8 @@ impl DbFormatChange {
         match disk_version.cmp(&running_version) {
             Ordering::Less => {
                 info!(
-                    ?running_version,
-                    ?disk_version,
+                    %running_version,
+                    %disk_version,
                     "trying to open older database format: launching upgrade task"
                 );
 
@@ -112,8 +112,8 @@ impl DbFormatChange {
             }
             Ordering::Greater => {
                 info!(
-                    ?running_version,
-                    ?disk_version,
+                    %running_version,
+                    %disk_version,
                     "trying to open newer database format: data should be compatible"
                 );
 
@@ -123,7 +123,7 @@ impl DbFormatChange {
                 })
             }
             Ordering::Equal => {
-                info!(?running_version, "trying to open current database format");
+                info!(%running_version, "trying to open current database format");
 
                 None
             }
@@ -190,6 +190,10 @@ impl DbFormatChange {
         upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        // These quick checks should pass for all format changes.
+        // (See the detailed comment at the end of this method.)
+        add_subtrees::quick_check(&upgrade_db);
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
             Upgrade { .. } => self.apply_format_upgrade(
@@ -265,16 +269,16 @@ impl DbFormatChange {
         let Some(initial_tip_height) = initial_tip_height else {
             // If the database is empty, then the RocksDb format doesn't need any changes.
             info!(
-                ?newer_running_version,
-                ?older_disk_version,
+                %newer_running_version,
+                %older_disk_version,
                 "marking empty database as upgraded"
             );
 
             Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
 
             info!(
-                ?newer_running_version,
-                ?older_disk_version,
+                %newer_running_version,
+                %older_disk_version,
                 "empty database is fully upgraded"
             );
 
@@ -352,11 +356,17 @@ impl DbFormatChange {
 
         // Note commitment subtree creation database upgrade task.
 
-        let version_for_adding_subtrees =
+        let latest_version_for_adding_subtrees = latest_version_for_adding_subtrees();
+        let first_version_for_adding_subtrees =
             Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
 
-        // Check if we need to add note commitment subtrees to the database.
-        if older_disk_version < version_for_adding_subtrees {
+        // Check if we need to add or fix note commitment subtrees in the database.
+        if older_disk_version < latest_version_for_adding_subtrees {
+            if older_disk_version >= first_version_for_adding_subtrees {
+                // Clear previous upgrade data, because it was incorrect.
+                add_subtrees::reset(initial_tip_height, &db, cancel_receiver)?;
+            }
+
             add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
@@ -364,7 +374,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&version_for_adding_subtrees, &config, network);
+            Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, &config, network);
         }
 
         // # New Upgrades Usually Go Here
@@ -376,7 +386,7 @@ impl DbFormatChange {
         // every time it runs its inner update loop.
 
         info!(
-            ?newer_running_version,
+            %newer_running_version,
             "Zebra automatically upgraded the database format to:"
         );
 
@@ -474,8 +484,8 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?disk_version,
+            %running_version,
+            disk_version = %disk_version.map_or("None".to_string(), |version| version.to_string()),
             "marked database format as newly created"
         );
     }
@@ -535,9 +545,11 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?format_upgrade_version,
-            ?disk_version,
+            %running_version,
+            %disk_version,
+            // wait_for_state_version_upgrade() needs this to be the last field,
+            // so the regex matches correctly
+            %format_upgrade_version,
             "marked database format as upgraded"
         );
     }
@@ -574,8 +586,8 @@ impl DbFormatChange {
             .expect("unable to write database format version file to disk");
 
         info!(
-            ?running_version,
-            ?disk_version,
+            %running_version,
+            %disk_version,
             "marked database format as downgraded"
         );
     }

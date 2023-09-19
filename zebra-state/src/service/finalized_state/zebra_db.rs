@@ -118,11 +118,20 @@ impl ZebraDb {
             // If we're re-opening a previously upgraded or newly created database,
             // the database format should be valid.
             // (There's no format change here, so the format change checks won't run.)
+            //
+            // Do the quick checks first, then the slower checks.
+            upgrade::add_subtrees::quick_check(&db);
+
             DbFormatChange::check_for_duplicate_trees(db.clone());
-            upgrade::add_subtrees::check(&db.clone());
+            upgrade::add_subtrees::check(&db);
         }
 
         db
+    }
+
+    /// Returns the configured network for this database.
+    pub fn network(&self) -> Network {
+        self.db.network()
     }
 
     /// Returns the `Path` where the files used by this database are located.
