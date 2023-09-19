@@ -128,6 +128,7 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the sprout note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     fn update_sprout_note_commitment_tree(
         mut sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sprout_note_commitments: Vec<sprout::NoteCommitment>,
@@ -145,8 +146,9 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the sapling note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
-    fn update_sapling_note_commitment_tree(
+    pub fn update_sapling_note_commitment_tree(
         mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
         sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
     ) -> Result<
@@ -170,11 +172,14 @@ impl NoteCommitmentTrees {
         let mut subtree_root = None;
 
         for sapling_note_commitment in sapling_note_commitments {
+            sapling_nct.append(sapling_note_commitment)?;
+
+            // Subtrees end heights come from the blocks they are completed in,
+            // so we check for new subtrees after appending the note.
+            // (If we check before, subtrees at the end of blocks have the wrong heights.)
             if let Some(index_and_node) = sapling_nct.completed_subtree_index_and_root() {
                 subtree_root = Some(index_and_node);
             }
-
-            sapling_nct.append(sapling_note_commitment)?;
         }
 
         // Re-calculate and cache the tree root.
@@ -184,8 +189,9 @@ impl NoteCommitmentTrees {
     }
 
     /// Update the orchard note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
-    fn update_orchard_note_commitment_tree(
+    pub fn update_orchard_note_commitment_tree(
         mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
         orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<
@@ -203,11 +209,14 @@ impl NoteCommitmentTrees {
         let mut subtree_root = None;
 
         for orchard_note_commitment in orchard_note_commitments {
+            orchard_nct.append(orchard_note_commitment)?;
+
+            // Subtrees end heights come from the blocks they are completed in,
+            // so we check for new subtrees after appending the note.
+            // (If we check before, subtrees at the end of blocks have the wrong heights.)
             if let Some(index_and_node) = orchard_nct.completed_subtree_index_and_root() {
                 subtree_root = Some(index_and_node);
             }
-
-            orchard_nct.append(orchard_note_commitment)?;
         }
 
         // Re-calculate and cache the tree root.

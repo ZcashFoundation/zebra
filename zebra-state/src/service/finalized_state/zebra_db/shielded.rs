@@ -167,7 +167,7 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Returns the Sapling note commitment trees in the supplied range.
+    /// Returns the Sapling note commitment trees in the supplied range, in increasing height order.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_height_range<R>(
         &self,
@@ -300,7 +300,7 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
-    /// Returns the Orchard note commitment trees in the supplied range.
+    /// Returns the Orchard note commitment trees in the supplied range, in increasing height order.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_height_range<R>(
         &self,
@@ -577,6 +577,23 @@ impl DiskWriteBatch {
         self.zs_delete_range(&sapling_tree_cf, from, to);
     }
 
+    /// Deletes the range of Sapling subtrees at the given [`NoteCommitmentSubtreeIndex`]es.
+    /// Doesn't delete the upper bound.
+    pub fn delete_range_sapling_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        from: NoteCommitmentSubtreeIndex,
+        to: NoteCommitmentSubtreeIndex,
+    ) {
+        let sapling_subtree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&sapling_subtree_cf, from, to);
+    }
+
     // Orchard tree methods
 
     /// Inserts the Orchard note commitment subtree.
@@ -611,5 +628,22 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&orchard_tree_cf, from, to);
+    }
+
+    /// Deletes the range of Orchard subtrees at the given [`NoteCommitmentSubtreeIndex`]es.
+    /// Doesn't delete the upper bound.
+    pub fn delete_range_orchard_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        from: NoteCommitmentSubtreeIndex,
+        to: NoteCommitmentSubtreeIndex,
+    ) {
+        let orchard_subtree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&orchard_subtree_cf, from, to);
     }
 }

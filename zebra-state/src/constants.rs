@@ -2,6 +2,7 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
+use semver::Version;
 
 // For doc comment links
 #[allow(unused_imports)]
@@ -52,7 +53,14 @@ pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 2;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
-pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
+pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 1;
+
+/// Returns the highest database version that modifies the subtree index format.
+///
+/// This version is used by tests to wait for the subtree upgrade to finish.
+pub fn latest_version_for_adding_subtrees() -> Version {
+    Version::parse("25.2.1").expect("Hardcoded version string should be valid.")
+}
 
 /// The name of the file containing the minor and patch database versions.
 ///
