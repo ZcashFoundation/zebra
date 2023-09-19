@@ -414,25 +414,33 @@ impl NoteCommitmentTree {
             .subtree_index()
             .map_or(-1, |index| i32::from(index.0));
 
+        // This calculation can't overflow, because we're using i32 for u16 values.
+        let index_difference = index - prev_index;
+
+        // There are 4 cases we need to handle:
+        // - lower index: never a new subtree
+        // - equal index: sometimes a new subtree
+        // - next index: sometimes a new subtree
+        // - greater than the next index: always a new subtree
+        //
+        // To simplify the function, we deal with the simple cases first.
+
         // There can't be any new subtrees if the current index is strictly lower.
         if index < prev_index {
             return false;
         }
 
-        // If the indexes are equal, there can only be a new subtree if `self` just completed it.
-        if index == prev_index && self.is_complete_subtree() {
-            return true;
-        }
-
-        // This calculation can't overflow, because we're using i32 for u16 values.
-        let index_difference = index - prev_index;
-
-        // There are multiple new subtrees, or one new subtree and a spurious index difference.
+        // There is at least one new subtree, even if there is a spurious index difference.
         if index_difference > 1 {
             return true;
         }
 
-        // Check for spurious index differences.
+        // If the indexes are equal, there can only be a new subtree if `self` just completed it.
+        if index == prev_index {
+            return self.is_complete_subtree();
+        }
+
+        // If `self` is the next index, check for spurious index differences.
         //
         // There is one new subtree somewhere in the trees. It is either:
         // - a new subtree at the end of the previous tree, or
