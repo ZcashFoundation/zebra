@@ -1,0 +1,18 @@
+---
+source: zebrad/tests/acceptance.rs
+expression: parsed
+---
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pool": "sapling",
+    "start_index": 0,
+    "subtrees": [
+      {
+        "root": "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13",
+        "end_height": 558822
+      }
+    ]
+  },
+  "id": 123
+}

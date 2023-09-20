@@ -5839,6 +5839,7 @@ dependencies = [
  "indexmap 2.0.0",
  "indicatif",
  "inferno",
+ "insta",
  "jsonrpc-core",
  "lazy_static",
  "log",
