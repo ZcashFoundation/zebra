@@ -32,8 +32,14 @@ pub(crate) mod add_subtrees;
 pub enum DbFormatChange {
     /// Marking the format as newly created by `running_version`.
     ///
-    /// Newly created databases have no disk version.
+    /// Newly created databases are opened with no disk version.
+    /// It is set to the running version by the format change code.
     NewlyCreated { running_version: Version },
+
+    /// The format is the same as `running_version`.
+    ///
+    /// Current version databases have a disk version that matches the running version.
+    Current { running_version: Version },
 
     /// Upgrading the format from `older_disk_version` to `newer_running_version`.
     ///
@@ -81,20 +87,19 @@ pub struct DbFormatChangeThreadHandle {
 pub struct CancelFormatChange;
 
 impl DbFormatChange {
-    /// Check if loading `disk_version` into `running_version` needs a format change,
-    /// and if it does, return the required format change.
+    /// Returns the format change for `running_version` code loading a `disk_version` database.
     ///
-    /// Also logs the kind of change at info level.
+    /// Also logs that change at info level.
     ///
     /// If `disk_version` is `None`, Zebra is creating a new database.
-    pub fn new(running_version: Version, disk_version: Option<Version>) -> Option<Self> {
+    pub fn new(running_version: Version, disk_version: Option<Version>) -> Self {
         let Some(disk_version) = disk_version else {
             info!(
                 %running_version,
                 "creating new database with the current format"
             );
 
-            return Some(NewlyCreated { running_version });
+            return NewlyCreated { running_version };
         };
 
         match disk_version.cmp(&running_version) {
@@ -105,10 +110,10 @@ impl DbFormatChange {
                     "trying to open older database format: launching upgrade task"
                 );
 
-                Some(Upgrade {
+                Upgrade {
                     older_disk_version: disk_version,
                     newer_running_version: running_version,
-                })
+                }
             }
             Ordering::Greater => {
                 info!(
@@ -117,15 +122,15 @@ impl DbFormatChange {
                     "trying to open newer database format: data should be compatible"
                 );
 
-                Some(Downgrade {
+                Downgrade {
                     newer_disk_version: disk_version,
                     older_running_version: running_version,
-                })
+                }
             }
             Ordering::Equal => {
                 info!(%running_version, "trying to open current database format");
 
-                None
+                Current { running_version }
             }
         }
     }
@@ -218,6 +223,13 @@ impl DbFormatChange {
                 //
                 // The responsibility of staying backwards-compatible is on the newer version.
                 // We do this on a best-effort basis for versions that are still supported.
+            }
+
+            Current { running_version } => {
+                info!(%running_version, "checking current database format is valid");
+
+                // If we're re-opening a previously upgraded or newly created database,
+                // the database format should be valid. This check is done below.
             }
         }
 

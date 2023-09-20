@@ -92,35 +92,26 @@ impl ZebraDb {
             return db;
         }
 
-        // Start any required format changes, and do format checks.
+        // Launch any required format changes or format checks,
+        // and put their handle in the database.
         //
-        // TODO: should debug_stop_at_height wait for these upgrades, or not?
-        if let Some(format_change) = format_change {
-            // Launch the format change and install its handle in the database.
-            //
-            // `upgrade_db` is a special clone of the database, which can't be used to shut down
-            // the upgrade task. (Because the task hasn't been launched yet,
-            // `db.format_change_handle` is always None.)
-            //
-            // It can be a FinalizedState if needed, or the FinalizedState methods needed for
-            // upgrades can be moved to ZebraDb.
-            let upgrade_db = db.clone();
+        // `upgrade_db` is a special clone of the database, which can't be used to shut down
+        // the upgrade task. (Because the task hasn't been launched yet,
+        // `db.format_change_handle` is always None.)
+        let upgrade_db = db.clone();
 
-            let format_change_handle = format_change.spawn_format_change(
-                config.clone(),
-                network,
-                initial_tip_height,
-                upgrade_db,
-            );
+        // TODO:
+        // - should debug_stop_at_height wait for the upgrade task to finish?
+        // - if needed, make upgrade_db into a FinalizedState,
+        //   or move the FinalizedState methods needed for upgrades to ZebraDb.
+        let format_change_handle = format_change.spawn_format_change(
+            config.clone(),
+            network,
+            initial_tip_height,
+            upgrade_db,
+        );
 
-            db.format_change_handle = Some(format_change_handle);
-        } else {
-            // If we're re-opening a previously upgraded or newly created database,
-            // the database format should be valid.
-            // (There's no format change here, so the format change checks won't run.)
-            DbFormatChange::format_validity_checks_detailed(&db)
-                .expect("current database format is valid");
-        }
+        db.format_change_handle = Some(format_change_handle);
 
         db
     }
