@@ -401,7 +401,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync-to-tip
+      test_id: full-sync
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
@@ -512,7 +512,7 @@ jobs:
     if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync-to-tip-testnet
+      test_id: full-sync-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: '-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
