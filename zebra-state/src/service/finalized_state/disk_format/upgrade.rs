@@ -11,7 +11,10 @@ use tracing::Span;
 
 use zebra_chain::{
     block::Height,
-    diagnostic::task::{CheckForPanics, WaitForPanics},
+    diagnostic::{
+        task::{CheckForPanics, WaitForPanics},
+        CodeTimer,
+    },
     parameters::Network,
 };
 
@@ -345,6 +348,8 @@ impl DbFormatChange {
 
         // Check if we need to prune the note commitment trees in the database.
         if older_disk_version < version_for_pruning_trees {
+            let timer = CodeTimer::start();
+
             // Prune duplicate Sapling note commitment trees.
 
             // The last tree we checked.
@@ -406,6 +411,8 @@ impl DbFormatChange {
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
             Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
+
+            timer.finish(module_path!(), line!(), "deduplicate trees upgrade");
         }
 
         // Note commitment subtree creation database upgrade task.
@@ -416,6 +423,8 @@ impl DbFormatChange {
 
         // Check if we need to add or fix note commitment subtrees in the database.
         if older_disk_version < latest_version_for_adding_subtrees {
+            let timer = CodeTimer::start();
+
             if older_disk_version >= first_version_for_adding_subtrees {
                 // Clear previous upgrade data, because it was incorrect.
                 add_subtrees::reset(initial_tip_height, &db, cancel_receiver)?;
@@ -430,6 +439,8 @@ impl DbFormatChange {
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
             Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, &config, network);
+
+            timer.finish(module_path!(), line!(), "add subtrees upgrade");
         }
 
         // # New Upgrades Usually Go Here
@@ -451,6 +462,7 @@ impl DbFormatChange {
     /// Run quick checks that the current database format is valid.
     #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
+        let timer = CodeTimer::start();
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
@@ -459,6 +471,9 @@ impl DbFormatChange {
         // run it early any more. (If future code changes accidentally make it depend on the
         // upgrade, they would accidentally break compatibility with older Zebra cached states.)
         results.push(add_subtrees::subtree_format_calculation_pre_checks(db));
+
+        // The work is done in the functions we just called.
+        timer.finish(module_path!(), line!(), "format_validity_checks_quick()");
 
         if results.iter().any(Result::is_err) {
             let err = Err(format!("invalid quick check: {results:?}"));
@@ -475,6 +490,7 @@ impl DbFormatChange {
         db: &ZebraDb,
         cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
+        let timer = CodeTimer::start();
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
@@ -487,6 +503,9 @@ impl DbFormatChange {
             db,
             cancel_receiver,
         )?);
+
+        // The work is done in the functions we just called.
+        timer.finish(module_path!(), line!(), "format_validity_checks_detailed()");
 
         if results.iter().any(Result::is_err) {
             let err = Err(format!("invalid detailed check: {results:?}"));
