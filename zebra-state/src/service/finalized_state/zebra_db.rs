@@ -19,7 +19,7 @@ use crate::{
         disk_db::DiskDb,
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
-            upgrade::{self, DbFormatChange, DbFormatChangeThreadHandle},
+            upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
     Config,
@@ -118,12 +118,8 @@ impl ZebraDb {
             // If we're re-opening a previously upgraded or newly created database,
             // the database format should be valid.
             // (There's no format change here, so the format change checks won't run.)
-            //
-            // Do the quick checks first, then the slower checks.
-            upgrade::add_subtrees::quick_check(&db);
-
-            DbFormatChange::check_for_duplicate_trees(db.clone());
-            upgrade::add_subtrees::check(&db);
+            DbFormatChange::format_validity_checks_detailed(&db)
+                .expect("current database format is valid");
         }
 
         db

@@ -145,20 +145,22 @@ pub fn reset(
 /// This allows us to fail the upgrade quickly in tests and during development,
 /// rather than waiting ~20 minutes to see if it failed.
 ///
-/// # Panics
-///
-/// If a note commitment subtree is missing or incorrect.
-pub fn quick_check(db: &ZebraDb) {
+/// This check runs the first subtree calculation, but it doesn't read the subtree data in the
+/// database. So it can be run before the upgrade is started.
+pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
+    // Check the entire format before returning any errors.
     let sapling_result = quick_check_sapling_subtrees(db);
     let orchard_result = quick_check_orchard_subtrees(db);
 
     if sapling_result.is_err() || orchard_result.is_err() {
-        // TODO: when the check functions are refactored so they are called from a single function,
-        //       move this panic into that function, but still log a detailed message here
-        panic!(
+        let err = Err(format!(
             "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        );
+        ));
+        warn!(?err);
+        return err;
     }
+
+    Ok(())
 }
 
 /// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
@@ -300,24 +302,24 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 }
 
 /// Check that note commitment subtrees were correctly added.
-///
-/// # Panics
-///
-/// If a note commitment subtree is missing or incorrect.
-pub fn check(db: &ZebraDb) {
-    // This check is partly redundant, but we want to make sure it's never missed.
-    quick_check(db);
+pub fn subtree_format_validity_checks_detailed(db: &ZebraDb) -> Result<(), String> {
+    // This is redundant in some code paths, but not in others. But it's quick anyway.
+    let quick_result = subtree_format_calculation_pre_checks(db);
 
+    // Check the entire format before returning any errors.
     let sapling_result = check_sapling_subtrees(db);
     let orchard_result = check_orchard_subtrees(db);
 
-    if sapling_result.is_err() || orchard_result.is_err() {
-        // TODO: when the check functions are refactored so they are called from a single function,
-        //       move this panic into that function, but still log a detailed message here
-        panic!(
-            "missing or bad subtree(s): sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        );
+    if quick_result.is_err() || sapling_result.is_err() || orchard_result.is_err() {
+        let err = Err(format!(
+            "missing or invalid subtree(s): \
+             quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
+        ));
+        warn!(?err);
+        return err;
     }
+
+    Ok(())
 }
 
 /// Check that Sapling note commitment subtrees were correctly added.
