@@ -1,0 +1,38 @@
+---
+source: zebrad/tests/acceptance.rs
+expression: parsed
+---
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pool": "sapling",
+    "start_index": 1090,
+    "subtrees": [
+      {
+        "root": "507ebccc63e2ca45bd254975ca2b75f2a221a0167d514077472dc7ef1e04a638",
+        "end_height": 1857525
+      },
+      {
+        "root": "0240b333e243a38583b692b9ce5b2fbdfde41cfdd3f3067b5c7d94fda5387666",
+        "end_height": 1860908
+      },
+      {
+        "root": "bf299f8446bea806854e9b363ed890f83423cececd53293c81df92ff112aa43f",
+        "end_height": 1866377
+      },
+      {
+        "root": "4a4778e6242b3e708f040b4a373c8cdedd14c5c415ab20f32e46430507b1a346",
+        "end_height": 1889548
+      },
+      {
+        "root": "c1cffa22d637cb194102a1b02a57d2b47c67f54094f6773a38b2e53d3becb45f",
+        "end_height": 1997495
+      },
+      {
+        "root": "0ee7328354ad588ee9581b25a3e2b94dbb03db647b79538c8805d793c61b822d",
+        "end_height": 2056616
+      }
+    ]
+  },
+  "id": 123
+}
