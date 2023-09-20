@@ -41,6 +41,12 @@ pub mod arbitrary;
 /// the database is closed.
 #[derive(Clone, Debug)]
 pub struct ZebraDb {
+    // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    debug_skip_format_upgrades: bool,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -69,10 +75,11 @@ impl ZebraDb {
             .expect("unable to read database format version file");
 
         // Log any format changes before opening the database, in case opening fails.
-        let format_change = DbFormatChange::new(running_version, disk_version);
+        let format_change = DbFormatChange::open(running_version, disk_version);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
+            debug_skip_format_upgrades,
             format_change_handle: None,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
@@ -88,7 +95,7 @@ impl ZebraDb {
         let initial_tip_height = db.finalized_tip_height();
 
         // Always do format upgrades & checks in production code.
-        if cfg!(test) && debug_skip_format_upgrades {
+        if cfg!(test) && db.debug_skip_format_upgrades {
             return db;
         }
 

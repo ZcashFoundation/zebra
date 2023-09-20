@@ -30,18 +30,28 @@ pub(crate) mod add_subtrees;
 /// The kind of database format change we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
-    /// Marking the format as newly created by `running_version`.
+    /// Mark the format as newly created by `running_version`.
     ///
     /// Newly created databases are opened with no disk version.
     /// It is set to the running version by the format change code.
     NewlyCreated { running_version: Version },
 
-    /// The format is the same as `running_version`.
+    /// Check that the database from a previous instance has the current `running_version` format.
     ///
     /// Current version databases have a disk version that matches the running version.
-    Current { running_version: Version },
+    /// No upgrades are needed, so we just run a format check on the database.
+    /// The data in that database was created or updated by a previous Zebra instance.
+    OpenCurrent { running_version: Version },
 
-    /// Upgrading the format from `older_disk_version` to `newer_running_version`.
+    /// Check that the database from this instance has the current `running_version` format.
+    ///
+    /// The data in that database was created or updated by the currently running Zebra instance.
+    /// So we periodically check for data bugs, which can happen if the upgrade and new block
+    /// code produce different data. (They can also be caused by disk corruption.)
+    #[allow(dead_code)]
+    CheckNewBlocksCurrent { running_version: Version },
+
+    /// Upgrade the format from `older_disk_version` to `newer_running_version`.
     ///
     /// Until this upgrade is complete, the format is a mixture of both versions.
     Upgrade {
@@ -49,7 +59,7 @@ pub enum DbFormatChange {
         newer_running_version: Version,
     },
 
-    /// Marking the format as downgraded from `newer_disk_version` to `older_running_version`.
+    /// Mark the format as downgraded from `newer_disk_version` to `older_running_version`.
     ///
     /// Until the state is upgraded to `newer_disk_version` by a Zebra version with that state
     /// version (or greater), the format will be a mixture of both versions.
@@ -92,7 +102,7 @@ impl DbFormatChange {
     /// Also logs that change at info level.
     ///
     /// If `disk_version` is `None`, Zebra is creating a new database.
-    pub fn new(running_version: Version, disk_version: Option<Version>) -> Self {
+    pub fn open(running_version: Version, disk_version: Option<Version>) -> Self {
         let Some(disk_version) = disk_version else {
             info!(
                 %running_version,
@@ -130,15 +140,31 @@ impl DbFormatChange {
             Ordering::Equal => {
                 info!(%running_version, "trying to open current database format");
 
-                Current { running_version }
+                OpenCurrent { running_version }
             }
         }
     }
 
-    /// Returns true if this change is an upgrade.
+    /// Returns a format check for newly added blocks in `running_version`.
+    /// This check makes sure the upgrade and new block code produce the same data.
+    ///
+    /// Also logs the check at info level.
+    #[allow(dead_code)]
+    pub fn check_new_blocks(running_version: Version) -> Self {
+        info!(%running_version, "checking new blocks were written in current database format");
+        NewlyCreated { running_version }
+    }
+
+    /// Returns true if this format change/check is an upgrade.
     #[allow(dead_code)]
     pub fn is_upgrade(&self) -> bool {
         matches!(self, Upgrade { .. })
+    }
+
+    /// Returns true if this format change/check happens at startup.
+    #[allow(dead_code)]
+    pub fn is_run_at_startup(&self) -> bool {
+        !matches!(self, CheckNewBlocksCurrent { .. })
     }
 
     /// Launch a `std::thread` that applies this format change to the database.
@@ -225,11 +251,27 @@ impl DbFormatChange {
                 // We do this on a best-effort basis for versions that are still supported.
             }
 
-            Current { running_version } => {
-                info!(%running_version, "checking current database format is valid");
-
+            OpenCurrent { running_version } => {
                 // If we're re-opening a previously upgraded or newly created database,
                 // the database format should be valid. This check is done below.
+                info!(
+                    %running_version,
+                    "checking database format produced by a previous zebra instance \
+                     is current and valid"
+                );
+            }
+
+            CheckNewBlocksCurrent { running_version } => {
+                // If we've added new blocks using the non-upgrade code,
+                // the database format should be valid. This check is done below.
+                //
+                // TODO: should this check panic or just log an error?
+                //       Currently, we panic to avoid consensus bugs, but this could cause a denial
+                //       of service. We can make errors fail in CI using ZEBRA_FAILURE_MESSAGES.
+                info!(
+                    %running_version,
+                    "checking database format produced by new blocks in this instance is valid"
+                );
             }
         }
 
