@@ -556,7 +556,12 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .sprout_tree(height.previous().unwrap().into())
+                .sprout_tree(
+                    height
+                        .previous()
+                        .expect("Already checked for underflow.")
+                        .into(),
+                )
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
@@ -754,7 +759,12 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .sapling_tree(height.previous().unwrap().into())
+                .sapling_tree(
+                    height
+                        .previous()
+                        .expect("Already checked for underflow.")
+                        .into(),
+                )
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
@@ -954,7 +964,12 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .orchard_tree(height.previous().unwrap().into())
+                .orchard_tree(
+                    height
+                        .previous()
+                        .expect("Already checked for underflow.")
+                        .into(),
+                )
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
