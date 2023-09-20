@@ -239,7 +239,9 @@ impl DbFormatChange {
         // - since the running Zebra code knows how to upgrade the database to this format,
         //   downgrades using this running code still know how to create a valid database
         //   (unless a future upgrade breaks these format checks)
-        Self::format_validity_checks_detailed(&upgrade_db)
+        // - re-opening the current version should be valid, regardless of whether the upgrade
+        //   or new block code created the format (or any combination).
+        Self::format_validity_checks_detailed(&upgrade_db, &cancel_receiver)?
             .expect("new, upgraded, or downgraded database format is valid");
 
         Ok(())
@@ -356,7 +358,8 @@ impl DbFormatChange {
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(&db).expect("database format is valid after upgrade");
+            Self::check_for_duplicate_trees(&db, cancel_receiver)?
+                .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
@@ -379,7 +382,7 @@ impl DbFormatChange {
             add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            add_subtrees::subtree_format_validity_checks_detailed(&db)
+            add_subtrees::subtree_format_validity_checks_detailed(&db, cancel_receiver)?
                 .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
@@ -426,7 +429,10 @@ impl DbFormatChange {
 
     /// Run detailed checks that the current database format is valid.
     #[allow(clippy::vec_init_then_push)]
-    pub fn format_validity_checks_detailed(db: &ZebraDb) -> Result<(), String> {
+    pub fn format_validity_checks_detailed(
+        db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
@@ -434,28 +440,30 @@ impl DbFormatChange {
         // Do the quick checks first, so we don't have to do this in every detailed check.
         results.push(Self::format_validity_checks_quick(db));
 
-        results.push(Self::check_for_duplicate_trees(db));
-        results.push(add_subtrees::subtree_format_validity_checks_detailed(db));
+        results.push(Self::check_for_duplicate_trees(db, cancel_receiver)?);
+        results.push(add_subtrees::subtree_format_validity_checks_detailed(
+            db,
+            cancel_receiver,
+        )?);
 
         if results.iter().any(Result::is_err) {
             let err = Err(format!("invalid detailed check: {results:?}"));
             error!(?err);
-            return err;
+            return Ok(err);
         }
 
-        Ok(())
+        Ok(Ok(()))
     }
 
     /// Check that note commitment trees were correctly de-duplicated.
-    ///
-    /// # Panics
-    ///
-    /// If a duplicate tree is found.
     //
     // TODO: move this method into an deduplication upgrade module file,
     //       along with the upgrade code above.
     #[allow(clippy::unwrap_in_result)]
-    fn check_for_duplicate_trees(db: &ZebraDb) -> Result<(), String> {
+    fn check_for_duplicate_trees(
+        db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
         // Runtime test: make sure we removed all duplicates.
         // We always run this test, even if the state has supposedly been upgraded.
         let mut result = Ok(());
@@ -463,6 +471,11 @@ impl DbFormatChange {
         let mut prev_height = None;
         let mut prev_tree = None;
         for (height, tree) in db.sapling_tree_by_height_range(..) {
+            // Return early if the format check is cancelled.
+            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
             if prev_tree == Some(tree.clone()) {
                 result = Err(format!(
                     "found duplicate sapling trees after running de-duplicate tree upgrade:\
@@ -480,6 +493,11 @@ impl DbFormatChange {
         let mut prev_height = None;
         let mut prev_tree = None;
         for (height, tree) in db.orchard_tree_by_height_range(..) {
+            // Return early if the format check is cancelled.
+            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
             if prev_tree == Some(tree.clone()) {
                 result = Err(format!(
                     "found duplicate orchard trees after running de-duplicate tree upgrade:\
@@ -494,7 +512,7 @@ impl DbFormatChange {
             prev_tree = Some(tree);
         }
 
-        result
+        Ok(result)
     }
 
     /// Mark a newly created database with the current format version.
