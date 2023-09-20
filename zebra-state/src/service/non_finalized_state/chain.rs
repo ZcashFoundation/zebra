@@ -556,7 +556,7 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .sprout_tree(height.previous().into())
+                .sprout_tree(height.previous().unwrap().into())
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
@@ -640,7 +640,7 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next();
+            let next_height = height.next().expect("Height should not overflow here.");
 
             if self.sprout_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.
@@ -754,7 +754,7 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .sapling_tree(height.previous().into())
+                .sapling_tree(height.previous().unwrap().into())
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
@@ -834,7 +834,7 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next();
+            let next_height = height.next().expect("Height should not overflow here.");
 
             if self.sapling_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.
@@ -954,7 +954,7 @@ impl Chain {
         // Don't add a new tree unless it differs from the previous one or there's no previous tree.
         if height.is_min()
             || self
-                .orchard_tree(height.previous().into())
+                .orchard_tree(height.previous().unwrap().into())
                 .map_or(true, |prev_tree| prev_tree != tree)
         {
             assert_eq!(
@@ -1034,7 +1034,7 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next();
+            let next_height = height.next().expect("Height should not overflow here.");
 
             if self.orchard_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.

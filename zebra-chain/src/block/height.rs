@@ -1,6 +1,7 @@
 //! Block height.
 
 use std::ops::{Add, Sub};
+use thiserror::Error;
 
 use crate::{serialization::SerializationError, BoxError};
 
@@ -23,6 +24,14 @@ pub mod json_conversion;
 /// `ZcashSerialize` or `ZcashDeserialize` for `Height`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Height(pub u32);
+
+#[derive(Error, Debug)]
+pub enum HeightError {
+    #[error("The resulting height would ovferflow Height::MAX.")]
+    Overflow,
+    #[error("The resulting height would underflow Height::MIN.")]
+    Underflow,
+}
 
 impl std::str::FromStr for Height {
     type Err = SerializationError;
@@ -72,8 +81,8 @@ impl Height {
     ///
     /// - If the current height is at its maximum.
     // TODO Return an error instead of panicking #7263.
-    pub fn next(self) -> Self {
-        (self + 1).expect("Height should not be at its maximum.")
+    pub fn next(self) -> Result<Self, HeightError> {
+        (self + 1).ok_or(HeightError::Overflow)
     }
 
     /// Returns the previous [`Height`].
@@ -82,8 +91,8 @@ impl Height {
     ///
     /// - If the current height is at its minimum.
     // TODO Return an error instead of panicking #7263.
-    pub fn previous(self) -> Self {
-        (self - 1).expect("Height should not be at its minimum.")
+    pub fn previous(self) -> Result<Self, HeightError> {
+        (self - 1).ok_or(HeightError::Underflow)
     }
 
     /// Returns `true` if the [`Height`] is at its minimum.
