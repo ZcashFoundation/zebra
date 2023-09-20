@@ -110,6 +110,44 @@ impl FromDisk for () {
     }
 }
 
+/// Access database keys or values as raw bytes.
+/// Mainly for use in tests, runtime checks, or format compatibility code.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RawBytes(Vec<u8>);
+
+// Note: don't implement From or Into for RawBytes, because it makes it harder to spot in reviews.
+// Instead, implement IntoDisk and FromDisk on the original type, or a specific wrapper type.
+
+impl RawBytes {
+    /// Create a new raw byte key or data.
+    ///
+    /// Mainly for use in tests or runtime checks.
+    /// These methods
+    pub fn new_raw_bytes(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    /// Create a new raw byte key or data.
+    /// Mainly for use in tests.
+    pub fn raw_bytes(&self) -> &Vec<u8> {
+        &self.0
+    }
+}
+
+impl IntoDisk for RawBytes {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.raw_bytes().clone()
+    }
+}
+
+impl FromDisk for RawBytes {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        Self::new_raw_bytes(bytes.as_ref().to_vec())
+    }
+}
+
 // Serialization Modification Functions
 
 /// Truncates `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
