@@ -84,8 +84,7 @@ pub async fn run() -> Result<()> {
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
-    let mut transactions =
-        load_transactions_from_future_blocks(network, test_type, test_name).await?;
+    let transactions = load_transactions_from_future_blocks(network, test_type, test_name).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -148,9 +147,6 @@ pub async fn run() -> Result<()> {
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
-    // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
-    transactions.truncate(max_sent_transactions());
-
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
 
@@ -191,7 +187,7 @@ pub async fn run() -> Result<()> {
     zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
-    let mut _counter = 0;
+    let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
         let hash = transaction::Hash::from_bytes_in_display_order(&hash);
@@ -202,15 +198,14 @@ pub async fn run() -> Result<()> {
              in isolated mempool: {tx:?}",
         );
 
-        _counter += 1;
+        counter += 1;
     }
 
-    // TODO: This check sometimes works and sometimes it doesn't so we can't just enable it.
-    // https://github.com/ZcashFoundation/zebra/issues/7529
-    //assert!(
-    //    counter >= 1,
-    //    "all transactions from future blocks failed to send to an isolated mempool"
-    //);
+    // This check will fail if there are no non-coinbase transactions in the first 50 non-finalized blocks
+    assert!(
+        counter >= 1,
+        "all transactions from future blocks failed to send to an isolated mempool"
+    );
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
@@ -263,6 +258,6 @@ fn prepare_send_transaction_request(transaction: Arc<Transaction>) -> wallet_grp
 
     wallet_grpc::RawTransaction {
         data: transaction_bytes,
-        height: -1,
+        height: 0,
     }
 }
