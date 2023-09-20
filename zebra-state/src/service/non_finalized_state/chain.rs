@@ -645,7 +645,9 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next().expect("Height should not overflow here.");
+            let next_height = height
+                .next()
+                .expect("Zebra should never reach the max height in normal operation.");
 
             if self.sprout_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.
@@ -844,7 +846,9 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next().expect("Height should not overflow here.");
+            let next_height = height
+                .next()
+                .expect("Zebra should never reach the max height in normal operation.");
 
             if self.sapling_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.
@@ -1049,7 +1053,9 @@ impl Chain {
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
         if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height.next().expect("Height should not overflow here.");
+            let next_height = height
+                .next()
+                .expect("Zebra should never reach the max height in normal operation.");
 
             if self.orchard_trees_by_height.get(&next_height).is_none() {
                 // TODO: Use `try_insert` once it stabilises.
