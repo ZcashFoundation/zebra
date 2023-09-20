@@ -42,7 +42,14 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     (
         // TODO: should we be subtracting 1 from the maximum timestamp?
         DateTime::<Utc>::MIN_UTC.timestamp()..=DateTime::<Utc>::MAX_UTC.timestamp(),
-        0..2_000_000_000_u32,
+        // > The nanosecond part can exceed 1,000,000,000 in order to represent a leap second,
+        // > but only when secs % 60 == 59. (The true "UNIX timestamp" cannot represent a leap second
+        // > unambiguously.)
+        //
+        // https://docs.rs/chrono/latest/chrono/offset/trait.TimeZone.html#method.timestamp_opt
+        //
+        // We use `1_000_000_000` as the right side of the range to avoid that issue.
+        0..1_000_000_000_u32,
     )
         .prop_map(|(secs, nsecs)| {
             Utc.timestamp_opt(secs, nsecs)
