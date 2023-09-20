@@ -356,7 +356,7 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             let prev_height = subtree
                 .end
                 .previous()
-                .expect("Height should not underflow here.");
+                .expect("underflow is impossible: Sapling activation is a long way from genesis");
 
             let Some(prev_tree) = db.sapling_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");

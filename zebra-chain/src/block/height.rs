@@ -27,7 +27,7 @@ pub struct Height(pub u32);
 
 #[derive(Error, Debug)]
 pub enum HeightError {
-    #[error("The resulting height would ovferflow Height::MAX.")]
+    #[error("The resulting height would overflow Height::MAX.")]
     Overflow,
     #[error("The resulting height would underflow Height::MIN.")]
     Underflow,
