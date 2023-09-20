@@ -24,6 +24,7 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -33,11 +34,32 @@ impl ZebraDb {
     /// Returns the ZIP-221 history tree of the finalized tip or `None`
     /// if it does not exist yet in the state (pre-Heartwood).
     pub fn history_tree(&self) -> Arc<HistoryTree> {
-        if let Some(height) = self.finalized_tip_height() {
+        if self.finalized_tip_height().is_some() {
             let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
 
-            let history_tree: Option<NonEmptyHistoryTree> =
-                self.db.zs_get(&history_tree_cf, &height);
+            // # Concurrency
+            //
+            // There is only one tree in this column family, which is atomically updated by a block
+            // write batch (database transaction). If this update runs between the height read and
+            // the tree read, the height will be wrong, and the tree will be missing.
+            // That could cause consensus bugs.
+            //
+            // Instead, always read the last tree in the column family, regardless of height.
+            //
+            // See ticket #7581 for more details.
+            //
+            // TODO: this concurrency bug will be permanently fixed in PR #7392,
+            //       by changing the block update to overwrite the tree, rather than deleting it.
+            //
+            // # Forwards Compatibility
+            //
+            // This code can read the column family format in 1.2.0 and earlier (tip height key),
+            // and after PR #7392 is merged (empty key).
+            let history_tree: Option<NonEmptyHistoryTree> = self
+                .db
+                .zs_last_key_value(&history_tree_cf)
+                // RawBytes will deserialize both Height and `()` (empty) keys.
+                .map(|(_key, value): (RawBytes, _)| value);
 
             if let Some(non_empty_tree) = history_tree {
                 return Arc::new(HistoryTree::from(non_empty_tree));
