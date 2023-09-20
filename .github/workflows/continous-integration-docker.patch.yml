@@ -93,8 +93,8 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  generate-checkpoints-mainnet:
-    name: Generate checkpoints mainnet / Run generate-checkpoints-mainnet test
+  gen-checkpoints-mainnet:
+    name: Generate checkpoints mainnet / Run gen-checkpoints-mainnet test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
