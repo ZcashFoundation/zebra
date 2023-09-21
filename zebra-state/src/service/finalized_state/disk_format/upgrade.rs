@@ -369,8 +369,12 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?
-            .expect("new, upgraded, or downgraded database format is valid");
+        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?.unwrap_or_else(|_| {
+            panic!(
+                "unexpected invalid database format: delete and re-sync the database at '{:?}'",
+                upgrade_db.path()
+            )
+        });
 
         let inital_disk_version = self
             .initial_disk_version()
