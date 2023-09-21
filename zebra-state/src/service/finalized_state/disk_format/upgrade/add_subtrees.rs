@@ -365,7 +365,12 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
-            let Some(prev_tree) = db.sapling_tree_by_height(&subtree.end.previous()) else {
+            let prev_height = subtree
+                .end
+                .previous()
+                .expect("Note commitment subtrees should not end at the minimal height.");
+
+            let Some(prev_tree) = db.sapling_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
                 error!(?result, ?subtree.end);
                 continue;
@@ -477,7 +482,12 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
-            let Some(prev_tree) = db.orchard_tree_by_height(&subtree.end.previous()) else {
+            let prev_height = subtree
+                .end
+                .previous()
+                .expect("Note commitment subtrees should not end at the minimal height.");
+
+            let Some(prev_tree) = db.orchard_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
                 error!(?result, ?subtree.end);
                 continue;
