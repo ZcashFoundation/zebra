@@ -141,9 +141,6 @@ impl ZebraDb {
         if let Some(format_change_handle) = self.format_change_handle.as_mut() {
             format_change_handle.check_for_panics();
         }
-
-        // This check doesn't panic, but we want to check it regularly anyway.
-        self.check_max_on_disk_tip_height();
     }
 
     /// Shut down the database, cleaning up background tasks and ephemeral data.
@@ -178,17 +175,20 @@ impl ZebraDb {
     /// # Logs an Error
     ///
     /// If Zebra is storing block heights that are close to [`MAX_ON_DISK_HEIGHT`].
-    fn check_max_on_disk_tip_height(&self) {
+    pub(crate) fn check_max_on_disk_tip_height(&self) -> Result<(), String> {
         if let Some((tip_height, tip_hash)) = self.tip() {
             if tip_height.0 > MAX_ON_DISK_HEIGHT.0 / 2 {
-                error!(
-                    ?tip_height,
-                    ?tip_hash,
-                    ?MAX_ON_DISK_HEIGHT,
-                    "unexpectedly large tip height, database format upgrade required",
-                );
+                let err = Err(format!(
+                    "unexpectedly large tip height, database format upgrade required: \
+                     tip height: {tip_height:?}, tip hash: {tip_hash:?}, \
+                     max height: {MAX_ON_DISK_HEIGHT:?}"
+                ));
+                error!(?err);
+                return err;
             }
         }
+
+        Ok(())
     }
 }
 

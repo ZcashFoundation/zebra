@@ -558,7 +558,8 @@ impl DbFormatChange {
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
-        //
+        results.push(db.check_max_on_disk_tip_height());
+
         // This check can be run before the upgrade, but the upgrade code is finished, so we don't
         // run it early any more. (If future code changes accidentally make it depend on the
         // upgrade, they would accidentally break compatibility with older Zebra cached states.)
