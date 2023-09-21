@@ -70,7 +70,7 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
-        os: [ubuntu-latest]
+        os: [zfnd-runners]
         rust: [stable, beta]
         features: ["", " --features getblocktemplate-rpcs"]
         exclude:
@@ -84,7 +84,7 @@ jobs:
             features: " --features getblocktemplate-rpcs"
         # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
         # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
-          - os: ubuntu-latest
+          - os: zfnd-runners
             rust: beta
             features: " --features getblocktemplate-rpcs"
 
