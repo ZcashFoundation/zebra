@@ -45,6 +45,9 @@ pub struct ZebraDb {
     //
     // This configuration cannot be modified after the database is initialized,
     // because some clones would have different values.
+    //
+    /// Should format upgrades and format checks be skipped for this instance?
+    /// Only used in test code.
     debug_skip_format_upgrades: bool,
 
     // Owned State
@@ -88,24 +91,31 @@ impl ZebraDb {
             db: DiskDb::new(config, network),
         };
 
-        db.check_max_on_disk_tip_height();
+        db.spawn_format_change(config, network, format_change);
+
+        db
+    }
+
+    /// Launch any required format changes or format checks, and store their thread handle.
+    pub fn spawn_format_change(
+        &mut self,
+        config: &Config,
+        network: Network,
+        format_change: DbFormatChange,
+    ) {
+        // Always do format upgrades & checks in production code.
+        if cfg!(test) && self.debug_skip_format_upgrades {
+            return;
+        }
 
         // We have to get this height before we spawn the upgrade task, because threads can take
         // a while to start, and new blocks can be committed as soon as we return from this method.
-        let initial_tip_height = db.finalized_tip_height();
+        let initial_tip_height = self.finalized_tip_height();
 
-        // Always do format upgrades & checks in production code.
-        if cfg!(test) && db.debug_skip_format_upgrades {
-            return db;
-        }
-
-        // Launch any required format changes or format checks,
-        // and put their handle in the database.
-        //
-        // `upgrade_db` is a special clone of the database, which can't be used to shut down
+        // `upgrade_db` is a special clone of this database, which can't be used to shut down
         // the upgrade task. (Because the task hasn't been launched yet,
-        // `db.format_change_handle` is always None.)
-        let upgrade_db = db.clone();
+        // its `db.format_change_handle` is always None.)
+        let upgrade_db = self.clone();
 
         // TODO:
         // - should debug_stop_at_height wait for the upgrade task to finish?
@@ -118,9 +128,7 @@ impl ZebraDb {
             upgrade_db,
         );
 
-        db.format_change_handle = Some(format_change_handle);
-
-        db
+        self.format_change_handle = Some(format_change_handle);
     }
 
     /// Returns the configured network for this database.
