@@ -300,7 +300,7 @@ impl DbFormatChange {
 
     /// Run a format change in the database, or check the format of the database once.
     #[allow(clippy::unwrap_in_result)]
-    fn run_format_change_or_check(
+    pub(crate) fn run_format_change_or_check(
         &self,
         config: &Config,
         network: Network,

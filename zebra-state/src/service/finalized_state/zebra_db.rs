@@ -9,7 +9,10 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{mpsc, Arc},
+};
 
 use zebra_chain::parameters::Network;
 
@@ -46,6 +49,11 @@ pub struct ZebraDb {
     // This configuration cannot be modified after the database is initialized,
     // because some clones would have different values.
     //
+    /// The configuration for the database.
+    //
+    // TODO: use the database and version paths instead, and refactor the upgrade code to use paths
+    config: Arc<Config>,
+
     /// Should format upgrades and format checks be skipped for this instance?
     /// Only used in test code.
     debug_skip_format_upgrades: bool,
@@ -82,6 +90,7 @@ impl ZebraDb {
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
+            config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
             // After the database directory is created, a newly created database temporarily
@@ -168,6 +177,42 @@ impl ZebraDb {
         if force || self.db.shared_database_owners() <= 1 {
             if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
+            }
+
+            // # Correctness
+            //
+            // Check that the database format is correct before shutting down.
+            // This lets users know to delete and re-sync their database immediately,
+            // rather than surprising them next time Zebra starts up.
+            //
+            // # Testinng
+            //
+            // In Zebra's CI, panicking here stops us writing invalid cached states,
+            // which would then get make unrelated PRs fail when Zebra starts up.
+
+            // If the upgrade has completed, or we've done a downgrade, check the state is valid.
+            let disk_version = database_format_version_on_disk(&self.config, self.network())
+                .expect("unexpected invalid or unreadable database version file");
+
+            if let Some(disk_version) = disk_version {
+                // We need to keep the cancel handle until the format check has finished,
+                // because dropping it cancels the format check.
+                let (_never_cancel_handle, never_cancel_receiver) = mpsc::sync_channel(1);
+
+                // We block here because the checks are quick and database validity is
+                // consensus-critical.
+                if disk_version >= database_format_version_in_code() {
+                    DbFormatChange::check_new_blocks()
+                        .run_format_change_or_check(
+                            &self.config,
+                            self.network(),
+                            // This argument is not used by the format check.
+                            None,
+                            self,
+                            &never_cancel_receiver,
+                        )
+                        .expect("cancel handle is never used");
+                }
             }
         }
 
