@@ -1,7 +1,8 @@
-//! In-place format upgrades for the Zebra state database.
+//! In-place format upgrades and format validity checks for the Zebra state database.
 
 use std::{
     cmp::Ordering,
+    convert::Infallible,
     sync::{mpsc, Arc},
     thread::{self, JoinHandle},
 };
@@ -22,7 +23,9 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk,
-    constants::{latest_version_for_adding_subtrees, DATABASE_FORMAT_VERSION},
+    constants::{
+        latest_version_for_adding_subtrees, DATABASE_FORMAT_CHECK_INTERVAL, DATABASE_FORMAT_VERSION,
+    },
     database_format_version_in_code, database_format_version_on_disk,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
     Config,
@@ -30,30 +33,11 @@ use crate::{
 
 pub(crate) mod add_subtrees;
 
-/// The kind of database format change we're performing.
+/// The kind of database format change or validity check we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DbFormatChange {
-    /// Mark the format as newly created by `running_version`.
-    ///
-    /// Newly created databases are opened with no disk version.
-    /// It is set to the running version by the format change code.
-    NewlyCreated { running_version: Version },
-
-    /// Check that the database from a previous instance has the current `running_version` format.
-    ///
-    /// Current version databases have a disk version that matches the running version.
-    /// No upgrades are needed, so we just run a format check on the database.
-    /// The data in that database was created or updated by a previous Zebra instance.
-    OpenCurrent { running_version: Version },
-
-    /// Check that the database from this instance has the current `running_version` format.
-    ///
-    /// The data in that database was created or updated by the currently running Zebra instance.
-    /// So we periodically check for data bugs, which can happen if the upgrade and new block
-    /// code produce different data. (They can also be caused by disk corruption.)
-    #[allow(dead_code)]
-    CheckNewBlocksCurrent { running_version: Version },
-
+    // Data Format Changes
+    //
     /// Upgrade the format from `older_disk_version` to `newer_running_version`.
     ///
     /// Until this upgrade is complete, the format is a mixture of both versions.
@@ -61,6 +45,14 @@ pub enum DbFormatChange {
         older_disk_version: Version,
         newer_running_version: Version,
     },
+
+    // Format Version File Changes
+    //
+    /// Mark the format as newly created by `running_version`.
+    ///
+    /// Newly created databases are opened with no disk version.
+    /// It is set to the running version by the format change code.
+    NewlyCreated { running_version: Version },
 
     /// Mark the format as downgraded from `newer_disk_version` to `older_running_version`.
     ///
@@ -70,6 +62,22 @@ pub enum DbFormatChange {
         newer_disk_version: Version,
         older_running_version: Version,
     },
+
+    // Data Format Checks
+    //
+    /// Check that the database from a previous instance has the current `running_version` format.
+    ///
+    /// Current version databases have a disk version that matches the running version.
+    /// No upgrades are needed, so we just run a format check on the database.
+    /// The data in that database was created or updated by a previous Zebra instance.
+    CheckOpenCurrent { running_version: Version },
+
+    /// Check that the database from this instance has the current `running_version` format.
+    ///
+    /// The data in that database was created or updated by the currently running Zebra instance.
+    /// So we periodically check for data bugs, which can happen if the upgrade and new block
+    /// code produce different data. (They can also be caused by disk corruption.)
+    CheckNewBlocksCurrent { running_version: Version },
 }
 
 /// A handle to a spawned format change thread.
@@ -81,21 +89,22 @@ pub enum DbFormatChange {
 /// Cancelling the thread on drop has a race condition, because two handles can be dropped at
 /// the same time.
 ///
-/// If cancelling the thread is important, the owner of the handle must call force_cancel().
+/// If cancelling the thread is required for correct operation or usability, the owner of the
+/// handle must call force_cancel().
 #[derive(Clone, Debug)]
 pub struct DbFormatChangeThreadHandle {
-    /// A handle that can wait for the running format change thread to finish.
+    /// A handle to the format change/check thread.
+    /// This thread continues running so it can perform periodic format checks.
     ///
     /// Panics from this thread are propagated into Zebra's state service.
     /// The task returns an error if the upgrade was cancelled by a shutdown.
-    update_task: Option<Arc<JoinHandle<Result<(), CancelFormatChange>>>>,
+    update_task: Option<Arc<JoinHandle<Result<Infallible, CancelFormatChange>>>>,
 
-    /// A channel that tells the running format thread to finish early.
     /// A channel that tells the running format thread to finish early.
     cancel_handle: mpsc::SyncSender<CancelFormatChange>,
 }
 
-/// Marker for cancelling a format upgrade.
+/// Marker type that is sent to cancel a format upgrade, and returned as a error on cancellation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct CancelFormatChange;
 
@@ -105,7 +114,7 @@ impl DbFormatChange {
     /// Also logs that change at info level.
     ///
     /// If `disk_version` is `None`, Zebra is creating a new database.
-    pub fn open(running_version: Version, disk_version: Option<Version>) -> Self {
+    pub fn open_database(running_version: Version, disk_version: Option<Version>) -> Self {
         let Some(disk_version) = disk_version else {
             info!(
                 %running_version,
@@ -143,19 +152,20 @@ impl DbFormatChange {
             Ordering::Equal => {
                 info!(%running_version, "trying to open current database format");
 
-                OpenCurrent { running_version }
+                CheckOpenCurrent { running_version }
             }
         }
     }
 
-    /// Returns a format check for newly added blocks in `running_version`.
+    /// Returns a format check for newly added blocks in the currently running Zebra version.
     /// This check makes sure the upgrade and new block code produce the same data.
     ///
     /// Also logs the check at info level.
-    #[allow(dead_code)]
-    pub fn check_new_blocks(running_version: Version) -> Self {
+    pub fn check_new_blocks() -> Self {
+        let running_version = database_format_version_in_code();
+
         info!(%running_version, "checking new blocks were written in current database format");
-        NewlyCreated { running_version }
+        CheckNewBlocksCurrent { running_version }
     }
 
     /// Returns true if this format change/check is an upgrade.
@@ -170,10 +180,48 @@ impl DbFormatChange {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
 
-    /// Launch a `std::thread` that applies this format change to the database.
+    /// Returns the running version in this format change.
+    pub fn running_version(&self) -> Version {
+        match self {
+            Upgrade {
+                newer_running_version,
+                ..
+            } => newer_running_version,
+            Downgrade {
+                older_running_version,
+                ..
+            } => older_running_version,
+            NewlyCreated { running_version }
+            | CheckOpenCurrent { running_version }
+            | CheckNewBlocksCurrent { running_version } => running_version,
+        }
+        .clone()
+    }
+
+    /// Returns the initial database version before this format change.
+    ///
+    /// Returns `None` if the database was newly created.
+    pub fn initial_disk_version(&self) -> Option<Version> {
+        match self {
+            Upgrade {
+                older_disk_version, ..
+            } => Some(older_disk_version),
+            Downgrade {
+                newer_disk_version, ..
+            } => Some(newer_disk_version),
+            CheckOpenCurrent { running_version } | CheckNewBlocksCurrent { running_version } => {
+                Some(running_version)
+            }
+            NewlyCreated { .. } => None,
+        }
+        .cloned()
+    }
+
+    /// Launch a `std::thread` that applies this format change to the database,
+    /// then continues running to perform periodic format checks.
     ///
     /// `initial_tip_height` is the database height when it was opened, and `upgrade_db` is the
-    /// database instance to upgrade.
+    /// database instance to upgrade or check.
     pub fn spawn_format_change(
         self,
         config: Config,
@@ -190,7 +238,7 @@ impl DbFormatChange {
         let span = Span::current();
         let update_task = thread::spawn(move || {
             span.in_scope(move || {
-                self.apply_format_change(
+                self.format_change_run_loop(
                     config,
                     network,
                     initial_tip_height,
@@ -210,20 +258,49 @@ impl DbFormatChange {
         handle
     }
 
-    /// Apply this format change to the database.
+    /// Run the initial format change or check to the database, then periodically check the format
+    /// of newly added blocks matches the current format.
     ///
-    /// Format changes are launched in an independent `std::thread` by `apply_format_upgrade()`.
-    /// This thread runs until the upgrade is finished or cancelled.
-    ///
-    /// See `apply_format_upgrade()` for details.
-    #[allow(clippy::unwrap_in_result)]
-    fn apply_format_change(
+    /// This method runs until it is cancelled or panics.
+    fn format_change_run_loop(
         self,
         config: Config,
         network: Network,
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+    ) -> Result<Infallible, CancelFormatChange> {
+        self.run_format_change_or_check(
+            &config,
+            network,
+            initial_tip_height,
+            &upgrade_db,
+            &cancel_receiver,
+        )?;
+
+        loop {
+            // We've just run a format check, so sleep first, then run another one.
+            thread::sleep(DATABASE_FORMAT_CHECK_INTERVAL);
+
+            Self::check_new_blocks().run_format_change_or_check(
+                &config,
+                network,
+                initial_tip_height,
+                &upgrade_db,
+                &cancel_receiver,
+            )?;
+        }
+    }
+
+    /// Run a format change in the database, or check the format of the database once.
+    #[allow(clippy::unwrap_in_result)]
+    fn run_format_change_or_check(
+        &self,
+        config: &Config,
+        network: Network,
+        initial_tip_height: Option<Height>,
+        upgrade_db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
@@ -231,12 +308,12 @@ impl DbFormatChange {
                 config,
                 network,
                 initial_tip_height,
-                upgrade_db.clone(),
-                &cancel_receiver,
+                upgrade_db,
+                cancel_receiver,
             )?,
 
             NewlyCreated { .. } => {
-                Self::mark_as_newly_created(&config, network);
+                Self::mark_as_newly_created(config, network);
             }
 
             Downgrade { .. } => {
@@ -245,7 +322,7 @@ impl DbFormatChange {
                 // At the start of a format downgrade, the database must be marked as partially or
                 // fully downgraded. This lets newer Zebra versions know that some blocks with older
                 // formats have been added to the database.
-                Self::mark_as_downgraded(&config, network);
+                Self::mark_as_downgraded(config, network);
 
                 // Older supported versions just assume they can read newer formats,
                 // because they can't predict all changes a newer Zebra version could make.
@@ -254,7 +331,7 @@ impl DbFormatChange {
                 // We do this on a best-effort basis for versions that are still supported.
             }
 
-            OpenCurrent { running_version } => {
+            CheckOpenCurrent { running_version } => {
                 // If we're re-opening a previously upgraded or newly created database,
                 // the database format should be valid. This check is done below.
                 info!(
@@ -286,8 +363,17 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(&upgrade_db, &cancel_receiver)?
+        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?
             .expect("new, upgraded, or downgraded database format is valid");
+
+        let inital_disk_version = self
+            .initial_disk_version()
+            .map_or_else(|| "None".to_string(), |version| version.to_string());
+        info!(
+            running_version = %self.running_version(),
+            %inital_disk_version,
+            "database format is valid"
+        );
 
         Ok(())
     }
@@ -304,11 +390,11 @@ impl DbFormatChange {
     // New format upgrades must be added to the *end* of this method.
     #[allow(clippy::unwrap_in_result)]
     fn apply_format_upgrade(
-        self,
-        config: Config,
+        &self,
+        config: &Config,
         network: Network,
         initial_tip_height: Option<Height>,
-        db: ZebraDb,
+        db: &ZebraDb,
         cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
@@ -330,7 +416,7 @@ impl DbFormatChange {
                 "marking empty database as upgraded"
             );
 
-            Self::mark_as_upgraded_to(&database_format_version_in_code(), &config, network);
+            Self::mark_as_upgraded_to(&database_format_version_in_code(), config, network);
 
             info!(
                 %newer_running_version,
@@ -347,7 +433,7 @@ impl DbFormatChange {
             Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
 
         // Check if we need to prune the note commitment trees in the database.
-        if older_disk_version < version_for_pruning_trees {
+        if older_disk_version < &version_for_pruning_trees {
             let timer = CodeTimer::start();
 
             // Prune duplicate Sapling note commitment trees.
@@ -368,7 +454,7 @@ impl DbFormatChange {
                 // Delete any duplicate trees.
                 if tree == last_tree {
                     let mut batch = DiskWriteBatch::new();
-                    batch.delete_sapling_tree(&db, &height);
+                    batch.delete_sapling_tree(db, &height);
                     db.write_batch(batch)
                         .expect("Deleting Sapling note commitment trees should always succeed.");
                 }
@@ -395,7 +481,7 @@ impl DbFormatChange {
                 // Delete any duplicate trees.
                 if tree == last_tree {
                     let mut batch = DiskWriteBatch::new();
-                    batch.delete_orchard_tree(&db, &height);
+                    batch.delete_orchard_tree(db, &height);
                     db.write_batch(batch)
                         .expect("Deleting Orchard note commitment trees should always succeed.");
                 }
@@ -405,12 +491,12 @@ impl DbFormatChange {
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(&db, cancel_receiver)?
+            Self::check_for_duplicate_trees(db, cancel_receiver)?
                 .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&version_for_pruning_trees, &config, network);
+            Self::mark_as_upgraded_to(&version_for_pruning_trees, config, network);
 
             timer.finish(module_path!(), line!(), "deduplicate trees upgrade");
         }
@@ -422,23 +508,23 @@ impl DbFormatChange {
             Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
 
         // Check if we need to add or fix note commitment subtrees in the database.
-        if older_disk_version < latest_version_for_adding_subtrees {
+        if older_disk_version < &latest_version_for_adding_subtrees {
             let timer = CodeTimer::start();
 
-            if older_disk_version >= first_version_for_adding_subtrees {
+            if older_disk_version >= &first_version_for_adding_subtrees {
                 // Clear previous upgrade data, because it was incorrect.
-                add_subtrees::reset(initial_tip_height, &db, cancel_receiver)?;
+                add_subtrees::reset(initial_tip_height, db, cancel_receiver)?;
             }
 
-            add_subtrees::run(initial_tip_height, &db, cancel_receiver)?;
+            add_subtrees::run(initial_tip_height, db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            add_subtrees::subtree_format_validity_checks_detailed(&db, cancel_receiver)?
+            add_subtrees::subtree_format_validity_checks_detailed(db, cancel_receiver)?
                 .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, &config, network);
+            Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, config, network);
 
             timer.finish(module_path!(), line!(), "add subtrees upgrade");
         }

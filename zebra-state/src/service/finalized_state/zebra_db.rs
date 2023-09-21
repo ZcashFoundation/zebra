@@ -75,7 +75,7 @@ impl ZebraDb {
             .expect("unable to read database format version file");
 
         // Log any format changes before opening the database, in case opening fails.
-        let format_change = DbFormatChange::open(running_version, disk_version);
+        let format_change = DbFormatChange::open_database(running_version, disk_version);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
