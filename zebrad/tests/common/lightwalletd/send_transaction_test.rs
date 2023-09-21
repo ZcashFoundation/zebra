@@ -191,7 +191,7 @@ pub async fn run() -> Result<()> {
     zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
-    let mut counter = 0;
+    let mut _counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
         let hash = transaction::Hash::from_bytes_in_display_order(&hash);
@@ -202,39 +202,32 @@ pub async fn run() -> Result<()> {
              in isolated mempool: {tx:?}",
         );
 
-        counter += 1;
+        _counter += 1;
     }
 
-    // TODO: This test is working locally in some environments, failing in others, failing always in the CI.
+    // TODO: This check sometimes works and sometimes it doesn't so we can't just enable it.
     // https://github.com/ZcashFoundation/zebra/issues/7529
     //assert!(
     //    counter >= 1,
     //    "all transactions from future blocks failed to send to an isolated mempool"
     //);
-    assert_eq!(
-        counter, 0,
-        "developers: should fail if `get_mempool_tx` start working."
-    );
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
-    let mut counter = 0;
+    let mut _counter = 0;
     while let Some(_tx) = transaction_stream.message().await? {
         // TODO: check tx.data or tx.height here?
-        counter += 1;
+        _counter += 1;
     }
 
-    // TODO: This is not working, found out why.
+    // TODO: This check sometimes works and sometimes it doesn't so we can't just enable it.
+    // https://github.com/ZcashFoundation/zebra/issues/7529
     //assert!(
     //    counter >= 1,
     //    "all transactions from future blocks failed to send to an isolated mempool"
     //);
-    assert_eq!(
-        counter, 0,
-        "developers: should fail if `get_mempool_stream` start working."
-    );
 
     Ok(())
 }
