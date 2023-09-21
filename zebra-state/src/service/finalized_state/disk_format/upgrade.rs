@@ -280,7 +280,13 @@ impl DbFormatChange {
 
         loop {
             // We've just run a format check, so sleep first, then run another one.
-            thread::sleep(DATABASE_FORMAT_CHECK_INTERVAL);
+            // But return early if there is a cancel signal.
+            if !matches!(
+                cancel_receiver.recv_timeout(DATABASE_FORMAT_CHECK_INTERVAL),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
+                return Err(CancelFormatChange);
+            }
 
             Self::check_new_blocks().run_format_change_or_check(
                 &config,
