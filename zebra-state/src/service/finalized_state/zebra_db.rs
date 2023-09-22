@@ -19,7 +19,7 @@ use crate::{
         disk_db::DiskDb,
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
-            upgrade::{self, DbFormatChange, DbFormatChangeThreadHandle},
+            upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
     Config,
@@ -41,6 +41,15 @@ pub mod arbitrary;
 /// the database is closed.
 #[derive(Clone, Debug)]
 pub struct ZebraDb {
+    // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    //
+    /// Should format upgrades and format checks be skipped for this instance?
+    /// Only used in test code.
+    debug_skip_format_upgrades: bool,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -69,10 +78,11 @@ impl ZebraDb {
             .expect("unable to read database format version file");
 
         // Log any format changes before opening the database, in case opening fails.
-        let format_change = DbFormatChange::new(running_version, disk_version);
+        let format_change = DbFormatChange::open_database(running_version, disk_version);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
+            debug_skip_format_upgrades,
             format_change_handle: None,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
@@ -81,52 +91,44 @@ impl ZebraDb {
             db: DiskDb::new(config, network),
         };
 
-        db.check_max_on_disk_tip_height();
+        db.spawn_format_change(config, network, format_change);
+
+        db
+    }
+
+    /// Launch any required format changes or format checks, and store their thread handle.
+    pub fn spawn_format_change(
+        &mut self,
+        config: &Config,
+        network: Network,
+        format_change: DbFormatChange,
+    ) {
+        // Always do format upgrades & checks in production code.
+        if cfg!(test) && self.debug_skip_format_upgrades {
+            return;
+        }
 
         // We have to get this height before we spawn the upgrade task, because threads can take
         // a while to start, and new blocks can be committed as soon as we return from this method.
-        let initial_tip_height = db.finalized_tip_height();
+        let initial_tip_height = self.finalized_tip_height();
 
-        // Always do format upgrades & checks in production code.
-        if cfg!(test) && debug_skip_format_upgrades {
-            return db;
-        }
+        // `upgrade_db` is a special clone of this database, which can't be used to shut down
+        // the upgrade task. (Because the task hasn't been launched yet,
+        // its `db.format_change_handle` is always None.)
+        let upgrade_db = self.clone();
 
-        // Start any required format changes, and do format checks.
-        //
-        // TODO: should debug_stop_at_height wait for these upgrades, or not?
-        if let Some(format_change) = format_change {
-            // Launch the format change and install its handle in the database.
-            //
-            // `upgrade_db` is a special clone of the database, which can't be used to shut down
-            // the upgrade task. (Because the task hasn't been launched yet,
-            // `db.format_change_handle` is always None.)
-            //
-            // It can be a FinalizedState if needed, or the FinalizedState methods needed for
-            // upgrades can be moved to ZebraDb.
-            let upgrade_db = db.clone();
+        // TODO:
+        // - should debug_stop_at_height wait for the upgrade task to finish?
+        // - if needed, make upgrade_db into a FinalizedState,
+        //   or move the FinalizedState methods needed for upgrades to ZebraDb.
+        let format_change_handle = format_change.spawn_format_change(
+            config.clone(),
+            network,
+            initial_tip_height,
+            upgrade_db,
+        );
 
-            let format_change_handle = format_change.spawn_format_change(
-                config.clone(),
-                network,
-                initial_tip_height,
-                upgrade_db,
-            );
-
-            db.format_change_handle = Some(format_change_handle);
-        } else {
-            // If we're re-opening a previously upgraded or newly created database,
-            // the database format should be valid.
-            // (There's no format change here, so the format change checks won't run.)
-            //
-            // Do the quick checks first, then the slower checks.
-            upgrade::add_subtrees::quick_check(&db);
-
-            DbFormatChange::check_for_duplicate_trees(db.clone());
-            upgrade::add_subtrees::check(&db);
-        }
-
-        db
+        self.format_change_handle = Some(format_change_handle);
     }
 
     /// Returns the configured network for this database.
@@ -147,9 +149,6 @@ impl ZebraDb {
         if let Some(format_change_handle) = self.format_change_handle.as_mut() {
             format_change_handle.check_for_panics();
         }
-
-        // This check doesn't panic, but we want to check it regularly anyway.
-        self.check_max_on_disk_tip_height();
     }
 
     /// Shut down the database, cleaning up background tasks and ephemeral data.
@@ -184,17 +183,20 @@ impl ZebraDb {
     /// # Logs an Error
     ///
     /// If Zebra is storing block heights that are close to [`MAX_ON_DISK_HEIGHT`].
-    fn check_max_on_disk_tip_height(&self) {
+    pub(crate) fn check_max_on_disk_tip_height(&self) -> Result<(), String> {
         if let Some((tip_height, tip_hash)) = self.tip() {
             if tip_height.0 > MAX_ON_DISK_HEIGHT.0 / 2 {
-                error!(
-                    ?tip_height,
-                    ?tip_hash,
-                    ?MAX_ON_DISK_HEIGHT,
-                    "unexpectedly large tip height, database format upgrade required",
-                );
+                let err = Err(format!(
+                    "unexpectedly large tip height, database format upgrade required: \
+                     tip height: {tip_height:?}, tip hash: {tip_hash:?}, \
+                     max height: {MAX_ON_DISK_HEIGHT:?}"
+                ));
+                error!(?err);
+                return err;
             }
         }
+
+        Ok(())
     }
 }
 

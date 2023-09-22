@@ -145,20 +145,22 @@ pub fn reset(
 /// This allows us to fail the upgrade quickly in tests and during development,
 /// rather than waiting ~20 minutes to see if it failed.
 ///
-/// # Panics
-///
-/// If a note commitment subtree is missing or incorrect.
-pub fn quick_check(db: &ZebraDb) {
+/// This check runs the first subtree calculation, but it doesn't read the subtree data in the
+/// database. So it can be run before the upgrade is started.
+pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
+    // Check the entire format before returning any errors.
     let sapling_result = quick_check_sapling_subtrees(db);
     let orchard_result = quick_check_orchard_subtrees(db);
 
     if sapling_result.is_err() || orchard_result.is_err() {
-        // TODO: when the check functions are refactored so they are called from a single function,
-        //       move this panic into that function, but still log a detailed message here
-        panic!(
+        let err = Err(format!(
             "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        );
+        ));
+        warn!(?err);
+        return err;
     }
+
+    Ok(())
 }
 
 /// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
@@ -300,34 +302,40 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 }
 
 /// Check that note commitment subtrees were correctly added.
-///
-/// # Panics
-///
-/// If a note commitment subtree is missing or incorrect.
-pub fn check(db: &ZebraDb) {
-    // This check is partly redundant, but we want to make sure it's never missed.
-    quick_check(db);
+pub fn subtree_format_validity_checks_detailed(
+    db: &ZebraDb,
+    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+) -> Result<Result<(), String>, CancelFormatChange> {
+    // This is redundant in some code paths, but not in others. But it's quick anyway.
+    let quick_result = subtree_format_calculation_pre_checks(db);
 
-    let sapling_result = check_sapling_subtrees(db);
-    let orchard_result = check_orchard_subtrees(db);
+    // Check the entire format before returning any errors.
+    let sapling_result = check_sapling_subtrees(db, cancel_receiver)?;
+    let orchard_result = check_orchard_subtrees(db, cancel_receiver)?;
 
-    if sapling_result.is_err() || orchard_result.is_err() {
-        // TODO: when the check functions are refactored so they are called from a single function,
-        //       move this panic into that function, but still log a detailed message here
-        panic!(
-            "missing or bad subtree(s): sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        );
+    if quick_result.is_err() || sapling_result.is_err() || orchard_result.is_err() {
+        let err = Err(format!(
+            "missing or invalid subtree(s): \
+             quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
+        ));
+        warn!(?err);
+        return Ok(err);
     }
+
+    Ok(Ok(()))
 }
 
 /// Check that Sapling note commitment subtrees were correctly added.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
+fn check_sapling_subtrees(
+    db: &ZebraDb,
+    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
         db.sapling_tree().subtree_index()
     else {
-        return Ok(());
+        return Ok(Ok(()));
     };
 
     // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
@@ -337,6 +345,11 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
+        // Return early if the format check is cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             result = Err("missing subtree");
@@ -402,6 +415,11 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             }
         })
     {
+        // Return early if the format check is cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
         // Check that there's an entry for every completed sapling subtree root in all sapling trees
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             result = Err("missing subtree");
@@ -434,17 +452,20 @@ fn check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         );
     }
 
-    result
+    Ok(result)
 }
 
 /// Check that Orchard note commitment subtrees were correctly added.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
+fn check_orchard_subtrees(
+    db: &ZebraDb,
+    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
         db.orchard_tree().subtree_index()
     else {
-        return Ok(());
+        return Ok(Ok(()));
     };
 
     // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
@@ -454,6 +475,11 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
+        // Return early if the format check is cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             result = Err("missing subtree");
@@ -519,6 +545,11 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
             }
         })
     {
+        // Return early if the format check is cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
         // Check that there's an entry for every completed orchard subtree root in all orchard trees
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             result = Err("missing subtree");
@@ -551,7 +582,7 @@ fn check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         );
     }
 
-    result
+    Ok(result)
 }
 
 /// Calculates a note commitment subtree for Sapling, reading blocks from `read_db` if needed.
