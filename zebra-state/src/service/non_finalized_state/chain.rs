@@ -48,6 +48,29 @@ pub struct Chain {
     /// The configured network for this chain.
     network: Network,
 
+    /// The internal state of this chain.
+    inner: ChainInner,
+
+    // Diagnostics
+    //
+    /// The last height this chain forked at. Diagnostics only.
+    ///
+    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
+    /// for equality.
+    ///
+    /// We keep the same last fork height in both sides of a clone, because every new block clones
+    /// a chain, even if it's just growing that chain.
+    pub(super) last_fork_height: Option<Height>,
+    // # Note
+    //
+    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
+    // Some diagnostics only use the best chain, and others need to modify the Chain state,
+    // but that's difficult with `Arc<Chain>`s.
+}
+
+/// The internal state of [`Chain`].
+#[derive(PartialEq, Clone, Debug)]
+struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
@@ -185,22 +208,6 @@ pub struct Chain {
     /// When a new chain is created from the finalized tip,
     /// it is initialized with the finalized tip chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
-
-    // Diagnostics
-    //
-    /// The last height this chain forked at. Diagnostics only.
-    ///
-    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
-    /// for equality.
-    ///
-    /// We keep the same last fork height in both sides of a clone, because every new block clones
-    /// a chain, even if it's just growing that chain.
-    pub(super) last_fork_height: Option<Height>,
-    // # Note
-    //
-    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
-    // Some diagnostics only use the best chain, and others need to modify the Chain state,
-    // but that's difficult with `Arc<Chain>`s.
 }
 
 impl Chain {
@@ -214,8 +221,7 @@ impl Chain {
         history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
-        let mut chain = Self {
-            network,
+        let mut inner = ChainInner {
             blocks: Default::default(),
             height_by_hash: Default::default(),
             tx_loc_by_hash: Default::default(),
@@ -240,6 +246,11 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+        };
+
+        let mut chain = Self {
+            network,
+            inner,
             last_fork_height: None,
         };
 
@@ -263,49 +274,7 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn eq_internal_state(&self, other: &Chain) -> bool {
-        // blocks, heights, hashes
-        self.blocks == other.blocks &&
-            self.height_by_hash == other.height_by_hash &&
-            self.tx_loc_by_hash == other.tx_loc_by_hash &&
-
-            // transparent UTXOs
-            self.created_utxos == other.created_utxos &&
-            self.spent_utxos == other.spent_utxos &&
-
-            // note commitment trees
-            self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
-            self.sprout_trees_by_height == other.sprout_trees_by_height &&
-            self.sapling_trees_by_height == other.sapling_trees_by_height &&
-            self.orchard_trees_by_height == other.orchard_trees_by_height &&
-
-            // history trees
-            self.history_trees_by_height == other.history_trees_by_height &&
-
-            // note commitment subtrees
-            self.sapling_subtrees == other.sapling_subtrees &&
-            self.orchard_subtrees == other.orchard_subtrees &&
-
-            // anchors
-            self.sprout_anchors == other.sprout_anchors &&
-            self.sprout_anchors_by_height == other.sprout_anchors_by_height &&
-            self.sapling_anchors == other.sapling_anchors &&
-            self.sapling_anchors_by_height == other.sapling_anchors_by_height &&
-            self.orchard_anchors == other.orchard_anchors &&
-            self.orchard_anchors_by_height == other.orchard_anchors_by_height &&
-
-            // nullifiers
-            self.sprout_nullifiers == other.sprout_nullifiers &&
-            self.sapling_nullifiers == other.sapling_nullifiers &&
-            self.orchard_nullifiers == other.orchard_nullifiers &&
-
-            // transparent address indexes
-            self.partial_transparent_transfers == other.partial_transparent_transfers &&
-
-            // proof of work
-            self.partial_cumulative_work == other.partial_cumulative_work &&
-
-            // chain value pool balances
-            self.chain_value_pools == other.chain_value_pools
+        self.inner == other.inner
     }
 
     /// Returns the last fork height if that height is still in the non-finalized state.
