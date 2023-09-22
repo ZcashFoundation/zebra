@@ -104,7 +104,7 @@ pub struct DbFormatChangeThreadHandle {
     cancel_handle: mpsc::SyncSender<CancelFormatChange>,
 }
 
-/// Marker type that is sent to cancel a format upgrade, and returned as a error on cancellation.
+/// Marker type that is sent to cancel a format upgrade, and returned as an error on cancellation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct CancelFormatChange;
 
