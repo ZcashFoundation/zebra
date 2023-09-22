@@ -323,7 +323,18 @@ pub fn database_format_version_on_disk(
     network: Network,
 ) -> Result<Option<Version>, BoxError> {
     let version_path = config.version_file_path(network);
+    let db_path = config.db_path(network);
 
+    database_format_version_at_path(&version_path, &db_path)
+}
+
+/// Returns the full semantic version of the on-disk database at `version_path`.
+///
+/// See [`database_format_version_on_disk()`] for details.
+pub(crate) fn database_format_version_at_path(
+    version_path: &Path,
+    db_path: &Path,
+) -> Result<Option<Version>, BoxError> {
     let disk_version_file = match fs::read_to_string(version_path) {
         Ok(version) => Some(version),
         Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -345,8 +356,6 @@ pub fn database_format_version_on_disk(
             patch.parse()?,
         )));
     }
-
-    let db_path = config.db_path(network);
 
     // There's no version file on disk, so we need to guess the version
     // based on the database content
