@@ -188,7 +188,7 @@ impl ZebraDb {
             // # Testinng
             //
             // In Zebra's CI, panicking here stops us writing invalid cached states,
-            // which would then get make unrelated PRs fail when Zebra starts up.
+            // which would then make unrelated PRs fail when Zebra starts up.
 
             // If the upgrade has completed, or we've done a downgrade, check the state is valid.
             let disk_version = database_format_version_on_disk(&self.config, self.network())
