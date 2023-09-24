@@ -9,6 +9,7 @@ assignees: ''
 
 # Prepare for the Release
 
+- [ ] Make sure there has been [at least one full sync test](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml?query=event%3Aschedule) since the last state change, or start a manual full sync.
 - [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged.
       (See the release ticket checklist for details)
 
