@@ -66,32 +66,6 @@ on:
       - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
-  # to also run a job on Mergify head branches,
-  # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-
-  # Check if the cached state disks used by the tests are available for the default network.
-  #
-  # The default network is mainnet unless a manually triggered workflow or repository variable
-  # is configured differently.
-  #
-  # The outputs for this job have the same names as the workflow outputs in manual-find-cached-disks.yml
-  get-available-disks:
-    name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
-    uses: ./.github/workflows/manual-find-cached-disks.yml
-    with:
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-
-  # Check if the cached state disks used by the tests are available for testnet.
-  #
-  # The outputs for this job have the same names as the workflow outputs in manual-find-cached-disks.yml
-  # Some outputs are ignored, because we don't run those jobs on testnet.
-  get-available-disks-testnet:
-    name: Check if cached state disks exist for testnet
-    uses: ./.github/workflows/manual-find-cached-disks.yml
-    with:
-      network: 'Testnet'
-
   # Build the docker image used by the tests.
   #
   # The default network in the Zebra config in the image is mainnet, unless a manually triggered
@@ -109,13 +83,7 @@ jobs:
       rust_lib_backtrace: full
       rust_log: info
 
-  # zebrad tests without cached state
-
-  # TODO: make the non-cached-state tests use:
-  # network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-
   # Run all the zebra tests, including tests that are ignored by default.
-  # Skips tests that need a cached state disk or a lightwalletd binary.
   #
   # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
@@ -296,8 +264,8 @@ jobs:
       - name: Run tests using the default config
         run: |
           set -ex
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           # show the logs, even if the job times out
           docker logs --tail all --follow default-conf-tests | \
           tee --output-error=exit /dev/stderr | \
@@ -336,8 +304,8 @@ jobs:
       - name: Run tests using a testnet config
         run: |
           set -ex
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           # show the logs, even if the job times out
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
