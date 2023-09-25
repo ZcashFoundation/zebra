@@ -63,7 +63,7 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/ci-integration-tests-gcp.yml'
-      - '.github/workflows/cd-integration-tests-gcp.yml'
+      - '.github/workflows/cd-deploy-integration-tests-gcp.yml'
       - '.github/workflows/sub-build-docker-image.yml'
       - '.github/workflows/manual-find-cached-disks.yml'
 
@@ -87,7 +87,7 @@ on:
       - 'docker/**'
       - '.dockerignore'
       - '.github/workflows/ci-integration-tests-gcp.yml'
-      - '.github/workflows/cd-integration-tests-gcp.yml'
+      - '.github/workflows/cd-deploy-integration-tests-gcp.yml'
       - '.github/workflows/manual-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
@@ -147,7 +147,7 @@ jobs:
   regenerate-stateful-disks:
     name: Zebra checkpoint
     needs: [ build, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
     with:
       app_name: zebrad
@@ -176,7 +176,7 @@ jobs:
   test-stateful-sync:
     name: Zebra checkpoint update
     needs: [ regenerate-stateful-disks, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || needs.regenerate-stateful-disks.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
@@ -204,7 +204,7 @@ jobs:
   test-full-sync:
     name: Zebra tip
     needs: [ build, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
@@ -247,7 +247,7 @@ jobs:
   test-update-sync:
     name: Zebra tip update
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
@@ -280,7 +280,7 @@ jobs:
   generate-checkpoints-mainnet:
     name: Generate checkpoints mainnet
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
@@ -315,7 +315,7 @@ jobs:
   test-full-sync-testnet:
     name: Zebra tip on testnet
     needs: [ build, get-available-disks-testnet ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
@@ -361,7 +361,7 @@ jobs:
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [ test-full-sync-testnet, get-available-disks-testnet ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.test-full-sync-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
@@ -394,7 +394,7 @@ jobs:
   lightwalletd-full-sync:
     name: lightwalletd tip
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
@@ -434,7 +434,7 @@ jobs:
   lightwalletd-update-sync:
     name: lightwalletd tip update
     needs: [ lightwalletd-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -466,7 +466,7 @@ jobs:
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -491,7 +491,7 @@ jobs:
   lightwalletd-transactions-test:
     name: lightwalletd tip send
     needs: [ lightwalletd-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -518,7 +518,7 @@ jobs:
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests
     needs: [ lightwalletd-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -549,7 +549,7 @@ jobs:
   get-block-template-test:
     name: get block template
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
@@ -575,7 +575,7 @@ jobs:
   submit-block-test:
     name: submit block
     needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/cd-integration-tests-gcp.yml
+    uses: ./.github/workflows/cd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad

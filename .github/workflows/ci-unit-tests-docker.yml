@@ -37,7 +37,7 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/ci-unit-tests-docker.yml'
-      - '.github/workflows/cd-integration-tests-gcp.yml'
+      - '.github/workflows/cd-deploy-integration-tests-gcp.yml'
       - '.github/workflows/sub-build-docker-image.yml'
       - '.github/workflows/manual-find-cached-disks.yml'
 
@@ -61,7 +61,7 @@ on:
       - 'docker/**'
       - '.dockerignore'
       - '.github/workflows/ci-unit-tests-docker.yml'
-      - '.github/workflows/cd-integration-tests-gcp.yml'
+      - '.github/workflows/cd-deploy-integration-tests-gcp.yml'
       - '.github/workflows/manual-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
