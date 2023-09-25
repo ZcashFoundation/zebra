@@ -1,4 +1,4 @@
-name: zcash-lightwalletd
+name: Build lightwalletd
 
 # When the real job doesn't run because the files aren't changed,
 # run a fake CI job to satisfy the branch protection rules.

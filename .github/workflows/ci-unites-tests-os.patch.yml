@@ -1,4 +1,4 @@
-name: CI OSes
+name: Multi-OS Unit Tests
 
 on:
   pull_request:

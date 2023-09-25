@@ -1,4 +1,4 @@
-name: CI Docker
+name: Docker Unit Tests
 
 # These jobs *don't* depend on cached Google Cloud state disks,
 # so they can be skipped when the modified files make the actual workflow run.
