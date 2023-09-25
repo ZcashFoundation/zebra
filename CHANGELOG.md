@@ -24,9 +24,7 @@ strategy, and contains the following updates:
 - Add state requests and support code for the `z_getsubtreesbyindex` RPC (#7408)
 - Implement the `z_getsubtreesbyindex` RPC (#7436)
 - Add snapshot tests for the `z_getsubtreesbyindex` RPC (#7514)
-- Add fixed test vectors for `z_getsubtreesbyindex` from zcashd to zebra ([#7515]
-- Test `z_getsubtreesbyindex` using a lightwalletd gRPC request (#7521)
-- Use correct end heights for end of block subtrees during the full sync (#7566)
+- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566)
 - Format subtree roots in little-endian order (#7466)
 - Add note subtree indexes for new and existing blocks (#7437)
 - Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
