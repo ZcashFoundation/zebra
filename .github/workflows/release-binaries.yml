@@ -18,7 +18,7 @@ jobs:
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from git
 
-  # The image will be named `zebra:<semver>`
+  # The image will be named `zebra:<semver>`repair
   build:
     name: Build Release Docker
     uses: ./.github/workflows/build-docker-image.yml
@@ -43,3 +43,23 @@ jobs:
       rust_log: info
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
+
+  failure-issue:
+    name: Open or update issues for release binaries failures
+    # When a new job is added to this workflow, add it to this list.
+    #
+    # This list is for reliable jobs.
+    # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
+    needs: [ build ]
+    # Open tickets for any failed build in this workflow.
+    if: failure() || cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: jayqi/failed-build-issue-action@v1
+        with:
+          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
+          # New failures open an issue with this label.
+          label-name: S-ci-fail-binaries-auto-issue
+          # If there is already an open issue with this label, any failures become comments on that issue.
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
