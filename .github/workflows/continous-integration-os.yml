@@ -323,7 +323,7 @@ jobs:
   failure-issue:
     name: Open or update issues for OS integration failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ test,  install-from-lockfile-no-cache, check-cargo-lock, cargo-deny, unused-deps]
+    needs: [ test,  install-from-lockfile-no-cache, check-cargo-lock, cargo-deny, unused-deps ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)

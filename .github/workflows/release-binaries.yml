@@ -18,7 +18,7 @@ jobs:
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from git
 
-  # The image will be named `zebra:<semver>`repair
+  # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
     uses: ./.github/workflows/build-docker-image.yml
@@ -47,9 +47,6 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    #
-    # This list is for reliable jobs.
-    # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
     needs: [ build ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()

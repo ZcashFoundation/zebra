@@ -386,9 +386,6 @@ jobs:
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
-    #
-    # This list is for reliable jobs.
-    # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
     needs: [ versioning, build,  test-configuration-file, deploy-nodes, deploy-instance ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
