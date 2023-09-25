@@ -12,12 +12,11 @@ strategy, and contains the following updates:
 
 ### Security
 
-- Avoid panics and history tree consensus database concurrency bugs (#7590)
+- Fix database concurrency bugs that could have led to panics or incorrect history tree data (#7590)
 
 ### Added
 
 - Add missing elasticsearch flag feature to lib docs (#7568)
-- Add self hosted runner for long tests (#7520)
 - Add missing Docker variables and examples (#7552)
 
 #### Spend before Sync support
@@ -27,26 +26,18 @@ strategy, and contains the following updates:
 - Add snapshot tests for the `z_getsubtreesbyindex` RPC (#7514)
 - Add fixed test vectors for `z_getsubtreesbyindex` from zcashd to zebra ([#7515]
 - Test `z_getsubtreesbyindex` using a lightwalletd gRPC request (#7521)
-- Refactor docs for `z_getsubtreesbyindex` RPC state requests (#7462)
 - Use correct end heights for end of block subtrees during the full sync (#7566)
 - Format subtree roots in little-endian order (#7466)
 - Add note subtree indexes for new and existing blocks (#7437)
 - Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
-- Add code comments to state validity test for subtree format upgrade (#7496)
-- Format subtree roots in little-endian order (#7466)
-- Compare subtrees in non-finalized chains when evaluating chain equality (#7562)
 - Handle a subtree comparison edge case correctly (#7587)
-- Use correct end heights for end of block subtrees during the full sync (#7566)
-- Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
-- Add code comments to state validity test for subtree format upgrade (#7496)
 
 ### Changed
 
 - Check database format is valid every 5 minutes, to catch format errors in new block code (#7602)
 - Check database format is valid on shutdown, to catch format errors in new block code (#7606)
-- Restrict access to types for database writes (#7440)
 - Return errors instead of panicking in methods for Heights (#7591)
-- Update tests for new lightwalletd version used in Zebra ([#7349]
+- Update tests for compatibility with the ECC's `lightwalletd` fork (#7349)
 
 ### Fixed
 
