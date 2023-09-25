@@ -16,8 +16,6 @@ pub use endpoint::TracingEndpoint;
 #[cfg(feature = "flamegraph")]
 pub use flame::{layer, Grapher};
 
-use ProgressConfig::*;
-
 /// Tracing configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
@@ -113,8 +111,8 @@ pub struct Config {
     /// Shows progress bars for block syncing, and mempool transactions, and peer networking.
     /// Also sends logs to the default log file path.
     ///
-    /// This config is ignored unless the `progress-bar` feature is enabled.
-    pub progress_bar: ProgressConfig,
+    /// This config field is ignored unless the `progress-bar` feature is enabled.
+    pub progress_bar: Option<ProgressConfig>,
 
     /// If set to a path, write the tracing logs to that path.
     ///
@@ -158,46 +156,18 @@ impl Config {
         self.force_use_color
             || (self.use_color && atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stderr))
     }
-
-    /// Returns the progress bar setting based on the `progress_bar` config and `progress-bar`
-    /// feature.
-    pub fn progress_bar(&self) -> ProgressConfig {
-        if !cfg!(feature = "progress-bar") {
-            return Disabled;
-        }
-
-        self.progress_bar
-    }
-
-    /// Returns the log file path based on `log_file` and `progress_bar`.
-    pub fn log_file(&self) -> Option<PathBuf> {
-        log_file(self.log_file.clone(), self.progress_bar())
-    }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            use_color: true,
-            force_use_color: false,
-            filter: None,
-            buffer_limit: 128_000,
-            endpoint_addr: None,
-            flamegraph: None,
-            progress_bar: ProgressConfig::default(),
-            log_file: log_file(None, ProgressConfig::default()),
-            use_journald: false,
-        }
-    }
-}
-
-/// Returns the log file path based on `log_file` and `progress_bar`.
-fn log_file(log_file: Option<PathBuf>, progress_bar: ProgressConfig) -> Option<PathBuf> {
+/// Returns the default log file path based on `log_file` and `progress_bar`.
+fn default_log_file(
+    log_file: Option<PathBuf>,
+    progress_bar: Option<ProgressConfig>,
+) -> Option<PathBuf> {
     if let Some(log_file) = log_file {
         return Some(log_file);
     }
 
-    if progress_bar.is_enabled() {
+    if progress_bar.is_some() {
         let default_log_file = dirs::state_dir()
             .or_else(dirs::data_local_dir)
             .map(|dir| dir.join("zebrad.log"));
@@ -206,6 +176,25 @@ fn log_file(log_file: Option<PathBuf>, progress_bar: ProgressConfig) -> Option<P
     }
 
     None
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        // TODO: enable progress bars by default once they have been tested
+        let progress_bar = None;
+
+        Self {
+            use_color: true,
+            force_use_color: false,
+            filter: None,
+            buffer_limit: 128_000,
+            endpoint_addr: None,
+            flamegraph: None,
+            progress_bar,
+            log_file: default_log_file(None, progress_bar),
+            use_journald: false,
+        }
+    }
 }
 
 /// The progress bars that Zebra will show while running.
@@ -218,21 +207,7 @@ pub enum ProgressConfig {
     /// Show a few important progress bars.
     //
     // TODO: actually hide some progress bars in this mode.
-    //       enable this setting by default once it has been tested
-    //#[cfg_attr(feature = "progress-bar", default)]
-    #[serde(alias = "true")]
-    Summary,
-
-    /// Don't show any progress bars.
-    //#[cfg_attr(not(feature = "progress-bar"), default)]
     #[default]
-    #[serde(alias = "false")]
-    Disabled,
-}
-
-impl ProgressConfig {
-    /// Are any progress bars enabled?
-    pub fn is_enabled(&self) -> bool {
-        self != &Disabled
-    }
+    #[serde(other)]
+    Summary,
 }

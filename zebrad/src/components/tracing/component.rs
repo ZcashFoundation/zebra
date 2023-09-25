@@ -114,7 +114,7 @@ impl Tracing {
             );
         }
 
-        let writer = if let Some(log_file) = config.log_file() {
+        let writer = if let Some(log_file) = config.log_file.as_ref() {
             // Make sure the directory for the log file exists.
             // If the log is configured in the current directory, it won't have a parent directory.
             //
@@ -305,7 +305,7 @@ impl Tracing {
         //
         // TODO: move this to its own module?
         #[cfg(feature = "progress-bar")]
-        if config.progress_bar().is_enabled() {
+        if let Some(progress_bar_config) = config.progress_bar.as_ref() {
             use howudoin::consumers::TermLine;
             use std::time::Duration;
 
@@ -315,7 +315,11 @@ impl Tracing {
             let terminal_consumer = TermLine::with_debounce(PROGRESS_BAR_DEBOUNCE);
             howudoin::init(terminal_consumer);
 
-            info!("activated progress bars");
+            info!(?progress_bar_config, "activated progress bars");
+        } else {
+            info!(
+                "set 'tracing.progress_bar =\"summary\"' in zebrad.toml to activate progress bars"
+            );
         }
 
         Ok(Self {

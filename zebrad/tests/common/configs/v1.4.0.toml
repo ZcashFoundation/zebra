@@ -67,7 +67,7 @@ parallel_cpu_threads = 0
 [tracing]
 buffer_limit = 128000
 force_use_color = false
-progress_bar = "disabled"
+progress_bar = "summary"
 use_color = true
 use_journald = false
 
