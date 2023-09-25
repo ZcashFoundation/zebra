@@ -149,7 +149,7 @@ jobs:
   # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -175,7 +175,7 @@ jobs:
   # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
   test-all-getblocktemplate-rpcs:
     name: Test all with getblocktemplate-rpcs feature
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
