@@ -11,7 +11,7 @@ on:
       - '**/deny.toml'
       - '.cargo/config.toml'
       - '**/clippy.toml'
-      - '.github/workflows/continous-integration-os.yml'
+      - '.github/workflows/ci-unit-tests-os.yml'
 
 jobs:
   test:

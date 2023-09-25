@@ -1,4 +1,4 @@
-name: CD
+name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
 # already in process, won't get cancelled. Instead, we let the first to complete
@@ -48,31 +48,11 @@ on:
   #    - 'docker/**'
   #    - '.dockerignore'
   #    - '.github/workflows/continous-delivery.yml'
-  #    - '.github/workflows/build-docker-image.yml'
-
-  # Only runs the Docker image tests, doesn't deploy any instances
-  pull_request:
-    paths:
-      # code and tests
-      - '**/*.rs'
-      # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
-      # workflow definitions
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/continous-delivery.yml'
-      - '.github/workflows/find-cached-disks.yml'
+  #    - '.github/workflows/sub-build-docker-image.yml'
 
   release:
     types:
       - published
-
 
 jobs:
   # If a release was made we want to extract the first part of the semver from the
@@ -108,94 +88,13 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
-    uses: ./.github/workflows/build-docker-image.yml
+    uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
-
-  # Test that Zebra works using the default config with the latest Zebra version.
-  test-configuration-file:
-    name: Test Zebra CD Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Make sure Zebra can sync at least one full checkpoint on mainnet
-      - name: Run tests using the default config
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          # show the logs, even if the job times out
-          docker logs --tail all --follow default-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
-          docker stop default-conf-tests
-          # get the exit status from docker
-          EXIT_STATUS=$( \
-          docker wait default-conf-tests || \
-          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
-          echo "missing container, or missing exit status for container" \
-          )
-          docker logs default-conf-tests
-          echo "docker exit status: $EXIT_STATUS"
-          if [[ "$EXIT_STATUS" = "137" ]]; then
-          echo "ignoring expected signal status"
-          exit 0
-          fi
-          exit "$EXIT_STATUS"
-
-  # Test reconfiguring the docker image for testnet.
-  test-configuration-file-testnet:
-    name: Test testnet Zebra CD Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Make sure Zebra can sync the genesis block on testnet
-      - name: Run tests using a testnet config
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          # show the logs, even if the job times out
-          docker logs --tail all --follow testnet-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
-          -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
-          docker stop testnet-conf-tests
-          # get the exit status from docker
-          EXIT_STATUS=$( \
-          docker wait testnet-conf-tests || \
-          docker inspect --format "{{.State.ExitCode}}" testnet-conf-tests || \
-          echo "missing container, or missing exit status for container" \
-          )
-          docker logs testnet-conf-tests
-          echo "docker exit status: $EXIT_STATUS"
-          if [[ "$EXIT_STATUS" = "137" ]]; then
-          echo "ignoring expected signal status"
-          exit 0
-          fi
-          exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -210,14 +109,14 @@ jobs:
   #   otherwise a new major version is deployed in a new MiG.
   #
   # Runs:
-  # - on every push/merge to the `main` branch
+  # - on every push to the `main` branch
   # - on every release, when it's published
   deploy-nodes:
     strategy:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, test-configuration-file, versioning ]
+    needs: [ build, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -319,7 +218,7 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build, test-configuration-file ]
+    needs: [ build ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

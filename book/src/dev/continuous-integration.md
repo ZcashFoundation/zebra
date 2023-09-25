@@ -90,7 +90,7 @@ This means that the entire workflow must be re-run when a single test fails.
 1. Look for the earliest job that failed, and find the earliest failure.
 
 For example, this failure doesn't tell us what actually went wrong:
->  Error: The template is not valid. ZcashFoundation/zebra/.github/workflows/build-docker-image.yml@8bbc5b21c97fafc83b70fbe7f3b5e9d0ffa19593 (Line: 52, Col: 19): Error reading JToken from JsonReader. Path '', line 0, position 0.
+>  Error: The template is not valid. ZcashFoundation/zebra/.github/workflows/sub-build-docker-image.yml@8bbc5b21c97fafc83b70fbe7f3b5e9d0ffa19593 (Line: 52, Col: 19): Error reading JToken from JsonReader. Path '', line 0, position 0.
 
 https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:41:4
 

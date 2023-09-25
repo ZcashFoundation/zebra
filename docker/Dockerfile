@@ -13,7 +13,7 @@
 #
 # Build zebrad with these features
 # Keep these in sync with:
-# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/build-docker-image.yml#L37
+# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/sub-build-docker-image.yml#L37
 ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 

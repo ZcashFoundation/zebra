@@ -1,4 +1,4 @@
-name: zcash-params
+name: Build zcash-params
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
 # already in process, won't get cancelled. Instead, we let the first to complete
@@ -28,13 +28,13 @@ on:
       # workflow definitions
       - 'docker/zcash-params/Dockerfile'
       - '.dockerignore'
-      - '.github/workflows/zcash-params.yml'
-      - '.github/workflows/build-docker-image.yml'
+      - '.github/workflows/sub-build-zcash-params.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
   build:
     name: Build Zcash Params Docker
-    uses: ./.github/workflows/build-docker-image.yml
+    uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/zcash-params/Dockerfile
       dockerfile_target: release

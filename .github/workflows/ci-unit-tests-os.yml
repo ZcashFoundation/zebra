@@ -1,4 +1,4 @@
-name: CI OSes
+name: Multi-OS Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -12,6 +12,26 @@ on:
   # we build Rust and Zcash parameter caches on main,
   # so they can be shared by all branches:
   # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - '.github/workflows/ci-unit-tests-os.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
+
   push:
     branches:
       - main
@@ -31,24 +51,8 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/continous-integration-os.yml'
-  pull_request:
-    paths:
-      # code and tests
-      - '**/*.rs'
-      # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
-      # test data snapshots
-      - '**/*.snap'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/deny.toml'
-      # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
-      # workflow definitions
-      - '.github/workflows/continous-integration-os.yml'
+      - '.github/workflows/ci-unit-tests-os.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -58,6 +62,9 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
+  ########################################
+  ### Build and test Zebra on all OSes ###
+  ########################################
   test:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
     # The large timeout is to accommodate:
@@ -233,7 +240,6 @@ jobs:
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.1.0
         with:
-          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -319,3 +325,206 @@ jobs:
           else
               echo "No unused dependencies found."
           fi
+
+  ########################################
+  ### Build and test Zebra with Docker ###
+  ########################################
+  # Build the docker image used by the tests.
+  #
+  # The default network in the Zebra config in the image is mainnet, unless a manually triggered
+  # workflow or repository variable is configured differently. Testnet jobs change that config to
+  # testnet when running the image.
+  build:
+    name: Build CI Docker
+    uses: ./.github/workflows/sub-build-docker-image.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: tests
+      image_name: ${{ vars.CI_IMAGE_NAME }}
+      no_cache: ${{ inputs.no_cache || false }}
+      rust_backtrace: full
+      rust_lib_backtrace: full
+      rust_log: info
+
+  # zebrad tests without cached state
+
+  # TODO: make the non-cached-state tests use:
+  # network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Run all the zebra tests, including tests that are ignored by default.
+  # Skips tests that need a cached state disk or a lightwalletd binary.
+  #
+  # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
+  # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
+  #
+  # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
+  test-all:
+    name: Test all
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
+      #
+      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
+      - name: Run zebrad tests
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --include-ignored
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # zebrad tests without cached state with `getblocktemplate-rpcs` feature
+  #
+  # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
+  test-all-getblocktemplate-rpcs:
+    name: Test all with getblocktemplate-rpcs feature
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run zebrad tests
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --name zebrad-tests --tty -e ${{ inputs.network || vars.ZCASH_NETWORK }} ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Run state tests with fake activation heights.
+  #
+  # This test changes zebra-chain's activation heights,
+  # which can recompile all the Zebra crates,
+  # so we want its build products to be cached separately.
+  #
+  # Also, we don't want to accidentally use the fake heights in other tests.
+  #
+  # (The gRPC feature is a zebrad feature, so it isn't needed here.)
+  test-fake-activation-heights:
+    name: Test with fake activation heights
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests with fake activation heights
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
+        env:
+          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
+  #
+  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run zebrad large sync tests
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Test launching lightwalletd with an empty lightwalletd and Zebra state.
+  #
+  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
+  test-lightwalletd-integration:
+    name: Test integration with lightwalletd
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests with empty lightwalletd launch
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
+        env:
+          ZEBRA_TEST_LIGHTWALLETD: '1'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Test that Zebra works using the default config with the latest Zebra version
+  test-configuration-file:
+    name: Test Zebra default Docker config file
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests using the default config
+        run: |
+          set -ex
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
+          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          docker stop default-conf-tests
+          docker logs default-conf-tests
+          exit "$EXIT_STATUS"
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Test that Zebra works using the $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test Zebra custom Docker config file
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests using the $ZEBRA_CONF_PATH
+        run: |
+          set -ex
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
+          EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
+          docker stop variable-conf-tests
+          docker logs variable-conf-tests
+          exit "$EXIT_STATUS"
+        env:
+          ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}

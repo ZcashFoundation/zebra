@@ -10,7 +10,7 @@ on:
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
       - 'docker/zcash-lightwalletd/Dockerfile'
-      - '.github/workflows/zcash-lightwalletd.yml'
+      - '.github/workflows/sub-build-lightwalletd.yml'
 
 jobs:
   build:

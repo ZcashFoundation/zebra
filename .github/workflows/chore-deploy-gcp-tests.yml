@@ -292,7 +292,7 @@ jobs:
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
       #
-      # TODO: move this script into a file, and call it from find-cached-disks.yml as well.
+      # TODO: move this script into a file, and call it from manual-find-cached-disks.yml as well.
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         run: |
@@ -413,7 +413,7 @@ jobs:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       #
       # This path must match the variable used by the tests in Rust, which are also set in
-      # `continous-integration-docker.yml` to be able to run this tests.
+      # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root, Zebra will only respect the values from
       # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
@@ -461,7 +461,7 @@ jobs:
       # delete the whole cache directory.)
       #
       # This paths must match the variables used by the tests in Rust, which are also set in
-      # `continous-integration-docker.yml` to be able to run this tests.
+      # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
       # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
