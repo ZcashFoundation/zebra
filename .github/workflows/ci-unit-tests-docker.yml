@@ -249,36 +249,9 @@ jobs:
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
-  # Test that Zebra works using the $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run tests using the $ZEBRA_CONF_PATH
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
-          EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
-          docker stop variable-conf-tests
-          docker logs variable-conf-tests
-          exit "$EXIT_STATUS"
-        env:
-          ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
-
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
-    name: Test testnet Zebra CD Docker config file
+    name: Test Zebra testnet Docker config file
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
@@ -318,6 +291,33 @@ jobs:
           exit "$EXIT_STATUS"
         env:
           NETWORK: Testnet
+
+  # Test that Zebra works using the $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test Zebra custom Docker config file
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests using the $ZEBRA_CONF_PATH
+        run: |
+          set -ex
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
+          EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
+          docker stop variable-conf-tests
+          docker logs variable-conf-tests
+          exit "$EXIT_STATUS"
+        env:
+          ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   failure-issue:
     name: Open or update issues for main branch failures
