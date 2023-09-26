@@ -104,7 +104,7 @@ pub struct DbFormatChangeThreadHandle {
     cancel_handle: mpsc::SyncSender<CancelFormatChange>,
 }
 
-/// Marker type that is sent to cancel a format upgrade, and returned as a error on cancellation.
+/// Marker type that is sent to cancel a format upgrade, and returned as an error on cancellation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct CancelFormatChange;
 
@@ -300,7 +300,7 @@ impl DbFormatChange {
 
     /// Run a format change in the database, or check the format of the database once.
     #[allow(clippy::unwrap_in_result)]
-    fn run_format_change_or_check(
+    pub(crate) fn run_format_change_or_check(
         &self,
         config: &Config,
         network: Network,
@@ -369,8 +369,12 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?
-            .expect("new, upgraded, or downgraded database format is valid");
+        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?.unwrap_or_else(|_| {
+            panic!(
+                "unexpected invalid database format: delete and re-sync the database at '{:?}'",
+                upgrade_db.path()
+            )
+        });
 
         let inital_disk_version = self
             .initial_disk_version()
