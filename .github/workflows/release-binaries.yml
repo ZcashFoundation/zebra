@@ -47,7 +47,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build ]
+    needs: [ build, build-mining-testnet ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest
