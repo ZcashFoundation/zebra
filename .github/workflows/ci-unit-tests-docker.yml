@@ -221,14 +221,30 @@ jobs:
         with:
           short-length: 7
 
+      # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run -e NETWORK --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
-          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          # show the logs, even if the job times out
+          docker logs --tail all --follow default-conf-tests | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop default-conf-tests
+          # get the exit status from docker
+          EXIT_STATUS=$( \
+          docker wait default-conf-tests || \
+          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
+          echo "missing container, or missing exit status for container" \
+          )
           docker logs default-conf-tests
+          echo "docker exit status: $EXIT_STATUS"
+          if [[ "$EXIT_STATUS" = "137" ]]; then
+          echo "ignoring expected signal status"
+          exit 0
+          fi
           exit "$EXIT_STATUS"
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -260,32 +276,6 @@ jobs:
           ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
-      # Make sure Zebra can sync at least one full checkpoint on mainnet
-      - name: Run tests using the default config
-        run: |
-          set -ex
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          # show the logs, even if the job times out
-          docker logs --tail all --follow default-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
-          docker stop default-conf-tests
-          # get the exit status from docker
-          EXIT_STATUS=$( \
-          docker wait default-conf-tests || \
-          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
-          echo "missing container, or missing exit status for container" \
-          )
-          docker logs default-conf-tests
-          echo "docker exit status: $EXIT_STATUS"
-          if [[ "$EXIT_STATUS" = "137" ]]; then
-          echo "ignoring expected signal status"
-          exit 0
-          fi
-          exit "$EXIT_STATUS"
-
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
     name: Test testnet Zebra CD Docker config file
@@ -305,7 +295,7 @@ jobs:
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e NETWORK --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
           # show the logs, even if the job times out
           docker logs --tail all --follow testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
@@ -326,6 +316,8 @@ jobs:
           exit 0
           fi
           exit "$EXIT_STATUS"
+        env:
+          NETWORK: Testnet
 
   failure-issue:
     name: Open or update issues for main branch failures
