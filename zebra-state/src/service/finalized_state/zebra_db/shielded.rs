@@ -290,6 +290,32 @@ impl ZebraDb {
         }
     }
 
+    /// Get the sapling note commitment subtress for the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
+        let sapling_activation_height = NetworkUpgrade::Sapling
+            .activation_height(self.network())
+            .expect("sapling activation height must exist");
+
+        if tip_height >= sapling_activation_height {
+            let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+
+            let tip_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree> = self
+                .zs_last_key_value(&sapling_nct_handle)
+                .map(|(_key, value): (RawBytes, _)| Arc::new(value))
+                .expect("Sapling note commitment tree must exist if there is a finalized tip");
+
+            if let Some((subtree_index, node)) =
+                tip_note_commitment_tree.completed_subtree_index_and_root()
+            {
+                return Some(NoteCommitmentSubtree::new(subtree_index, tip_height, node));
+            }
+        }
+
+        None
+    }
+
     // Orchard trees
 
     /// Returns the Orchard note commitment tree of the finalized tip or the empty tree if the state
@@ -436,44 +462,6 @@ impl ZebraDb {
         }
     }
 
-    /// Returns the shielded note commitment trees of the finalized tip
-    /// or the empty trees if the state is empty.
-    pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
-        NoteCommitmentTrees {
-            sprout: self.sprout_tree(),
-            sapling: self.sapling_tree(),
-            sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_tree(),
-            orchard_subtree: self.orchard_subtree_for_tip(),
-        }
-    }
-
-    /// Get the sapling note commitment subtress for the finalized tip.
-    #[allow(clippy::unwrap_in_result)]
-    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
-        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
-        let sapling_activation_height = NetworkUpgrade::Sapling
-            .activation_height(self.network())
-            .expect("sapling activation height must exist");
-
-        if tip_height >= sapling_activation_height {
-            let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-
-            let tip_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree> = self
-                .zs_last_key_value(&sapling_nct_handle)
-                .map(|(_key, value): (RawBytes, _)| Arc::new(value))
-                .expect("Sapling note commitment tree must exist if there is a finalized tip");
-
-            if let Some((subtree_index, node)) =
-                tip_note_commitment_tree.completed_subtree_index_and_root()
-            {
-                return Some(NoteCommitmentSubtree::new(subtree_index, tip_height, node));
-            }
-        }
-
-        None
-    }
-
     /// Get the orchard note commitment subtress for the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
@@ -498,6 +486,18 @@ impl ZebraDb {
         }
 
         None
+    }
+
+    /// Returns the shielded note commitment trees of the finalized tip
+    /// or the empty trees if the state is empty.
+    pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_tree(),
+            sapling: self.sapling_tree(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_tree(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
+        }
     }
 }
 

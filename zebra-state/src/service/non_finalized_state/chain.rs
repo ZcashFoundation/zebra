@@ -737,6 +737,16 @@ impl Chain {
             .collect()
     }
 
+    /// Returns the Sapling note commitment subtree of the tip of this [`Chain`],
+    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        if !self.is_empty() {
+            let tip = self.non_finalized_tip_height();
+            Some(self.sapling_subtree(tip.into())?)
+        } else {
+            None
+        }
+    }
+
     /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
@@ -937,6 +947,16 @@ impl Chain {
             .take(limit)
             .map(|(index, subtree)| (*index, *subtree))
             .collect()
+    }
+
+    /// Returns the Orchard note commitment subtree of the tip of this [`Chain`],
+    pub fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        if !self.is_empty() {
+            let tip = self.non_finalized_tip_height();
+            Some(self.orchard_subtree(tip.into())?)
+        } else {
+            None
+        }
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
@@ -1389,9 +1409,9 @@ impl Chain {
         let mut nct = NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree(),
             sapling: self.sapling_note_commitment_tree(),
-            sapling_subtree: None,
+            sapling_subtree: self.sapling_subtree_for_tip(),
             orchard: self.orchard_note_commitment_tree(),
-            orchard_subtree: None,
+            orchard_subtree: self.orchard_subtree_for_tip(),
         };
 
         let mut tree_result = None;
