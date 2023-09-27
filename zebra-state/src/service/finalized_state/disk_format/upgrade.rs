@@ -2,7 +2,6 @@
 
 use std::{
     cmp::Ordering,
-    convert::Infallible,
     sync::{mpsc, Arc},
     thread::{self, JoinHandle},
 };
@@ -23,9 +22,7 @@ use DbFormatChange::*;
 
 use crate::{
     config::write_database_format_version_to_disk,
-    constants::{
-        latest_version_for_adding_subtrees, DATABASE_FORMAT_CHECK_INTERVAL, DATABASE_FORMAT_VERSION,
-    },
+    constants::{latest_version_for_adding_subtrees, DATABASE_FORMAT_VERSION},
     database_format_version_in_code, database_format_version_on_disk,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
     Config,
@@ -94,11 +91,11 @@ pub enum DbFormatChange {
 #[derive(Clone, Debug)]
 pub struct DbFormatChangeThreadHandle {
     /// A handle to the format change/check thread.
-    /// This thread continues running so it can perform periodic format checks.
+    /// If configured, this thread continues running so it can perform periodic format checks.
     ///
     /// Panics from this thread are propagated into Zebra's state service.
     /// The task returns an error if the upgrade was cancelled by a shutdown.
-    update_task: Option<Arc<JoinHandle<Result<Infallible, CancelFormatChange>>>>,
+    update_task: Option<Arc<JoinHandle<Result<(), CancelFormatChange>>>>,
 
     /// A channel that tells the running format thread to finish early.
     cancel_handle: mpsc::SyncSender<CancelFormatChange>,
@@ -258,10 +255,11 @@ impl DbFormatChange {
         handle
     }
 
-    /// Run the initial format change or check to the database, then periodically check the format
-    /// of newly added blocks matches the current format.
+    /// Run the initial format change or check to the database. Under the default runtime config,
+    /// this method returns after the format change or check.
     ///
-    /// This method runs until it is cancelled or panics.
+    /// But if runtime validity checks are enabled, this method periodically checks the format of
+    /// newly added blocks matches the current format. It will run until it is cancelled or panics.
     fn format_change_run_loop(
         self,
         config: Config,
@@ -269,7 +267,7 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
-    ) -> Result<Infallible, CancelFormatChange> {
+    ) -> Result<(), CancelFormatChange> {
         self.run_format_change_or_check(
             &config,
             network,
@@ -278,11 +276,15 @@ impl DbFormatChange {
             &cancel_receiver,
         )?;
 
+        let Some(debug_validity_check_interval) = config.debug_validity_check_interval else {
+            return Ok(());
+        };
+
         loop {
             // We've just run a format check, so sleep first, then run another one.
             // But return early if there is a cancel signal.
             if !matches!(
-                cancel_receiver.recv_timeout(DATABASE_FORMAT_CHECK_INTERVAL),
+                cancel_receiver.recv_timeout(debug_validity_check_interval),
                 Err(mpsc::RecvTimeoutError::Timeout)
             ) {
                 return Err(CancelFormatChange);
