@@ -501,7 +501,7 @@ impl DbFormatChange {
             }
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(db, cancel_receiver)?
+            Self::tree_deduplication_format_validity_checks_detailed(db, cancel_receiver)?
                 .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
@@ -559,10 +559,12 @@ impl DbFormatChange {
     #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
         let timer = CodeTimer::start();
-        let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
+        let mut results = Vec::new();
+
         results.push(db.check_max_on_disk_tip_height());
+        results.push(Self::tree_deduplication_format_validity_checks_quick(db));
 
         // This check can be run before the upgrade, but the upgrade code is finished, so we don't
         // run it early any more. (If future code changes accidentally make it depend on the
@@ -595,7 +597,10 @@ impl DbFormatChange {
         // Do the quick checks first, so we don't have to do this in every detailed check.
         results.push(Self::format_validity_checks_quick(db));
 
-        results.push(Self::check_for_duplicate_trees(db, cancel_receiver)?);
+        results.push(Self::tree_deduplication_format_validity_checks_detailed(
+            db,
+            cancel_receiver,
+        )?);
         results.push(add_subtrees::subtree_format_validity_checks_detailed(
             db,
             cancel_receiver,
@@ -613,17 +618,114 @@ impl DbFormatChange {
         Ok(Ok(()))
     }
 
-    /// Check that note commitment trees were correctly de-duplicated.
-    //
-    // TODO: move this method into an deduplication upgrade module file,
+    // TODO: move these methods into an deduplication upgrade module file,
     //       along with the upgrade code above.
+
+    /// Quick check that at least one note commitment tree was correctly de-duplicated.
     #[allow(clippy::unwrap_in_result)]
-    fn check_for_duplicate_trees(
+    fn tree_deduplication_format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
+        // Check the entire format before returning any errors.
+        let mut result = Ok(());
+
+        let genesis = Height(0);
+        let genesis_block = db.block(genesis.into());
+
+        if let Some(genesis_block) = genesis_block {
+            // Check that Sapling note counts match
+            let sapling_block_note_commitments = genesis_block.sapling_note_commitments().count();
+            let sapling_genesis_tree = db
+                .sapling_tree_by_height(&genesis)
+                .expect("tree is written in the same DB transaction as the block");
+            let sapling_tree_note_count = sapling_genesis_tree.position().map_or(0, |position| {
+                usize::try_from(position).expect("fits in memory") + 1
+            });
+
+            if sapling_block_note_commitments != sapling_tree_note_count {
+                result = Err(format!(
+                    "incorrect sapling tree: tree should have all note commitments: \n\
+                     {genesis:?} block commitments {sapling_block_note_commitments} \
+                     tree commitments {sapling_tree_note_count} \n\
+                     tree {sapling_genesis_tree:?}",
+                ));
+                warn!(?result);
+            }
+
+            // Check that Orchard note counts match
+            let orchard_block_note_commitments = genesis_block.orchard_note_commitments().count();
+            let orchard_genesis_tree = db
+                .orchard_tree_by_height(&genesis)
+                .expect("tree is written in the same DB transaction as the block");
+            let orchard_tree_note_count = orchard_genesis_tree.position().map_or(0, |position| {
+                usize::try_from(position).expect("fits in memory") + 1
+            });
+
+            if orchard_block_note_commitments != orchard_tree_note_count {
+                result = Err(format!(
+                    "incorrect orchard tree: tree should have all note commitments: \n\
+                     {genesis:?} block commitments {orchard_block_note_commitments} \
+                     tree commitments {orchard_tree_note_count} \n\
+                     tree {orchard_genesis_tree:?}",
+                ));
+                warn!(?result);
+            }
+        }
+
+        let one = Height(1);
+
+        let sapling_height_one_tree = db.sapling_tree_by_height_range(one..=one).next();
+        if let Some(sapling_height_one_tree) = sapling_height_one_tree {
+            result = Err(format!(
+                "incorrect sapling tree de-duplication: tree should have been deleted: \
+                 {one:?} {sapling_height_one_tree:?}"
+            ));
+            warn!(?result);
+        }
+
+        let orchard_height_one_tree = db.orchard_tree_by_height_range(one..=one).next();
+        if let Some(orchard_height_one_tree) = orchard_height_one_tree {
+            result = Err(format!(
+                "incorrect orchard tree de-duplication: tree should have been deleted: \
+                 {one:?} {orchard_height_one_tree:?}"
+            ));
+            warn!(?result);
+        }
+
+        result
+    }
+
+    /// Check that note commitment trees were correctly de-duplicated.
+    fn tree_deduplication_format_validity_checks_detailed(
         db: &ZebraDb,
         cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
+        // Check the entire format before returning any errors.
+
+        // This is redundant in some code paths, but not in others. But it's quick anyway.
+        let quick_result = Self::tree_deduplication_format_validity_checks_quick(db);
+
         // Runtime test: make sure we removed all duplicates.
         // We always run this test, even if the state has supposedly been upgraded.
+        let sapling_result = Self::check_for_duplicate_trees_sapling(db, cancel_receiver)?;
+        let orchard_result = Self::check_for_duplicate_trees_orchard(db, cancel_receiver)?;
+
+        if quick_result.is_err() || sapling_result.is_err() || orchard_result.is_err() {
+            let err = Err(format!(
+                "incorrect tree de-duplication: \
+                 quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
+            ));
+            warn!(?err);
+            return Ok(err);
+        }
+
+        Ok(Ok(()))
+    }
+
+    /// Check that there aren't any duplicate Sapling note commitment trees.
+    #[allow(clippy::unwrap_in_result)]
+    fn check_for_duplicate_trees_sapling(
+        db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
         let mut result = Ok(());
 
         let mut prev_height = None;
@@ -647,6 +749,17 @@ impl DbFormatChange {
             prev_height = Some(height);
             prev_tree = Some(tree);
         }
+
+        Ok(result)
+    }
+
+    /// Check that there aren't any duplicate Orchard note commitment trees.
+    #[allow(clippy::unwrap_in_result)]
+    fn check_for_duplicate_trees_orchard(
+        db: &ZebraDb,
+        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
+        let mut result = Ok(());
 
         let mut prev_height = None;
         let mut prev_tree = None;
