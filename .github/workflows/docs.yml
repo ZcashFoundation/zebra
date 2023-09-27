@@ -79,7 +79,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Setup mdBook
-        uses: jontze/action-mdbook@v2.2.1
+        uses: jontze/action-mdbook@v2.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mdbook-version: '~0.4'
