@@ -622,54 +622,19 @@ impl DbFormatChange {
     //       along with the upgrade code above.
 
     /// Quick check that at least one note commitment tree was correctly de-duplicated.
-    #[allow(clippy::unwrap_in_result)]
     fn tree_deduplication_format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
         // Check the entire format before returning any errors.
         let mut result = Ok(());
 
-        let genesis = Height(0);
-        let genesis_block = db.block(genesis.into());
-
-        if let Some(genesis_block) = genesis_block {
-            // Check that Sapling note counts match
-            let sapling_block_note_commitments = genesis_block.sapling_note_commitments().count();
-            let sapling_genesis_tree = db
-                .sapling_tree_by_height(&genesis)
-                .expect("tree is written in the same DB transaction as the block");
-            let sapling_tree_note_count = sapling_genesis_tree.position().map_or(0, |position| {
-                usize::try_from(position).expect("fits in memory") + 1
-            });
-
-            if sapling_block_note_commitments != sapling_tree_note_count {
-                result = Err(format!(
-                    "incorrect sapling tree: tree should have all note commitments: \n\
-                     {genesis:?} block commitments {sapling_block_note_commitments} \
-                     tree commitments {sapling_tree_note_count} \n\
-                     tree {sapling_genesis_tree:?}",
-                ));
-                warn!(?result);
-            }
-
-            // Check that Orchard note counts match
-            let orchard_block_note_commitments = genesis_block.orchard_note_commitments().count();
-            let orchard_genesis_tree = db
-                .orchard_tree_by_height(&genesis)
-                .expect("tree is written in the same DB transaction as the block");
-            let orchard_tree_note_count = orchard_genesis_tree.position().map_or(0, |position| {
-                usize::try_from(position).expect("fits in memory") + 1
-            });
-
-            if orchard_block_note_commitments != orchard_tree_note_count {
-                result = Err(format!(
-                    "incorrect orchard tree: tree should have all note commitments: \n\
-                     {genesis:?} block commitments {orchard_block_note_commitments} \
-                     tree commitments {orchard_tree_note_count} \n\
-                     tree {orchard_genesis_tree:?}",
-                ));
-                warn!(?result);
+        if !db.is_empty() {
+            let genesis = Height(0);
+            if let Err(err) = Self::check_tree_note_counts_for_height(db, genesis) {
+                result = Err(err);
             }
         }
 
+        // We don't need to check for an empty database, because the trees should be missing either
+        // way.
         let one = Height(1);
 
         let sapling_height_one_tree = db.sapling_tree_by_height_range(one..=one).next();
@@ -718,6 +683,66 @@ impl DbFormatChange {
         }
 
         Ok(Ok(()))
+    }
+
+    /// Check that all the notes in the block at `height` were added to the trees at `height`.
+    ///
+    /// It's not possible to do this check for Sprout, because we don't have a sprout tree by height
+    /// index in the database. (The sprout index only contains the tip tree.)
+    ///
+    /// # Panics
+    ///
+    /// If the block or the tree at `height` are missing from the database.
+    #[allow(clippy::unwrap_in_result)]
+    fn check_tree_note_counts_for_height(db: &ZebraDb, height: Height) -> Result<(), String> {
+        // Check both pools before returning any errors.
+        let mut result = Ok(());
+
+        // Deserializing the block is the most expensive part of this function,
+        // so it is ok to do a redundant check if there are no sapling or orchard notes in it.
+        let block = db
+            .block(height.into())
+            .expect("caller should check for block or tree at height");
+
+        // Check that Sapling note counts match
+        let sapling_block_notes = block.sapling_note_commitments().count();
+        let sapling_tree = db
+            .sapling_tree_by_height(&height)
+            .expect("tree is written in the same DB transaction as the block");
+        let sapling_tree_notes = sapling_tree.position().map_or(0, |position| {
+            usize::try_from(position).expect("fits in memory") + 1
+        });
+
+        if sapling_block_notes != sapling_tree_notes {
+            result = Err(format!(
+                "incorrect sapling tree: tree should have all notes in block: \n\
+                 {height:?} block notes {sapling_block_notes} \
+                 tree notes {sapling_tree_notes} \n\
+                 tree {sapling_tree:?}",
+            ));
+            warn!(?result);
+        }
+
+        // Check that Orchard note counts match
+        let orchard_block_notes = block.orchard_note_commitments().count();
+        let orchard_tree = db
+            .orchard_tree_by_height(&height)
+            .expect("tree is written in the same DB transaction as the block");
+        let orchard_tree_notes = orchard_tree.position().map_or(0, |position| {
+            usize::try_from(position).expect("fits in memory") + 1
+        });
+
+        if orchard_block_notes != orchard_tree_notes {
+            result = Err(format!(
+                "incorrect orchard tree: tree should have all notes in block: \n\
+                 {height:?} block notes {orchard_block_notes} \
+                 tree notes {orchard_tree_notes} \n\
+                 tree {orchard_tree:?}",
+            ));
+            warn!(?result);
+        }
+
+        result
     }
 
     /// Check that there aren't any duplicate Sapling note commitment trees.
