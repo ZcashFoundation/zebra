@@ -633,8 +633,14 @@ impl DbFormatChange {
             let sapling_tree = db.sapling_tree_by_height(&genesis);
             let orchard_tree = db.orchard_tree_by_height(&genesis);
 
-            let count_result =
-                Self::check_tree_note_counts_for_height(db, genesis, sapling_tree, orchard_tree);
+            let count_result = Self::check_tree_note_counts_for_height(
+                db,
+                genesis,
+                sapling_tree,
+                None,
+                orchard_tree,
+                None,
+            );
             result = result.and(count_result);
         }
 
@@ -718,6 +724,9 @@ impl DbFormatChange {
         let mut sapling_trees = db.sapling_tree_by_height_range(..).peekable();
         let mut orchard_trees = db.orchard_tree_by_height_range(..).peekable();
 
+        let mut prev_sapling_tree = None;
+        let mut prev_orchard_tree = None;
+
         while sapling_trees.peek().is_some() && orchard_trees.peek().is_some() {
             // Return early if the format check is cancelled.
             if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
@@ -734,39 +743,50 @@ impl DbFormatChange {
                 .expect("just checked for an item");
 
             // We want to avoid deserializing blocks twice, it is very expensive for large blocks.
-            let count_result = match sapling_height.cmp(&orchard_height) {
+            let count_result;
+            match sapling_height.cmp(&orchard_height) {
                 Ordering::Equal => {
-                    // Manually advance the iterators
-                    sapling_trees.next();
-                    orchard_trees.next();
-
-                    Self::check_tree_note_counts_for_height(
+                    count_result = Self::check_tree_note_counts_for_height(
                         db,
                         sapling_height,
-                        Some(sapling_tree),
-                        Some(orchard_tree),
-                    )
+                        Some(sapling_tree.clone()),
+                        prev_sapling_tree,
+                        Some(orchard_tree.clone()),
+                        prev_orchard_tree,
+                    );
+
+                    // Manually advance the iterators
+                    sapling_trees.next().expect("just checked");
+                    orchard_trees.next().expect("just checked");
+                    prev_sapling_tree = Some(sapling_tree);
+                    prev_orchard_tree = Some(orchard_tree);
                 }
                 Ordering::Less => {
-                    sapling_trees.next();
-
-                    Self::check_tree_note_counts_for_height(
+                    count_result = Self::check_tree_note_counts_for_height(
                         db,
                         sapling_height,
-                        Some(sapling_tree),
+                        Some(sapling_tree.clone()),
+                        prev_sapling_tree,
                         None,
-                    )
+                        None,
+                    );
+
+                    sapling_trees.next().expect("just checked");
+                    prev_sapling_tree = Some(sapling_tree);
                 }
 
                 Ordering::Greater => {
-                    orchard_trees.next();
-
-                    Self::check_tree_note_counts_for_height(
+                    count_result = Self::check_tree_note_counts_for_height(
                         db,
                         orchard_height,
                         None,
-                        Some(orchard_tree),
-                    )
+                        None,
+                        Some(orchard_tree.clone()),
+                        prev_orchard_tree,
+                    );
+
+                    orchard_trees.next().expect("just checked");
+                    prev_orchard_tree = Some(orchard_tree);
                 }
             };
 
@@ -779,8 +799,16 @@ impl DbFormatChange {
                 return Err(CancelFormatChange);
             }
 
-            let count_result =
-                Self::check_tree_note_counts_for_height(db, height, Some(sapling_tree), None);
+            let count_result = Self::check_tree_note_counts_for_height(
+                db,
+                height,
+                Some(sapling_tree.clone()),
+                prev_sapling_tree,
+                None,
+                None,
+            );
+            prev_sapling_tree = Some(sapling_tree);
+
             result = result.and(count_result);
         }
 
@@ -789,8 +817,16 @@ impl DbFormatChange {
                 return Err(CancelFormatChange);
             }
 
-            let count_result =
-                Self::check_tree_note_counts_for_height(db, height, None, Some(orchard_tree));
+            let count_result = Self::check_tree_note_counts_for_height(
+                db,
+                height,
+                None,
+                None,
+                Some(orchard_tree.clone()),
+                prev_orchard_tree,
+            );
+            prev_orchard_tree = Some(orchard_tree);
+
             result = result.and(count_result);
         }
 
@@ -810,7 +846,9 @@ impl DbFormatChange {
         db: &ZebraDb,
         height: Height,
         sapling_tree: Option<Arc<sapling::tree::NoteCommitmentTree>>,
+        prev_sapling_tree: Option<Arc<sapling::tree::NoteCommitmentTree>>,
         orchard_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+        prev_orchard_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
     ) -> Result<(), String> {
         // Check both pools before returning any errors.
         let mut result = Ok(());
@@ -827,13 +865,18 @@ impl DbFormatChange {
             let sapling_tree_notes = sapling_tree.position().map_or(0, |position| {
                 usize::try_from(position).expect("fits in memory") + 1
             });
+            let prev_sapling_tree_notes = prev_sapling_tree
+                .and_then(|tree| tree.position())
+                .map_or(0, |position| {
+                    usize::try_from(position).expect("fits in memory") + 1
+                });
 
-            if sapling_block_notes != sapling_tree_notes {
+            if sapling_block_notes != sapling_tree_notes - prev_sapling_tree_notes {
                 result = Err(format!(
-                    "incorrect sapling tree: tree should have all notes in block: \n\
-                 {height:?} block notes {sapling_block_notes} \
-                 tree notes {sapling_tree_notes} \n\
-                 tree {sapling_tree:?}",
+                    "incorrect sapling tree: tree should have all notes in block:\n\
+                     {height:?} block notes {sapling_block_notes}\n\
+                     tree notes {sapling_tree_notes} prev notes {prev_sapling_tree_notes} \n\
+                     tree {sapling_tree:?}",
                 ));
                 warn!(?result);
             }
@@ -845,13 +888,18 @@ impl DbFormatChange {
             let orchard_tree_notes = orchard_tree.position().map_or(0, |position| {
                 usize::try_from(position).expect("fits in memory") + 1
             });
+            let prev_orchard_tree_notes = prev_orchard_tree
+                .and_then(|tree| tree.position())
+                .map_or(0, |position| {
+                    usize::try_from(position).expect("fits in memory") + 1
+                });
 
             if orchard_block_notes != orchard_tree_notes {
                 result = Err(format!(
-                    "incorrect orchard tree: tree should have all notes in block: \n\
-                 {height:?} block notes {orchard_block_notes} \
-                 tree notes {orchard_tree_notes} \n\
-                 tree {orchard_tree:?}",
+                    "incorrect orchard tree: tree should have all notes in block:\n\
+                     {height:?} block notes {orchard_block_notes}\n\
+                     tree notes {orchard_tree_notes} prev notes {prev_orchard_tree_notes} \n\
+                     tree {orchard_tree:?}",
                 ));
                 warn!(?result);
             }
