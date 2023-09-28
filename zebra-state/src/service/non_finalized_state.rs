@@ -436,16 +436,20 @@ impl NonFinalizedState {
             .any(|chain| chain.height_by_hash.contains_key(hash))
     }
 
-    /// Removes and returns the first chain satisfying the given predicate.
+    /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
     /// (Using the tip block hash tie-breaker.)
-    fn find_chain<P>(&mut self, mut predicate: P) -> Option<&Arc<Chain>>
+    pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,
     {
         // Reverse the iteration order, to find highest difficulty chains first.
-        self.chain_set.iter().rev().find(|chain| predicate(chain))
+        self.chain_set
+            .iter()
+            .rev()
+            .find(|chain| predicate(chain))
+            .cloned()
     }
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
@@ -576,10 +580,7 @@ impl NonFinalizedState {
     /// The chain can be an existing chain in the non-finalized state, or a freshly
     /// created fork.
     #[allow(clippy::unwrap_in_result)]
-    fn parent_chain(
-        &mut self,
-        parent_hash: block::Hash,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
+    fn parent_chain(&self, parent_hash: block::Hash) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state
             Some(chain) => Ok(chain.clone()),
