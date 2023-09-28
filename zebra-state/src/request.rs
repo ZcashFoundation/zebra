@@ -938,9 +938,10 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::SolutionRate`]
     SolutionRate {
-        /// Specifies over difficulty averaging window.
+        /// The number of blocks to calculate the average difficulty for.
         num_blocks: usize,
-        /// Optionally estimate the network speed at the time when a certain block was found
+        /// Optionally estimate the network solution rate at the time when this height was mined.
+        /// Otherwise, estimate at the current tip height.
         height: Option<block::Height>,
     },
 

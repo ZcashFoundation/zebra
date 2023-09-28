@@ -89,6 +89,9 @@ pub fn solution_rate(
 ) -> Option<u128> {
     // Take 1 extra block for calculating the number of seconds between when mining on the first block likely started.
     // The work for the last block in this iterator is not added to `total_work`.
+    //
+    // Since we can't take more blocks than are actually in the chain, this automatically limits
+    // `num_blocks` to the chain length, like `zcashd` does.
     let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
         .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
         .peekable();

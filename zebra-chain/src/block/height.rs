@@ -169,6 +169,14 @@ impl TryIntoHeight for String {
     }
 }
 
+impl TryIntoHeight for i32 {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        u32::try_from(*self)?.try_into().map_err(Into::into)
+    }
+}
+
 // We don't implement Add<u32> or Sub<u32>, because they cause type inference issues for integer constants.
 
 impl Sub<Height> for Height {

@@ -1149,21 +1149,26 @@ async fn rpc_getnetworksolps() {
 
     let get_network_sol_ps_inputs = [
         (None, None),
+        (Some(-4), None),
+        (Some(-3), Some(0)),
+        (Some(-2), Some(-4)),
+        (Some(-1), Some(10)),
+        (Some(-1), Some(i32::MAX)),
         (Some(0), None),
         (Some(0), Some(0)),
-        (Some(0), Some(-1)),
+        (Some(0), Some(-3)),
         (Some(0), Some(10)),
         (Some(0), Some(i32::MAX)),
         (Some(1), None),
         (Some(1), Some(0)),
-        (Some(1), Some(-1)),
+        (Some(1), Some(-2)),
         (Some(1), Some(10)),
         (Some(1), Some(i32::MAX)),
-        (Some(usize::MAX), None),
-        (Some(usize::MAX), Some(0)),
-        (Some(usize::MAX), Some(-1)),
-        (Some(usize::MAX), Some(10)),
-        (Some(usize::MAX), Some(i32::MAX)),
+        (Some(i32::MAX), None),
+        (Some(i32::MAX), Some(0)),
+        (Some(i32::MAX), Some(-1)),
+        (Some(i32::MAX), Some(10)),
+        (Some(i32::MAX), Some(i32::MAX)),
     ];
 
     for (num_blocks_input, height_input) in get_network_sol_ps_inputs {
@@ -1171,9 +1176,9 @@ async fn rpc_getnetworksolps() {
             .get_network_sol_ps(num_blocks_input, height_input)
             .await;
         assert!(
-            get_network_sol_ps_result
-                .is_ok(),
-            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call with should be ok, got: {get_network_sol_ps_result:?}"
+            get_network_sol_ps_result.is_ok(),
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call should be ok, \
+             got: {get_network_sol_ps_result:?}"
         );
     }
 }
