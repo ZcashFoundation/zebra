@@ -9,7 +9,7 @@ use zebra_chain::{
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
     serialization::{DateTime32, Duration32},
-    work::difficulty::{CompactDifficulty, PartialCumulativeWork},
+    work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
 
 use crate::{
@@ -93,9 +93,10 @@ pub fn solution_rate(
     // Since we can't take more blocks than are actually in the chain, this automatically limits
     // `num_blocks` to the chain length, like `zcashd` does.
     let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
-        .take(num_blocks.checked_add(1).unwrap_or(num_blocks));
+        .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
+        .peekable();
 
-    let get_work = |block: Arc<Block>| {
+    let get_work = |block: &Block| {
         block
             .header
             .difficulty_threshold
@@ -103,35 +104,38 @@ pub fn solution_rate(
             .expect("work has already been validated")
     };
 
-    let last_block = block_iter.next()?;
-    let last_block_time = last_block.header.time;
+    // If there are no blocks in the range, we can't return a useful result.
+    let last_block = block_iter.peek()?;
 
-    let mut total_work: PartialCumulativeWork = get_work(last_block).into();
+    // Initialize the cumulative variables.
+    let mut min_time = last_block.header.time;
+    let mut max_time = last_block.header.time;
 
-    // We need at least 2 blocks to calculate average work over time.
-    if block_iter.len() == 0 {
-        return None;
+    let mut last_work = Work::zero();
+    let mut total_work = PartialCumulativeWork::zero();
+
+    for block in block_iter {
+        min_time = min_time.min(block.header.time);
+        max_time = max_time.max(block.header.time);
+
+        last_work = get_work(&block);
+        total_work += last_work;
     }
 
     // We added an extra block so we could estimate when mining on the first block
     // in the window of `num_blocks` likely started. But we don't want to add the work
-    // for that block. Since we've already taken the first block, we need to subtract 1 here.
-    for block in (&mut block_iter).take(num_blocks.checked_sub(1)?) {
-        total_work += get_work(block);
-    }
+    // for that block.
+    total_work -= last_work;
 
-    let first_block = block_iter
-        .next()
-        .expect("already checked for at least 1 block");
-    let first_block_time = first_block.header.time;
-    let duration_between_first_and_last_block = last_block_time - first_block_time;
+    let work_duration = (max_time - min_time).num_seconds();
 
-    // Avoid division by zero errors.
-    if duration_between_first_and_last_block.num_seconds() <= 0 {
+    // Avoid division by zero errors and negative average work.
+    // This also handles the case where there's only one block in the range.
+    if work_duration <= 0 {
         return None;
     }
 
-    Some(total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128)
+    Some(total_work.as_u128() / work_duration as u128)
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database
