@@ -109,23 +109,20 @@ pub fn solution_rate(
 
     let mut total_work: PartialCumulativeWork = get_work(block).into();
 
-    loop {
-        // Return `None` if the iterator doesn't yield a second item.
-        let block = block_iter.next()?;
+    // Return `None` if the iterator doesn't yield a second item.
+    let block = block_iter.next()?;
 
-        if block_iter.peek().is_some() {
-            // Add the block's work to `total_work` if it's not the last item in the iterator.
-            // The last item in the iterator is only used to estimate when mining on the first block
-            // in the window of `num_blocks` likely started.
-            total_work += get_work(block);
-        } else {
-            let first_block_time = block.header.time;
-            let duration_between_first_and_last_block = last_block_time - first_block_time;
-            return Some(
-                total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128,
-            );
-        }
+    while block_iter.peek().is_some() {
+        // Add the block's work to `total_work` if it's not the last item in the iterator.
+        // The last item in the iterator is only used to estimate when mining on the first block
+        // in the window of `num_blocks` likely started.
+        total_work += get_work(block);
     }
+
+    let first_block_time = block.header.time;
+    let duration_between_first_and_last_block = last_block_time - first_block_time;
+
+    Some(total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128)
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database
