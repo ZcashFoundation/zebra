@@ -4,13 +4,14 @@ use std::sync::Arc;
 
 use zebra_chain::block::{self, Block};
 
-use crate::{service::non_finalized_state::NonFinalizedState, HashOrHeight};
+use crate::service::non_finalized_state::NonFinalizedState;
 
 use super::finalized_state::ZebraDb;
 
-/// Iterator for state blocks.
+/// State chain iterator by block height or hash.
+/// Can be used for blocks, block headers, or any type indexed by [`HashOrHeight`].
 ///
-/// Starts at any block in any non-finalized or finalized chain,
+/// Starts at any hash or height in any non-finalized or finalized chain,
 /// and iterates in reverse height order. (Towards the genesis block.)
 pub(crate) struct Iter<'a> {
     pub(super) non_finalized_state: &'a NonFinalizedState,
@@ -37,49 +38,44 @@ impl Iter<'_> {
             IterState::Finalized(_) | IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = non_finalized_state.any_block_by_hash(hash) {
-            let hash = block.header.previous_block_hash;
-            self.state = IterState::NonFinalized(hash);
-            Some(block)
+        // This is efficient because the number of chains is limited, and the blocks are in memory.
+        if let Some(prev_hash) = non_finalized_state.any_prev_block_hash_for_hash(hash) {
+            self.state = IterState::NonFinalized(prev_hash);
         } else {
-            None
+            self.state = IterState::Finished;
         }
+
+        non_finalized_state.any_block_by_hash(hash)
     }
 
     #[allow(clippy::unwrap_in_result)]
     fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter {
-            non_finalized_state: _,
-            db,
-            state,
-        } = self;
-
-        let hash_or_height: HashOrHeight = match *state {
-            IterState::Finalized(height) => height.into(),
-            IterState::NonFinalized(hash) => hash.into(),
+        let height = match self.state {
+            IterState::Finalized(height) => Some(height),
+            // This is efficient because we only read the database once, when transitioning between
+            // non-finalized hashes and finalized heights.
+            IterState::NonFinalized(hash) => self.any_height_by_hash(hash),
             IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = db.block(hash_or_height) {
-            let height = block
-                .coinbase_height()
-                .expect("valid blocks have a coinbase height");
+        // We're finished unless we have a valid height and a valid previous height.
+        self.state = IterState::Finished;
 
-            if let Some(next_height) = height - 1 {
-                self.state = IterState::Finalized(next_height);
-            } else {
-                self.state = IterState::Finished;
+        if let Some(height) = height {
+            if let Ok(prev_height) = height.previous() {
+                self.state = IterState::Finalized(prev_height);
             }
 
-            Some(block)
-        } else {
-            self.state = IterState::Finished;
-            None
+            return self.db.block(height.into());
         }
+
+        None
     }
 
     /// Return the height for the block at `hash` in any chain.
     fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        // This is efficient because we check the blocks in memory first, then read a small column
+        // family if needed.
         self.non_finalized_state
             .any_height_by_hash(hash)
             .or_else(|| self.db.height(hash))
