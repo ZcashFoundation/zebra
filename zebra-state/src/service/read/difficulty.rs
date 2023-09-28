@@ -126,6 +126,11 @@ pub fn solution_rate(
     let first_block_time = first_block.header.time;
     let duration_between_first_and_last_block = last_block_time - first_block_time;
 
+    // Avoid division by zero errors.
+    if duration_between_first_and_last_block.num_seconds() <= 0 {
+        return None;
+    }
+
     Some(total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128)
 }
 
