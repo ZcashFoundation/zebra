@@ -21,7 +21,6 @@ use zebra_chain::{
     block::Height,
     orchard,
     parallel::tree::NoteCommitmentTrees,
-    parameters::NetworkUpgrade,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
@@ -293,28 +292,17 @@ impl ZebraDb {
     /// Get the sapling note commitment subtress for the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
-        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
-        let sapling_activation_height = NetworkUpgrade::Sapling
-            .activation_height(self.network())
-            .expect("sapling activation height must exist");
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
 
-        if tip_height >= sapling_activation_height {
-            let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let (index, subtree_data): (
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<sapling::tree::Node>,
+        ) = self.db.zs_last_key_value(&sapling_subtrees)?;
 
-            let tip_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree> = self
-                .db
-                .zs_last_key_value(&sapling_nct_handle)
-                .map(|(_key, value): (RawBytes, _)| Arc::new(value))
-                .expect("Sapling note commitment tree must exist if there is a finalized tip");
-
-            if let Some((subtree_index, node)) =
-                tip_note_commitment_tree.completed_subtree_index_and_root()
-            {
-                return Some(NoteCommitmentSubtree::new(subtree_index, tip_height, node));
-            }
-        }
-
-        None
+        Some(subtree_data.with_index(index))
     }
 
     // Orchard trees
@@ -466,28 +454,17 @@ impl ZebraDb {
     /// Get the orchard note commitment subtress for the finalized tip.
     #[allow(clippy::unwrap_in_result)]
     fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
-        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
-        let orchard_activation_height = NetworkUpgrade::Nu5
-            .activation_height(self.network())
-            .expect("sapling activation height must exist");
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
 
-        if tip_height >= orchard_activation_height {
-            let orchard_nct_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let (index, subtree_data): (
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<orchard::tree::Node>,
+        ) = self.db.zs_last_key_value(&orchard_subtrees)?;
 
-            let tip_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree> = self
-                .db
-                .zs_last_key_value(&orchard_nct_handle)
-                .map(|(_key, value): (RawBytes, _)| Arc::new(value))
-                .expect("Orchard note commitment tree must exist if there is a finalized tip");
-
-            if let Some((subtree_index, node)) =
-                tip_note_commitment_tree.completed_subtree_index_and_root()
-            {
-                return Some(NoteCommitmentSubtree::new(subtree_index, tip_height, node));
-            }
-        }
-
-        None
+        Some(subtree_data.with_index(index))
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
