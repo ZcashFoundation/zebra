@@ -93,8 +93,7 @@ pub fn solution_rate(
     // Since we can't take more blocks than are actually in the chain, this automatically limits
     // `num_blocks` to the chain length, like `zcashd` does.
     let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
-        .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
-        .peekable();
+        .take(num_blocks.checked_add(1).unwrap_or(num_blocks));
 
     let get_work = |block: Arc<Block>| {
         block
@@ -104,22 +103,27 @@ pub fn solution_rate(
             .expect("work has already been validated")
     };
 
-    let block = block_iter.next()?;
-    let last_block_time = block.header.time;
+    let last_block = block_iter.next()?;
+    let last_block_time = last_block.header.time;
 
-    let mut total_work: PartialCumulativeWork = get_work(block).into();
+    let mut total_work: PartialCumulativeWork = get_work(last_block).into();
 
-    // Return `None` if the iterator doesn't yield a second item.
-    let block = block_iter.next()?;
+    // We need at least 2 blocks to calculate average work over time.
+    if block_iter.len() == 0 {
+        return None;
+    }
 
-    while block_iter.peek().is_some() {
-        // Add the block's work to `total_work` if it's not the last item in the iterator.
-        // The last item in the iterator is only used to estimate when mining on the first block
-        // in the window of `num_blocks` likely started.
+    // We added an extra block so we could estimate when mining on the first block
+    // in the window of `num_blocks` likely started. But we don't want to add the work
+    // for that block. Since we've already taken the first block, we need to subtract 1 here.
+    for block in (&mut block_iter).take(num_blocks.checked_sub(1)?) {
         total_work += get_work(block);
     }
 
-    let first_block_time = block.header.time;
+    let first_block = block_iter
+        .next()
+        .expect("already checked for at least 1 block");
+    let first_block_time = first_block.header.time;
     let duration_between_first_and_last_block = last_block_time - first_block_time;
 
     Some(total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128)
