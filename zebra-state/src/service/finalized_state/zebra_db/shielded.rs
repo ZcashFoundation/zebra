@@ -302,6 +302,7 @@ impl ZebraDb {
             let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
             let tip_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree> = self
+                .db
                 .zs_last_key_value(&sapling_nct_handle)
                 .map(|(_key, value): (RawBytes, _)| Arc::new(value))
                 .expect("Sapling note commitment tree must exist if there is a finalized tip");
@@ -474,6 +475,7 @@ impl ZebraDb {
             let orchard_nct_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
             let tip_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree> = self
+                .db
                 .zs_last_key_value(&orchard_nct_handle)
                 .map(|(_key, value): (RawBytes, _)| Arc::new(value))
                 .expect("Orchard note commitment tree must exist if there is a finalized tip");
