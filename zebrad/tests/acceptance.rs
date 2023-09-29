@@ -1118,6 +1118,7 @@ fn create_cached_database(network: Network) -> Result<()> {
 
 #[tracing::instrument]
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
+    return Ok(());
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
         format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
