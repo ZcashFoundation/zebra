@@ -28,7 +28,7 @@ To find the latest checkpoints on the `main` branch:
    `Run gen-checkpoints-mainnet` job, in the `Generate checkpoints mainnet` job
 3. Scroll down until you see the list of checkpoints, it should start around line 200
 4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
-5. Repeat steps 2 to 4 for `testnet`
+5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
 
 #### Manual Checkpoint Generation
