@@ -80,7 +80,6 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its maximum.
-    // TODO Return an error instead of panicking #7263.
     pub fn next(self) -> Result<Self, HeightError> {
         (self + 1).ok_or(HeightError::Overflow)
     }
@@ -90,7 +89,6 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its minimum.
-    // TODO Return an error instead of panicking #7263.
     pub fn previous(self) -> Result<Self, HeightError> {
         (self - 1).ok_or(HeightError::Underflow)
     }
