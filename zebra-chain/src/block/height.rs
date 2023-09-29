@@ -99,6 +99,11 @@ impl Height {
     pub fn is_min(self) -> bool {
         self == Self::MIN
     }
+
+    /// Returns the value as a `usize`.
+    pub fn as_usize(self) -> usize {
+        self.0.try_into().expect("fits in usize")
+    }
 }
 
 /// A difference between two [`Height`]s, possibly negative.

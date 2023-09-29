@@ -97,6 +97,22 @@ impl ZebraDb {
         self.db.zs_get(&height_by_hash, &hash)
     }
 
+    /// Returns the previous block hash for the given block hash in the finalized state.
+    #[allow(dead_code)]
+    pub fn prev_block_hash_for_hash(&self, hash: block::Hash) -> Option<block::Hash> {
+        let height = self.height(hash)?;
+        let prev_height = height.previous().ok()?;
+
+        self.hash(prev_height)
+    }
+
+    /// Returns the previous block height for the given block hash in the finalized state.
+    pub fn prev_block_height_for_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        let height = self.height(hash)?;
+
+        height.previous().ok()
+    }
+
     /// Returns the [`block::Header`] with [`block::Hash`] or
     /// [`Height`], if it exists in the finalized chain.
     //
