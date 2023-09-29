@@ -30,14 +30,14 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v38.1.3
+        uses: tj-actions/changed-files@v39.2.0
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v38.1.3
+        uses: tj-actions/changed-files@v39.2.0
         with:
           files: |
             .github/workflows/*.yml
@@ -62,12 +62,12 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v2.0.0
+        uses: arduino/setup-protoc@v2.1.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '23.x'
@@ -86,7 +86,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
-      - uses: Swatinem/rust-cache@v2.6.2
+      - uses: Swatinem/rust-cache@v2.7.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -112,13 +112,13 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v2.0.0
+        uses: arduino/setup-protoc@v2.1.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '23.x'
@@ -131,7 +131,7 @@ jobs:
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v2.6.2
+      #- uses: Swatinem/rust-cache@v2.7.0
 
       - run: |
           cargo fmt --all -- --check
@@ -142,9 +142,9 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
       - name: actionlint
-        uses: reviewdog/action-actionlint@v1.37.1
+        uses: reviewdog/action-actionlint@v1.39.0
         with:
           level: warning
           fail_on_error: false
@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
       - uses: plettich/action-codespell@master
         with:
           github_token: ${{ secrets.github_token }}

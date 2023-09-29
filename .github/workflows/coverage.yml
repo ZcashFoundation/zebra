@@ -54,10 +54,10 @@ jobs:
     # - stable builds (typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
     timeout-minutes: 140
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
 
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
 

@@ -149,7 +149,7 @@ jobs:
   # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -175,7 +175,7 @@ jobs:
   # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
   test-all-getblocktemplate-rpcs:
     name: Test all with getblocktemplate-rpcs feature
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
@@ -606,7 +606,7 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Adding block to cache '
+      height_grep_text: 'Waiting for block: '
     secrets: inherit
     # We want to prevent multiple lightwalletd full syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
@@ -636,14 +636,14 @@ jobs:
       test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
-      # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
-      saves_to_disk: false
+      saves_to_disk: true
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Adding block to cache '
+      height_grep_text: 'Waiting for block: '
     secrets: inherit
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
@@ -782,3 +782,26 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
     secrets: inherit
+
+  failure-issue:
+    name: Open or update issues for main branch failures
+    # When a new test is added to this workflow, add it to this list.
+    #
+    # This list is for reliable tests that are run on the `main` branch.
+    # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
+    needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-all, test-all-getblocktemplate-rpcs, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path, test-stateful-sync, test-update-sync, generate-checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
+    # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
+    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?
+    if: failure() && github.event.pull_request == null
+    runs-on: ubuntu-latest
+    steps:
+      - uses: jayqi/failed-build-issue-action@v1
+        with:
+          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
+          # New failures open an issue with this label.
+          # TODO: do we want a different label for each workflow, or each kind of workflow?
+          label-name: S-ci-fail-auto-issue
+          # If there is already an open issue with this label, any failures become comments on that issue.
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}

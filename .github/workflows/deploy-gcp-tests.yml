@@ -104,17 +104,17 @@ env:
   CACHED_STATE_UPDATE_LIMIT: 576
 
 jobs:
-  # set up the test, if it doesn't use any cached state
+  # set up and launch the test, if it doesn't use any cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
-  setup-without-cached-state:
-    name: Setup ${{ inputs.test_id }} test
+  launch-without-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     if: ${{ !inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -145,7 +145,9 @@ jobs:
           known_hosts: unnecessary
 
       - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -198,51 +200,6 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  # launch the test, if it doesn't use any cached state
-  launch-without-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    needs: [ setup-without-cached-state ]
-    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
-    if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
         run: |
@@ -262,20 +219,19 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-
-  # set up the test, if it uses cached state
+  # set up and launch the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
-  setup-with-cached-state:
-    name: Setup ${{ inputs.test_id }} test
+  launch-with-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
+    runs-on: zfnd-runners
     outputs:
       cached_disk_name: ${{ steps.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -300,7 +256,9 @@ jobs:
           known_hosts: unnecessary
 
       - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -333,6 +291,8 @@ jobs:
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
+      #
+      # TODO: move this script into a file, and call it from find-cached-disks.yml as well.
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         run: |
@@ -396,6 +356,9 @@ jobs:
               exit 1
           fi
 
+          # Use hard-coded cache to compare sync to tip performance
+          CACHED_DISK_NAME="zebrad-cache-main-a9980e9-v25-mainnet-tip-u-020400"
+
           echo "Selected Disk: $CACHED_DISK_NAME"
           echo "cached_disk_name=$CACHED_DISK_NAME" >> "$GITHUB_OUTPUT"
 
@@ -441,51 +404,6 @@ jobs:
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
-
-  # launch the test, if it uses cached state
-  launch-with-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    needs: [ setup-with-cached-state ]
-    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
-    if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -575,22 +493,24 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-
-  # check the logs of the test we just launched for zebrad startup messages
+  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
+  # Then check the result of the test.
   #
-  # this step makes sure `zebrad` is running, and configured for `inputs.network`.
-  logs-startup:
-    name: Check startup for ${{ inputs.test_id }}
+  # If `inputs.is_long_test` is `true`, the timeout is 5 days, otherwise it's 3 hours.
+  test-result:
+    name: Run ${{ inputs.test_id }} test
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     needs: [ launch-with-cached-state, launch-without-cached-state ]
-    # If the previous job fails, we still want to show the logs.
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
+    runs-on: zfnd-runners
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -609,7 +529,9 @@ jobs:
           known_hosts: unnecessary
 
       - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -654,1015 +576,6 @@ jobs:
           -e 'Zcash network: ${{ inputs.network }}' \
           "
 
-  # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
-  #
-  # If `inputs.is_long_test` is `false`, this job is skipped.
-  logs-heartwood:
-    name: Log ${{ inputs.test_id }} test (heartwood)
-    needs: [ logs-startup ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show all the logs since the container launched,
-      # following until Canopy activation (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (heartwood)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
-  logs-canopy:
-    name: Log ${{ inputs.test_id }} test (canopy)
-    needs: [ logs-heartwood ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until NU5 activation (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (canopy)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,740,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 5 hours into the NU5 sync, at the end of July 2022.
-  logs-1740k:
-    name: Log ${{ inputs.test_id }} test (1740k)
-    needs: [ logs-canopy ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,740,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1740k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,760,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 8 hours into the NU5 sync, at the end of August 2022.
-  logs-1760k:
-    name: Log ${{ inputs.test_id }} test (1760k)
-    needs: [ logs-1740k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,760,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1760k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,780,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 12 hours into the NU5 sync, at the end of August 2022.
-  logs-1780k:
-    name: Log ${{ inputs.test_id }} test (1780k)
-    needs: [ logs-1760k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,780,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1780k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,800,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 20 hours into the NU5 sync, in October 2022.
-  # (These blocks seem to be larger than the previous ones.)
-  logs-1800k:
-    name: Log ${{ inputs.test_id }} test (1800k)
-    needs: [ logs-1780k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,800,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1800k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,820,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 24 hours into the NU5 sync, in October 2022.
-  # (These blocks seem to be larger than the previous ones.)
-  logs-1820k:
-    name: Log ${{ inputs.test_id }} test (1820k)
-    needs: [ logs-1800k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,820,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1820k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*18[2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,850,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 5 hours from the last job, in December 2022.
-  logs-1850k:
-    name: Log ${{ inputs.test_id }} test (1850k)
-    needs: [ logs-1820k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,850,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1850k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*18[5-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,880,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 5 hours from the last job, in December 2022.
-  logs-1880k:
-    name: Log ${{ inputs.test_id }} test (1880k)
-    needs: [ logs-1850k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,880,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1880k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*18[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,920,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 4 hours from the last job, in February 2023.
-  logs-1920k:
-    name: Log ${{ inputs.test_id }} test (1920k)
-    needs: [ logs-1880k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,920,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1920k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*19[2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 1,960,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 4 hours from the last job, in February 2023.
-  logs-1960k:
-    name: Log ${{ inputs.test_id }} test (1960k)
-    needs: [ logs-1920k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 1,960,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1920k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*19[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[2-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 2,030,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because it was about 4.5 hours from the last job, in June 2023.
-  logs-2030k:
-    name: Log ${{ inputs.test_id }} test (2030k)
-    needs: [ logs-1960k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 2,030,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (2030k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*20[3-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[1-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[3-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to block 2,100,000 or later
-  # (or the test finishing)
-  #
-  # We chose this height because we guessed it was 4.5 hours from the last job, in June 2023.
-  logs-2100k:
-    name: Log ${{ inputs.test_id }} test (2100k)
-    needs: [ logs-2030k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until block 2,100,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (2100k)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*2[1-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*[3-9][0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
-
-  # follow the logs of the test we just launched, up to the last checkpoint, or the test finishing,
-  # or for lightwalletd tests, about 5 hours into the full lightwalletd sync (block 1880k)
-  logs-checkpoint:
-    name: Log ${{ inputs.test_id }} test (checkpoint)
-    needs: [ logs-2100k ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() && inputs.is_long_test }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Show recent logs, following until the last checkpoint, or the test finishes, or 5 hours of lightwalletd sync (1880k)
-      #
-      # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
-      - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'verified final checkpoint' \
-          -e 'lightwalletd.*Adding block to cache 18[8-9][0-9][0-9][0-9][0-9]' \
-          -e 'lightwalletd.*Adding block to cache 19[0-9][0-9][0-9][0-9][0-9]' \
-          -e 'lightwalletd.*Adding block to cache [2-9][0-9][0-9][0-9][0-9][0-9][0-9]' \
-          -e 'test result:.*finished in' \
-          "
-
-
-  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
-  # Then check the result of the test.
-  #
-  # If `inputs.is_long_test` is `false`, the Rust test harness mostly runs in this job.
-  # Otherwise, it mostly runs in the "logs" jobs.
-  test-result:
-    name: Run ${{ inputs.test_id }} test
-    needs: [ logs-checkpoint ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.6.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
@@ -1682,6 +595,9 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
           set -e;
+          set -o pipefail;
+          trap '' PIPE;
+
           sudo docker logs \
           --tail all \
           --follow \
@@ -1689,21 +605,22 @@ jobs:
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
+
           EXIT_STATUS=$( \
           sudo docker wait ${{ inputs.test_id }} || \
           sudo docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
           echo "missing container, or missing exit status for container" \
           ); \
+
           echo "sudo docker exit status: $EXIT_STATUS"; \
           exit "$EXIT_STATUS" \
           '
-
 
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result, setup-with-cached-state ]
+    needs: [ test-result, launch-with-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -1712,7 +629,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -1749,7 +666,9 @@ jobs:
           known_hosts: unnecessary
 
       - name: Generate public SSH key
-        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1944,14 +863,19 @@ jobs:
       - name: Get original cached state height from google cloud
         run: |
           ORIGINAL_HEIGHT="0"
+          ORIGINAL_DISK_NAME="${{ format('{0}', needs.launch-with-cached-state.outputs.cached_disk_name) }}"
 
-          if [[ -n "${{ format('{0}', needs.setup-with-cached-state.outputs.cached_disk_name) }}" ]]; then
-              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=${{ needs.setup-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
+          if [[ -n "$ORIGINAL_DISK_NAME" ]]; then
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=$ORIGINAL_DISK_NAME" --format="value(labels.height)")
               ORIGINAL_HEIGHT=${ORIGINAL_HEIGHT:-0}
-              echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
+              echo "$ORIGINAL_DISK_NAME height: $ORIGINAL_HEIGHT"
+          else
+              ORIGINAL_DISK_NAME="new-disk"
+              echo "newly created disk, original height set to 0"
           fi
 
           echo "ORIGINAL_HEIGHT=$ORIGINAL_HEIGHT" >> "$GITHUB_ENV"
+          echo "ORIGINAL_DISK_NAME=$ORIGINAL_DISK_NAME" >> "$GITHUB_ENV"
 
       # Create an image from the state disk, which will be used for any tests that start
       # after it is created. These tests can be in the same workflow, or in a different PR.
@@ -1992,9 +916,9 @@ jobs:
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
-              echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT"
+              echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
 
   # delete the Google Cloud instance for this test
@@ -2010,7 +934,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
           fetch-depth: '2'

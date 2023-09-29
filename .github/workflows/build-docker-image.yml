@@ -53,7 +53,7 @@ jobs:
   build:
     name: Build images
     timeout-minutes: 210
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
@@ -61,7 +61,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -74,7 +74,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.6.0
+        uses: docker/metadata-action@v5.0.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -100,7 +100,7 @@ jobs:
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -116,7 +116,7 @@ jobs:
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v2.2.0
+        uses: docker/login-action@v3.0.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
@@ -126,7 +126,7 @@ jobs:
         # We only publish images to DockerHub if a release is not a pre-release
         # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
         if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
-        uses: docker/login-action@v2.2.0
+        uses: docker/login-action@v3.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

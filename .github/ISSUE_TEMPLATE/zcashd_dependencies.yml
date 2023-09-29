@@ -1,0 +1,51 @@
+---
+name: "Upgrade zcashd dependencies"
+description: "Specific steps for upgrading dependencies shared with zcashd. Zebra developers only."
+title: 'Upgrade dependencies for zcashd (version)'
+labels: [A-dependencies, A-script, S-needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Motivation
+        
+        `zcashd` crate dependency upgrades need to be done together, along with an upgrade to `zcash_script`.
+        We don't have upgrade instructions yet, but there's a draft in #6532.
+        
+        The upgrade steps are:
+        - [ ] upgrade and release `zcash_script`
+        - [ ] upgrade Zebra's ECC and `zcash_script` dependencies in the same PR
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: |
+        What versions of `zcashd` and the ECC crates do we need to upgrade to? 
+    validations:
+      required: true
+  - type: textarea
+    id: complexity
+    attributes:
+      label: Complex Code or Requirements
+      description: |
+        Does this PR change unsafe code or complex consensus rules?
+        If it does, explain how we will implement, review, and test it.
+    validations:
+      required: false
+  - type: textarea
+    id: tests
+    attributes:
+      label: Testing
+      description: |
+        How can we check that this change does what we want it to do?
+    validations:
+      required: false
+  - type: textarea
+    id: related
+    attributes:
+      label: Related Work
+      description: |
+        Is this change related to other features or tickets?
+    validations:
+      required: false
+

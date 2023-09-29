@@ -22,6 +22,7 @@ updates:
             - "orchard"
             - "halo2*"
             - "incrementalmerkletree"
+            - "bridgetree"
             - "equihash"
             # addresses
             - "bs58"
@@ -50,18 +51,20 @@ updates:
             - "reqwest"
             - "futures*"
             - "pin-project*"
-        log:
+        log-time:
           patterns:
             - "tracing*"
             - "log"
             - "*eyre*"
             - "thiserror"
-            - "displaydoc"
-            - "spandoc"
+            # displaydoc, spandoc
+            - "*doc"
             - "owo-colors"
             - "sentry*"
             - "metrics*"
-            - "inferno"
+            # time, humantime
+            - "*time*"
+            - "chrono*"
         concurrency:
           patterns:
             - "once_cell"
@@ -73,11 +76,6 @@ updates:
           patterns:
             - "indicatif"
             - "howudoin"
-        time:
-          patterns:
-            - "chrono*"
-            - "time*"
-            - "humantime*"
         app:
           patterns:
             - "abscissa*"
@@ -118,9 +116,12 @@ updates:
             - "insta"
             - "prost*"
             - "tonic*"
+            # depends on tonic and prost
+            - "console-subscriber"
             - "tempfile"
             - "static_assertions"
             - "criterion"
+            - "inferno"
   - package-ecosystem: github-actions
     directory: '/'
     schedule:
