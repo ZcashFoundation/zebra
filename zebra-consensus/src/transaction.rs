@@ -406,7 +406,11 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => Self::verify_v5_transaction(
+                } | Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                }=> Self::verify_v5_transaction(
                     &req,
                     network,
                     script_verifier,

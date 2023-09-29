@@ -82,3 +82,8 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+[patch.crates-io]
+#zcash_note_encryption_zsa = { package = "zcash_note_encryption", version = "0.4", git = "https://github.com/QED-it/librustzcash.git", branch = "zsa-bundle-in-v5-vector-serialization-with-burn-valid" }
+zcash_note_encryption_zsa = { version = "0.4", path = "../librustzcash/components/zcash_note_encryption" }
+

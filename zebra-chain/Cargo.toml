@@ -84,6 +84,11 @@ zcash_history = "0.3.0"
 zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.12.0", features = ["transparent-inputs"] }
 
+# ZSA deps
+#orchard_zsa = { package = "orchard", version = "0.5", git = "https://github.com/QED-it/orchard", branch = "ivk-to-bytes-visibility-downgrade-with-burn-valid" }
+orchard_zsa = { package = "orchard", version = "0.5", path = "../../orchard" }
+#zcash_note_encryption_zsa = { version = "0.4", path = "../../librustzcash/components/zcash_note_encryption" }
+
 # Time
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
@@ -159,3 +164,4 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+

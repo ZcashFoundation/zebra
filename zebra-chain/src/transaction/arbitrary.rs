@@ -926,6 +926,7 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
+        v6 @ V6 { .. } => v6.clone(), // TODO: FIXME: check how it should work for v6
     }
 }
 

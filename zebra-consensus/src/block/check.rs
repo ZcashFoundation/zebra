@@ -221,6 +221,8 @@ pub fn miner_fees_are_valid(
         .expect("positive value always fit in `NegativeAllowed`");
     let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
+    let orchard_zsa_burn_value = coinbase.orchard_zsa_burn_value().burn_amount(); // FIXME: not
+                                                                                  // need burn
 
     let block_subsidy = subsidy::general::block_subsidy(height, network)
         .expect("a valid block subsidy for this height and network");
@@ -232,7 +234,10 @@ pub fn miner_fees_are_valid(
     // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-    let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
+    let left = (transparent_value_balance
+        - sapling_value_balance
+        - orchard_value_balance
+        - orchard_zsa_burn_value)
         .map_err(|_| SubsidyError::SumOverflow)?;
     let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 

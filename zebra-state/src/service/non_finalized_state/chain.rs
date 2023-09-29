@@ -1483,7 +1483,13 @@ impl Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => (
+                } | V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                }=> (
                     inputs,
                     outputs,
                     &None,
@@ -1630,7 +1636,13 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => (
+                } | V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                }=> (
                     inputs,
                     outputs,
                     &None,

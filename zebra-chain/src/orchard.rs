@@ -22,4 +22,7 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
+pub use shielded_data::{
+    ActionRef, AuthorizedAction, Flags, ShieldedData, ENCRYPTED_NOTE_SIZE_V5,
+    ENCRYPTED_NOTE_SIZE_V6,
+};

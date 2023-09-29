@@ -21,7 +21,7 @@ use super::{
 ///
 /// [actiondesc]: https://zips.z.cash/protocol/nu5.pdf#actiondesc
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Action {
+pub struct Action<const ENCRYPTED_NOTE_SIZE: usize> {
     /// A value commitment to net value of the input note minus the output note
     pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note being spent.
@@ -35,14 +35,14 @@ pub struct Action {
     /// encrypted private key in `out_ciphertext`.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: note::EncryptedNote,
+    pub enc_ciphertext: note::EncryptedNote<ENCRYPTED_NOTE_SIZE>,
     /// A ciphertext component that allows the holder of a full viewing key to
     /// recover the recipient diversified transmission key and the ephemeral
     /// private key (and therefore the entire note plaintext).
     pub out_ciphertext: note::WrappedNoteKey,
 }
 
-impl ZcashSerialize for Action {
+impl<const ENCRYPTED_NOTE_SIZE: usize> ZcashSerialize for Action<ENCRYPTED_NOTE_SIZE> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.nullifier)[..])?;
@@ -55,7 +55,7 @@ impl ZcashSerialize for Action {
     }
 }
 
-impl ZcashDeserialize for Action {
+impl<const EncryptedNoteSize: usize> ZcashDeserialize for Action<EncryptedNoteSize> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //

@@ -36,6 +36,7 @@ pub mod diagnostic;
 pub mod error;
 pub mod fmt;
 pub mod history_tree;
+pub mod issuance_zsa;
 pub mod orchard;
 pub mod parallel;
 pub mod parameters;
