@@ -15,6 +15,7 @@ use zebra_chain::{
 use crate::{
     service::{
         any_ancestor_blocks,
+        block_iter::any_chain_ancestor_iter,
         check::{
             difficulty::{
                 BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
@@ -87,44 +88,44 @@ pub fn solution_rate(
     num_blocks: usize,
     start_hash: Hash,
 ) -> Option<u128> {
-    // Take 1 extra block for calculating the number of seconds between when mining on the first block likely started.
-    // The work for the last block in this iterator is not added to `total_work`.
+    // Take 1 extra header for calculating the number of seconds between when mining on the first
+    // block likely started. The work for the extra header is not added to `total_work`.
     //
-    // Since we can't take more blocks than are actually in the chain, this automatically limits
+    // Since we can't take more headers than are actually in the chain, this automatically limits
     // `num_blocks` to the chain length, like `zcashd` does.
-    let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
-        .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
-        .peekable();
+    let mut header_iter =
+        any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, start_hash)
+            .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
+            .peekable();
 
-    let get_work = |block: &Block| {
-        block
-            .header
+    let get_work = |header: &block::Header| {
+        header
             .difficulty_threshold
             .to_work()
             .expect("work has already been validated")
     };
 
     // If there are no blocks in the range, we can't return a useful result.
-    let last_block = block_iter.peek()?;
+    let last_header = header_iter.peek()?;
 
     // Initialize the cumulative variables.
-    let mut min_time = last_block.header.time;
-    let mut max_time = last_block.header.time;
+    let mut min_time = last_header.time;
+    let mut max_time = last_header.time;
 
     let mut last_work = Work::zero();
     let mut total_work = PartialCumulativeWork::zero();
 
-    for block in block_iter {
-        min_time = min_time.min(block.header.time);
-        max_time = max_time.max(block.header.time);
+    for header in header_iter {
+        min_time = min_time.min(header.time);
+        max_time = max_time.max(header.time);
 
-        last_work = get_work(&block);
+        last_work = get_work(&header);
         total_work += last_work;
     }
 
-    // We added an extra block so we could estimate when mining on the first block
+    // We added an extra header so we could estimate when mining on the first block
     // in the window of `num_blocks` likely started. But we don't want to add the work
-    // for that block.
+    // for that header.
     total_work -= last_work;
 
     let work_duration = (max_time - min_time).num_seconds();
