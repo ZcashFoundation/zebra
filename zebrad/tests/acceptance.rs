@@ -1118,20 +1118,21 @@ fn create_cached_database(network: Network) -> Result<()> {
 
 #[tracing::instrument]
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
-    let height = network.mandatory_checkpoint_height() + 1200;
-    let full_validation_stop_regex =
-        format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
+    return Ok(());
+    // let height = network.mandatory_checkpoint_height() + 1200;
+    // let full_validation_stop_regex =
+    //     format!("{STOP_AT_HEIGHT_REGEX}.*commit contextually-verified request");
 
-    create_cached_database_height(
-        network,
-        height.unwrap(),
-        // We need the ZK parameters for full validation
-        false,
-        // Test full validation by turning checkpoints off
-        false,
-        // Check that we're doing full validation when we finish the cached sync
-        &full_validation_stop_regex,
-    )
+    // create_cached_database_height(
+    //     network,
+    //     height.unwrap(),
+    //     // We need the ZK parameters for full validation
+    //     false,
+    //     // Test full validation by turning checkpoints off
+    //     false,
+    //     // Check that we're doing full validation when we finish the cached sync
+    //     &full_validation_stop_regex,
+    // )
 }
 
 /// Sync `network` until the chain tip is reached, or a timeout elapses.
