@@ -464,6 +464,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the `block` with the given hash in any chain.
+    #[allow(dead_code)]
     pub fn any_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
         // This performs efficiently because the number of chains is limited to 10.
         for chain in self.chain_set.iter().rev() {
@@ -480,6 +481,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the previous block hash for the given block hash in any chain.
+    #[allow(dead_code)]
     pub fn any_prev_block_hash_for_hash(&self, hash: block::Hash) -> Option<block::Hash> {
         // This performs efficiently because the blocks are in memory.
         self.any_block_by_hash(hash)
@@ -522,6 +524,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the height of `hash` in any chain.
+    #[allow(dead_code)]
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         for chain in self.chain_set.iter().rev() {
             if let Some(height) = chain.height_by_hash.get(&hash) {

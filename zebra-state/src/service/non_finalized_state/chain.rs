@@ -462,6 +462,7 @@ impl Chain {
 
     /// Returns true is the chain contains the given block hash or height.
     /// Returns false otherwise.
+    #[allow(dead_code)]
     pub fn contains_hash_or_height(&self, hash_or_height: impl Into<HashOrHeight>) -> bool {
         use HashOrHeight::*;
 
