@@ -356,7 +356,7 @@ jobs:
               exit 1
           fi
 
-          # Use hard-coded cache to compare sync to tip performance
+          # Use hard-coded cache disk name to compare sync to tip performance
           CACHED_DISK_NAME="zebrad-cache-main-a9980e9-v25-mainnet-tip-u-020400"
 
           echo "Selected Disk: $CACHED_DISK_NAME"
