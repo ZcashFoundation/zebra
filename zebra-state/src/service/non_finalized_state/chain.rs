@@ -450,8 +450,8 @@ impl Chain {
 
     /// Returns true is the chain contains the given block hash.
     /// Returns false otherwise.
-    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
-        self.height_by_hash.contains_key(hash)
+    pub fn contains_block_hash(&self, hash: block::Hash) -> bool {
+        self.height_by_hash.contains_key(&hash)
     }
 
     /// Returns true is the chain contains the given block height.
@@ -468,7 +468,7 @@ impl Chain {
         let hash_or_height = hash_or_height.into();
 
         match hash_or_height {
-            Hash(hash) => self.contains_block_hash(&hash),
+            Hash(hash) => self.contains_block_hash(hash),
             Height(height) => self.contains_block_height(height),
         }
     }
