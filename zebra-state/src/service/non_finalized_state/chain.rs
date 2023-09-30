@@ -504,7 +504,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no sprout trees. (This should be impossible.)
-    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
+    pub fn sprout_note_commitment_tree_for_tip(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         self.sprout_trees_by_height
             .last_key_value()
             .expect("only called while sprout_trees_by_height is populated")
@@ -668,7 +668,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no sapling trees. (This should be impossible.)
-    pub fn sapling_note_commitment_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
+    pub fn sapling_note_commitment_tree_for_tip(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         self.sapling_trees_by_height
             .last_key_value()
             .expect("only called while sapling_trees_by_height is populated")
@@ -737,7 +737,7 @@ impl Chain {
             .collect()
     }
 
-    /// Returns the Sapling note commitment subtree of the tip of this [`Chain`],
+    /// Returns the Sapling [`NoteCommitmentSubtree`] if it was completed at the tip height.
     pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
@@ -879,7 +879,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no orchard trees. (This should be impossible.)
-    pub fn orchard_note_commitment_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
+    pub fn orchard_note_commitment_tree_for_tip(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         self.orchard_trees_by_height
             .last_key_value()
             .expect("only called while orchard_trees_by_height is populated")
@@ -949,7 +949,7 @@ impl Chain {
             .collect()
     }
 
-    /// Returns the Orchard note commitment subtree of the tip of this [`Chain`],
+    /// Returns the Orchard [`NoteCommitmentSubtree`] if it was completed at the tip height.
     pub fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
@@ -1407,10 +1407,10 @@ impl Chain {
 
         // Prepare data for parallel execution
         let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree(),
-            sapling: self.sapling_note_commitment_tree(),
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
             sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_note_commitment_tree(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
             orchard_subtree: self.orchard_subtree_for_tip(),
         };
 
@@ -1447,8 +1447,8 @@ impl Chain {
                 .insert(subtree.index, subtree.into_data());
         }
 
-        let sapling_root = self.sapling_note_commitment_tree().root();
-        let orchard_root = self.orchard_note_commitment_tree().root();
+        let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
+        let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let mut history_tree = self.history_block_commitment_tree();
