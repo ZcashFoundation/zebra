@@ -302,6 +302,11 @@ impl ZebraDb {
             NoteCommitmentSubtreeData<sapling::tree::Node>,
         ) = self.db.zs_last_key_value(&sapling_subtrees)?;
 
+        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
+        if subtree_data.end != tip_height  {
+            return None;
+        }
+
         Some(subtree_data.with_index(index))
     }
 
@@ -463,6 +468,11 @@ impl ZebraDb {
             NoteCommitmentSubtreeIndex,
             NoteCommitmentSubtreeData<orchard::tree::Node>,
         ) = self.db.zs_last_key_value(&orchard_subtrees)?;
+
+        let tip_height = self.finalized_tip_height().unwrap_or(Height(0));
+        if subtree_data.end != tip_height  {
+            return None;
+        }
 
         Some(subtree_data.with_index(index))
     }
