@@ -41,8 +41,6 @@ pub mod index;
 /// to a non-finalized chain tip.
 #[derive(Clone, Debug)]
 pub struct Chain {
-    // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
-
     // Config
     //
     /// The configured network for this chain.
