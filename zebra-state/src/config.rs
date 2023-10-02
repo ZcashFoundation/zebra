@@ -4,6 +4,7 @@ use std::{
     fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
     io::ErrorKind,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use semver::Version;
@@ -83,11 +84,6 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
-    /// Commit blocks to the finalized state up to this height, then exit Zebra.
-    ///
-    /// Set to `None` by default: Zebra continues syncing indefinitely.
-    pub debug_stop_at_height: Option<u32>,
-
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -95,6 +91,21 @@ pub struct Config {
     /// deleted.
     pub delete_old_database: bool,
 
+    // Debug configs
+    //
+    /// Commit blocks to the finalized state up to this height, then exit Zebra.
+    ///
+    /// Set to `None` by default: Zebra continues syncing indefinitely.
+    pub debug_stop_at_height: Option<u32>,
+
+    /// While Zebra is running, check state validity this often.
+    ///
+    /// Set to `None` by default: Zebra only checks state format validity on startup and shutdown.
+    #[serde(with = "humantime_serde")]
+    pub debug_validity_check_interval: Option<Duration>,
+
+    // Elasticsearch configs
+    //
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database url.
     pub elasticsearch_url: String,
@@ -162,8 +173,9 @@ impl Default for Config {
         Self {
             cache_dir,
             ephemeral: false,
-            debug_stop_at_height: None,
             delete_old_database: true,
+            debug_stop_at_height: None,
+            debug_validity_check_interval: None,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_url: "https://localhost:9200".to_string(),
             #[cfg(feature = "elasticsearch")]
