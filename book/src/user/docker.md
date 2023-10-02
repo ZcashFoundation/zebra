@@ -51,7 +51,7 @@ And after our image has been built, we can run it on `Mainnet` with the followin
 docker run --env LOG_COLOR="true" -p 9999:9999 local/zebra.mining
 ```
 
-Based on our actual `runtime-entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
+Based on our actual `entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
 
 ```toml
 [network]
@@ -80,7 +80,7 @@ endpoint_addr = "127.0.0.1:9999"
 
 - `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 - `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
-- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `runtime-entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
+- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
 
 #### CI/CD
 

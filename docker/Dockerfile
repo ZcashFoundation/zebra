@@ -169,8 +169,8 @@ RUN rm -r zebra-original
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-COPY ./docker/runtime-entrypoint.sh /
-RUN chmod u+x /runtime-entrypoint.sh
+COPY ./docker/entrypoint.sh /
+RUN chmod u+x /entrypoint.sh
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
@@ -178,7 +178,7 @@ RUN chmod u+x /runtime-entrypoint.sh
 # binary from the `release` stage, and the Zcash Sprout & Sapling parameters from ZCash
 FROM debian:bullseye-slim AS runtime
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
-COPY --from=release /runtime-entrypoint.sh /
+COPY --from=release /entrypoint.sh /
 COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/zcash-params:edge /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
@@ -194,4 +194,4 @@ EXPOSE 8233 18233
 
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
-ENTRYPOINT [ "/runtime-entrypoint.sh" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
