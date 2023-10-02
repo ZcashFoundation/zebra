@@ -67,7 +67,7 @@ pub struct Chain {
 }
 
 /// The internal state of [`Chain`].
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
