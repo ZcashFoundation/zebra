@@ -4,7 +4,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ops::{Deref, RangeInclusive},
+    ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
@@ -70,7 +70,7 @@ pub struct Chain {
 
 /// The internal state of [`Chain`].
 #[derive(PartialEq, Clone, Debug)]
-struct ChainInner {
+pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
@@ -221,7 +221,7 @@ impl Chain {
         history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
-        let mut inner = ChainInner {
+        let inner = ChainInner {
             blocks: Default::default(),
             height_by_hash: Default::default(),
             tx_loc_by_hash: Default::default(),
@@ -1526,6 +1526,20 @@ impl Chain {
         self.update_chain_tip_with(chain_value_pool_change)?;
 
         Ok(())
+    }
+}
+
+impl Deref for Chain {
+    type Target = ChainInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Chain {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
