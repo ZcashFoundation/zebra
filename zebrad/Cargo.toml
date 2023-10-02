@@ -153,14 +153,14 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.29" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.29", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.4.4", features = ["cargo"] }
+clap = { version = "4.4.6", features = ["cargo"] }
 chrono = { version = "0.4.31", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.0.0"
 lazy_static = "1.4.0"
 semver = "1.0.18"
 serde = { version = "1.0.188", features = ["serde_derive"] }
-toml = "0.8.0"
+toml = "0.8.1"
 
 futures = "0.3.28"
 rayon = "1.7.0"
