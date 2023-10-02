@@ -58,9 +58,9 @@ tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
-orchard = "0.5.0"
+orchard = "0.6.0"
 
-zcash_proofs = { version = "0.12.1", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.13.0", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.5" }
 tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.5" }
