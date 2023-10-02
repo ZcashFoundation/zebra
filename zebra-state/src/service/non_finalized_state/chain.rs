@@ -2057,14 +2057,14 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     /// When forking from the tip, subtract the block's chain value pool change.
     ///
     /// When finalizing the root, leave the chain value pool balances unchanged.
-    /// [`Self::chain_value_pools`] tracks the chain value pools for all
-    /// finalized blocks, and the non-finalized blocks in this chain. So
-    /// finalizing the root doesn't change the set of blocks it tracks.
+    /// [`ChainInner::chain_value_pools`] tracks the chain value pools for all finalized blocks, and
+    /// the non-finalized blocks in this chain. So finalizing the root doesn't change the set of
+    /// blocks it tracks.
     ///
     /// # Panics
     ///
-    /// Panics if the chain pool value balance is invalid
-    /// after we subtract the block value pool change.
+    /// Panics if the chain pool value balance is invalid after we subtract the block value pool
+    /// change.
     fn revert_chain_with(
         &mut self,
         block_value_pool_change: &ValueBalance<NegativeAllowed>,
