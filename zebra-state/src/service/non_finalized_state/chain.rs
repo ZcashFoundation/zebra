@@ -741,7 +741,7 @@ impl Chain {
     pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
-            Some(self.sapling_subtree(tip.into())?)
+            self.sapling_subtree(tip.into())
         } else {
             None
         }
@@ -953,7 +953,7 @@ impl Chain {
     pub fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
-            Some(self.orchard_subtree(tip.into())?)
+            self.orchard_subtree(tip.into())
         } else {
             None
         }
