@@ -83,7 +83,7 @@ impl FromDisk for NonEmptyHistoryTree {
     }
 }
 
-// We don't write empty history trees to disk, so we known this one is non-empty.
+// We don't write empty history trees to disk, so we know this one is non-empty.
 impl FromDisk for HistoryTree {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         NonEmptyHistoryTree::from_bytes(bytes).into()
