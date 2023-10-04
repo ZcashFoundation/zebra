@@ -382,7 +382,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 60
 
       # Create a docker volume with the selected cached state.
       #
@@ -398,6 +397,10 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          # Wait for the disk exist and verify it's not in use
+          while [[ ! -e /dev/sdb ]] || lsof /dev/sdb &>/dev/null; do
+            sleep 1;
+          done && \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
@@ -432,8 +435,6 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          # Wait for the disk to be attached
-          while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
@@ -482,8 +483,6 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          # Wait for the disk to be attached
-          while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
