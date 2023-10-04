@@ -197,9 +197,13 @@ jobs:
           "\
           sudo mkfs.ext4 -v /dev/sdb \
           && \
+          sleep 30 \
+          && \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
+          # TODO: remove this sleep and the one above if they're not needed
+          sleep 30
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
@@ -403,6 +407,8 @@ jobs:
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
+          # TODO: remove this sleep if it's not needed
+          sleep 30
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
