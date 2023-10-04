@@ -697,7 +697,22 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
                 issuance_zsa_shielded_data,
             } => {
-                // FIXME: imlpement
+                // FIXME: add comments like in V5
+                writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
+                writer.write_u32::<LittleEndian>(u32::from(
+                    network_upgrade
+                        .branch_id()
+                        .expect("valid transactions must have a network upgrade with a branch id"),
+                ))?;
+                lock_time.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(expiry_height.0)?;
+                inputs.zcash_serialize(&mut writer)?;
+                outputs.zcash_serialize(&mut writer)?;
+                sapling_shielded_data.zcash_serialize(&mut writer)?;
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
+
+                // FIXME: serialize issuance_zsa_shielded_data
+                //issuance_zsa_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())

@@ -196,6 +196,7 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> AuthorizedAction<ENCRYPTED_NOTE_SIZE> {
 }
 
 // FIXME: Add description for this?
+// FIXME: move to transaction.rs as it's not used here? Or use it here instead of transaction.rs?
 pub struct ActionRef<'a> {
     pub cv: &'a super::commitment::ValueCommitment,
     pub nullifier: &'a super::note::Nullifier,
@@ -204,7 +205,7 @@ pub struct ActionRef<'a> {
 }
 
 impl<'a, const ENCRYPTED_NOTE_SIZE: usize> From<&'a Action<ENCRYPTED_NOTE_SIZE>> for ActionRef<'a> {
-    fn from(action: &Action<ENCRYPTED_NOTE_SIZE>) -> Self {
+    fn from(action: &'a Action<ENCRYPTED_NOTE_SIZE>) -> Self {
         Self {
             cv: &action.cv,
             nullifier: &action.nullifier,
@@ -238,7 +239,9 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> TrustedPreallocate for Action<ENCRYPTED_N
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
         // Each signature must have a corresponding action.
-        Action::max_allocation()
+        // FIXME: ENCRYPTED_NOTE_SIZE_V6 is used as it provieds the max size of the action.
+        // So it's used even for ENCRYPTED_NOTE_SIZE_V5 - is this correct?
+        Action::<ENCRYPTED_NOTE_SIZE_V6>::max_allocation()
     }
 }
 

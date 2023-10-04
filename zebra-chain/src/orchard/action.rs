@@ -55,7 +55,7 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> ZcashSerialize for Action<ENCRYPTED_NOTE_
     }
 }
 
-impl<const EncryptedNoteSize: usize> ZcashDeserialize for Action<EncryptedNoteSize> {
+impl<const ENCRYPTED_NOTE_SIZE: usize> ZcashDeserialize for Action<ENCRYPTED_NOTE_SIZE> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //

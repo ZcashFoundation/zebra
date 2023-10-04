@@ -989,67 +989,81 @@ impl Transaction {
 
     /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_actions(&self) -> impl Iterator<Item = orchard::ActionRef> {
+    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionRef> + '_> {
         match self {
             Transaction::V5 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::actions),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::actions)
+                    .map(orchard::ActionRef::from),
+            ),
 
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::actions),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::actions)
+                    .map(orchard::ActionRef::from),
+            ),
 
-            _ => None,
+            _ => Box::new(std::iter::empty()),
         }
     }
 
     /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+    pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
         match self {
             Transaction::V5 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::nullifiers),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::nullifiers),
+            ),
 
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::nullifiers),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::nullifiers),
+            ),
 
-            _ => None,
+            _ => Box::new(std::iter::empty()),
         }
     }
 
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+    pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = &pallas::Base> + '_> {
         match self {
             Transaction::V5 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::note_commitments),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::note_commitments),
+            ),
 
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data
-                .into_iter()
-                .flat_map(orchard::ShieldedData::note_commitments),
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::note_commitments),
+            ),
 
-            _ => None,
+            _ => Box::new(std::iter::empty()),
         }
     }
 
