@@ -30,8 +30,14 @@ use crate::common::{
     test_type::TestType,
 };
 
-/// Path to a directory containing a cached Zebra state.
+/// The environmental variable that holds the path to a directory containing a cached Zebra state.
 pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
+
+/// In integration tests, the interval between database format checks for newly added blocks.
+///
+/// This should be short enough that format bugs cause CI test failures,
+/// but long enough that it doesn't impact performance.
+pub const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Type alias for a boxed state service.
 pub type BoxStateService =
