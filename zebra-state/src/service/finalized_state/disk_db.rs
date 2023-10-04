@@ -698,6 +698,7 @@ impl DiskDb {
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
         const ONE_MEGABYTE: usize = 1024 * 1024;
+        const ONE_GIGABYTE: usize = 1024 * ONE_MEGABYTE;
 
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
@@ -730,6 +731,9 @@ impl DiskDb {
         let db_file_limit = db_file_limit.try_into().unwrap_or(ideal_limit);
 
         opts.set_max_open_files(db_file_limit);
+
+        // The default manifest file size is unlimited, which could use all the disk space.
+        opts.set_max_manifest_file_size(ONE_GIGABYTE);
 
         // Set the block-based options
         opts.set_block_based_table_factory(&block_based_opts);
