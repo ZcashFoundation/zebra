@@ -218,9 +218,8 @@ jobs:
           --command \
           "\
           set -x; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -231,9 +230,8 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
@@ -460,9 +458,8 @@ jobs:
           --command \
           "\
           set -x; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -473,9 +470,8 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
@@ -523,9 +519,8 @@ jobs:
           --command \
           "\
           set -x; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -537,9 +532,8 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof +f -- /dev/sdb; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo lsof /dev/sdb; \
+          sudo lsof +D -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
