@@ -290,8 +290,9 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          set -ex; \
           # Check if we need to format the disk if no state is needed
-          if [[ "${{ inputs.needs_zebra_state }}" == "false" || "${{ inputs.needs_lwd_state }}" == "false" ]]; then
+          if [[ ${{ inputs.needs_zebra_state }} == false || ${{ inputs.needs_lwd_state }} == false ]]; then
             sudo mkfs.ext4 -v /dev/sdb
           fi \
           && \
