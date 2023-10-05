@@ -265,7 +265,7 @@ fn runtime_default_log_file(
 
 /// Returns the configured log file path using the runtime `log_file` and `progress_bar` config.
 ///
-/// This is the inverse of [`deserialize_default_log_file()`].
+/// This is the inverse of [`runtime_default_log_file()`].
 fn disk_default_log_file(
     log_file: Option<PathBuf>,
     progress_bar: Option<ProgressConfig>,
