@@ -91,13 +91,11 @@ case "$1" in
         elif [[ "$TEST_LWD_FULL_SYNC" -eq "1" ]]; then
             # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            ln -s "$ZEBRA_CACHED_STATE_DIR" "$LIGHTWALLETD_DATA_DIR"
             cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_full_sync
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
         elif [[ "$TEST_LWD_UPDATE_SYNC" -eq "1" ]]; then
             # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            ln -s "$ZEBRA_CACHED_STATE_DIR" "$LIGHTWALLETD_DATA_DIR"
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_update_sync
 
@@ -105,13 +103,11 @@ case "$1" in
         elif [[ "$TEST_LWD_GRPC" -eq "1" ]]; then
             # Starting with a cached Zebra and lightwalletd tip, test all gRPC calls to lightwalletd, which calls Zebra.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            ln -s "$ZEBRA_CACHED_STATE_DIR" "$LIGHTWALLETD_DATA_DIR"
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_wallet_grpc_tests
         elif [[ "$TEST_LWD_TRANSACTIONS" -eq "1" ]]; then
             # Starting with a cached Zebra and lightwalletd tip, test sending transactions gRPC call to lightwalletd, which calls Zebra.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            ln -s "$ZEBRA_CACHED_STATE_DIR" "$LIGHTWALLETD_DATA_DIR"
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored sending_transactions_using_lightwalletd
 
