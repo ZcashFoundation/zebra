@@ -104,127 +104,14 @@ env:
   CACHED_STATE_UPDATE_LIMIT: 576
 
 jobs:
-  # set up and launch the test, if it doesn't use any cached state
-  # each test runs one of the *-with/without-cached-state job series, and skips the other
-  launch-without-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    if: ${{ !inputs.needs_zebra_state }}
+  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
+  # Then check the result of the test.
+  #
+  # If `inputs.is_long_test` is `true`, the timeout is 5 days, otherwise it's 3 hours.
+  test-result:
+    name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v4.0.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Makes the Zcash network name lowercase.
-      #
-      # Labels in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase ${{ inputs.network }}.
-      #
-      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      - name: Downcase network name for labels
-        run: |
-          NETWORK_CAPS="${{ inputs.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
-          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
-
-      # Create a Compute Engine virtual machine
-      - name: Create ${{ inputs.test_id }} GCP compute instance
-        id: create-instance
-        run: |
-          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 300GB \
-          --boot-disk-type pd-ssd \
-          --image-project=cos-cloud \
-          --image-family=cos-stable \
-          --create-disk=name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
-          --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
-          --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
-          --tags ${{ inputs.app_name }} \
-          --zone ${{ vars.GCP_ZONE }}
-          sleep 60
-
-      # Create a docker volume with the new disk we just created.
-      #
-      # SSH into the just created VM, and create a docker volume with the newly created disk.
-      - name: Create ${{ inputs.test_id }} Docker volume
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo mkfs.ext4 -v /dev/sdb \
-          && \
-          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
-      # Launch the test without any cached state
-      - name: Launch ${{ inputs.test_id }} test
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
-  # set up and launch the test, if it uses cached state
-  # each test runs one of the *-with/without-cached-state job series, and skips the other
-  launch-with-cached-state:
-    name: Launch ${{ inputs.test_id }} test
-    if: ${{ inputs.needs_zebra_state }}
-    runs-on: zfnd-runners
+    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
       cached_disk_name: ${{ steps.get-disk-name.outputs.cached_disk_name }}
     permissions:
@@ -295,6 +182,7 @@ jobs:
       # TODO: move this script into a file, and call it from manual-find-cached-disks.yml as well.
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
+        if: ${{ inputs.needs_zebra_state || inputs.needs_lwd_state }}
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
@@ -361,18 +249,21 @@ jobs:
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> "$GITHUB_ENV"
+          echo "DISK_OPTION=image=$CACHED_DISK_NAME," >> "$GITHUB_ENV"
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
+      # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
         run: |
+          DISK_OPTION=${{ steps.get-disk-name.outputs.disk_option }}
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 300GB \
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
+          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -382,9 +273,8 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 60
 
-      # Create a docker volume with the selected cached state.
+      # Create a docker volume with the new disk we just created or the cached state.
       #
       # SSH into the just created VM and create a docker volume with the recently attached disk.
       # (The cached state and disk are usually the same size,
@@ -398,53 +288,16 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          sudo mkfs.ext4 -v /dev/sdb \
+          && \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-      # Launch the test with the previously created Zebra-only cached state.
-      # Each test runs one of the "Launch test" steps, and skips the other.
+      # Launch the test with the previously created disk or cached state.
       #
-      # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
-      #
-      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
-      # container in one path:
-      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
-      #
-      # This path must match the variable used by the tests in Rust, which are also set in
-      # `ci-unit-tests-docker.yml` to be able to run this tests.
-      #
-      # Although we're mounting the disk root, Zebra will only respect the values from
-      # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
-      # to match that variable paths.
-      - name: Launch ${{ inputs.test_id }} test
-        # This step only runs for tests that just read or write a Zebra state.
-        #
-        # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
-        # TODO: we should find a better logic for this use cases
-        if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          # Wait for the disk to be attached
-          while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
-          sudo docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
-      # Launch the test with the previously created Lightwalletd and Zebra cached state.
-      # Each test runs one of the "Launch test" steps, and skips the other.
+      # This step uses a $MOUNT_FLAGS variable to mount the disk to the docker container.
+      # If the test needs Lightwalletd state, we add the Lightwalletd state mount to the $MOUNT_FLAGS variable.
       #
       # SSH into the just created VM, and create a Docker container to run the incoming test
       # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
@@ -454,7 +307,7 @@ jobs:
       # considerations.
       #
       # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
-      # container in two different paths:
+      # container, and might have two different paths (if lightwalletd state is needed):
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
       #
@@ -462,19 +315,22 @@ jobs:
       # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
       # delete the whole cache directory.)
       #
-      # This paths must match the variables used by the tests in Rust, which are also set in
+      # This path must match the variable used by the tests in Rust, which are also set in
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
       # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
-      # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
+      # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
+      # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
-        # This step only runs for tests that read or write Lightwalletd and Zebra states.
-        #
-        # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
-        # TODO: we should find a better logic for this use cases
-        if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         run: |
+          MOUNT_FLAGS="--mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
+
+          # Check if we need to mount for Lightwalletd state
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
+            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}"
+          fi
+
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -489,62 +345,9 @@ jobs:
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          $MOUNT_FLAGS \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
-
-  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
-  # Then check the result of the test.
-  #
-  # If `inputs.is_long_test` is `true`, the timeout is 5 days, otherwise it's 3 hours.
-  test-result:
-    name: Run ${{ inputs.test_id }} test
-    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
-    needs: [ launch-with-cached-state, launch-without-cached-state ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() }}
-    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
-    runs-on: zfnd-runners
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v4.0.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Install our SSH secret
-      - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.5.1
-        with:
-          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          name: google_compute_engine
-          known_hosts: unnecessary
-
-      - name: Generate public SSH key
-        run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
-          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
 
       # Show all the logs since the container launched,
       # following until we see zebrad startup messages.
@@ -621,7 +424,7 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result, launch-with-cached-state ]
+    needs: [ test-result ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -864,7 +667,7 @@ jobs:
       - name: Get original cached state height from google cloud
         run: |
           ORIGINAL_HEIGHT="0"
-          ORIGINAL_DISK_NAME="${{ format('{0}', needs.launch-with-cached-state.outputs.cached_disk_name) }}"
+          ORIGINAL_DISK_NAME="${{ format('{0}', needs.test-result.outputs.cached_disk_name) }}"
 
           if [[ -n "$ORIGINAL_DISK_NAME" ]]; then
               ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=$ORIGINAL_DISK_NAME" --format="value(labels.height)")
