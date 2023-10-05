@@ -193,15 +193,15 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           " \
-          set -x \
+          set -x; \
           while ! \
           sudo mkfs.ext4 -v /dev/sdb \
           && \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service \
-          sleep 5 \
+          sudo journalctl -u docker.service; \
+          sleep 5; \
           done \
           "
 
@@ -215,7 +215,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x \
+          set -x; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -225,8 +225,8 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service \
-          sleep 5 \
+          sudo journalctl -u docker.service; \
+          sleep 5; \
           done \
           "
 
@@ -409,13 +409,13 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x \
+          set -x; \
           while ! \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service \
-          sleep 5 \
+          sudo journalctl -u docker.service; \
+          sleep 5; \
           done \
           "
 
@@ -449,7 +449,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x \
+          set -x; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -459,8 +459,8 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service \
-          sleep 5 \
+          sudo journalctl -u docker.service; \
+          sleep 5; \
           done \
           "
 
@@ -508,7 +508,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x \
+          set -x; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -518,8 +518,8 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service \
-          sleep 5 \
+          sudo journalctl -u docker.service; \
+          sleep 5; \
           done \
           "
 
