@@ -458,23 +458,18 @@ jobs:
           --command \
           "\
           set -x; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          while ! \
+          while [[ ! -e /dev/sdb ]] || lsof /dev/sdb &>/dev/null || lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} &>/dev/null; do \
+            echo 'Waiting for /dev/sdb to be free...'; \
+            sleep 5; \
+          done; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
-          do \
-          sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo journalctl --unit docker.service --reverse --lines=10; \
-          sleep 5; \
-          done \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          sudo journalctl --unit docker.service --reverse --lines=10 \
           "
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
@@ -518,10 +513,10 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          while ! \
+          while [[ ! -e /dev/sdb ]] || lsof /dev/sdb &>/dev/null || lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} &>/dev/null; do \
+            echo 'Waiting for /dev/sdb to be free...'; \
+            sleep 5; \
+          done; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
@@ -529,14 +524,8 @@ jobs:
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
-          do \
-          sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo journalctl --unit docker.service --reverse --lines=10; \
-          sleep 5; \
-          done \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          sudo journalctl --unit docker.service --reverse --lines=10 \
           "
 
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
