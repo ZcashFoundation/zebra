@@ -197,10 +197,12 @@ jobs:
           while ! \
           sudo mkfs.ext4 -v /dev/sdb \
           && \
+          sudo journalctl --unit docker.service --reverse \
+          && \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service; \
+          sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
           "
@@ -216,6 +218,9 @@ jobs:
           --command \
           "\
           set -x; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -226,7 +231,10 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo journalctl -u docker.service; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
           "
@@ -411,11 +419,12 @@ jobs:
           --command \
           "\
           set -x; \
+          sudo journalctl --unit docker.service --reverse;
           while ! \
           sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
           do \
-          sudo journalctl -u docker.service; \
+          sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
           "
@@ -451,6 +460,9 @@ jobs:
           --command \
           "\
           set -x; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -461,7 +473,10 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo journalctl -u docker.service; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
           "
@@ -508,6 +523,9 @@ jobs:
           --command \
           "\
           set -x; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
           while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -519,7 +537,10 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
           sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo journalctl -u docker.service; \
+          sudo lsof +f -- /dev/sdb; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
+          sudo lsof +f -- /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}/_data; \
+          sudo journalctl --unit docker.service --reverse --lines=10; \
           sleep 5; \
           done \
           "
