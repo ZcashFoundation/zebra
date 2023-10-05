@@ -160,6 +160,8 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
+        with:
+          install_components: 'beta'
 
       # Create a Compute Engine virtual machine
       - name: Create ${{ inputs.test_id }} GCP compute instance
@@ -271,6 +273,9 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
+        with:
+          install_components: 'beta'
+
 
       # Find a cached state disk for this job, matching all of:
       # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
@@ -545,6 +550,8 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
+        with:
+          install_components: 'beta'
 
       # Show all the logs since the container launched,
       # following until we see zebrad startup messages.
@@ -681,6 +688,8 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
+        with:
+          install_components: 'beta'
 
       # Get the state version from the local constants.rs file to be used in the image creation,
       # as the state version is part of the disk image name.
@@ -956,6 +965,8 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
+        with:
+          install_components: 'beta'
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
