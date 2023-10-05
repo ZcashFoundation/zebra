@@ -225,6 +225,7 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
+          sudo docker rm --force ${{ inputs.test_id }}; \
           sudo journalctl -u docker.service; \
           sleep 5; \
           done \
@@ -459,6 +460,7 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
+          sudo docker rm --force ${{ inputs.test_id }}; \
           sudo journalctl -u docker.service; \
           sleep 5; \
           done \
@@ -479,10 +481,7 @@ jobs:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
       #
-      # Doing two mounts has caused "device or resource busy" errors in the past (#7659, #4415).
-      # So we use a symlink for the lightwalletd path instead.
-      # TODO: remove duplicate code by doing the zebrad mount in one common step
-      #       then only doing the symlink for the lightwalletd tests in entrypoint.sh
+      # Currently we do this by mounting the same disk at both paths.
       #
       # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
       # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
@@ -516,8 +515,10 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           do \
+          sudo docker rm --force ${{ inputs.test_id }}; \
           sudo journalctl -u docker.service; \
           sleep 5; \
           done \
