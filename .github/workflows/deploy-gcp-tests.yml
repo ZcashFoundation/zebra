@@ -191,7 +191,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          while [[ ! -e /dev/sdb ]] || sudo lsof /dev/sdb &>/dev/null; do \
+          while sudo lsof /dev/sdb; do \
             echo 'Waiting for /dev/sdb to be free...'; \
             sleep 10; \
           done; \
