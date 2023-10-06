@@ -214,7 +214,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
   # set up and launch the test, if it uses cached state
@@ -469,7 +469,7 @@ jobs:
           ${{ inputs.test_variables }} \
           --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
