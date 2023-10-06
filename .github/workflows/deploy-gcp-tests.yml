@@ -381,6 +381,7 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
+          sleep 60
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -418,7 +419,7 @@ jobs:
           --detach \
           ${{ inputs.test_variables }} \
           --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
