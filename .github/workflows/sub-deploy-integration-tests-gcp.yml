@@ -256,15 +256,15 @@ jobs:
       # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
+        shell: /usr/bin/bash -ex {0}
         run: |
-          DISK_OPTION=${{ steps.get-disk-name.outputs.disk_option }}
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 300GB \
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image=gcr.io/google-containers/busybox \
+          --create-disk=${{ env.DISK_OPTION }}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
+          --container-image=gcr.io/google-containers/ubuntu \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
@@ -273,8 +273,8 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          # Wait for the instance to be created and fully booted
-          sleep 90
+        env:
+          DISK_OPTION: ${{ steps.get-disk-name.outputs.disk_option }}
 
       # Create a docker volume with the new disk we just created or the cached state.
       #
@@ -282,6 +282,7 @@ jobs:
       # (The cached state and disk are usually the same size,
       # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
+        shell: /usr/bin/bash -ex {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -290,7 +291,6 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -ex; \
           # Check if we need to format the disk if no state is needed
           if [[ "${{ inputs.needs_zebra_state }}" == "false" && "${{ inputs.needs_lwd_state }}" == "false" ]]; then
             sudo mkfs.ext4 -v /dev/sdb
@@ -329,6 +329,7 @@ jobs:
       # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
+        shell: /usr/bin/bash -ex {0}
         run: |
           MOUNT_FLAGS="--mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
 
@@ -344,7 +345,6 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -ex; \
           # Wait for the disk to be attached
           while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
           sudo docker run \
@@ -398,6 +398,7 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
+        shell: /usr/bin/bash -exo pipefail && trap '' PIPE && {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -405,10 +406,6 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          set -e;
-          set -o pipefail;
-          trap '' PIPE;
-
           sudo docker logs \
           --tail all \
           --follow \
