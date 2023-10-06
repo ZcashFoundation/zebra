@@ -30,7 +30,6 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -85,34 +84,49 @@ impl ZebraDb {
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sprout_tree_for_tip(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
-        if self.finalized_tip_height().is_none() {
-            return Default::default();
+        if self.is_empty() {
+            return Arc::<sprout::tree::NoteCommitmentTree>::default();
         }
 
-        let sprout_nct_handle = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        // # Performance
+        //
+        // Using `zs_last_key_value()` on this column family significantly reduces sync performance
+        // (#7618). This is probably because `zs_delete()` is also used on the same column family.
+        // See the comment in `ZebraDb::history_tree()` for details.
+        //
+        // This bug will be fixed by PR #7392, because it changes this column family to update the
+        // existing key, rather than deleting old keys.
+        let sprout_tree_cf = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
 
-        // # Concurrency
-        //
-        // There is only one tree in this column family, which is atomically updated by a block
-        // write batch (database transaction). If this update runs between the height read and the
-        // tree read, the height will be wrong, and the tree will be missing.
-        //
-        // Instead, always read the last tree in the column family, regardless of height.
-        //
-        // See ticket #7581 for more details.
-        //
-        // TODO: this concurrency bug will be permanently fixed in PR #7392,
-        //       by changing the block update to overwrite the tree, rather than deleting it.
-        //
         // # Forwards Compatibility
         //
         // This code can read the column family format in 1.2.0 and earlier (tip height key),
-        // and after PR #7392 is merged (empty key).
-        self.db
-            .zs_last_key_value(&sprout_nct_handle)
-            // RawBytes will deserialize both Height and `()` (empty) keys.
-            .map(|(_key, value): (RawBytes, _)| Arc::new(value))
-            .expect("Sprout note commitment tree must exist if there is a finalized tip")
+        // and after PR #7392 is merged (empty key). The height-based code can be removed when
+        // versions 1.2.0 and earlier are no longer supported.
+        //
+        // # Concurrency
+        //
+        // There is only one tree in this column family, which is atomically updated by a block
+        // write batch (database transaction). If this update runs between the height read and
+        // the tree read, the height will be wrong, and the tree will be missing.
+        // That could cause consensus bugs.
+        //
+        // See the comment in `ZebraDb::history_tree()` for details.
+        //
+        // TODO: this concurrency bug will be permanently fixed in PR #7392,
+        //       by changing the block update to overwrite the tree, rather than deleting it.
+        let mut sprout_tree: Option<Arc<sprout::tree::NoteCommitmentTree>> =
+            self.db.zs_get(&sprout_tree_cf, &());
+
+        if sprout_tree.is_none() {
+            let tip_height = self
+                .finalized_tip_height()
+                .expect("just checked for an empty database");
+
+            sprout_tree = self.db.zs_get(&sprout_tree_cf, &tip_height);
+        }
+
+        sprout_tree.expect("Sprout note commitment tree must exist if there is a finalized tip")
     }
 
     /// Returns the Sprout note commitment tree matching the given anchor.

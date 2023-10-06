@@ -1,7 +1,5 @@
 //! Constants that impact state behaviour.
 
-use std::time::Duration;
-
 use lazy_static::lazy_static;
 use regex::Regex;
 use semver::Version;
@@ -68,12 +66,6 @@ pub fn latest_version_for_adding_subtrees() -> Version {
 ///
 /// Use [`Config::version_file_path()`] to get the path to this file.
 pub(crate) const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
-
-/// The interval between database format checks for newly added blocks.
-///
-/// This should be short enough that format bugs cause CI test failures,
-/// but long enough that it doesn't impact performance.
-pub(crate) const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.
