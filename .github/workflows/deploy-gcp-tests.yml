@@ -171,7 +171,7 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk=name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image=gcr.io/google-containers/ubuntu \
+          --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
@@ -181,10 +181,8 @@ jobs:
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
 
-      # Create a docker volume with the new disk we just created.
-      #
-      # SSH into the just created VM, and create a docker volume with the newly created disk.
-      - name: Create ${{ inputs.test_id }} Docker volume
+      # Format the mounted disk if the test doesn't use a cached state.
+      - name: Format ${{ inputs.test_id }} volume
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -192,19 +190,12 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
-          " \
-          set -x; \
-          while ! \
+          "\
+          while [[ ! -e /dev/sdb ]] || sudo lsof /dev/sdb &>/dev/null; do \
+            echo 'Waiting for /dev/sdb to be free...'; \
+            sleep 10; \
+          done; \
           sudo mkfs.ext4 -v /dev/sdb \
-          && \
-          sudo journalctl --unit docker.service --reverse \
-          && \
-          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          do \
-          sudo journalctl --unit docker.service --reverse --lines=10; \
-          sleep 5; \
-          done \
           "
 
       # Launch the test without any cached state
@@ -217,24 +208,13 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          while ! \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
-          do \
-          sudo docker rm --force ${{ inputs.test_id }}; \
-          sudo lsof /dev/sdb; \
-          sudo lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          sudo journalctl --unit docker.service --reverse --lines=10; \
-          sleep 5; \
-          done \
           "
 
   # set up and launch the test, if it uses cached state
@@ -392,7 +372,7 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk=image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image=gcr.io/google-containers/ubuntu \
+          --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
@@ -401,31 +381,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-
-      # Create a docker volume with the selected cached state.
-      #
-      # SSH into the just created VM and create a docker volume with the recently attached disk.
-      # (The cached state and disk are usually the same size,
-      # but the cached state can be smaller if we just increased the disk size.)
-      - name: Create ${{ inputs.test_id }} Docker volume
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          set -x; \
-          sudo journalctl --unit docker.service --reverse;
-          while ! \
-          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}; \
-          do \
-          sudo journalctl --unit docker.service --reverse --lines=10; \
-          sleep 5; \
-          done \
-          "
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -457,19 +412,13 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          set -x; \
-          while [[ ! -e /dev/sdb ]] || lsof /dev/sdb &>/dev/null || lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} &>/dev/null; do \
-            echo 'Waiting for /dev/sdb to be free...'; \
-            sleep 5; \
-          done; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          sudo journalctl --unit docker.service --reverse --lines=10 \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           "
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
@@ -513,19 +462,14 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          while [[ ! -e /dev/sdb ]] || lsof /dev/sdb &>/dev/null || lsof +D /var/lib/docker/volumes/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} &>/dev/null; do \
-            echo 'Waiting for /dev/sdb to be free...'; \
-            sleep 5; \
-          done; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          sudo journalctl --unit docker.service --reverse --lines=10 \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}; \
           "
 
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
