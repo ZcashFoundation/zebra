@@ -292,7 +292,7 @@ jobs:
           while [[ ! -e /dev/sdb ]] || sudo lsof /dev/sdb &>/dev/null do \
             echo 'Waiting for /dev/sdb to be free...'; \
             sleep 10; \
-          done; \
+          done \
           # Check if we need to format the disk if no state is needed
           if [[ "${{ inputs.needs_zebra_state }}" == "false" && "${{ inputs.needs_lwd_state }}" == "false" ]]; then
             sudo mkfs.ext4 -v /dev/sdb
