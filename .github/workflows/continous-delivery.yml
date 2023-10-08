@@ -132,37 +132,29 @@ jobs:
 
       # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
-        shell: /usr/bin/bash -exo pipefail {0}
         run: |
+          set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-
           # show the logs, even if the job times out
-          # Temporarily disable "set -e" to handle the broken pipe error gracefully
-          set +e;
-          docker logs \
-          --tail all \
-          --follow \
-          default-conf-tests | \
-          tee --output-error=exit-nopipe /dev/stderr | \
+          docker logs --tail all --follow default-conf-tests | \
+          tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter";
-          LOGS_EXIT_STATUS=$?;
-          set -e;
-
-          # get the exit status from docker
+          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop default-conf-tests
-          EXIT_STATUS=$(docker wait default-conf-tests || echo "Error retrieving exit status");
-          echo "docker exit status: $EXIT_STATUS";
-
-          # If grep found the pattern, exit with the Docker container"s exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
+          # get the exit status from docker
+          EXIT_STATUS=$( \
+          docker wait default-conf-tests || \
+          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
+          echo "missing container, or missing exit status for container" \
+          )
+          docker logs default-conf-tests
+          echo "docker exit status: $EXIT_STATUS"
+          if [[ "$EXIT_STATUS" = "137" ]]; then
+          echo "ignoring expected signal status"
+          exit 0
           fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1
+          exit "$EXIT_STATUS"
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -182,35 +174,29 @@ jobs:
       - name: Run tests using a testnet config
         shell: /usr/bin/bash -exo pipefail {0}
         run: |
+          set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-
           # show the logs, even if the job times out
-          # Temporarily disable "set -e" to handle the broken pipe error gracefully
-          set +e;
-          docker logs \
-          --tail all \
-          --follow \
-          testnet-conf-tests | \
-          tee --output-error=exit-nopipe /dev/stderr | \
+          docker logs --tail all --follow testnet-conf-tests | \
+          tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter";
-          LOGS_EXIT_STATUS=$?;
-          set -e;
-
-          # get the exit status from docker
+          -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
+          -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop testnet-conf-tests
-          EXIT_STATUS=$(docker wait testnet-conf-tests || echo "Error retrieving exit status");
-          echo "docker exit status: $EXIT_STATUS";
-
-          # If grep found the pattern, exit with the Docker container"s exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
+          # get the exit status from docker
+          EXIT_STATUS=$( \
+          docker wait testnet-conf-tests || \
+          docker inspect --format "{{.State.ExitCode}}" testnet-conf-tests || \
+          echo "missing container, or missing exit status for container" \
+          )
+          docker logs testnet-conf-tests
+          echo "docker exit status: $EXIT_STATUS"
+          if [[ "$EXIT_STATUS" = "137" ]]; then
+          echo "ignoring expected signal status"
+          exit 0
           fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1
+          exit "$EXIT_STATUS"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
