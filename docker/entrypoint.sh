@@ -85,7 +85,9 @@ case "$1" in
         elif [[ "$TEST_LWD_RPC_CALL" -eq "1" ]]; then
             # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored fully_synced_rpc_test
+            # Run both the fully synced RPC test and the subtree snapshot test, one test at a time.
+            # Since these tests use the same cached state, a state problem in the first test can fail the second test.
+            cargo test --locked --release --features "$ENTRYPOINT_FEATURES" --package zebrad --test acceptance -- --nocapture --include-ignored --test-threads 1 fully_synced_rpc_
         elif [[ "$TEST_LWD_FULL_SYNC" -eq "1" ]]; then
             # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")

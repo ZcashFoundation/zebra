@@ -53,7 +53,7 @@ jobs:
   build:
     name: Build images
     timeout-minutes: 210
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
@@ -74,7 +74,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.6.0
+        uses: docker/metadata-action@v5.0.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -100,7 +100,7 @@ jobs:
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Authenticate to Google Cloud
         id: auth

@@ -258,6 +258,7 @@ impl PartialEq for DiskDb {
                 self.ephemeral, other.ephemeral,
                 "database with same path but different ephemeral configs",
             );
+
             return true;
         }
 
@@ -437,6 +438,46 @@ impl DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
+        self.zs_range_iter_with_direction(cf, range, false)
+    }
+
+    /// Returns a reverse iterator over the items in `cf` in `range`.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    ///
+    /// This code is copied from `zs_range_iter()`, but with the mode reversed.
+    pub fn zs_reverse_range_iter<C, K, V, R>(
+        &self,
+        cf: &C,
+        range: R,
+    ) -> impl Iterator<Item = (K, V)> + '_
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
+        self.zs_range_iter_with_direction(cf, range, true)
+    }
+
+    /// Returns an iterator over the items in `cf` in `range`.
+    ///
+    /// RocksDB iterators are ordered by increasing key bytes by default.
+    /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    fn zs_range_iter_with_direction<C, K, V, R>(
+        &self,
+        cf: &C,
+        range: R,
+        reverse: bool,
+    ) -> impl Iterator<Item = (K, V)> + '_
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+        R: RangeBounds<K>,
+    {
         use std::ops::Bound::{self, *};
 
         // Replace with map() when it stabilises:
@@ -451,38 +492,65 @@ impl DiskDb {
 
         let start_bound = map_to_vec(range.start_bound());
         let end_bound = map_to_vec(range.end_bound());
-        let range = (start_bound.clone(), end_bound);
+        let range = (start_bound, end_bound);
 
-        let start_bound_vec =
-            if let Included(ref start_bound) | Excluded(ref start_bound) = start_bound {
-                start_bound.clone()
-            } else {
-                // Actually unused
-                Vec::new()
-            };
-
-        let start_mode = if matches!(start_bound, Unbounded) {
-            // Unbounded iterators start at the first item
-            rocksdb::IteratorMode::Start
-        } else {
-            rocksdb::IteratorMode::From(start_bound_vec.as_slice(), rocksdb::Direction::Forward)
-        };
+        let mode = Self::zs_iter_mode(&range, reverse);
 
         // Reading multiple items from iterators has caused database hangs,
         // in previous RocksDB versions
         self.db
-            .iterator_cf(cf, start_mode)
+            .iterator_cf(cf, mode)
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
-            // Skip excluded start bound and empty ranges. The `start_mode` already skips keys
-            // before the start bound.
+            // Skip excluded "from" bound and empty ranges. The `mode` already skips keys
+            // strictly before the "from" bound.
             .skip_while({
                 let range = range.clone();
                 move |(key, _value)| !range.contains(key)
             })
-            // Take until the excluded end bound is reached, or we're after the included end bound.
+            // Take until the excluded "to" bound is reached,
+            // or we're after the included "to" bound.
             .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
+    }
+
+    /// Returns the RocksDB iterator "from" mode for `range`.
+    ///
+    /// RocksDB iterators are ordered by increasing key bytes by default.
+    /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
+    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode
+    where
+        R: RangeBounds<Vec<u8>>,
+    {
+        use std::ops::Bound::*;
+
+        let from_bound = if reverse {
+            range.end_bound()
+        } else {
+            range.start_bound()
+        };
+
+        match from_bound {
+            Unbounded => {
+                if reverse {
+                    // Reversed unbounded iterators start from the last item
+                    rocksdb::IteratorMode::End
+                } else {
+                    // Unbounded iterators start from the first item
+                    rocksdb::IteratorMode::Start
+                }
+            }
+
+            Included(bound) | Excluded(bound) => {
+                let direction = if reverse {
+                    rocksdb::Direction::Reverse
+                } else {
+                    rocksdb::Direction::Forward
+                };
+
+                rocksdb::IteratorMode::From(bound.as_slice(), direction)
+            }
+        }
     }
 
     /// The ideal open file limit for Zebra

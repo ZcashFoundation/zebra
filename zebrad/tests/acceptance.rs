@@ -151,6 +151,7 @@ use color_eyre::{
     Help,
 };
 use semver::Version;
+use serde_json::Value;
 
 use zebra_chain::{
     block::{self, Height},
@@ -1420,8 +1421,6 @@ async fn rpc_endpoint_parallel_threads() -> Result<()> {
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
 #[tracing::instrument]
 async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
-    use serde_json::Value;
-
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -2634,5 +2633,105 @@ async fn state_format_test(
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     }
+    Ok(())
+}
+
+/// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
+///
+/// This test name must have the same prefix as the `fully_synced_rpc_test`, so they can be run in the same test job.
+#[tokio::test]
+#[ignore]
+async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // We're only using cached Zebra state here, so this test type is the most similar
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
+    let network = Network::Mainnet;
+
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+        network,
+        "rpc_z_getsubtreesbyindex_sync_snapshots",
+        test_type,
+        true,
+    )? {
+        tracing::info!("running fully synced zebrad z_getsubtreesbyindex RPC test");
+
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
+    };
+
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
+    // Wait for zebrad to load the full cached blockchain.
+    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+
+    // Create an http client
+    let client =
+        RpcRequestClient::new(zebra_rpc_address.expect("already checked that address is valid"));
+
+    // Create test vector matrix
+    let zcashd_test_vectors = vec![
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_0_1".to_string(),
+            r#"["sapling", 0, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_0_11".to_string(),
+            r#"["sapling", 0, 11]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_17_1".to_string(),
+            r#"["sapling", 17, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_1090_6".to_string(),
+            r#"["sapling", 1090, 6]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_0_1".to_string(),
+            r#"["orchard", 0, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_338_1".to_string(),
+            r#"["orchard", 338, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_585_1".to_string(),
+            r#"["orchard", 585, 1]"#.to_string(),
+        ),
+    ];
+
+    // Before we write a cached state image, wait for a database upgrade.
+    //
+    // TODO: this line will hang if the state upgrade finishes before zebra is synced.
+    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
+    // If it happens for a later upgrade, this code can be moved earlier in the test,
+    // as long as all the cached states are version 25.2.2 or later.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        database_format_version_in_code(),
+    )?;
+
+    for i in zcashd_test_vectors {
+        let res = client.call("z_getsubtreesbyindex", i.1).await?;
+        let body = res.bytes().await;
+        let parsed: Value = serde_json::from_slice(&body.expect("Response is valid json"))?;
+        insta::assert_json_snapshot!(i.0, parsed);
+    }
+
+    zebrad.kill(false)?;
+
+    let output = zebrad.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
     Ok(())
 }
