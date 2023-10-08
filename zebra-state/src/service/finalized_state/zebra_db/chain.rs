@@ -14,59 +14,74 @@
 use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    amount::NonNegative,
-    history_tree::{HistoryTree, NonEmptyHistoryTree},
-    transparent,
-    value_balance::ValueBalance,
+    amount::NonNegative, history_tree::HistoryTree, transparent, value_balance::ValueBalance,
 };
 
 use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
-    /// Returns the ZIP-221 history tree of the finalized tip or `None`
-    /// if it does not exist yet in the state (pre-Heartwood).
+    /// Returns the ZIP-221 history tree of the finalized tip.
+    ///
+    /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
+    /// returns an empty history tree.
     pub fn history_tree(&self) -> Arc<HistoryTree> {
-        if self.finalized_tip_height().is_some() {
-            let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
-
-            // # Concurrency
-            //
-            // There is only one tree in this column family, which is atomically updated by a block
-            // write batch (database transaction). If this update runs between the height read and
-            // the tree read, the height will be wrong, and the tree will be missing.
-            // That could cause consensus bugs.
-            //
-            // Instead, always read the last tree in the column family, regardless of height.
-            //
-            // See ticket #7581 for more details.
-            //
-            // TODO: this concurrency bug will be permanently fixed in PR #7392,
-            //       by changing the block update to overwrite the tree, rather than deleting it.
-            //
-            // # Forwards Compatibility
-            //
-            // This code can read the column family format in 1.2.0 and earlier (tip height key),
-            // and after PR #7392 is merged (empty key).
-            let history_tree: Option<NonEmptyHistoryTree> = self
-                .db
-                .zs_last_key_value(&history_tree_cf)
-                // RawBytes will deserialize both Height and `()` (empty) keys.
-                .map(|(_key, value): (RawBytes, _)| value);
-
-            if let Some(non_empty_tree) = history_tree {
-                return Arc::new(HistoryTree::from(non_empty_tree));
-            }
+        if self.is_empty() {
+            return Arc::<HistoryTree>::default();
         }
 
-        Default::default()
+        // # Performance
+        //
+        // Using `zs_last_key_value()` on this column family significantly reduces sync performance
+        // (#7618). But it seems to work for other column families. This is probably because
+        // `zs_delete()` is also used on the same column family:
+        // <https://tracker.ceph.com/issues/55324>
+        // <https://jira.mariadb.org/browse/MDEV-19670>
+        //
+        // See also the performance notes in:
+        // <https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound>
+        //
+        // This bug will be fixed by PR #7392, because it changes this column family to update the
+        // existing key, rather than deleting old keys.
+        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+
+        // # Forwards Compatibility
+        //
+        // This code can read the column family format in 1.2.0 and earlier (tip height key),
+        // and after PR #7392 is merged (empty key). The height-based code can be removed when
+        // versions 1.2.0 and earlier are no longer supported.
+        //
+        // # Concurrency
+        //
+        // There is only one tree in this column family, which is atomically updated by a block
+        // write batch (database transaction). If this update runs between the height read and
+        // the tree read, the height will be wrong, and the tree will be missing.
+        // That could cause consensus bugs.
+        //
+        // Instead, try reading the new empty-key format (from PR #7392) first,
+        // then read the old format if needed.
+        //
+        // See ticket #7581 for more details.
+        //
+        // TODO: this concurrency bug will be permanently fixed in PR #7392,
+        //       by changing the block update to overwrite the tree, rather than deleting it.
+        let mut history_tree: Option<Arc<HistoryTree>> = self.db.zs_get(&history_tree_cf, &());
+
+        if history_tree.is_none() {
+            let tip_height = self
+                .finalized_tip_height()
+                .expect("just checked for an empty database");
+
+            history_tree = self.db.zs_get(&history_tree_cf, &tip_height);
+        }
+
+        history_tree.unwrap_or_default()
     }
 
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
