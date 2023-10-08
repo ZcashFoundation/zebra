@@ -83,7 +83,7 @@ impl ZebraDb {
 
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sprout_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
+    pub fn sprout_tree_for_tip(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         if self.is_empty() {
             return Arc::<sprout::tree::NoteCommitmentTree>::default();
         }
@@ -161,7 +161,7 @@ impl ZebraDb {
 
     /// Returns the Sapling note commitment tree of the finalized tip or the empty tree if the state
     /// is empty.
-    pub fn sapling_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
+    pub fn sapling_tree_for_tip(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
@@ -303,11 +303,32 @@ impl ZebraDb {
         }
     }
 
+    /// Get the sapling note commitment subtress for the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        let sapling_subtrees = self
+            .db
+            .cf_handle("sapling_note_commitment_subtree")
+            .unwrap();
+
+        let (index, subtree_data): (
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<sapling::tree::Node>,
+        ) = self.db.zs_last_key_value(&sapling_subtrees)?;
+
+        let tip_height = self.finalized_tip_height()?;
+        if subtree_data.end != tip_height {
+            return None;
+        }
+
+        Some(subtree_data.with_index(index))
+    }
+
     // Orchard trees
 
     /// Returns the Orchard note commitment tree of the finalized tip or the empty tree if the state
     /// is empty.
-    pub fn orchard_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
+    pub fn orchard_tree_for_tip(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
@@ -449,15 +470,38 @@ impl ZebraDb {
         }
     }
 
+    /// Get the orchard note commitment subtress for the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        let orchard_subtrees = self
+            .db
+            .cf_handle("orchard_note_commitment_subtree")
+            .unwrap();
+
+        let (index, subtree_data): (
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<orchard::tree::Node>,
+        ) = self.db.zs_last_key_value(&orchard_subtrees)?;
+
+        let tip_height = self.finalized_tip_height()?;
+        if subtree_data.end != tip_height {
+            return None;
+        }
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns the shielded note commitment trees of the finalized tip
     /// or the empty trees if the state is empty.
-    pub fn note_commitment_trees(&self) -> NoteCommitmentTrees {
+    /// Additionally, returns the sapling and orchard subtrees for the finalized tip if
+    /// the current subtree is finalizing in the tip, None otherwise.
+    pub fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
         NoteCommitmentTrees {
-            sprout: self.sprout_tree(),
-            sapling: self.sapling_tree(),
-            sapling_subtree: None,
-            orchard: self.orchard_tree(),
-            orchard_subtree: None,
+            sprout: self.sprout_tree_for_tip(),
+            sapling: self.sapling_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
         }
     }
 }
@@ -571,10 +615,10 @@ impl DiskWriteBatch {
 
         // Store the Sapling tree only if it is not already present at the previous height.
         if height.is_min()
-            || prev_note_commitment_trees
-                .as_ref()
-                .map_or_else(|| zebra_db.sapling_tree(), |trees| trees.sapling.clone())
-                != trees.sapling
+            || prev_note_commitment_trees.as_ref().map_or_else(
+                || zebra_db.sapling_tree_for_tip(),
+                |trees| trees.sapling.clone(),
+            ) != trees.sapling
         {
             self.zs_insert(&sapling_tree_cf, height, trees.sapling);
         }
@@ -582,7 +626,7 @@ impl DiskWriteBatch {
         // Store the Orchard tree only if it is not already present at the previous height.
         if height.is_min()
             || prev_note_commitment_trees
-                .map_or_else(|| zebra_db.orchard_tree(), |trees| trees.orchard)
+                .map_or_else(|| zebra_db.orchard_tree_for_tip(), |trees| trees.orchard)
                 != trees.orchard
         {
             self.zs_insert(&orchard_tree_cf, height, trees.orchard);
