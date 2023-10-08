@@ -134,11 +134,12 @@ jobs:
       - name: Run tests using the default config
         run: |
           set -ex
+          trap "" PIPE;
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           # show the logs, even if the job times out
           docker logs --tail all --follow default-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
+          tee --output-error=exit-nopipe /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
           docker stop default-conf-tests
@@ -175,11 +176,12 @@ jobs:
         shell: /usr/bin/bash -exo pipefail {0}
         run: |
           set -ex
+          trap "" PIPE;
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           # show the logs, even if the job times out
           docker logs --tail all --follow testnet-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
+          tee --output-error=exit-nopipe /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
           -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
