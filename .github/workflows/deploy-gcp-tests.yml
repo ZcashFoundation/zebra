@@ -180,12 +180,9 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 60
 
-      # Create a docker volume with the new disk we just created.
-      #
-      # SSH into the just created VM, and create a docker volume with the newly created disk.
-      - name: Create ${{ inputs.test_id }} Docker volume
+      # Format the mounted disk if the test doesn't use a cached state.
+      - name: Format ${{ inputs.test_id }} volume
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -194,10 +191,11 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          while sudo lsof /dev/sdb; do \
+            echo 'Waiting for /dev/sdb to be free...'; \
+            sleep 10; \
+          done; \
           sudo mkfs.ext4 -v /dev/sdb \
-          && \
-          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
       # Launch the test without any cached state
@@ -215,7 +213,7 @@ jobs:
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
@@ -296,6 +294,7 @@ jobs:
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         run: |
+          set -x
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
@@ -384,24 +383,6 @@ jobs:
           --zone ${{ vars.GCP_ZONE }}
           sleep 60
 
-      # Create a docker volume with the selected cached state.
-      #
-      # SSH into the just created VM and create a docker volume with the recently attached disk.
-      # (The cached state and disk are usually the same size,
-      # but the cached state can be smaller if we just increased the disk size.)
-      - name: Create ${{ inputs.test_id }} Docker volume
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
       #
@@ -432,14 +413,12 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          # Wait for the disk to be attached
-          while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
@@ -453,10 +432,12 @@ jobs:
       # VM and to the container might require more steps in this workflow, and additional
       # considerations.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
-      # container in two different paths:
+      # The disk mounted in the VM is located at /dev/sdb, we want the root `/` of this disk to be
+      # available in the docker container at two different paths:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      #
+      # Currently we do this by mounting the same disk at both paths.
       #
       # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
       # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
@@ -482,15 +463,13 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          # Wait for the disk to be attached
-          while [[ ! -e /dev/sdb ]]; do sleep 1; done && \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
