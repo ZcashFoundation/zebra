@@ -180,7 +180,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 90
 
       # Format the mounted disk if the test doesn't use a cached state.
       - name: Format ${{ inputs.test_id }} volume
