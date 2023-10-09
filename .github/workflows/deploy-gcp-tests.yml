@@ -604,6 +604,10 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
+          trap "" PIPE;
+
+          # Temporarily disable "set -e" to handle the broken pipe error gracefully
+          set +e;
           sudo docker logs \
           --tail all \
           --follow \
@@ -611,7 +615,7 @@ jobs:
           head -700 | \
           tee --output-error=exit-nopipe /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e "Zcash network: ${{ inputs.network }}" \
+          "Zcash network: ${{ inputs.network }}"; \
           '
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
