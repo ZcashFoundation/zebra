@@ -192,11 +192,11 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          while sudo lsof /dev/sdb; do \
-            echo "Waiting for /dev/sdb to be free..."; \
-            sleep 10; \
-          done; \
-          sudo mkfs.ext4 -v /dev/sdb \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
+          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+          sudo mkfs.ext4 -v /dev/$DISK_NAME \
           '
 
       # Launch the test without any cached state
@@ -215,12 +215,12 @@ jobs:
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
 
-      # Show dmesg logs if previous job failed
-      - name: Show dmesg logs if previous job failed
+      # Show debug logs if previous job failed
+      - name: Show debug logs if previous job failed
         if: ${{ failure() }}
         shell: /usr/bin/bash -exo pipefail {0}
         run: |
@@ -230,7 +230,10 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          sudo dmesg \
+          lsblk;
+          sudo lsof /dev/sdb;
+          sudo dmesg;
+          sudo journalctl -b \
           '
 
   # set up and launch the test, if it uses cached state
@@ -397,24 +400,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 90
-
-      # Wait for the /dev/sdb to be ready and not in use by another process
-      - name: Wait for ${{ inputs.test_id }} volume
-        shell: /usr/bin/bash -exo pipefail {0}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          set -ex
-          while sudo lsof /dev/sdb; do \
-            echo "Waiting for /dev/sdb to be free..."; \
-            sleep 10; \
-          done; \
-          '
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -446,16 +431,21 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
+          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
 
-      # Show dmesg logs if previous job failed
+      # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
         if: ${{ failure() && (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
         shell: /usr/bin/bash -exo pipefail {0}
@@ -466,7 +456,8 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          sudo lsof /dev/sdb;
+          lsblk;
+          sudo lsof /dev/$DISK_NAME;
           sudo dmesg;
           sudo journalctl -b \
           '
@@ -512,18 +503,23 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
+          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
 
-      # Show dmesg logs if previous job failed
-      - name: Show dmesg logs if previous job failed
+      # Show debug logs if previous job failed
+      - name: Show debug logs if previous job failed
         if: ${{ failure() && (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         shell: /usr/bin/bash -exo pipefail {0}
         run: |
@@ -533,7 +529,8 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          sudo lsof /dev/sdb;
+          lsblk;
+          sudo lsof /dev/$DISK_NAME;
           sudo dmesg;
           sudo journalctl -b \
           '
