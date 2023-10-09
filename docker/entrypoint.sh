@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# This script serves as the entrypoint for the Zebra Docker container.
+#
+# Description:
+# This script serves as the primary entrypoint for the Docker container. Its main responsibilities include:
+# 1. Environment Setup: Prepares the environment by setting various flags and parameters.
+# 2. Configuration Management: Dynamically generates the `zebrad.toml` configuration file based on environment variables, ensuring the node starts with the desired settings.
+# 3. Test Execution: Can run a series of tests to validate functionality based on specified environment variables.
+# 4. Node Startup: Starts the node, allowing it to begin its operations.
+#
+
 # Show the commands we are executing
 set -x
 # Exit if a command fails
@@ -157,6 +167,12 @@ run_cargo_test() {
   cargo test --locked --release --features "$1" --package zebrad --test acceptance -- --nocapture --include-ignored "$2" "$3" || { echo "Cargo test failed"; exit 1; }
 }
 
+# Main Execution Logic:
+# This section determines the primary operation of the script based on the first argument passed.
+# - If the argument starts with '--' or '-', the script attempts to execute `zebrad` with the provided arguments.
+# - If no argument is provided, the script defaults to running `zebrad` with either a custom or default configuration.
+# - For any other argument, the script checks for specific environment variables to determine which tests or operations to run.
+# This design allows for flexible execution, catering to various use cases like node startup, testing, or other operations.
 case "$1" in
   --* | -*)
     if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
