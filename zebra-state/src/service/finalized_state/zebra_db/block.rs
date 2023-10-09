@@ -107,6 +107,7 @@ impl ZebraDb {
     }
 
     /// Returns the previous block height for the given block hash in the finalized state.
+    #[allow(dead_code)]
     pub fn prev_block_height_for_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let height = self.height(hash)?;
 
