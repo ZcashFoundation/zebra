@@ -513,8 +513,8 @@ fn history_tree_is_updated_for_network_upgrade(
     let tree = NonEmptyHistoryTree::from_block(
         Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree().root(),
-        &chain.orchard_note_commitment_tree().root(),
+        &chain.sapling_note_commitment_tree_for_tip().root(),
+        &chain.orchard_note_commitment_tree_for_tip().root(),
     )
     .unwrap();
 
@@ -598,8 +598,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let tree = NonEmptyHistoryTree::from_block(
         Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree().root(),
-        &chain.orchard_note_commitment_tree().root(),
+        &chain.sapling_note_commitment_tree_for_tip().root(),
+        &chain.orchard_note_commitment_tree_for_tip().root(),
     )
     .unwrap();
 
