@@ -180,7 +180,8 @@ jobs:
          retry_wait_seconds: 60
          # These commands are slow, so we don't need to check their results every second.
          polling_interval_seconds: 10
-         # TODO: shell: bash (arguments)
+         # We want to see which commands are being executed
+         shell: bash -x
          # TODO: make a cleanup script and call it from both launch steps and delete instance.
          on_retry_command: |
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
@@ -407,6 +408,7 @@ jobs:
          retry_on: error
          retry_wait_seconds: 60
          polling_interval_seconds: 10
+         shell: bash -x
          on_retry_command: |
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --zone "${{ vars.GCP_ZONE }}" \
