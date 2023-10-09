@@ -183,39 +183,56 @@ jobs:
 
       # Format the mounted disk if the test doesn't use a cached state.
       - name: Format ${{ inputs.test_id }} volume
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          while sudo lsof /dev/sdb; do \
-            echo 'Waiting for /dev/sdb to be free...'; \
-            sleep 10; \
-          done; \
-          sudo mkfs.ext4 -v /dev/sdb \
-          "
+          --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-); \
+          sudo mkfs.ext4 -v /dev/$DISK_NAME \
+          '
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
+        id: launch-test
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
+          --command=' \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
+          '
+
+      # Show debug logs if previous job failed
+      - name: Show debug logs if previous job failed
+        if: ${{ failure() }}
+        shell: /usr/bin/bash -exo pipefail {0}
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ vars.GCP_ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command=' \
+          lsblk;
+          sudo lsof /dev/sdb;
+          sudo dmesg;
+          sudo journalctl -b \
+          '
 
   # set up and launch the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
@@ -381,7 +398,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 60
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -405,22 +421,43 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
+          --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-); \
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
+          '
+
+      # Show debug logs if previous job failed
+      - name: Show debug logs if previous job failed
+        if: ${{ failure() && (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
+        shell: /usr/bin/bash -exo pipefail {0}
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ vars.GCP_ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command=' \
+          lsblk;
+          sudo lsof /dev/$DISK_NAME;
+          sudo dmesg;
+          sudo journalctl -b \
+          '
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -455,23 +492,44 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
+          --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-); \
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
+          '
+
+      # Show debug logs if previous job failed
+      - name: Show debug logs if previous job failed
+        if: ${{ failure() && (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
+        shell: /usr/bin/bash -exo pipefail {0}
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ vars.GCP_ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command=' \
+          lsblk;
+          sudo lsof /dev/$DISK_NAME;
+          sudo dmesg;
+          sudo journalctl -b \
+          '
 
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
   # Then check the result of the test.
@@ -538,23 +596,23 @@ jobs:
       #
       # Errors in the tests are caught by the final test status job.
       - name: Check startup logs for ${{ inputs.test_id }}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
+          --command=' \
           sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
           head -700 | \
-          tee --output-error=exit /dev/stderr | \
+          tee --output-error=exit-nopipe /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e 'Zcash network: ${{ inputs.network }}' \
-          "
+          -e "Zcash network: ${{ inputs.network }}" \
+          '
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
@@ -567,6 +625,7 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -574,26 +633,31 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          set -e;
-          set -o pipefail;
-          trap '' PIPE;
+          trap "" PIPE;
 
+          # Temporarily disable "set -e" to handle the broken pipe error gracefully
+          set +e;
           sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
+          tee --output-error=exit-nopipe /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
+          "test result: .*ok.* [1-9][0-9]* passed.*finished in";
+          LOGS_EXIT_STATUS=$?;
+          set -e;
 
-          EXIT_STATUS=$( \
-          sudo docker wait ${{ inputs.test_id }} || \
-          sudo docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
-          echo "missing container, or missing exit status for container" \
-          ); \
+          EXIT_STATUS=$(sudo docker wait ${{ inputs.test_id }} || echo "Error retrieving exit status");
+          echo "sudo docker exit status: $EXIT_STATUS";
 
-          echo "sudo docker exit status: $EXIT_STATUS"; \
-          exit "$EXIT_STATUS" \
+          # If grep found the pattern, exit with the Docker container"s exit status
+          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
+              exit $EXIT_STATUS;
+          fi
+
+          # Handle other potential errors here
+          echo "An error occurred while processing the logs.";
+          exit 1; \
           '
 
   # create a state image from the instance's state disk, if requested by the caller
@@ -707,6 +771,7 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
@@ -718,9 +783,9 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=" \
+          --command=' \
           sudo docker logs ${{ inputs.test_id }} | head -1000 \
-          ")
+          ')
 
           # either a semantic version or "creating new database"
           INITIAL_DISK_DB_VERSION=$( \
@@ -796,6 +861,7 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           SYNC_HEIGHT=""
 
@@ -805,9 +871,9 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=" \
+          --command=' \
           sudo docker logs ${{ inputs.test_id }} --tail 200 \
-          ")
+          ')
 
           SYNC_HEIGHT=$( \
           echo "$DOCKER_LOGS" | \
