@@ -39,7 +39,8 @@ on:
       root_state_path:
         required: false
         type: string
-        default: '/zebrad-cache'
+        # When the root path is empty it becomes `/`, because we always put a `/` after it
+        default: ''
         description: 'Cached state base directory path'
       # TODO: find a better name
       zebra_state_dir:
