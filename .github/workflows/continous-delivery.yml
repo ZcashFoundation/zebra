@@ -132,14 +132,14 @@ jobs:
 
       # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
-          set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
 
           # Temporarily disable "set -e" to handle the broken pipe error gracefully
           set +e;
-          sudo docker logs \
+          docker logs \
           --tail all \
           --follow \
           default-conf-tests | \
@@ -151,8 +151,8 @@ jobs:
 
           docker stop default-conf-tests
 
-          EXIT_STATUS=$(sudo docker wait default-conf-tests || echo "Error retrieving exit status");
-          echo "sudo docker exit status: $EXIT_STATUS";
+          EXIT_STATUS=$(docker wait default-conf-tests || echo "Error retrieving exit status");
+          echo "docker exit status: $EXIT_STATUS";
 
           # If grep found the pattern, exit with the Docker container"s exit status
           if [ $LOGS_EXIT_STATUS -eq 0 ]; then
@@ -179,7 +179,7 @@ jobs:
 
       # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config
-        shell: /usr/bin/bash -x {0}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
@@ -187,21 +187,21 @@ jobs:
 
           # Temporarily disable "set -e" to handle the broken pipe error gracefully
           set +e;
-          sudo docker logs \
+          docker logs \
           --tail all \
           --follow \
           testnet-conf-tests | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e "net.*=.*Test.*estimated progress to chain tip.*Genesis' \
-          -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter';
+          -e "net.*=.*Test.*estimated progress to chain tip.*Genesis" \
+          -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter";
           LOGS_EXIT_STATUS=$?;
           set -e;
 
           docker stop testnet-conf-tests
 
-          EXIT_STATUS=$(sudo docker wait testnet-conf-tests || echo "Error retrieving exit status");
-          echo "sudo docker exit status: $EXIT_STATUS";
+          EXIT_STATUS=$(docker wait testnet-conf-tests || echo "Error retrieving exit status");
+          echo "docker exit status: $EXIT_STATUS";
 
           # If grep found the pattern, exit with the Docker container"s exit status
           if [ $LOGS_EXIT_STATUS -eq 0 ]; then
@@ -211,7 +211,6 @@ jobs:
           # Handle other potential errors here
           echo "An error occurred while processing the logs.";
           exit 1;
-
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
