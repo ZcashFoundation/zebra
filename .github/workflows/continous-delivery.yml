@@ -132,7 +132,7 @@ jobs:
 
       # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
-        shell: /usr/bin/bash -ex {0}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
@@ -143,7 +143,7 @@ jobs:
           --tail all \
           --follow \
           default-conf-tests | \
-          tee --output-error=warn /dev/stderr | \
+          tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter";
           LOGS_EXIT_STATUS=$?;
@@ -179,7 +179,7 @@ jobs:
 
       # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config
-        shell: /usr/bin/bash -ex {0}
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
@@ -190,7 +190,7 @@ jobs:
           --tail all \
           --follow \
           testnet-conf-tests | \
-          tee --output-error=warn /dev/stderr | \
+          tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           -e "net.*=.*Test.*estimated progress to chain tip.*Genesis" \
           -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter";
