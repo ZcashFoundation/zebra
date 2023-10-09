@@ -167,23 +167,25 @@ jobs:
       - name: Launch ${{ inputs.test_id }} GCP test instance
         id: launch-instance
         uses: nick-fields/retry@v2.9.0
-        # This step usually finishes in around 5 minutes.
-        timeout_minutes: 10
-        # We use a large number of attempts because the failure rate can be up to 50%.
-        max_attempts: 10
-        # We want to fail on timeouts but retry on errors.
-        retry_on: error
-        # It can take a few minutes to delete a container, but the command should wait.
-        retry_wait_seconds: 60
-        # These commands are slow, so we don't need to check their results every second.
-        polling_interval_seconds: 10
-        # TODO: shell: bash (arguments)
-        # TODO: make a cleanup script and call it from both launch steps and delete instance.
-        on_retry_command: |
+        with:
+         # TODO: fix intendation
+         # This step usually finishes in around 5 minutes.
+         timeout_minutes: 10
+         # We use a large number of attempts because the failure rate can be up to 50%.
+         max_attempts: 10
+         # We want to fail on timeouts but retry on errors.
+         retry_on: error
+         # It can take a few minutes to delete a container, but the command should wait.
+         retry_wait_seconds: 60
+         # These commands are slow, so we don't need to check their results every second.
+         polling_interval_seconds: 10
+         # TODO: shell: bash (arguments)
+         # TODO: make a cleanup script and call it from both launch steps and delete instance.
+         on_retry_command: |
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --zone "${{ vars.GCP_ZONE }}" \
           --delete-disks all
-        command: |
+         command: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
           --boot-disk-type pd-ssd \
@@ -396,19 +398,18 @@ jobs:
       - name: Launch ${{ inputs.test_id }} GCP test instance
         id: launch-instance
         uses: nick-fields/retry@v2.9.0
-        # See the other launch-instance step for details of these settings.
-        timeout_minutes: 10
-        max_attempts: 10
-        retry_on: error
-        retry_wait_seconds: 60
-        polling_interval_seconds: 10
-        # TODO: shell: bash (arguments)
-        # TODO: make a cleanup script and call it from both launch steps and delete instance.
-        on_retry_command: |
+        with:
+         # See the other launch-instance step for details of these settings.
+         timeout_minutes: 10
+         max_attempts: 10
+         retry_on: error
+         retry_wait_seconds: 60
+         polling_interval_seconds: 10
+         on_retry_command: |
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --zone "${{ vars.GCP_ZONE }}" \
           --delete-disks all
-        command: |
+         command: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
           --boot-disk-type pd-ssd \
