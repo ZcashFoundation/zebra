@@ -599,16 +599,14 @@ jobs:
     needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-stateful-sync, test-update-sync, generate-checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
-    # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?
-    if: failure() && github.event.pull_request == null
+    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
     steps:
       - uses: jayqi/failed-build-issue-action@v1
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           # New failures open an issue with this label.
-          # TODO: do we want a different label for each workflow, or each kind of workflow?
-          label-name: S-ci-fail-auto-issue
+          label-name: S-ci-fail-main-branch-auto-issue
           # If there is already an open issue with this label, any failures become comments on that issue.
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
