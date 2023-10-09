@@ -180,15 +180,16 @@ jobs:
          retry_wait_seconds: 60
          # These commands are slow, so we don't need to check their results every second.
          polling_interval_seconds: 10
-         # We want to see which commands are being executed
-         shell: bash -x
          # TODO: make a cleanup script and call it from both launch steps and delete instance.
          on_retry_command: |
+          # We want to see which commands are being executed
+          set -x
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --zone "${{ vars.GCP_ZONE }}" \
           --delete-disks all \
           --quiet
          command: |
+          set -x
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
           --boot-disk-type pd-ssd \
@@ -213,6 +214,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          set -x; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
@@ -408,13 +410,14 @@ jobs:
          retry_on: error
          retry_wait_seconds: 60
          polling_interval_seconds: 10
-         shell: bash -x
          on_retry_command: |
+          set -x
           gcloud compute instances delete "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --zone "${{ vars.GCP_ZONE }}" \
           --delete-disks all \
           --quiet
          command: |
+          set -x
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
           --boot-disk-type pd-ssd \
@@ -439,6 +442,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
+          set -x; \
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
