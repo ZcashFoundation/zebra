@@ -161,9 +161,11 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
 
-      # Create a Compute Engine virtual machine
-      - name: Create ${{ inputs.test_id }} GCP compute instance
-        id: create-instance
+      # Create a Compute Engine virtual machine,
+      # Format the mounted disk if the test doesn't use a cached state,
+      # then launch the test without any cached state.
+      - name: Launch ${{ inputs.test_id }} GCP test instance
+        id: launch-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
@@ -180,27 +182,8 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-
-      # Format the mounted disk if the test doesn't use a cached state.
-      - name: Format ${{ inputs.test_id }} volume
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          while sudo lsof /dev/sdb; do \
-            echo 'Waiting for /dev/sdb to be free...'; \
-            sleep 10; \
-          done; \
-          sudo mkfs.ext4 -v /dev/sdb \
-          "
-
-      # Launch the test without any cached state
-      - name: Launch ${{ inputs.test_id }} test
-        run: |
+          # Format the mounted disk if the test doesn't use a cached state.
+          # Then launch the test without any cached state.
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -363,8 +346,38 @@ jobs:
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
-      - name: Create ${{ inputs.test_id }} GCP compute instance
-        id: create-instance
+      #
+      # Then launch the test with the previously created Zebra cached state,
+      # and the previously created Lightwalletd cached state if it was written to the image.
+      # (If we're just running Zebra, the lightwalletd cached state mount is ignored.)
+      #
+      # SSH into the just created VM, and create a Docker container to run the incoming test
+      # from ${{ inputs.test_id }}, then mount the Docker volume created in the previous job.
+      #
+      # In this step we're using the same disk for simplicity, as mounting multiple disks to the
+      # VM and to the container might require more steps in this workflow, and additional
+      # considerations.
+      #
+      # The disk mounted in the VM is located at /dev/sdb, we want the root `/` of this disk to be
+      # available in the docker container at two different paths:
+      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
+      # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      #
+      # Currently we do this by mounting the same disk at both paths, even if we only have a Zebra
+      # cached state.
+      #
+      # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
+      # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
+      # delete the whole cache directory.)
+      #
+      # This paths must match the variables used by the tests in Rust, which are also set in
+      # `continous-integration-docker.yml` to be able to run this tests.
+      #
+      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
+      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
+      # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
+      - name: Launch ${{ inputs.test_id }} GCP test instance
+        id: launch-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
@@ -381,81 +394,8 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-          sleep 60
-
-      # Launch the test with the previously created Zebra-only cached state.
-      # Each test runs one of the "Launch test" steps, and skips the other.
-      #
-      # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
-      #
-      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
-      # container in one path:
-      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
-      #
-      # This path must match the variable used by the tests in Rust, which are also set in
-      # `continous-integration-docker.yml` to be able to run this tests.
-      #
-      # Although we're mounting the disk root, Zebra will only respect the values from
-      # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
-      # to match that variable paths.
-      - name: Launch ${{ inputs.test_id }} test
-        # This step only runs for tests that just read or write a Zebra state.
-        #
-        # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
-        # TODO: we should find a better logic for this use cases
-        if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
-      # Launch the test with the previously created Lightwalletd and Zebra cached state.
-      # Each test runs one of the "Launch test" steps, and skips the other.
-      #
-      # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
-      #
-      # In this step we're using the same disk for simplicity, as mounting multiple disks to the
-      # VM and to the container might require more steps in this workflow, and additional
-      # considerations.
-      #
-      # The disk mounted in the VM is located at /dev/sdb, we want the root `/` of this disk to be
-      # available in the docker container at two different paths:
-      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
-      # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
-      #
-      # Currently we do this by mounting the same disk at both paths.
-      #
-      # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
-      # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
-      # delete the whole cache directory.)
-      #
-      # This paths must match the variables used by the tests in Rust, which are also set in
-      # `continous-integration-docker.yml` to be able to run this tests.
-      #
-      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
-      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
-      # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
-      - name: Launch ${{ inputs.test_id }} test
-        # This step only runs for tests that read or write Lightwalletd and Zebra states.
-        #
-        # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
-        # TODO: we should find a better logic for this use cases
-        if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
-        run: |
+          # Then launch the test with the previously created Zebra cached state,
+          # and the previously created Lightwalletd cached state if it was written to the image.
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
