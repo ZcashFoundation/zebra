@@ -194,8 +194,7 @@ jobs:
           --command=' \
           set -ex;
           # Extract the correct disk name based on the device-name
-          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
-          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep --extended-regexp "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}\$" | cut -d" " -f11 | cut -d"/" -f3); \;
           sudo mkfs.ext4 -v /dev/$DISK_NAME \
           '
 
@@ -433,8 +432,7 @@ jobs:
           --command=' \
           set -ex;
           # Extract the correct disk name based on the device-name
-          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
-          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep --extended-regexp "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}\$" | cut -d" " -f11 | cut -d"/" -f3); \;
 
           sudo docker run \
           --name ${{ inputs.test_id }} \
@@ -505,8 +503,7 @@ jobs:
           --command=' \
           set -ex;
           # Extract the correct disk name based on the device-name
-          DISK_IDENTIFIER="google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}";
-          export DISK_NAME=$(ls -l /dev/disk/by-id | awk -v id="$DISK_IDENTIFIER" "$9 == id {gsub(\"../../\", \"\"); print $11}");
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep --extended-regexp "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}\$" | cut -d" " -f11 | cut -d"/" -f3); \;
 
           sudo docker run \
           --name ${{ inputs.test_id }} \
