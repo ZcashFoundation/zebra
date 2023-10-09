@@ -151,6 +151,7 @@ pub async fn run() -> Result<()> {
     // This is a workaround for a bug where lightwalletd will skip calling `get_raw_transaction`
     // the first time GetMempoolTx is called because it replaces the cache early and only calls the
     // RPC method for transaction ids that are missing in the old cache as keys.
+    // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L495-L502>
     //
     // TODO: Fix this issue in lightwalletd and delete this
     rpc_client
