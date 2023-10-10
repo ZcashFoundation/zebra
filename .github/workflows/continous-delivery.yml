@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
 
-  # Temporarily disabled to reduce network load, see #6894.
+  # TODO: Temporarily disabled to reduce network load, see #6894.
   #push:
   #  branches:
   #    - main
@@ -132,29 +132,37 @@ jobs:
 
       # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
-          set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          # show the logs, even if the job times out
-          docker logs --tail all --follow default-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter'
+
+          # Use a subshell to handle the broken pipe error gracefully
+          (
+            trap "" PIPE;
+            docker logs \
+            --tail all \
+            --follow \
+            default-conf-tests | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"
+          ) || true
+          LOGS_EXIT_STATUS=$?
+
           docker stop default-conf-tests
-          # get the exit status from docker
-          EXIT_STATUS=$( \
-          docker wait default-conf-tests || \
-          docker inspect --format "{{.State.ExitCode}}" default-conf-tests || \
-          echo "missing container, or missing exit status for container" \
-          )
-          docker logs default-conf-tests
-          echo "docker exit status: $EXIT_STATUS"
-          if [[ "$EXIT_STATUS" = "137" ]]; then
-          echo "ignoring expected signal status"
-          exit 0
+
+          EXIT_STATUS=$(docker wait default-conf-tests || echo "Error retrieving exit status");
+          echo "docker exit status: $EXIT_STATUS";
+
+          # If grep found the pattern, exit with the Docker container exit status
+          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
+              exit $EXIT_STATUS;
           fi
-          exit "$EXIT_STATUS"
+
+          # Handle other potential errors here
+          echo "An error occurred while processing the logs.";
+          exit 1;
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -172,30 +180,37 @@ jobs:
 
       # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config
+        shell: /usr/bin/bash -exo pipefail {0}
         run: |
-          set -ex
           docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
           docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          # show the logs, even if the job times out
-          docker logs --tail all --follow testnet-conf-tests | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'net.*=.*Test.*estimated progress to chain tip.*Genesis' \
-          -e 'net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter'
+          # Use a subshell to handle the broken pipe error gracefully
+          (
+            trap "" PIPE;
+            docker logs \
+            --tail all \
+            --follow \
+            testnet-conf-tests | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e "net.*=.*Test.*estimated progress to chain tip.*Genesis" \
+            -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter";
+          ) || true
+          LOGS_EXIT_STATUS=$?
+
           docker stop testnet-conf-tests
-          # get the exit status from docker
-          EXIT_STATUS=$( \
-          docker wait testnet-conf-tests || \
-          docker inspect --format "{{.State.ExitCode}}" testnet-conf-tests || \
-          echo "missing container, or missing exit status for container" \
-          )
-          docker logs testnet-conf-tests
-          echo "docker exit status: $EXIT_STATUS"
-          if [[ "$EXIT_STATUS" = "137" ]]; then
-          echo "ignoring expected signal status"
-          exit 0
+
+          EXIT_STATUS=$(docker wait testnet-conf-tests || echo "Error retrieving exit status");
+          echo "docker exit status: $EXIT_STATUS";
+
+          # If grep found the pattern, exit with the Docker container exit status
+          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
+              exit $EXIT_STATUS;
           fi
-          exit "$EXIT_STATUS"
+
+          # Handle other potential errors here
+          echo "An error occurred while processing the logs.";
+          exit 1;
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -226,7 +241,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v4.0.0
+      - uses: actions/checkout@v4.1.0
         with:
           persist-credentials: false
 
@@ -328,7 +343,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4.0.0
+      - uses: actions/checkout@v4.1.0
         with:
           persist-credentials: false
 
@@ -382,3 +397,21 @@ jobs:
           --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad \
           --zone ${{ vars.GCP_ZONE }}
+
+  failure-issue:
+    name: Open or update issues for release failures
+    # When a new job is added to this workflow, add it to this list.
+    needs: [ versioning, build,  test-configuration-file, deploy-nodes, deploy-instance ]
+    # Only open tickets for failed or cancelled jobs that are not coming from PRs.
+    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: jayqi/failed-build-issue-action@v1
+        with:
+          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
+          # New failures open an issue with this label.
+          label-name: S-ci-fail-release-auto-issue
+          # If there is already an open issue with this label, any failures become comments on that issue.
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -207,12 +207,13 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) = db.sapling_tree().subtree_index()
+    let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
+        db.sapling_tree_for_tip().subtree_index()
     else {
         return Ok(());
     };
 
-    if tip_subtree_index == 0 && !db.sapling_tree().is_complete_subtree() {
+    if tip_subtree_index == 0 && !db.sapling_tree_for_tip().is_complete_subtree() {
         return Ok(());
     }
 
@@ -260,12 +261,13 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) = db.orchard_tree().subtree_index()
+    let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
+        db.orchard_tree_for_tip().subtree_index()
     else {
         return Ok(());
     };
 
-    if tip_subtree_index == 0 && !db.orchard_tree().is_complete_subtree() {
+    if tip_subtree_index == 0 && !db.orchard_tree_for_tip().is_complete_subtree() {
         return Ok(());
     }
 
@@ -333,13 +335,13 @@ fn check_sapling_subtrees(
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
-        db.sapling_tree().subtree_index()
+        db.sapling_tree_for_tip().subtree_index()
     else {
         return Ok(Ok(()));
     };
 
     // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
-    if db.sapling_tree().is_complete_subtree() {
+    if db.sapling_tree_for_tip().is_complete_subtree() {
         first_incomplete_subtree_index += 1;
     }
 
@@ -463,13 +465,13 @@ fn check_orchard_subtrees(
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
-        db.orchard_tree().subtree_index()
+        db.orchard_tree_for_tip().subtree_index()
     else {
         return Ok(Ok(()));
     };
 
     // If there are no incomplete subtrees in the tree, also expect a subtree for the final index.
-    if db.orchard_tree().is_complete_subtree() {
+    if db.orchard_tree_for_tip().is_complete_subtree() {
         first_incomplete_subtree_index += 1;
     }
 
