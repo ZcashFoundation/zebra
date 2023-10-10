@@ -161,7 +161,12 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
-use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
+use zebra_test::{
+    args,
+    command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
+    prelude::*,
+};
 
 mod common;
 
@@ -925,17 +930,27 @@ fn stored_configs_work() -> Result<()> {
         let mut child =
             run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
+        let success_regexes = [
+            // When logs are sent to the terminal, we see the config loading message and path.
+            format!(
+                "loaded zebra config.*config_path.*=.*{}",
+                regex::escape(
+                    stored_config_path
+                        .file_name()
+                        .expect("config path must have a file name")
+                        .to_str()
+                        .expect("config paths are valid unicode")
+                )
+            ),
+            // If they are sent to a file, we just see a log file message.
+            "Sending logs to".to_string(),
+        ]
+        .iter()
+        .collect_regex_set()
+        .expect("regexes are valid");
+
         // Zebra was able to start with the stored config.
-        // When logs are sent to the terminal, we see the config loading message and path.
-        // If they are sent to a file, we just see a log file message.
-        child.expect_stdout_line_matches(format!(
-            "(loaded zebra config.*config_path.*=.*{})|(Sending logs to)",
-            regex::escape(
-                stored_config_path
-                    .to_str()
-                    .expect("config paths are valid unicode")
-            )
-        ))?;
+        child.expect_stdout_line_matches(success_regexes)?;
 
         // finish
         child.kill(false)?;
