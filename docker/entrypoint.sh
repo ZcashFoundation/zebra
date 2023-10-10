@@ -172,23 +172,20 @@ run_cargo_test() {
 
 # Main Execution Logic:
 # This section determines the primary operation of the script based on the first argument passed.
-# - If the argument starts with '--' or '-', the script attempts to execute `zebrad` with the provided arguments.
-# - If no argument is provided, the script defaults to running `zebrad` with either a custom or default configuration.
-# - For any other argument, the script checks for specific environment variables to determine which tests or operations to run.
+# - If the ENTRYPOINT_FEATURES environment variable is not set:
+#   - If the argument starts with '--' or '-', the script attempts to execute `zebrad` with the provided arguments.
+#   - If no argument is provided, the script defaults to running `zebrad` with either a custom or default configuration.
+# - If the ENTRYPOINT_FEATURES environment variable is set:
+#   - The script checks for specific environment variables to determine which tests or operations to run.
 # This design allows for flexible execution, catering to various use cases like node startup, testing, or other operations.
 case "$1" in
-  --* | -*)
-    if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
-        exec zebrad -c "${ZEBRA_CONF_PATH}" "$@" || { echo "Execution with custom configuration failed"; exit 1; }
-    else
-        exec zebrad "$@" || { echo "Execution failed"; exit 1; }
-    fi
-    ;;
-  "")
-    if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
-        exec zebrad -c "${ZEBRA_CONF_PATH}" || { echo "Execution with custom configuration failed"; exit 1; }
-    else
-        exec zebrad || { echo "Execution with default configuration failed"; exit 1; }
+  --* | -* | "")
+    if [[ -z "${ENTRYPOINT_FEATURES}" ]]; then
+      if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
+          exec zebrad -c "${ZEBRA_CONF_PATH}" "$@" || { echo "Execution with custom configuration failed"; exit 1; }
+      else
+          exec zebrad "$@" || { echo "Execution failed"; exit 1; }
+      fi
     fi
     ;;
   *)
