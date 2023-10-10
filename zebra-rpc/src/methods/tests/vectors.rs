@@ -1123,8 +1123,6 @@ async fn rpc_getnetworksolps() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
     use zebra_network::address_book_peers::MockAddressBookPeers;
 
-    use crate::constants::no_blocks_in_state_error;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1153,22 +1151,22 @@ async fn rpc_getnetworksolps() {
         // num_blocks, height, return value
         (None, None, Ok(2)),
         (Some(-4), None, Ok(2)),
-        (Some(-3), Some(0), Err(no_blocks_in_state_error())),
+        (Some(-3), Some(0), Ok(0)),
         (Some(-2), Some(-4), Ok(2)),
         (Some(-1), Some(10), Ok(2)),
         (Some(-1), Some(i32::MAX), Ok(2)),
         (Some(0), None, Ok(2)),
-        (Some(0), Some(0), Err(no_blocks_in_state_error())),
+        (Some(0), Some(0), Ok(0)),
         (Some(0), Some(-3), Ok(2)),
         (Some(0), Some(10), Ok(2)),
         (Some(0), Some(i32::MAX), Ok(2)),
         (Some(1), None, Ok(4096)),
-        (Some(1), Some(0), Err(no_blocks_in_state_error())),
+        (Some(1), Some(0), Ok(0)),
         (Some(1), Some(-2), Ok(4096)),
         (Some(1), Some(10), Ok(4096)),
         (Some(1), Some(i32::MAX), Ok(4096)),
         (Some(i32::MAX), None, Ok(2)),
-        (Some(i32::MAX), Some(0), Err(no_blocks_in_state_error())),
+        (Some(i32::MAX), Some(0), Ok(0)),
         (Some(i32::MAX), Some(-1), Ok(2)),
         (Some(i32::MAX), Some(10), Ok(2)),
         (Some(i32::MAX), Some(i32::MAX), Ok(2)),

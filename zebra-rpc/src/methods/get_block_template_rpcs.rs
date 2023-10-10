@@ -30,34 +30,31 @@ use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
-use crate::{
-    constants::no_blocks_in_state_error,
-    methods::{
-        best_chain_tip_height,
-        get_block_template_rpcs::{
-            constants::{
-                DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
-                ZCASHD_FUNDING_STREAM_ORDER,
-            },
-            get_block_template::{
-                check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
-                fetch_state_tip_and_local_time, validate_block_proposal,
-            },
-            // TODO: move the types/* modules directly under get_block_template_rpcs,
-            //       and combine any modules with the same names.
-            types::{
-                get_block_template::GetBlockTemplate,
-                get_mining_info,
-                hex_data::HexData,
-                long_poll::LongPollInput,
-                peer_info::PeerInfo,
-                submit_block,
-                subsidy::{BlockSubsidy, FundingStream},
-                unified_address, validate_address, z_validate_address,
-            },
+use crate::methods::{
+    best_chain_tip_height,
+    get_block_template_rpcs::{
+        constants::{
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+            ZCASHD_FUNDING_STREAM_ORDER,
         },
-        height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+        get_block_template::{
+            check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, validate_block_proposal,
+        },
+        // TODO: move the types/* modules directly under get_block_template_rpcs,
+        //       and combine any modules with the same names.
+        types::{
+            get_block_template::GetBlockTemplate,
+            get_mining_info,
+            hex_data::HexData,
+            long_poll::LongPollInput,
+            peer_info::PeerInfo,
+            submit_block,
+            subsidy::{BlockSubsidy, FundingStream},
+            unified_address, validate_address, z_validate_address,
+        },
     },
+    height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod constants;
@@ -878,9 +875,9 @@ where
                 })?;
 
             let solution_rate = match response {
-                ReadResponse::SolutionRate(solution_rate) => {
-                    solution_rate.ok_or_else(|| no_blocks_in_state_error())?
-                }
+                // zcashd returns a 0 rate when the calculation is invalid
+                ReadResponse::SolutionRate(solution_rate) => solution_rate.unwrap_or(0),
+
                 _ => unreachable!("unmatched response to a solution rate request"),
             };
 
