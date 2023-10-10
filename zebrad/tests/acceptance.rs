@@ -605,7 +605,7 @@ fn config_tests() -> Result<()> {
     // Check that Zebra's previous configurations still work
     stored_configs_work()?;
 
-    // Runs `zebrad` serially to avoid potential port conflicts
+    // We run the `zebrad` app test after the config tests, to avoid potential port conflicts
     app_no_args()?;
 
     Ok(())
@@ -925,8 +925,13 @@ fn stored_configs_work() -> Result<()> {
         let mut child =
             run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-        // zebra was able to start with the stored config
-        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+        // Zebra was able to start with the stored config.
+        // When logs are sent to the terminal, we see the config loading message and path.
+        // If they are sent to a file, we just see a log file message.
+        child.expect_stdout_line_matches(format!(
+            "(loaded zebra config.*config_path.*=.*{})|(Sending logs to)",
+            regex::escape(stored_config_path)
+        ))?;
 
         // finish
         child.kill(false)?;
