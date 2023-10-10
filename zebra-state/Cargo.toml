@@ -55,7 +55,7 @@ itertools = "0.11.0"
 lazy_static = "1.4.0"
 metrics = "0.21.1"
 mset = "0.1.1"
-regex = "1.9.5"
+regex = "1.10.0"
 rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.18"

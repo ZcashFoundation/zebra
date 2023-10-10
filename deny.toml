@@ -72,6 +72,10 @@ skip-tree = [
     # wait for console-subscriber to upgrade
     { name = "tonic", version = "=0.9.2" },
 
+    # wait for tracing and many other crates to upgrade
+    # this duplicate dependency currently only exists in testing builds
+    { name = "regex-syntax", version = "=0.6.29" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
