@@ -930,7 +930,11 @@ fn stored_configs_work() -> Result<()> {
         // If they are sent to a file, we just see a log file message.
         child.expect_stdout_line_matches(format!(
             "(loaded zebra config.*config_path.*=.*{})|(Sending logs to)",
-            regex::escape(stored_config_path)
+            regex::escape(
+                stored_config_path
+                    .to_str()
+                    .expect("config paths are valid unicode")
+            )
         ))?;
 
         // finish
