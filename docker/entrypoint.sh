@@ -152,8 +152,11 @@ EOF
   fi
 fi
 
-echo "Using zebrad.toml:"
-cat "${ZEBRA_CONF_PATH}"
+if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
+  # Print the config file
+  echo "Using zebrad.toml:"
+  cat "${ZEBRA_CONF_PATH}"
+fi
 
 # Function to list directory
 list_directory() {
