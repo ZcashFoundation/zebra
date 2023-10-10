@@ -595,11 +595,14 @@ jobs:
       # lines before the startup logs. So that's what we use here.
       #
       # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
+      # We're using >(...) which is a form of process substitution in Bash.
+      # The advantage of this method is that it avoids the "broken pipe" error
+      # as the `tee` command isn't directly writing to a closed pipe.
       #
       # Errors in the tests are caught by the final test status job.
       - name: Check startup logs for ${{ inputs.test_id }}
+        timeout-minutes: 5
         shell: /usr/bin/bash -exo pipefail {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -615,11 +618,7 @@ jobs:
           sudo docker logs \
           --tail all \
           --follow \
-          ${{ inputs.test_id }} | \
-          head -700 | \
-          tee --output-error=exit-nopipe /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          "Zcash network: ${{ inputs.network }}"; \
+          ${{ inputs.test_id }} > >(head -700 | tee /dev/stderr | grep --max-count=1 --extended-regexp --color=always "Zcash network: ${{ inputs.network }}");
           '
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
