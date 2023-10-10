@@ -193,7 +193,7 @@ jobs:
           --command=' \
           set -ex;
           # Extract the correct disk name based on the device-name
-          export DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-); \
+          DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-);
           sudo mkfs.ext4 -v /dev/$DISK_NAME \
           '
 
@@ -208,6 +208,10 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          export DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-); \
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
@@ -229,7 +233,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
           lsblk;
-          sudo lsof /dev/sdb;
+          sudo lsof /dev/$DISK_NAME;
           sudo dmesg;
           sudo journalctl -b \
           '
@@ -405,7 +409,7 @@ jobs:
       # SSH into the just created VM, and create a Docker container to run the incoming test
       # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
+      # The disk mounted in the VM is located at /dev/$DISK_NAME, we mount the root `/` of this disk to the docker
       # container in one path:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       #
@@ -469,7 +473,7 @@ jobs:
       # VM and to the container might require more steps in this workflow, and additional
       # considerations.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we want the root `/` of this disk to be
+      # The disk mounted in the VM is located at /dev/$DISK_NAME, we want the root `/` of this disk to be
       # available in the docker container at two different paths:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
