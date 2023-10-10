@@ -58,6 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.0
         with:
+          # Note: check service.proto when modifying lightwalletd repo
           repository: zcash/lightwalletd
           ref: 'master'
           persist-credentials: false
