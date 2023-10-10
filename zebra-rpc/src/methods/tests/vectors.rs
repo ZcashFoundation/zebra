@@ -1148,32 +1148,39 @@ async fn rpc_getnetworksolps() {
     );
 
     let get_network_sol_ps_inputs = [
-        (None, None),
-        (Some(0), None),
-        (Some(0), Some(0)),
-        (Some(0), Some(-1)),
-        (Some(0), Some(10)),
-        (Some(0), Some(i32::MAX)),
-        (Some(1), None),
-        (Some(1), Some(0)),
-        (Some(1), Some(-1)),
-        (Some(1), Some(10)),
-        (Some(1), Some(i32::MAX)),
-        (Some(usize::MAX), None),
-        (Some(usize::MAX), Some(0)),
-        (Some(usize::MAX), Some(-1)),
-        (Some(usize::MAX), Some(10)),
-        (Some(usize::MAX), Some(i32::MAX)),
+        // num_blocks, height, return value
+        (None, None, Ok(2)),
+        (Some(-4), None, Ok(2)),
+        (Some(-3), Some(0), Ok(0)),
+        (Some(-2), Some(-4), Ok(2)),
+        (Some(-1), Some(10), Ok(2)),
+        (Some(-1), Some(i32::MAX), Ok(2)),
+        (Some(0), None, Ok(2)),
+        (Some(0), Some(0), Ok(0)),
+        (Some(0), Some(-3), Ok(2)),
+        (Some(0), Some(10), Ok(2)),
+        (Some(0), Some(i32::MAX), Ok(2)),
+        (Some(1), None, Ok(4096)),
+        (Some(1), Some(0), Ok(0)),
+        (Some(1), Some(-2), Ok(4096)),
+        (Some(1), Some(10), Ok(4096)),
+        (Some(1), Some(i32::MAX), Ok(4096)),
+        (Some(i32::MAX), None, Ok(2)),
+        (Some(i32::MAX), Some(0), Ok(0)),
+        (Some(i32::MAX), Some(-1), Ok(2)),
+        (Some(i32::MAX), Some(10), Ok(2)),
+        (Some(i32::MAX), Some(i32::MAX), Ok(2)),
     ];
 
-    for (num_blocks_input, height_input) in get_network_sol_ps_inputs {
+    for (num_blocks_input, height_input, return_value) in get_network_sol_ps_inputs {
         let get_network_sol_ps_result = get_block_template_rpc
             .get_network_sol_ps(num_blocks_input, height_input)
             .await;
-        assert!(
-            get_network_sol_ps_result
-                .is_ok(),
-            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call with should be ok, got: {get_network_sol_ps_result:?}"
+        assert_eq!(
+            get_network_sol_ps_result, return_value,
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) result\n\
+             should be {return_value:?},\n\
+             got: {get_network_sol_ps_result:?}"
         );
     }
 }

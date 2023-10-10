@@ -450,8 +450,28 @@ impl Chain {
 
     /// Returns true is the chain contains the given block hash.
     /// Returns false otherwise.
-    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
-        self.height_by_hash.contains_key(hash)
+    pub fn contains_block_hash(&self, hash: block::Hash) -> bool {
+        self.height_by_hash.contains_key(&hash)
+    }
+
+    /// Returns true is the chain contains the given block height.
+    /// Returns false otherwise.
+    pub fn contains_block_height(&self, height: Height) -> bool {
+        self.blocks.contains_key(&height)
+    }
+
+    /// Returns true is the chain contains the given block hash or height.
+    /// Returns false otherwise.
+    #[allow(dead_code)]
+    pub fn contains_hash_or_height(&self, hash_or_height: impl Into<HashOrHeight>) -> bool {
+        use HashOrHeight::*;
+
+        let hash_or_height = hash_or_height.into();
+
+        match hash_or_height {
+            Hash(hash) => self.contains_block_hash(hash),
+            Height(height) => self.contains_block_height(height),
+        }
     }
 
     /// Returns the non-finalized tip block height and hash.
