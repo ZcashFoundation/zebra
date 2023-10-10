@@ -340,7 +340,7 @@ pub async fn run() -> Result<()> {
     assert_eq!(treestate.time, 1540779438);
     // Check that the note commitment tree is correct.
     assert_eq!(
-        treestate.tree,
+        treestate.sapling_tree,
         *zebra_test::vectors::SAPLING_TREESTATE_MAINNET_419201_STRING
     );
 
