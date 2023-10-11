@@ -244,15 +244,16 @@ impl ZebraDb {
 
         let last_transaction_location = AddressTransaction::new(
             address_location,
-            TransactionLocation::from_usize(*query_height_range.end(), usize::MAX),
+            TransactionLocation::from_usize(*query_height_range.end(), u16::MAX.into()),
         );
 
-        self.zs_range_iter(
-            &tx_loc_by_transparent_addr_loc,
-            &transaction_location..=&last_transaction_location,
-        )
-        .map(|(tx_loc, ())| tx_loc)
-        .collect()
+        self.db
+            .zs_range_iter(
+                &tx_loc_by_transparent_addr_loc,
+                &transaction_location..=&last_transaction_location,
+            )
+            .map(|(tx_loc, ())| tx_loc)
+            .collect()
     }
 
     // Address index queries
