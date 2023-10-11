@@ -21,6 +21,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
+use rocksdb::ReadOptions;
 use zebra_chain::parameters::Network;
 
 use crate::{
@@ -495,11 +496,12 @@ impl DiskDb {
         let range = (start_bound, end_bound);
 
         let mode = Self::zs_iter_mode(&range, reverse);
+        let opts = Self::zs_iter_opts(&range);
 
         // Reading multiple items from iterators has caused database hangs,
         // in previous RocksDB versions
         self.db
-            .iterator_cf(cf, mode)
+            .iterator_cf_opt(cf, opts, mode)
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
             // Skip excluded "from" bound and empty ranges. The `mode` already skips keys
@@ -512,6 +514,37 @@ impl DiskDb {
             // or we're after the included "to" bound.
             .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
+    }
+
+    /// Returns the RocksDB ReadOptions with a lower and upper bound for a range.
+    fn zs_iter_opts<R>(range: &R) -> ReadOptions
+    where
+        R: RangeBounds<Vec<u8>>,
+    {
+        use std::ops::Bound::*;
+
+        let mut opts = ReadOptions::default();
+
+        if let Included(bound) | Excluded(bound) = range.start_bound() {
+            opts.set_iterate_lower_bound(bound.clone());
+        };
+
+        match range.end_bound().cloned() {
+            Included(mut bound) => {
+                // Increment the last byte in the vector that is not u8::MAX, or
+                // skip adding an upper bound if every byte is u8::MAX
+                if let Some(increment_idx) = bound.iter().rposition(|&v| v != u8::MAX) {
+                    bound[increment_idx] += 1;
+                    opts.set_iterate_upper_bound(bound);
+                }
+            }
+            Excluded(bound) => {
+                opts.set_iterate_upper_bound(bound);
+            }
+            Unbounded => {}
+        };
+
+        opts
     }
 
     /// Returns the RocksDB iterator "from" mode for `range`.
