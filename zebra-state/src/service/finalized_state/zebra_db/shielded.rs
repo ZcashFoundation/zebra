@@ -30,6 +30,7 @@ use crate::{
     request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
@@ -155,6 +156,15 @@ impl ZebraDb {
 
         self.db
             .zs_items_in_range_unordered(&sprout_anchors_handle, ..)
+    }
+
+    /// Returns all the Sprout note commitment tip trees.
+    /// We only store the sprout tree for the tip, so this method is mainly used in tests.
+    pub fn sprout_trees_full_tip(
+        &self,
+    ) -> impl Iterator<Item = (RawBytes, Arc<sprout::tree::NoteCommitmentTree>)> + '_ {
+        let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        self.db.zs_range_iter(&sprout_trees, ..)
     }
 
     // # Sapling trees
@@ -579,71 +589,104 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
 
-        let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
-        let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
-        let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
-
-        let sprout_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
-
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
-        // Use the cached values that were previously calculated in parallel.
-        let sprout_root = trees.sprout.root();
-        let sapling_root = trees.sapling.root();
-        let orchard_root = trees.orchard.root();
+        let prev_sprout_tree = prev_note_commitment_trees.as_ref().map_or_else(
+            || zebra_db.sprout_tree_for_tip(),
+            |prev_trees| prev_trees.sprout.clone(),
+        );
+        let prev_sapling_tree = prev_note_commitment_trees.as_ref().map_or_else(
+            || zebra_db.sapling_tree_for_tip(),
+            |prev_trees| prev_trees.sapling.clone(),
+        );
+        let prev_orchard_tree = prev_note_commitment_trees.as_ref().map_or_else(
+            || zebra_db.orchard_tree_for_tip(),
+            |prev_trees| prev_trees.orchard.clone(),
+        );
 
-        // Index the new anchors.
-        // Note: if the root hasn't changed, we write the same value again.
-        self.zs_insert(&sprout_anchors, sprout_root, &trees.sprout);
-        self.zs_insert(&sapling_anchors, sapling_root, ());
-        self.zs_insert(&orchard_anchors, orchard_root, ());
-
-        // Delete the previously stored Sprout note commitment tree.
-        let current_tip_height = height - 1;
-        if let Some(h) = current_tip_height {
-            self.zs_delete(&sprout_tree_cf, h);
+        // Update the Sprout tree and store its anchor only if they have changed
+        if height.is_min() || prev_sprout_tree != trees.sprout {
+            self.update_sprout_tree(zebra_db, &trees.sprout)
         }
 
-        // TODO: if we ever need concurrent read-only access to the sprout tree,
-        // store it by `()`, not height. Otherwise, the ReadStateService could
-        // access a height that was just deleted by a concurrent StateService
-        // write. This requires a database version update.
-        self.zs_insert(&sprout_tree_cf, height, trees.sprout);
+        // Store the Sapling tree, anchor, and any new subtrees only if they have changed
+        if height.is_min() || prev_sapling_tree != trees.sapling {
+            self.create_sapling_tree(zebra_db, &height, &trees.sapling);
 
-        // Store the Sapling tree only if it is not already present at the previous height.
-        if height.is_min()
-            || prev_note_commitment_trees.as_ref().map_or_else(
-                || zebra_db.sapling_tree_for_tip(),
-                |trees| trees.sapling.clone(),
-            ) != trees.sapling
-        {
-            self.zs_insert(&sapling_tree_cf, height, trees.sapling);
+            if let Some(subtree) = trees.sapling_subtree {
+                self.insert_sapling_subtree(zebra_db, &subtree);
+            }
         }
 
-        // Store the Orchard tree only if it is not already present at the previous height.
-        if height.is_min()
-            || prev_note_commitment_trees
-                .map_or_else(|| zebra_db.orchard_tree_for_tip(), |trees| trees.orchard)
-                != trees.orchard
-        {
-            self.zs_insert(&orchard_tree_cf, height, trees.orchard);
+        // Store the Orchard tree, anchor, and any new subtrees only if they have changed
+        if height.is_min() || prev_orchard_tree != trees.orchard {
+            self.create_orchard_tree(zebra_db, &height, &trees.orchard);
+
+            if let Some(subtree) = trees.orchard_subtree {
+                self.insert_orchard_subtree(zebra_db, &subtree);
+            }
         }
 
-        if let Some(subtree) = trees.sapling_subtree {
-            self.insert_sapling_subtree(zebra_db, &subtree);
-        }
+        self.update_history_tree(db, &finalized.treestate.history_tree);
 
-        if let Some(subtree) = trees.orchard_subtree {
-            self.insert_orchard_subtree(zebra_db, &subtree);
-        }
+        Ok(())
+    }
 
-        self.prepare_history_batch(db, finalized)
+    // Sprout tree methods
+
+    /// Updates the Sprout note commitment tree for the tip, and the Sprout anchors.
+    pub fn update_sprout_tree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        tree: &sprout::tree::NoteCommitmentTree,
+    ) {
+        let sprout_anchors = zebra_db.db.cf_handle("sprout_anchors").unwrap();
+        let sprout_tree_cf = zebra_db
+            .db
+            .cf_handle("sprout_note_commitment_tree")
+            .unwrap();
+
+        // Sprout lookups need all previous trees by their anchors.
+        // The root must be calculated first, so it is cached in the database.
+        self.zs_insert(&sprout_anchors, tree.root(), tree);
+        self.zs_insert(&sprout_tree_cf, (), tree);
+    }
+
+    /// Legacy method: Deletes the range of Sprout note commitment trees at the given [`Height`]s.
+    /// Doesn't delete anchors from the anchor index. Doesn't delete the upper bound.
+    ///
+    /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
+    /// so this method does nothing.
+    pub fn delete_range_sprout_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let sprout_tree_cf = zebra_db
+            .db
+            .cf_handle("sprout_note_commitment_tree")
+            .unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&sprout_tree_cf, from, to);
     }
 
     // Sapling tree methods
+
+    /// Inserts or overwrites the Sapling note commitment tree at the given [`Height`],
+    /// and the Sapling anchors.
+    pub fn create_sapling_tree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        height: &Height,
+        tree: &sapling::tree::NoteCommitmentTree,
+    ) {
+        let sapling_anchors = zebra_db.db.cf_handle("sapling_anchors").unwrap();
+        let sapling_tree_cf = zebra_db
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .unwrap();
+
+        self.zs_insert(&sapling_anchors, tree.root(), ());
+        self.zs_insert(&sapling_tree_cf, height, tree);
+    }
 
     /// Inserts the Sapling note commitment subtree.
     pub fn insert_sapling_subtree(
@@ -667,7 +710,8 @@ impl DiskWriteBatch {
         self.zs_delete(&sapling_tree_cf, height);
     }
 
-    /// Deletes the range of Sapling note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    /// Deletes the range of Sapling note commitment trees at the given [`Height`]s.
+    /// Doesn't delete anchors from the anchor index. Doesn't delete the upper bound.
     #[allow(dead_code)]
     pub fn delete_range_sapling_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let sapling_tree_cf = zebra_db
@@ -698,6 +742,24 @@ impl DiskWriteBatch {
 
     // Orchard tree methods
 
+    /// Inserts or overwrites the Orchard note commitment tree at the given [`Height`],
+    /// and the Orchard anchors.
+    pub fn create_orchard_tree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        height: &Height,
+        tree: &orchard::tree::NoteCommitmentTree,
+    ) {
+        let orchard_anchors = zebra_db.db.cf_handle("orchard_anchors").unwrap();
+        let orchard_tree_cf = zebra_db
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .unwrap();
+
+        self.zs_insert(&orchard_anchors, tree.root(), ());
+        self.zs_insert(&orchard_tree_cf, height, tree);
+    }
+
     /// Inserts the Orchard note commitment subtree.
     pub fn insert_orchard_subtree(
         &mut self,
@@ -720,7 +782,8 @@ impl DiskWriteBatch {
         self.zs_delete(&orchard_tree_cf, height);
     }
 
-    /// Deletes the range of Orchard note commitment trees at the given [`Height`]s. Doesn't delete the upper bound.
+    /// Deletes the range of Orchard note commitment trees at the given [`Height`]s.
+    /// Doesn't delete anchors from the anchor index. Doesn't delete the upper bound.
     #[allow(dead_code)]
     pub fn delete_range_orchard_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let orchard_tree_cf = zebra_db

@@ -14,19 +14,22 @@
 use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    amount::NonNegative, history_tree::HistoryTree, transparent, value_balance::ValueBalance,
+    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
-    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
+    // History tree methods
+
     /// Returns the ZIP-221 history tree of the finalized tip.
     ///
     /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
@@ -84,6 +87,18 @@ impl ZebraDb {
         history_tree.unwrap_or_default()
     }
 
+    /// Returns all the history tip trees.
+    /// We only store the history tree for the tip, so this method is mainly used in tests.
+    pub fn history_trees_full_tip(
+        &self,
+    ) -> impl Iterator<Item = (RawBytes, Arc<HistoryTree>)> + '_ {
+        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+
+        self.db.zs_range_iter(&history_tree_cf, ..)
+    }
+
+    // Value pool methods
+
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
@@ -94,42 +109,30 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
-    /// Prepare a database batch containing the history tree updates
-    /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Returns any errors from updating the history tree
-    #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_history_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlockWithTrees,
-    ) -> Result<(), BoxError> {
+    // History tree methods
+
+    /// Updates the history tree for the tip, if it is not empty.
+    pub fn update_history_tree(&mut self, db: &DiskDb, tree: &HistoryTree) {
         let history_tree_cf = db.cf_handle("history_tree").unwrap();
 
-        let height = finalized.verified.height;
-
-        // Update the tree in state
-        let current_tip_height = height - 1;
-        if let Some(h) = current_tip_height {
-            self.zs_delete(&history_tree_cf, h);
+        if let Some(tree) = tree.as_ref().as_ref() {
+            self.zs_insert(&history_tree_cf, (), tree);
         }
-
-        // TODO: if we ever need concurrent read-only access to the history tree,
-        // store it by `()`, not height.
-        // Otherwise, the ReadStateService could access a height
-        // that was just deleted by a concurrent StateService write.
-        // This requires a database version update.
-        if let Some(history_tree) = finalized.treestate.history_tree.as_ref().as_ref() {
-            self.zs_insert(&history_tree_cf, height, history_tree);
-        }
-
-        Ok(())
     }
+
+    /// Legacy method: Deletes the range of history trees at the given [`Height`]s.
+    /// Doesn't delete the upper bound.
+    ///
+    /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
+    /// so this method does nothing.
+    pub fn delete_range_history_tree(&mut self, db: &DiskDb, from: &Height, to: &Height) {
+        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&history_tree_cf, from, to);
+    }
+
+    // Value pool methods
 
     /// Prepare a database batch containing the chain value pool update from `finalized.block`,
     /// and return it (without actually writing anything).

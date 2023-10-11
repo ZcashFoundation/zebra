@@ -29,6 +29,8 @@ use crate::{
 };
 
 pub(crate) mod add_subtrees;
+pub(crate) mod cache_genesis_roots;
+pub(crate) mod fix_tree_key_type;
 
 /// The kind of database format change or validity check we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -541,6 +543,32 @@ impl DbFormatChange {
             timer.finish(module_path!(), line!(), "add subtrees upgrade");
         }
 
+        // Sprout & history tree key formats, and cached genesis tree roots database upgrades.
+
+        let version_for_tree_keys_and_caches =
+            Version::parse("25.3.0").expect("Hardcoded version string should be valid.");
+
+        // Check if we need to do the upgrade.
+        if older_disk_version < &version_for_tree_keys_and_caches {
+            let timer = CodeTimer::start();
+
+            // It shouldn't matter what order these are run in.
+            cache_genesis_roots::run(initial_tip_height, db, cancel_receiver)?;
+            fix_tree_key_type::run(initial_tip_height, db, cancel_receiver)?;
+
+            // Before marking the state as upgraded, check that the upgrade completed successfully.
+            cache_genesis_roots::detailed_check(db, cancel_receiver)?
+                .expect("database format is valid after upgrade");
+            fix_tree_key_type::detailed_check(db, cancel_receiver)?
+                .expect("database format is valid after upgrade");
+
+            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
+            // database is marked, so the upgrade MUST be complete at this point.
+            Self::mark_as_upgraded_to(&version_for_tree_keys_and_caches, config, network);
+
+            timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
+        }
+
         // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
@@ -570,6 +598,9 @@ impl DbFormatChange {
         // run it early any more. (If future code changes accidentally make it depend on the
         // upgrade, they would accidentally break compatibility with older Zebra cached states.)
         results.push(add_subtrees::subtree_format_calculation_pre_checks(db));
+
+        results.push(cache_genesis_roots::quick_check(db));
+        results.push(fix_tree_key_type::quick_check(db));
 
         // The work is done in the functions we just called.
         timer.finish(module_path!(), line!(), "format_validity_checks_quick()");
@@ -602,6 +633,8 @@ impl DbFormatChange {
             db,
             cancel_receiver,
         )?);
+        results.push(cache_genesis_roots::detailed_check(db, cancel_receiver)?);
+        results.push(fix_tree_key_type::detailed_check(db, cancel_receiver)?);
 
         // The work is done in the functions we just called.
         timer.finish(module_path!(), line!(), "format_validity_checks_detailed()");
