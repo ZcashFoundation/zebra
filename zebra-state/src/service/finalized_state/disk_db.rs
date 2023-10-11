@@ -359,7 +359,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, ..=upper_bound, false).next()
+        self.zs_range_iter(cf, ..=upper_bound, true).next()
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
