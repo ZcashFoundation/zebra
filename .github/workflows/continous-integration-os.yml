@@ -312,8 +312,8 @@ jobs:
           echo "-- full cargo machete output, including ignored dependencies --"
           cargo machete --skip-target-dir || true
           echo "-- unused dependencies are below this line, full output is above --"
-          if (cargo machete --skip-target-dir 2>/dev/null || true) | \
-          (grep -e '^\t' || true) | \
+          if cargo machete --skip-target-dir 2>/dev/null | \
+          grep --extended-regexp -e '^\t' | \
           grep -v -e gumdrop -e humantime-serde -e tinyvec -e zebra-utils; then
               echo "New unused dependencies were found, please remove them!"
               exit 1
