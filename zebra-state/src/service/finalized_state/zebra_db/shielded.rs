@@ -89,17 +89,9 @@ impl ZebraDb {
             return Arc::<sprout::tree::NoteCommitmentTree>::default();
         }
 
-        // # Performance
-        //
-        // Using `zs_last_key_value()` on this column family significantly reduces sync performance
-        // (#7618). This is probably because `zs_delete()` is also used on the same column family.
-        // See the comment in `ZebraDb::history_tree()` for details.
-        //
-        // This bug will be fixed by PR #7392, because it changes this column family to update the
-        // existing key, rather than deleting old keys.
         let sprout_tree_cf = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
 
-        // # Forwards Compatibility
+        // # Backwards Compatibility
         //
         // This code can read the column family format in 1.2.0 and earlier (tip height key),
         // and after PR #7392 is merged (empty key). The height-based code can be removed when
@@ -107,15 +99,12 @@ impl ZebraDb {
         //
         // # Concurrency
         //
-        // There is only one tree in this column family, which is atomically updated by a block
-        // write batch (database transaction). If this update runs between the height read and
-        // the tree read, the height will be wrong, and the tree will be missing.
-        // That could cause consensus bugs.
+        // There is only one entry in this column family, which is atomically updated by a block
+        // write batch (database transaction). If we used a height as the column family tree,
+        // any updates between reading the tip height and reading the tree could cause panics.
         //
-        // See the comment in `ZebraDb::history_tree()` for details.
-        //
-        // TODO: this concurrency bug will be permanently fixed in PR #7392,
-        //       by changing the block update to overwrite the tree, rather than deleting it.
+        // So we use the empty key `()`. Since the key has a constant value, we will always read
+        // the latest tree.
         let mut sprout_tree: Option<Arc<sprout::tree::NoteCommitmentTree>> =
             self.db.zs_get(&sprout_tree_cf, &());
 

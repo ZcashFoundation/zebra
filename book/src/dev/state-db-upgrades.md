@@ -40,6 +40,28 @@ This means that:
 
 If there is an upgrade failure, it can panic and tell the user to delete their cached state and re-launch Zebra.
 
+### Performance Constraints
+
+Some column family access patterns can lead to very poor performance.
+
+Known performance issues include:
+- using an iterator on a column family which also deletes keys
+- creating large numbers of iterators
+- holding an iterator for a long time
+
+See the performance notes and bug reports in:
+- https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound
+- https://tracker.ceph.com/issues/55324
+- https://jira.mariadb.org/browse/MDEV-19670
+
+But need to use iterators for some operations, so our alternatives are (in preferred order):
+1. Minimise the number of keys we delete, and how often we delete them
+2. Avoid using iterators on column families where we delete keys
+3. If we must use iterators on those column families, set read bounds to minimise the amount of deleted data that is read
+
+Currently only UTXOs require key deletion, and only `utxo_loc_by_transparent_addr_loc` requires
+deletion and iterators.
+
 ### Implementation Steps
 
 - [ ] update the [database format](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#current) in the Zebra docs
