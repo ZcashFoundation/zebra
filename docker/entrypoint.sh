@@ -181,7 +181,7 @@ check_directory_files() {
 
 # Function to run cargo test
 run_cargo_test() {
-  cargo test --locked --release --features "$1" --package zebrad --test acceptance -- --nocapture --include-ignored "$2" "$3" || { echo "Cargo test failed"; exit 1; }
+  cargo test --locked --release --features "$1" --package zebrad --test acceptance -- --nocapture --include-ignored "$2" "$3" "$4" || { echo "Cargo test failed"; exit 1; }
 }
 
 # Main Execution Logic:
@@ -276,7 +276,7 @@ case "$1" in
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         # Run both the fully synced RPC test and the subtree snapshot test, one test at a time.
         # Since these tests use the same cached state, a state problem in the first test can fail the second test.
-        run_cargo_test "${ENTRYPOINT_FEATURES}" "--test-threads 1" "fully_synced_rpc_"
+        run_cargo_test "${ENTRYPOINT_FEATURES}" "--test-threads" "1" "fully_synced_rpc_"
 
       elif [[ "${TEST_LWD_FULL_SYNC}" -eq "1" ]]; then
         # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
