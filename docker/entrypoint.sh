@@ -33,6 +33,7 @@ set -o pipefail
 # [state]
 # Set this to change the default cached state directory
 : "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad-cache}"
+: "${LIGHTWALLETD_DATA_DIR:=/var/cache/lwd-cache}"
 # [metrics]
 : "${METRICS_ENDPOINT_ADDR:=0.0.0.0}"
 : "${METRICS_ENDPOINT_PORT:=9999}"
