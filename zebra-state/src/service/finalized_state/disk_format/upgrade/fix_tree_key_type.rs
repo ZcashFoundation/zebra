@@ -6,7 +6,9 @@ use std::sync::{mpsc, Arc};
 
 use zebra_chain::{block::Height, history_tree::HistoryTree, sprout};
 
-use crate::service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb};
+use crate::service::finalized_state::{
+    disk_db::DiskWriteBatch, disk_format::MAX_ON_DISK_HEIGHT, ZebraDb,
+};
 
 use super::CancelFormatChange;
 
@@ -28,8 +30,8 @@ pub fn run(
 
     // Delete the previous `Height` tip key format, which is now a duplicate.
     // It's ok to do a full delete, because the trees are restored before the batch is written.
-    batch.delete_range_sprout_tree(upgrade_db, &Height(0), &Height::MAX);
-    batch.delete_range_history_tree(upgrade_db, &Height(0), &Height::MAX);
+    batch.delete_range_sprout_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
+    batch.delete_range_history_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
 
     // Update the sprout tip key format in the database.
     batch.update_sprout_tree(upgrade_db, &sprout_tip_tree);

@@ -43,6 +43,7 @@ pub fn run(
     // It's ok to write the genesis tree to the tip tree index, because is overwritten by
     // the actual tip before the batch is written to the database.
     batch.update_sprout_tree(upgrade_db, &sprout_genesis_tree);
+    // This method makes sure the sprout tip tree has a cached root, even if it's the genesis tree.
     batch.update_sprout_tree(upgrade_db, &sprout_tip_tree);
 
     batch.create_sapling_tree(upgrade_db, &Height(0), &sapling_genesis_tree);
