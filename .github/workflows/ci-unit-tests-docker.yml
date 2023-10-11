@@ -209,7 +209,7 @@ jobs:
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
-    name: Test Zebra CD Docker config file
+    name: Test Zebra default Docker config file
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
@@ -221,13 +221,10 @@ jobs:
         with:
           short-length: 7
 
-      # Make sure Zebra can sync at least one full checkpoint on mainnet
       - name: Run tests using the default config
-        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run -e NETWORK --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
-
           # Use a subshell to handle the broken pipe error gracefully
           (
             trap "" PIPE;
@@ -255,11 +252,11 @@ jobs:
           echo "An error occurred while processing the logs.";
           exit 1;
         env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+          NETWORK: Mainnet
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
-    name: Test testnet Zebra CD Docker config file
+    name: Test Zebra testnet Docker config file
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
@@ -273,7 +270,6 @@ jobs:
 
       # Make sure Zebra can sync the genesis block on testnet
       - name: Run tests using a testnet config
-        shell: /usr/bin/bash -exo pipefail {0}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run -e NETWORK --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
@@ -325,7 +321,7 @@ jobs:
         run: |
           set -ex
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
+          docker run -e NETWORK --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
           EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
           docker stop variable-conf-tests
           docker logs variable-conf-tests
@@ -356,4 +352,3 @@ jobs:
           # If there is already an open issue with this label, any failures become comments on that issue.
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
