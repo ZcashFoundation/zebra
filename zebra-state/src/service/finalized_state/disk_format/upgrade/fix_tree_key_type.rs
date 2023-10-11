@@ -29,11 +29,11 @@ pub fn run(
     // Delete the previous `Height` tip key format, which is now a duplicate.
     // It's ok to do a full delete, because the trees are restored before the batch is written.
     batch.delete_range_sprout_tree(upgrade_db, &Height(0), &Height::MAX);
-    batch.delete_range_history_tree(upgrade_db.db(), &Height(0), &Height::MAX);
+    batch.delete_range_history_tree(upgrade_db, &Height(0), &Height::MAX);
 
     // Update the sprout tip key format in the database.
     batch.update_sprout_tree(upgrade_db, &sprout_tip_tree);
-    batch.update_history_tree(upgrade_db.db(), &history_tip_tree);
+    batch.update_history_tree(upgrade_db, &history_tip_tree);
 
     // Return before we write if the upgrade is cancelled.
     if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {

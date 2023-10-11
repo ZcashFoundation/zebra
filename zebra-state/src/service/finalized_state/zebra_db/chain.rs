@@ -112,8 +112,8 @@ impl DiskWriteBatch {
     // History tree methods
 
     /// Updates the history tree for the tip, if it is not empty.
-    pub fn update_history_tree(&mut self, db: &DiskDb, tree: &HistoryTree) {
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+    pub fn update_history_tree(&mut self, zebra_db: &ZebraDb, tree: &HistoryTree) {
+        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
 
         if let Some(tree) = tree.as_ref().as_ref() {
             self.zs_insert(&history_tree_cf, (), tree);
@@ -125,8 +125,8 @@ impl DiskWriteBatch {
     ///
     /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
     /// so this method does nothing.
-    pub fn delete_range_history_tree(&mut self, db: &DiskDb, from: &Height, to: &Height) {
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+    pub fn delete_range_history_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&history_tree_cf, from, to);

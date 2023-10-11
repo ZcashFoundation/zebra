@@ -581,8 +581,6 @@ impl DiskWriteBatch {
         finalized: &SemanticallyVerifiedBlockWithTrees,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
-        let db = &zebra_db.db;
-
         let height = finalized.verified.height;
         let trees = finalized.treestate.note_commitment_trees.clone();
 
@@ -622,7 +620,7 @@ impl DiskWriteBatch {
             }
         }
 
-        self.update_history_tree(db, &finalized.treestate.history_tree);
+        self.update_history_tree(zebra_db, &finalized.treestate.history_tree);
 
         Ok(())
     }
