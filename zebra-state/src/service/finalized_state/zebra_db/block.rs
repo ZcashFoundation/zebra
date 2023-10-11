@@ -24,7 +24,6 @@ use zebra_chain::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
-    sprout,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
