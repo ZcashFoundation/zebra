@@ -43,10 +43,13 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
-use zebra_state::latest_version_for_adding_subtrees;
+use zebra_state::database_format_version_in_code;
 
 use crate::common::{
-    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
