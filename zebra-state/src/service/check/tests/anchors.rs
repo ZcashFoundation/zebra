@@ -31,12 +31,12 @@ fn check_sprout_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Bootstrap a block at height == 1.
+    // Create a block at height == 1.
     let block_1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    // Bootstrap a block just before the first Sprout anchors.
+    // Create a block just before the first Sprout anchors.
     let block_395 = zebra_test::vectors::BLOCK_MAINNET_395_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -44,7 +44,7 @@ fn check_sprout_anchors() {
     // Add initial transactions to [`block_1`].
     let block_1 = prepare_sprout_block(block_1, block_395);
 
-    // Bootstrap a block at height == 2 that references the Sprout note commitment tree state
+    // Create a block at height == 2 that references the Sprout note commitment tree state
     // from [`block_1`].
     let block_2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into::<Block>()
@@ -182,7 +182,7 @@ fn check_sapling_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Bootstrap a block at height == 1 that has the first Sapling note commitments
+    // Create a block at height == 1 that has the first Sapling note commitments
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -227,7 +227,7 @@ fn check_sapling_anchors() {
 
     let block1 = Arc::new(block1).prepare();
 
-    // Bootstrap a block at height == 2 that references the Sapling note commitment tree state
+    // Create a block at height == 2 that references the Sapling note commitment tree state
     // from earlier block
     let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into::<Block>()
