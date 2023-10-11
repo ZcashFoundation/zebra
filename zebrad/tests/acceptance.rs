@@ -962,8 +962,11 @@ fn stored_configs_work() -> Result<()> {
                 "loaded zebrad config.*config_path.*=.*{}",
                 regex::escape(config_file_name)
             ),
-            // If they are sent to a file, we just see a log file message.
+            // If they are sent to a file, we see a log file message on stdout,
+            // and a logo, welcome message, and progress bar on stderr.
             "Sending logs to".to_string(),
+            // TODO: add expect_stdout_or_stderr_line_matches() and check for this instead:
+            //"Thank you for running a mainnet zebrad".to_string(),
         ];
 
         tracing::info!(

@@ -139,7 +139,8 @@ impl Tracing {
             }
 
             if uses_intro {
-                eprintln!("Sending logs to {log_file:?}...");
+                // We want this to appear on stdout instead of the usual log messages.
+                println!("Sending logs to {log_file:?}...");
             }
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
