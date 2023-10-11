@@ -586,7 +586,7 @@ impl DiskWriteBatch {
             |prev_trees| prev_trees.orchard.clone(),
         );
 
-        // Update the Sprout tree and store its anchor only if they have changed
+        // Update the Sprout tree and store its anchor only if it has changed
         if height.is_min() || prev_sprout_tree != trees.sprout {
             self.update_sprout_tree(zebra_db, &trees.sprout)
         }

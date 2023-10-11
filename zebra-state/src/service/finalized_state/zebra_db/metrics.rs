@@ -21,25 +21,9 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         .flat_map(|t| t.outputs().iter())
         .count();
 
-    let sprout_nullifier_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.sprout_nullifiers())
-        .count();
-
-    let sapling_nullifier_count = block
-        .transactions
-        .iter()
-        .flat_map(|t| t.sapling_nullifiers())
-        .count();
-
-    // Work around a compiler panic (ICE) with flat_map():
-    // https://github.com/rust-lang/rust/issues/105044
-    let orchard_nullifier_count: usize = block
-        .transactions
-        .iter()
-        .map(|t| t.orchard_nullifiers().count())
-        .sum();
+    let sprout_nullifier_count = block.sprout_nullifiers().count();
+    let sapling_nullifier_count = block.sapling_nullifiers().count();
+    let orchard_nullifier_count = block.orchard_nullifiers().count();
 
     tracing::debug!(
         ?hash,
@@ -50,7 +34,8 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         sprout_nullifier_count,
         sapling_nullifier_count,
         orchard_nullifier_count,
-        "preparing to commit finalized block"
+        "preparing to commit finalized {:?}block",
+        if height.is_min() { "genesis " } else { "" }
     );
 
     metrics::counter!("state.finalized.block.count", 1);
@@ -60,14 +45,7 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         "state.finalized.cumulative.transactions",
         transaction_count as u64
     );
-    metrics::counter!(
-        "state.finalized.cumulative.transparent_prevouts",
-        transparent_prevout_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.transparent_newouts",
-        transparent_newout_count as u64
-    );
+
     metrics::counter!(
         "state.finalized.cumulative.sprout_nullifiers",
         sprout_nullifier_count as u64
@@ -80,4 +58,16 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         "state.finalized.cumulative.orchard_nullifiers",
         orchard_nullifier_count as u64
     );
+
+    // The outputs from the genesis block can't be spent, so we skip them here.
+    if !height.is_min() {
+        metrics::counter!(
+            "state.finalized.cumulative.transparent_prevouts",
+            transparent_prevout_count as u64
+        );
+        metrics::counter!(
+            "state.finalized.cumulative.transparent_newouts",
+            transparent_newout_count as u64
+        );
+    }
 }
