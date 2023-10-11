@@ -534,7 +534,13 @@ impl DiskDb {
                 // Increment the last byte in the vector that is not u8::MAX, or
                 // skip adding an upper bound if every byte is u8::MAX
                 if let Some(increment_idx) = bound.iter().rposition(|&v| v != u8::MAX) {
-                    bound[increment_idx] += 1;
+                    let increment_byte = bound
+                        .get_mut(increment_idx)
+                        .expect("index should be in bounds");
+                    *increment_byte = increment_byte
+                        .checked_add(1)
+                        .expect("adding 1 should succeed");
+
                     opts.set_iterate_upper_bound(bound);
                 }
             }
