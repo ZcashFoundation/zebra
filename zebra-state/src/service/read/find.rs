@@ -108,7 +108,7 @@ pub fn non_finalized_state_contains_block_hash(
     hash: block::Hash,
 ) -> Option<KnownBlock> {
     let mut chains_iter = non_finalized_state.chain_iter();
-    let is_hash_in_chain = |chain: &Arc<Chain>| chain.contains_block_hash(&hash);
+    let is_hash_in_chain = |chain: &Arc<Chain>| chain.contains_block_hash(hash);
 
     // Equivalent to `chain_set.iter().next_back()` in `NonFinalizedState.best_chain()` method.
     let best_chain = chains_iter.next();
