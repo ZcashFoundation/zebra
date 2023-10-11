@@ -257,14 +257,14 @@ jobs:
       # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
-        shell: /usr/bin/bash -ex {0}
+        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 50GB \
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
+          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=400GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -285,14 +285,12 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          while sudo lsof /dev/sdb; do \
-            echo 'Waiting for /dev/sdb to be free...'; \
-            sleep 10; \
-          done; \
-          sudo mkfs.ext4 -v /dev/sdb \
-          "
+          --command=' \
+          set -ex;
+          # Extract the correct disk name based on the device-name
+          DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-);
+          sudo mkfs.ext4 -v /dev/$DISK_NAME \
+          '
 
       # Launch the test with the previously created disk or cached state.
       #
@@ -325,22 +323,26 @@ jobs:
       # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
-        shell: /usr/bin/bash -ex {0}
+        id: launch-test
+        shell: /usr/bin/bash -x {0}
         run: |
-          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
-
-          # Check if we need to mount for Lightwalletd state
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
-            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/sdb,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}"
-          fi
-
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          '\
+          --command=' \
+
+          # Extract the correct disk name based on the device-name
+          DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-)
+
+          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
+
+          # Check if we need to mount for Lightwalletd state
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
+            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}"
+          fi
+
           sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
@@ -352,8 +354,8 @@ jobs:
 
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
-        if: ${{ failure() && (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
-        shell: /usr/bin/bash -exo pipefail {0}
+        if: ${{ failure() }}
+        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -380,7 +382,7 @@ jobs:
       #
       # Errors in the tests are caught by the final test status job.
       - name: Check startup logs for ${{ inputs.test_id }}
-        shell: /usr/bin/bash -exo pipefail {0}
+        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -388,10 +390,6 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          trap "" PIPE;
-
-          # Temporarily disable "set -e" to handle the broken pipe error gracefully
-          set +e;
           sudo docker logs \
           --tail all \
           --follow \
@@ -413,7 +411,7 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        shell: /usr/bin/bash -exo pipefail {0}
+        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -429,7 +427,6 @@ jobs:
           grep --max-count=1 --extended-regexp --color=always \
           "test result: .*ok.* [1-9][0-9]* passed.*finished in";
           LOGS_EXIT_STATUS=$?;
-          set -e;
 
           EXIT_STATUS=$(sudo docker wait ${{ inputs.test_id }} || echo "Error retrieving exit status");
           echo "sudo docker exit status: $EXIT_STATUS";
@@ -555,7 +552,7 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
-        shell: /usr/bin/bash -exo pipefail {0}
+        shell: /usr/bin/bash -x {0}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
@@ -645,7 +642,7 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
-        shell: /usr/bin/bash -exo pipefail {0}
+        shell: /usr/bin/bash -x {0}
         run: |
           SYNC_HEIGHT=""
 
