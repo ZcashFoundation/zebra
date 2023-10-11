@@ -78,15 +78,15 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
     let sprout_genesis_tree = sprout::tree::NoteCommitmentTree::default();
     let sprout_genesis_tree = db
         .sprout_tree_by_anchor(&sprout_genesis_tree.root())
-        .expect("caller has checked for genesis block");
+        .expect("just checked for genesis block");
     let sprout_tip_tree = db.sprout_tree_for_tip();
 
     let sapling_genesis_tree = db
         .sapling_tree_by_height(&Height(0))
-        .expect("caller has checked for genesis block");
+        .expect("just checked for genesis block");
     let orchard_genesis_tree = db
         .orchard_tree_by_height(&Height(0))
-        .expect("caller has checked for genesis block");
+        .expect("just checked for genesis block");
 
     // Check the entire format before returning any errors.
     let sprout_result = sprout_genesis_tree
