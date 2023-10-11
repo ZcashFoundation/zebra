@@ -146,9 +146,7 @@ where
         let regexes = regexes?;
 
         // This conversion discards flags and limits from Regex and RegexBuilder.
-        let regexes = regexes
-            .iter()
-            .flat_map(|regex_set| regex_set.patterns());
+        let regexes = regexes.iter().flat_map(|regex_set| regex_set.patterns());
 
         RegexSet::new(regexes)
     }
