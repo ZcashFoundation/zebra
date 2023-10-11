@@ -208,7 +208,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync-to-tip
+      test_id: full-sync
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
@@ -277,14 +277,14 @@ jobs:
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  generate-checkpoints-mainnet:
+  checkpoints-mainnet:
     name: Generate checkpoints mainnet
     needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: generate-checkpoints-mainnet
+      test_id: checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
       test_variables: '-e NETWORK=Mainnet -e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
@@ -319,7 +319,7 @@ jobs:
     if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync-to-tip-testnet
+      test_id: full-sync-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: '-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
@@ -358,14 +358,14 @@ jobs:
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  generate-checkpoints-testnet:
+  checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [ test-full-sync-testnet, get-available-disks-testnet ]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.test-full-sync-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: generate-checkpoints-testnet
+      test_id: checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
       test_variables: '-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
       network: "Testnet"
@@ -596,7 +596,7 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-stateful-sync, test-update-sync, generate-checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
+    needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-stateful-sync, test-update-sync, checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)

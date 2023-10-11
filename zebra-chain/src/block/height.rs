@@ -80,7 +80,6 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its maximum.
-    // TODO Return an error instead of panicking #7263.
     pub fn next(self) -> Result<Self, HeightError> {
         (self + 1).ok_or(HeightError::Overflow)
     }
@@ -90,7 +89,6 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its minimum.
-    // TODO Return an error instead of panicking #7263.
     pub fn previous(self) -> Result<Self, HeightError> {
         (self - 1).ok_or(HeightError::Underflow)
     }
@@ -98,6 +96,11 @@ impl Height {
     /// Returns `true` if the [`Height`] is at its minimum.
     pub fn is_min(self) -> bool {
         self == Self::MIN
+    }
+
+    /// Returns the value as a `usize`.
+    pub fn as_usize(self) -> usize {
+        self.0.try_into().expect("fits in usize")
     }
 }
 
@@ -166,6 +169,14 @@ impl TryIntoHeight for String {
 
     fn try_into_height(&self) -> Result<Height, Self::Error> {
         self.as_str().try_into_height()
+    }
+}
+
+impl TryIntoHeight for i32 {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        u32::try_from(*self)?.try_into().map_err(Into::into)
     }
 }
 
