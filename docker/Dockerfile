@@ -189,6 +189,10 @@ RUN apt-get update && \
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
+# Path and name of the config file
+ENV ZEBRA_CONF_DIR=/etc/zebrad
+ENV ZEBRA_CONF_FILE=zebrad.toml
+
 # Expose configured ports
 EXPOSE 8233 18233
 
