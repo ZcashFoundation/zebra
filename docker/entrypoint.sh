@@ -210,7 +210,7 @@ case "$1" in
       if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
           # Run all the available tests for the current environment.
           # If the lightwalletd environmental variables are set, we will also run those tests.
-          cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace -- --nocapture --include-ignored
+          exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace -- --nocapture --include-ignored
 
       # For these tests, we activate the gRPC feature to avoid recompiling `zebrad`,
       # but we don't actually run any gRPC tests.
