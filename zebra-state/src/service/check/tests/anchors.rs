@@ -6,8 +6,9 @@ use zebra_chain::{
     amount::Amount,
     block::{Block, Height},
     primitives::Groth16Proof,
+    sapling,
     serialization::ZcashDeserializeInto,
-    sprout::JoinSplit,
+    sprout::{self, JoinSplit},
     transaction::{JoinSplitData, LockTime, Transaction, UnminedTx},
 };
 
@@ -18,7 +19,7 @@ use crate::{
         write::validate_and_commit_non_finalized,
     },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    SemanticallyVerifiedBlock, ValidateContextError,
+    DiskWriteBatch, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // Sprout
@@ -31,7 +32,17 @@ fn check_sprout_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Create a block at height == 1.
+    // Delete the empty anchor from the database
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_sprout_anchor(
+        &finalized_state,
+        &sprout::tree::NoteCommitmentTree::default().root(),
+    );
+    finalized_state
+        .write_batch(batch)
+        .expect("unexpected I/O error");
+
+    // Create a block at height 1.
     let block_1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -185,7 +196,17 @@ fn check_sapling_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Create a block at height == 1 that has the first Sapling note commitments
+    // Delete the empty anchor from the database
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_sapling_anchor(
+        &finalized_state,
+        &sapling::tree::NoteCommitmentTree::default().root(),
+    );
+    finalized_state
+        .write_batch(batch)
+        .expect("unexpected I/O error");
+
+    // Create a block at height 1 that has the first Sapling note commitments
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -318,3 +339,5 @@ fn check_sapling_anchors() {
         Ok(())
     );
 }
+
+// TODO: create a test for orchard anchors

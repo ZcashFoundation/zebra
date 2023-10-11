@@ -649,6 +649,13 @@ impl DiskWriteBatch {
         self.zs_delete_range(&sprout_tree_cf, from, to);
     }
 
+    /// Deletes the given Sprout note commitment tree `anchor`.
+    #[allow(dead_code)]
+    pub fn delete_sprout_anchor(&mut self, zebra_db: &ZebraDb, anchor: &sprout::tree::Root) {
+        let sprout_anchors = zebra_db.db.cf_handle("sprout_anchors").unwrap();
+        self.zs_delete(&sprout_anchors, anchor);
+    }
+
     // Sapling tree methods
 
     /// Inserts or overwrites the Sapling note commitment tree at the given [`Height`],
@@ -702,6 +709,13 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&sapling_tree_cf, from, to);
+    }
+
+    /// Deletes the given Sapling note commitment tree `anchor`.
+    #[allow(dead_code)]
+    pub fn delete_sapling_anchor(&mut self, zebra_db: &ZebraDb, anchor: &sapling::tree::Root) {
+        let sapling_anchors = zebra_db.db.cf_handle("sapling_anchors").unwrap();
+        self.zs_delete(&sapling_anchors, anchor);
     }
 
     /// Deletes the range of Sapling subtrees at the given [`NoteCommitmentSubtreeIndex`]es.
@@ -774,6 +788,13 @@ impl DiskWriteBatch {
 
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
         self.zs_delete_range(&orchard_tree_cf, from, to);
+    }
+
+    /// Deletes the given Orchard note commitment tree `anchor`.
+    #[allow(dead_code)]
+    pub fn delete_orchard_anchor(&mut self, zebra_db: &ZebraDb, anchor: &orchard::tree::Root) {
+        let orchard_anchors = zebra_db.db.cf_handle("orchard_anchors").unwrap();
+        self.zs_delete(&orchard_anchors, anchor);
     }
 
     /// Deletes the range of Orchard subtrees at the given [`NoteCommitmentSubtreeIndex`]es.

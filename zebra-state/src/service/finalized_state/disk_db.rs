@@ -98,7 +98,7 @@ pub struct DiskDb {
 //       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
 #[derive(Default)]
-pub(crate) struct DiskWriteBatch {
+pub struct DiskWriteBatch {
     /// The inner RocksDB write batch.
     batch: rocksdb::WriteBatch,
 }
