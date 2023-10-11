@@ -180,9 +180,24 @@ check_directory_files() {
   fi
 }
 
-# Function to run cargo test
+# Function to run cargo test with an arbitrary number of arguments
 run_cargo_test() {
-  cargo test --locked --release --features "$1" --package zebrad --test acceptance -- --nocapture --include-ignored "$2" "$3" "$4" || { echo "Cargo test failed"; exit 1; }
+  # Start constructing the command
+  local cmd="exec cargo test --locked --release --features $1 --package zebrad --test acceptance -- --nocapture --include-ignored"
+
+  # Shift the first argument, as it's already included in the cmd
+  shift
+
+  # Loop through the remaining arguments
+  for arg in "$@"; do
+    if [[ -n ${arg} ]]; then
+      # If the argument is non-empty, add it to the command
+      cmd+=" ${arg}"
+    fi
+  done
+
+  # Run the command
+  eval "${cmd}" || { echo "Cargo test failed"; exit 1; }
 }
 
 # Main Execution Logic:
