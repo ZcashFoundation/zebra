@@ -69,6 +69,11 @@ pub fn run(
 ///
 /// If the state is empty.
 pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
+    // An empty database doesn't have any trees, so its format is trivially correct.
+    if db.is_empty() {
+        return Ok(());
+    }
+
     let sprout_genesis_tree = sprout::tree::NoteCommitmentTree::default();
     let sprout_genesis_tree = db
         .sprout_tree_by_anchor(&sprout_genesis_tree.root())
