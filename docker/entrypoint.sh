@@ -266,7 +266,7 @@ case "$1" in
         # TODO: replace with ${ZEBRA_CACHED_STATE_DIR} in Rust and workflows
         check_directory_files "/zebrad-cache"
         # TODO: use environmental variables instead of Rust features (part of #2995)
-        run_cargo_test "sync_past_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" "sync_past_mandatory_checkpoint_${NETWORK,,}"
+        run_cargo_test "test_sync_past_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
       elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
         # Generate checkpoints after syncing Zebra from a cached state on mainnet.
