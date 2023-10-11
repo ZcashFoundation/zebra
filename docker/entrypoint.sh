@@ -163,13 +163,13 @@ check_directory_files() {
   local dir="$1"
   # Check if the directory exists
   if [[ -d "${dir}" ]]; then
-    # Check if any subdirectory contains any files
-    if find "${dir}" -mindepth 2 -type f | read -r; then
-      # Subdirectories exist and have files, so we continue
+    # Check if there are any subdirectories
+    if find "${dir}" -mindepth 1 -type d | read -r; then
+      # Subdirectories exist, so we continue
       :
     else
-      # Subdirectories exists but are empty, print message and exit with status 1
-      echo "Subdirectories in ${dir} exists but contain no files."
+      # No subdirectories, print message and exit with status 1
+      echo "No subdirectories found in ${dir}."
       exit 1
     fi
   else
