@@ -337,7 +337,7 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ test-all, test-all-getblocktemplate-rpcs, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path, test-configuration-file-testnet ]
+    needs: [ test-all, test-all-getblocktemplate-rpcs, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-configuration-file-testnet, test-zebra-conf-path ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?

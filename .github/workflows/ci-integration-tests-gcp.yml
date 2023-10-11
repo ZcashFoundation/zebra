@@ -596,7 +596,7 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-stateful-sync, test-update-sync, checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
+    needs: [ regenerate-stateful-disks, test-stateful-sync, test-full-sync, test-update-sync, checkpoints-mainnet, test-full-sync-testnet, checkpoints-testnet, lightwalletd-full-sync, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
