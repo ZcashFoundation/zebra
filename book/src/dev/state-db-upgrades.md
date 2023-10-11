@@ -87,7 +87,7 @@ We use the following rocksdb column families:
 | *Sprout*                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
-| `sprout_note_commitment_tree`      | `block::Height`        | `sprout::NoteCommitmentTree`  | Delete  |
+| `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
 | *Sapling*                          |                        |                               |         |
 | `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
@@ -99,7 +99,7 @@ We use the following rocksdb column families:
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Chain*                            |                        |                               |         |
-| `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
+| `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
@@ -131,6 +131,7 @@ Amounts:
 
 Derived Formats:
 - `*::NoteCommitmentTree`: `bincode` using `serde`
+  - stored note commitment trees always have cached roots
 - `NonEmptyHistoryTree`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
 
 
