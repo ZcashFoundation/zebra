@@ -148,8 +148,7 @@ where
         // This conversion discards flags and limits from Regex and RegexBuilder.
         let regexes = regexes
             .iter()
-            .map(|regex_set| regex_set.patterns())
-            .flatten();
+            .flat_map(|regex_set| regex_set.patterns());
 
         RegexSet::new(regexes)
     }
