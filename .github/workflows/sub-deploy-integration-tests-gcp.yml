@@ -311,7 +311,7 @@ jobs:
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
       #
-      # TODO: move this script into a file, and call it from manual-find-cached-disks.yml as well.
+      # TODO: move this script into a file, and call it from sub-find-cached-disks.yml as well.
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         run: |

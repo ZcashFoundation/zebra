@@ -65,7 +65,7 @@ on:
       - '.github/workflows/ci-integration-tests-gcp.yml'
       - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
       - '.github/workflows/sub-build-docker-image.yml'
-      - '.github/workflows/manual-find-cached-disks.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
 
   push:
     branches:
@@ -88,7 +88,7 @@ on:
       - '.dockerignore'
       - '.github/workflows/ci-integration-tests-gcp.yml'
       - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
-      - '.github/workflows/manual-find-cached-disks.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
@@ -101,20 +101,20 @@ jobs:
   # The default network is mainnet unless a manually triggered workflow or repository variable
   # is configured differently.
   #
-  # The outputs for this job have the same names as the workflow outputs in manual-find-cached-disks.yml
+  # The outputs for this job have the same names as the workflow outputs in sub-find-cached-disks.yml
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
-    uses: ./.github/workflows/manual-find-cached-disks.yml
+    uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Check if the cached state disks used by the tests are available for testnet.
   #
-  # The outputs for this job have the same names as the workflow outputs in manual-find-cached-disks.yml
+  # The outputs for this job have the same names as the workflow outputs in sub-find-cached-disks.yml
   # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
-    uses: ./.github/workflows/manual-find-cached-disks.yml
+    uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: 'Testnet'
 

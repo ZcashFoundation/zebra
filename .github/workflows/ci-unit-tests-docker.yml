@@ -39,7 +39,7 @@ on:
       - '.github/workflows/ci-unit-tests-docker.yml'
       - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
       - '.github/workflows/sub-build-docker-image.yml'
-      - '.github/workflows/manual-find-cached-disks.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
 
   push:
     branches:
@@ -62,7 +62,7 @@ on:
       - '.dockerignore'
       - '.github/workflows/ci-unit-tests-docker.yml'
       - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
-      - '.github/workflows/manual-find-cached-disks.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
