@@ -272,7 +272,7 @@ jobs:
       - name: Run tests using a testnet config
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e NETWORK -e ZEBRA_CONF_PATH --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
+          docker run -e NETWORK -e ZEBRA_CONF_PATH -e ENTRYPOINT_FEATURES='' --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
           # Use a subshell to handle the broken pipe error gracefully
           (
             trap "" PIPE;
