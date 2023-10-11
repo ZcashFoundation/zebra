@@ -195,7 +195,7 @@ pub trait ReadDisk {
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk;
 
     /// Returns the highest key in `cf`, and the corresponding value.
@@ -204,7 +204,7 @@ pub trait ReadDisk {
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk;
 
     /// Returns the first key greater than or equal to `lower_bound` in `cf`,
@@ -322,34 +322,22 @@ impl ReadDisk for DiskDb {
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, .., false).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, .., true).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -359,17 +347,8 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        let lower_bound = lower_bound.as_bytes();
-        let from = rocksdb::IteratorMode::From(lower_bound.as_ref(), rocksdb::Direction::Forward);
-
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, from)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, lower_bound.., false).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -379,17 +358,8 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        let upper_bound = upper_bound.as_bytes();
-        let from = rocksdb::IteratorMode::From(upper_bound.as_ref(), rocksdb::Direction::Reverse);
-
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, from)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, ..=upper_bound, false).next()
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
@@ -399,7 +369,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range).collect()
+        self.zs_range_iter(cf, range, false).collect()
     }
 
     fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
@@ -409,7 +379,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range).collect()
+        self.zs_range_iter(cf, range, false).collect()
     }
 }
 
@@ -432,14 +402,19 @@ impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
-    pub fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    pub fn zs_range_iter<C, K, V, R>(
+        &self,
+        cf: &C,
+        range: R,
+        reverse: bool,
+    ) -> impl Iterator<Item = (K, V)> + '_
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter_with_direction(cf, range, false)
+        self.zs_range_iter_with_direction(cf, range, reverse)
     }
 
     /// Returns a reverse iterator over the items in `cf` in `range`.
