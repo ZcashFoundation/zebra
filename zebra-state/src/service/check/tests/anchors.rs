@@ -74,10 +74,13 @@ fn check_sprout_anchors() {
         )
     });
 
-    assert!(matches!(
-        check_unmined_tx_anchors_result,
-        Err(ValidateContextError::UnknownSproutAnchor { .. })
-    ));
+    assert!(
+        matches!(
+            check_unmined_tx_anchors_result,
+            Err(ValidateContextError::UnknownSproutAnchor { .. }),
+        ),
+        "unexpected result: {check_unmined_tx_anchors_result:?}",
+    );
 
     // Validate and commit [`block_1`]. This will add an anchor referencing the
     // empty note commitment tree to the state.
