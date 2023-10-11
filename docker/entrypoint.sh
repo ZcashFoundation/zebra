@@ -171,15 +171,17 @@ run_cargo_test() {
 }
 
 # Main Execution Logic:
-# This section determines the primary operation of the script based on the first argument passed.
-# - If the ENTRYPOINT_FEATURES environment variable is not set:
-#   - If the argument starts with '--' or '-', the script attempts to execute `zebrad` with the provided arguments.
-#   - If no argument is provided, the script defaults to running `zebrad` with either a custom or default configuration.
-# - If the ENTRYPOINT_FEATURES environment variable is set:
-#   - The script checks for specific environment variables to determine which tests or operations to run.
-# This design allows for flexible execution, catering to various use cases like node startup, testing, or other operations.
+# This script orchestrates the execution flow based on the provided arguments and environment variables.
+# - If "$1" is '--', '-', or 'zebrad', the script processes the subsequent arguments for the 'zebrad' command.
+#   - If ENTRYPOINT_FEATURES is unset, it checks for ZEBRA_CONF_PATH. If set, 'zebrad' runs with this custom configuration; otherwise, it runs with the provided arguments.
+# - If "$1" is an empty string and ENTRYPOINT_FEATURES is set, the script enters the testing phase, checking various environment variables to determine the specific tests to run.
+#   - Different tests or operations are triggered based on the respective conditions being met.
+# - If "$1" doesn't match any of the above, it's assumed to be a command, which is executed directly.
+# This structure ensures a flexible execution strategy, accommodating various scenarios such as custom configurations, different testing phases, or direct command execution.
+
 case "$1" in
-  --* | -* | "")
+  --* | -* | zebrad)
+    shift
     if [[ -z "${ENTRYPOINT_FEATURES}" ]]; then
       if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
           exec zebrad -c "${ZEBRA_CONF_PATH}" "$@" || { echo "Execution with custom configuration failed"; exit 1; }
@@ -188,7 +190,7 @@ case "$1" in
       fi
     fi
     ;;
-  *)
+  "")
     if [[ -n "${ENTRYPOINT_FEATURES}" ]]; then
       # Validate the test variables
       # For these tests, we activate the test features to avoid recompiling `zebrad`,
@@ -305,4 +307,8 @@ case "$1" in
           exec "$@"
       fi
     fi
+    ;;
+  *)
+    exec "$@"
+    ;;
 esac

@@ -199,3 +199,4 @@ EXPOSE 8233 18233
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
 ENTRYPOINT [ "/entrypoint.sh" ]
+CMD ["zebrad"]
