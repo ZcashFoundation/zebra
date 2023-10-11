@@ -62,7 +62,7 @@ impl ZebraDb {
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
         let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
         self.db.zs_contains(&sprout_anchors, &sprout_anchor)
@@ -148,7 +148,7 @@ impl ZebraDb {
     /// Returns all the Sprout note commitment trees in the database.
     ///
     /// Calling this method can load a lot of data into RAM, and delay block commit transactions.
-    #[allow(dead_code, clippy::unwrap_in_result)]
+    #[allow(dead_code)]
     pub fn sprout_trees_full_map(
         &self,
     ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
@@ -210,7 +210,6 @@ impl ZebraDb {
     }
 
     /// Returns the Sapling note commitment trees in the supplied range, in increasing height order.
-    #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_height_range<R>(
         &self,
         range: R,
@@ -223,7 +222,6 @@ impl ZebraDb {
     }
 
     /// Returns the Sapling note commitment trees in the reversed range, in decreasing height order.
-    #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_reversed_height_range<R>(
         &self,
         range: R,
@@ -268,7 +266,6 @@ impl ZebraDb {
     ///
     /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
     /// It might not work for other RPCs or state checks.
-    #[allow(clippy::unwrap_in_result)]
     pub fn sapling_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
@@ -377,7 +374,6 @@ impl ZebraDb {
     }
 
     /// Returns the Orchard note commitment trees in the supplied range, in increasing height order.
-    #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_height_range<R>(
         &self,
         range: R,
@@ -390,7 +386,6 @@ impl ZebraDb {
     }
 
     /// Returns the Orchard note commitment trees in the reversed range, in decreasing height order.
-    #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_reversed_height_range<R>(
         &self,
         range: R,
@@ -435,7 +430,6 @@ impl ZebraDb {
     ///
     /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
     /// It might not work for other RPCs or state checks.
-    #[allow(clippy::unwrap_in_result)]
     pub fn orchard_subtree_list_by_index_for_rpc(
         &self,
         start_index: NoteCommitmentSubtreeIndex,
