@@ -102,6 +102,19 @@ pub async fn run() -> Result<()> {
     // Store the state version message so we can wait for the upgrade later if needed.
     let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
+    // Wait for the state to upgrade, if the upgrade is short.
+    // If incompletely upgraded states get written to the CI cache,
+    // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
+    //
+    // If this line hangs, move it after the RPC port check.
+    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+        )?;
+    }
+
     tracing::info!(
         ?test_type,
         ?zebra_rpc_address,
@@ -134,6 +147,16 @@ pub async fn run() -> Result<()> {
         true,
         use_internet_connection,
     )?;
+
+    // Wait for the state to upgrade, if the upgrade is long.
+    // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
+    if DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+        )?;
+    }
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -383,18 +406,6 @@ pub async fn run() -> Result<()> {
         lightd_info.zcashd_subversion,
         zebrad::application::user_agent()
     );
-
-    // Before we call `z_getsubtreesbyindex`, we might need to wait for a database upgrade.
-    //
-    // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
-    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-    // If it happens for a later upgrade, this code can be moved earlier in the test,
-    // as long as all the cached states are version 25.2.2 or later.
-    wait_for_state_version_upgrade(
-        &mut zebrad,
-        &state_version_message,
-        latest_version_for_adding_subtrees(),
-    )?;
 
     // Call `z_getsubtreesbyindex` separately for...
 
