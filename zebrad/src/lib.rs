@@ -61,9 +61,10 @@
 //!
 //! ### Metrics
 //!
-//! * `prometheus`: export metrics to prometheus.
-//! * `progress-bar`: shows key metrics in the terminal using progress bars,
+//! * configuring a `tracing.progress_bar`: shows key metrics in the terminal using progress bars,
 //!   and automatically configures Zebra to send logs to a file.
+//!   (The `progress-bar` feature is activated by default.)
+//! * `prometheus`: export metrics to prometheus.
 //!
 //! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
 //! for more details.

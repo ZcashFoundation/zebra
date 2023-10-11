@@ -11,7 +11,7 @@
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
-    - [Optional Features](#optional-features)
+    - [Optional Configs & Features](#optional-features)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)
@@ -116,13 +116,24 @@ zebrad start
 See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
 sections in the book for more details.
 
-#### Optional Features
+#### Optional Configs & Features
+
+##### Configuring Progress Bars
+
+Configure `tracing.progress_bar` in your `zebrad.toml` to
+[show key metrics in the terminal using progress bars](https://zfnd.org/experimental-zebra-progress-bars/).
+When progress bars are active, Zebra automatically sends logs to a file.
+
+In future releases, the `progress_bar = "summary"` config will show a few key metrics,
+and the "detailed" config will show all available metrics. Please let us know which metrics are
+important to you!
+
+##### Custom Build Features
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
 
 - `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html)
 - `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
-- `progress-bar` [experimental progress bars](https://zfnd.org/experimental-zebra-progress-bars/)
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
 - `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
 
