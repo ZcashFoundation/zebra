@@ -182,8 +182,8 @@ check_directory_files() {
 
 # Function to run cargo test with an arbitrary number of arguments
 run_cargo_test() {
-  # Start constructing the command
-  local cmd="exec cargo test --locked --release --features $1 --package zebrad --test acceptance -- --nocapture --include-ignored"
+  # Start constructing the command, ensuring that $1 is enclosed in single quotes as it's a feature list
+  local cmd="exec cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
 
   # Shift the first argument, as it's already included in the cmd
   shift
@@ -196,7 +196,7 @@ run_cargo_test() {
     fi
   done
 
-  # Run the command
+  # Run the command using eval, this will replace the current process with the cargo command
   eval "${cmd}" || { echo "Cargo test failed"; exit 1; }
 }
 
