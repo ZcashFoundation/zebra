@@ -30,9 +30,6 @@ impl DiskDb {
 fn zs_iter_opts_increments_key_by_one() {
     let _init_guard = zebra_test::init();
 
-    // let (config, network) = Default::default();
-    // let db = DiskDb::new(&config, network);
-
     let keys: [u32; 13] = [
         0, 1, 200, 255, 256, 257, 65535, 65536, 65537, 16777215, 16777216, 16777217, 16777218,
     ];
