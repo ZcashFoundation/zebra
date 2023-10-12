@@ -2224,3 +2224,26 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
+
+#[cfg(test)]
+impl Chain {
+    /// Inserts the supplied Sapling note commitment subtree into the chain.
+    pub(crate) fn insert_sapling_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+    ) {
+        self.inner
+            .sapling_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+
+    /// Inserts the supplied Orchard note commitment subtree into the chain.
+    pub(crate) fn insert_orchard_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<orchard::tree::Node>,
+    ) {
+        self.inner
+            .orchard_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+}
