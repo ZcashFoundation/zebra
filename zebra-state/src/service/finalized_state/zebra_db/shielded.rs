@@ -291,6 +291,12 @@ impl ZebraDb {
                 .collect();
         }
 
+        // Make sure the amount of retrieved subtrees does not exceed the given limit.
+        #[cfg(debug_assertions)]
+        if let Some(limit) = limit {
+            assert!(list.len() <= limit.0.into());
+        }
+
         // Check that we got the start subtree.
         if list.get(&start_index).is_some() {
             list
@@ -453,6 +459,12 @@ impl ZebraDb {
                 .db
                 .zs_range_iter(&orchard_subtrees, start_index..)
                 .collect();
+        }
+
+        // Make sure the amount of retrieved subtrees does not exceed the given limit.
+        #[cfg(debug_assertions)]
+        if let Some(limit) = limit {
+            assert!(list.len() <= limit.0.into());
         }
 
         // Check that we got the start subtree.
@@ -676,7 +688,7 @@ impl DiskWriteBatch {
         self.zs_insert(&sapling_tree_cf, height, tree);
     }
 
-    /// Inserts the Sapling note commitment subtree.
+    /// Inserts the Sapling note commitment subtree into the batch.
     pub fn insert_sapling_subtree(
         &mut self,
         zebra_db: &ZebraDb,
@@ -755,7 +767,7 @@ impl DiskWriteBatch {
         self.zs_insert(&orchard_tree_cf, height, tree);
     }
 
-    /// Inserts the Orchard note commitment subtree.
+    /// Inserts the Orchard note commitment subtree into the batch.
     pub fn insert_orchard_subtree(
         &mut self,
         zebra_db: &ZebraDb,
