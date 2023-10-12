@@ -506,16 +506,16 @@ impl DiskDb {
 
         match range.end_bound().cloned() {
             Included(mut bound) => {
-                // Increment the last byte in the vector that is not u8::MAX, or
-                // skip adding an upper bound if every byte is u8::MAX
-                if let Some(increment_idx) = bound.iter().rposition(|&v| v != u8::MAX) {
-                    let increment_byte = bound
-                        .get_mut(increment_idx)
-                        .expect("index should be in bounds");
-                    *increment_byte = increment_byte
-                        .checked_add(1)
-                        .expect("adding 1 should succeed");
+                // Skip adding an upper bound if every byte is u8::MAX, or
+                // increment the last byte in the upper bound that is less than u8::MAX,
+                // and clear any bytes after it to increment the big-endian number this
+                // string represents to RocksDB.
+                let is_max_key = bound.iter_mut().rev().all(|v| {
+                    *v = v.wrapping_add(1);
+                    v == &0
+                });
 
+                if !is_max_key {
                     opts.set_iterate_upper_bound(bound);
                 }
             }
