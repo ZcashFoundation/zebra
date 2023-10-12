@@ -25,7 +25,7 @@ impl DiskDb {
     }
 }
 
-/// Check that the sprout tree database serialization format has not changed.
+/// Check that zs_iter_opts returns an upper bound one greater than provided inclusive end bounds.
 #[test]
 fn zs_iter_opts_increments_key_by_one() {
     let _init_guard = zebra_test::init();
