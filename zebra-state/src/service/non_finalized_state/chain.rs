@@ -39,7 +39,7 @@ pub mod index;
 
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Chain {
     // Config
     //
@@ -67,7 +67,7 @@ pub struct Chain {
 }
 
 /// The internal state of [`Chain`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
@@ -2224,3 +2224,26 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
+
+#[cfg(test)]
+impl Chain {
+    /// Inserts the supplied Sapling note commitment subtree into the chain.
+    pub(crate) fn insert_sapling_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+    ) {
+        self.inner
+            .sapling_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+
+    /// Inserts the supplied Orchard note commitment subtree into the chain.
+    pub(crate) fn insert_orchard_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<orchard::tree::Node>,
+    ) {
+        self.inner
+            .orchard_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+}

@@ -347,9 +347,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network) {
 
     // Mock the data for the response.
     let mut subtrees = BTreeMap::new();
-    let subtree_root = [0u8; 32].as_slice().try_into().expect(
-        "The array [0u8; 32] should be convertible to a Sapling note commitment tree node.",
-    );
+    let subtree_root = sapling::tree::Node::default();
 
     for i in 0..2u16 {
         let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);
@@ -377,9 +375,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network) {
 
     // Mock the data for the response.
     let mut subtrees = BTreeMap::new();
-    let subtree_root = [0u8; 32].try_into().expect(
-        "The array [0u8; 32] should be convertible to a Sapling note commitment tree node.",
-    );
+    let subtree_root = orchard::tree::Node::default();
 
     for i in 0..2u16 {
         let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);

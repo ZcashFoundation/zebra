@@ -166,7 +166,7 @@ impl ZcashDeserialize for Root {
 ///
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Default)]
 pub struct Node([u8; 32]);
 
 impl AsRef<[u8; 32]> for Node {
