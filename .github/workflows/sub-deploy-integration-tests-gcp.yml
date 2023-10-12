@@ -315,7 +315,7 @@ jobs:
       # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
       # delete the whole cache directory.)
       #
-      # This path must match the variable used by the tests in Rust, which are also set in
+      # These paths must match the variables used by the tests in Rust, which are also set in
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
@@ -339,6 +339,7 @@ jobs:
           MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
 
           # Check if we need to mount for Lightwalletd state
+          # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
             MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}"
           fi
