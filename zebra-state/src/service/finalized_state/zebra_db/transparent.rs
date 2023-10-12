@@ -237,21 +237,13 @@ impl ZebraDb {
 
         // A potentially invalid key representing the first UTXO send to the address,
         // or the query start height.
-        let transaction_location = AddressTransaction::address_iterator_start(
+        let transaction_location_range = AddressTransaction::address_iterator_range(
             address_location,
             *query_height_range.start(),
         );
 
-        let last_transaction_location = AddressTransaction::new(
-            address_location,
-            TransactionLocation::from_usize(*query_height_range.end(), u16::MAX.into()),
-        );
-
         self.db
-            .zs_range_iter(
-                &tx_loc_by_transparent_addr_loc,
-                &transaction_location..=&last_transaction_location,
-            )
+            .zs_range_iter(&tx_loc_by_transparent_addr_loc, transaction_location_range)
             .map(|(tx_loc, ())| tx_loc)
             .collect()
     }

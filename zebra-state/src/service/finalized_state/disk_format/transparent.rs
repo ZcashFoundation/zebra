@@ -416,36 +416,36 @@ impl AddressTransaction {
         }
     }
 
-    /// Create an [`AddressTransaction`] which starts iteration for the supplied
+    /// Create a range of [`AddressTransaction`]s which starts iteration for the supplied
     /// address. Starts at the first UTXO, or at the `query_start` height,
-    /// whichever is greater.
+    /// whichever is greater. Ends at the last transaction index for an [`AddressLocation`].
     ///
-    /// Used to look up the first transaction with
-    /// [`ReadDisk::zs_next_key_value_from`][1].
+    /// Used to look up transactions with
+    /// [`DiskDb::zs_range_iter`][1].
     ///
     /// The transaction location might be invalid, if it is based on the
     /// `query_start` height. But this is not an issue, since
-    /// [`ReadDisk::zs_next_key_value_from`][1] will fetch the next existing
-    /// (valid) value.
+    /// [`DiskDb::zs_range_iter`][1] will fetch all existing
+    /// (valid) values in the range.
     ///
-    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
-    pub fn address_iterator_start(
+    /// [1]: super::super::disk_db::DiskDb
+    pub fn address_iterator_range(
         address_location: AddressLocation,
         query_start: Height,
-    ) -> AddressTransaction {
+    ) -> std::ops::RangeInclusive<AddressTransaction> {
         // Iterating from the lowest possible transaction location gets us the first transaction.
         //
         // The address location is the output location of the first UTXO sent to the address,
         // and addresses can not spend funds until they receive their first UTXO.
-        let first_utxo_location = address_location.transaction_location();
-
+        //
         // Iterating from the start height filters out transactions that aren't needed.
-        let query_start_location = TransactionLocation::from_usize(query_start, 0);
+        let start_height = max(query_start, address_location.height());
+        let first_utxo_idx = address_location.transaction_index().0;
 
-        AddressTransaction {
-            address_location,
-            transaction_location: max(first_utxo_location, query_start_location),
-        }
+        let tx_loc = |tx_idx| TransactionLocation::from_index(start_height, tx_idx);
+        let addr_tx = |tx_idx| AddressTransaction::new(address_location, tx_loc(tx_idx));
+
+        addr_tx(first_utxo_idx)..=addr_tx(u16::MAX)
     }
 
     /// Update the transaction location to the next possible transaction for the
