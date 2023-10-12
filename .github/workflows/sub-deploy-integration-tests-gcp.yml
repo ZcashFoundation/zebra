@@ -304,7 +304,7 @@ jobs:
       # VM and to the container might require more steps in this workflow, and additional
       # considerations.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
+      # The disk mounted in the VM is located at /dev/$DISK_NAME, we mount the root `/` of this disk to the docker
       # container, and might have two different paths (if lightwalletd state is needed):
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
