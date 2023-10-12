@@ -105,11 +105,20 @@ pub async fn run() -> Result<()> {
     // Store the state version message so we can wait for the upgrade later if needed.
     let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
+    tracing::info!(
+        ?test_type,
+        ?zebra_rpc_address,
+        "launched zebrad, waiting for zebrad to open its RPC port..."
+    );
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+
     // Wait for the state to upgrade, if the upgrade is short.
+    //
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
     //
-    // If this line hangs, move it after the RPC port check.
+    // If this line hangs, move it before the RPC port check.
+    // (The RPC port is usually much faster than even a quick state upgrade.)
     if !DATABASE_FORMAT_UPGRADE_IS_LONG {
         wait_for_state_version_upgrade(
             &mut zebrad,
@@ -117,13 +126,6 @@ pub async fn run() -> Result<()> {
             database_format_version_in_code(),
         )?;
     }
-
-    tracing::info!(
-        ?test_type,
-        ?zebra_rpc_address,
-        "launched zebrad, waiting for zebrad to open its RPC port..."
-    );
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
     tracing::info!(
         ?zebra_rpc_address,
