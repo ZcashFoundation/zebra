@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-09-25
 
-This release provides support for the Spend before Sync synchronization
-strategy, and contains the following updates:
+This release adds RPC methods for the "Spend before Sync" light wallet synchronization
+strategy, and fixes performance issues and bugs in the mining solution rate RPCs.
+Progress bars can now be enabled using a config, please help us test them!
+
+It contains the following updates:
+ 
+### User Testing: Progress Bars
+ 
+Zebra has progress bars! When progress bars are enabled, you can see Zebra's blocks,
+transactions, and peer connections in your terminal. We're asking Zebra users to test this
+feature, and give us [feedback on the forums](https://forum.zcashcommunity.com/t/zebra-progress-bars/44485).
+
+To show progress bars while running Zebra, add these lines to your `zebrad.toml`:
+```toml
+[tracing]
+progress_bar = "summary"
+```
+
+For more details, including a known issue with time estimates,
+read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-bars/).
 
 ### Security
 
