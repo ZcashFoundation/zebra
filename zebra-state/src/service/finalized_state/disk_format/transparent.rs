@@ -433,13 +433,13 @@ impl AddressTransaction {
         address_location: AddressLocation,
         query_start: Height,
     ) -> std::ops::RangeInclusive<AddressTransaction> {
+        // Iterating from the start height filters out transactions that aren't needed.
+        let start_height = max(query_start, address_location.height());
+
         // Iterating from the lowest possible transaction location gets us the first transaction.
         //
         // The address location is the output location of the first UTXO sent to the address,
         // and addresses can not spend funds until they receive their first UTXO.
-        //
-        // Iterating from the start height filters out transactions that aren't needed.
-        let start_height = max(query_start, address_location.height());
         let first_utxo_idx = address_location.transaction_index().0;
 
         let tx_loc = |tx_idx| TransactionLocation::from_index(start_height, tx_idx);
@@ -457,6 +457,7 @@ impl AddressTransaction {
     /// existing (valid) value.
     ///
     /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
+    #[allow(dead_code)]
     pub fn address_iterator_next(&mut self) {
         // Iterating from the next possible output location gets us the next output,
         // even if it is in a later block or transaction.
