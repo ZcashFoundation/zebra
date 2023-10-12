@@ -295,6 +295,12 @@ impl ZebraDb {
                 .collect();
         }
 
+        // Make sure the amount of retrieved subtrees does not exceed the given limit.
+        #[cfg(debug_assertions)]
+        if let Some(limit) = limit {
+            assert!(list.len() <= limit.0.into());
+        }
+
         // Check that we got the start subtree.
         if list.get(&start_index).is_some() {
             list
@@ -460,6 +466,12 @@ impl ZebraDb {
                 .db
                 .zs_range_iter(&orchard_subtrees, start_index..)
                 .collect();
+        }
+
+        // Make sure the amount of retrieved subtrees does not exceed the given limit.
+        #[cfg(debug_assertions)]
+        if let Some(limit) = limit {
+            assert!(list.len() <= limit.0.into());
         }
 
         // Check that we got the start subtree.
