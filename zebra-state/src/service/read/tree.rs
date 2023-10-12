@@ -190,6 +190,19 @@ where
 {
     let mut db_list = db.orchard_subtree_list_by_index_for_rpc(start_index, limit);
 
+    if let Some(limit) = limit {
+        let subtrees_num = u16::try_from(db_list.len())
+            .expect("There can't be more than `u16::MAX` Orchard subtrees.");
+
+        // Return the subtrees if the amount of them reached the given limit.
+        if subtrees_num == limit.0 {
+            return db_list;
+        }
+
+        // If not, make sure the amount is below the limit.
+        debug_assert!(subtrees_num < limit.0);
+    }
+
     // If there's no chain, then we have the complete list.
     let Some(chain) = chain else {
         return db_list;
@@ -209,6 +222,17 @@ where
         // If there's no matching index, just update the list of trees.
         let Some(db_subtree) = db_list.get(&fork_index) else {
             db_list.insert(fork_index, fork_subtree);
+
+            // Stop adding new subtrees once their amount reaches the given limit.
+            if let Some(limit) = limit {
+                let subtrees_num = u16::try_from(db_list.len())
+                    .expect("There can't be more than `u16::MAX` Orchard subtrees.");
+
+                if subtrees_num == limit.0 {
+                    break;
+                }
+            }
+
             continue;
         };
 
@@ -218,6 +242,12 @@ where
         }
 
         // Otherwise, the subtree is already in the list, so we don't need to add it.
+    }
+
+    // Make sure the amount of retrieved subtrees does not exceed the given limit.
+    #[cfg(debug_assertions)]
+    if let Some(limit) = limit {
+        assert!(db_list.len() <= limit.0.into());
     }
 
     // Check that we got the start subtree from the non-finalized or finalized state.
