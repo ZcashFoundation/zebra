@@ -1,6 +1,10 @@
 //! Tracing and logging infrastructure for Zebra.
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,10 +20,59 @@ pub use endpoint::TracingEndpoint;
 #[cfg(feature = "flamegraph")]
 pub use flame::{layer, Grapher};
 
-/// Tracing configuration section.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+/// Tracing configuration section: outer config after cross-field defaults are applied.
+///
+/// This is a wrapper type that dereferences to the inner config type.
+///
+//
+// TODO: replace with serde's finalizer attribute when that feature is implemented.
+//       we currently use the recommended workaround of a wrapper struct with from/into attributes.
+//       https://github.com/serde-rs/serde/issues/642#issuecomment-525432907
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(
+    deny_unknown_fields,
+    default,
+    from = "InnerConfig",
+    into = "InnerConfig"
+)]
 pub struct Config {
+    inner: InnerConfig,
+}
+
+impl Deref for Config {
+    type Target = InnerConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Config {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl From<InnerConfig> for Config {
+    fn from(mut inner: InnerConfig) -> Self {
+        inner.log_file = runtime_default_log_file(inner.log_file, inner.progress_bar);
+
+        Self { inner }
+    }
+}
+
+impl From<Config> for InnerConfig {
+    fn from(mut config: Config) -> Self {
+        config.log_file = disk_default_log_file(config.log_file.clone(), config.progress_bar);
+
+        config.inner
+    }
+}
+
+/// Tracing configuration section: inner config used to deserialize and apply cross-field defaults.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct InnerConfig {
     /// Whether to use colored terminal output, if available.
     ///
     /// Colored terminal output is automatically disabled if an output stream
@@ -108,10 +161,16 @@ pub struct Config {
     /// replaced with `.folded` and `.svg` for the respective files.
     pub flamegraph: Option<PathBuf>,
 
+    /// Shows progress bars for block syncing, and mempool transactions, and peer networking.
+    /// Also sends logs to the default log file path.
+    ///
+    /// This config field is ignored unless the `progress-bar` feature is enabled.
+    pub progress_bar: Option<ProgressConfig>,
+
     /// If set to a path, write the tracing logs to that path.
     ///
     /// By default, logs are sent to the terminal standard output.
-    /// But if the `progress-bar` feature is activated, logs are sent to the standard log file path:
+    /// But if the `progress_bar` config is activated, logs are sent to the standard log file path:
     /// - Linux: `$XDG_STATE_HOME/zebrad.log` or `$HOME/.local/state/zebrad.log`
     /// - macOS: `$HOME/Library/Application Support/zebrad.log`
     /// - Windows: `%LOCALAPPDATA%\zebrad.log` or `C:\Users\%USERNAME%\AppData\Local\zebrad.log`
@@ -129,6 +188,21 @@ pub struct Config {
     ///
     /// Install Zebra using `cargo install --features=journald` to enable this config.
     pub use_journald: bool,
+}
+
+/// The progress bars that Zebra will show while running.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressConfig {
+    /// Show a lot of progress bars.
+    Detailed,
+
+    /// Show a few important progress bars.
+    //
+    // TODO: actually hide some progress bars in this mode.
+    #[default]
+    #[serde(other)]
+    Summary,
 }
 
 impl Config {
@@ -152,12 +226,10 @@ impl Config {
     }
 }
 
-impl Default for Config {
+impl Default for InnerConfig {
     fn default() -> Self {
-        #[cfg(feature = "progress-bar")]
-        let default_log_file = dirs::state_dir()
-            .or_else(dirs::data_local_dir)
-            .map(|dir| dir.join("zebrad.log"));
+        // TODO: enable progress bars by default once they have been tested
+        let progress_bar = None;
 
         Self {
             use_color: true,
@@ -166,11 +238,50 @@ impl Default for Config {
             buffer_limit: 128_000,
             endpoint_addr: None,
             flamegraph: None,
-            #[cfg(not(feature = "progress-bar"))]
-            log_file: None,
-            #[cfg(feature = "progress-bar")]
-            log_file: default_log_file,
+            progress_bar,
+            log_file: runtime_default_log_file(None, progress_bar),
             use_journald: false,
         }
     }
+}
+
+/// Returns the runtime default log file path based on the `log_file` and `progress_bar` configs.
+fn runtime_default_log_file(
+    log_file: Option<PathBuf>,
+    progress_bar: Option<ProgressConfig>,
+) -> Option<PathBuf> {
+    if let Some(log_file) = log_file {
+        return Some(log_file);
+    }
+
+    // If the progress bar is active, we want to use a log file regardless of the config.
+    // (Logging to a terminal erases parts of the progress bars, making both unreadable.)
+    if progress_bar.is_some() {
+        return default_log_file();
+    }
+
+    None
+}
+
+/// Returns the configured log file path using the runtime `log_file` and `progress_bar` config.
+///
+/// This is the inverse of [`runtime_default_log_file()`].
+fn disk_default_log_file(
+    log_file: Option<PathBuf>,
+    progress_bar: Option<ProgressConfig>,
+) -> Option<PathBuf> {
+    // If the progress bar is active, and we've likely substituted the default log file path,
+    // don't write that substitute to the config on disk.
+    if progress_bar.is_some() && log_file == default_log_file() {
+        return None;
+    }
+
+    log_file
+}
+
+/// Returns the default log file path.
+fn default_log_file() -> Option<PathBuf> {
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .map(|dir| dir.join("zebrad.log"))
 }

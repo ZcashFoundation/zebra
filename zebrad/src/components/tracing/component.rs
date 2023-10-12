@@ -79,14 +79,14 @@ impl Tracing {
     /// and the Zebra logo on startup. (If the terminal supports it.)
     //
     // This method should only print to stderr, because stdout is for tracing logs.
-    #[allow(clippy::print_stderr, clippy::unwrap_in_result)]
+    #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
     pub fn new(network: Network, config: Config, uses_intro: bool) -> Result<Self, FrameworkError> {
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
         let use_color = config.use_color_stdout();
         let use_color_stderr = config.use_color_stderr();
 
-        let filter = config.filter.unwrap_or_default();
+        let filter = config.filter.clone().unwrap_or_default();
         let flame_root = &config.flamegraph;
 
         // Only show the intro for user-focused node server commands like `start`
@@ -139,7 +139,8 @@ impl Tracing {
             }
 
             if uses_intro {
-                eprintln!("Sending logs to {log_file:?}...");
+                // We want this to appear on stdout instead of the usual log messages.
+                println!("Sending logs to {log_file:?}...");
             }
             let log_file = File::options().append(true).create(true).open(log_file)?;
             Box::new(log_file) as BoxWrite
@@ -305,7 +306,7 @@ impl Tracing {
         //
         // TODO: move this to its own module?
         #[cfg(feature = "progress-bar")]
-        {
+        if let Some(progress_bar_config) = config.progress_bar.as_ref() {
             use howudoin::consumers::TermLine;
             use std::time::Duration;
 
@@ -315,7 +316,11 @@ impl Tracing {
             let terminal_consumer = TermLine::with_debounce(PROGRESS_BAR_DEBOUNCE);
             howudoin::init(terminal_consumer);
 
-            info!("activated progress bar");
+            info!(?progress_bar_config, "activated progress bars");
+        } else {
+            info!(
+                "set 'tracing.progress_bar =\"summary\"' in zebrad.toml to activate progress bars"
+            );
         }
 
         Ok(Self {

@@ -5779,6 +5779,7 @@ dependencies = [
  "humantime",
  "indexmap 2.0.1",
  "insta",
+ "itertools 0.11.0",
  "lazy_static",
  "once_cell",
  "owo-colors",
