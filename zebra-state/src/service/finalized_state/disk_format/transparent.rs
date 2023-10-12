@@ -431,21 +431,21 @@ impl AddressTransaction {
     /// [1]: super::super::disk_db::DiskDb
     pub fn address_iterator_range(
         address_location: AddressLocation,
-        query_start: Height,
+        query: std::ops::RangeInclusive<Height>,
     ) -> std::ops::RangeInclusive<AddressTransaction> {
-        // Iterating from the start height filters out transactions that aren't needed.
-        let start_height = max(query_start, address_location.height());
-
         // Iterating from the lowest possible transaction location gets us the first transaction.
         //
         // The address location is the output location of the first UTXO sent to the address,
         // and addresses can not spend funds until they receive their first UTXO.
-        let first_utxo_idx = address_location.transaction_index().0;
+        let first_utxo_location = address_location.transaction_location();
 
-        let tx_loc = |tx_idx| TransactionLocation::from_index(start_height, tx_idx);
-        let addr_tx = |tx_idx| AddressTransaction::new(address_location, tx_loc(tx_idx));
+        // Iterating from the start height filters out transactions that aren't needed.
+        let query_start_location = TransactionLocation::from_index(*query.start(), 0);
+        let query_end_location = TransactionLocation::from_index(*query.end(), u16::MAX);
 
-        addr_tx(first_utxo_idx)..=addr_tx(u16::MAX)
+        let addr_tx = |tx_loc| AddressTransaction::new(address_location, tx_loc);
+
+        addr_tx(max(first_utxo_location, query_start_location))..=addr_tx(query_end_location)
     }
 
     /// Update the transaction location to the next possible transaction for the
