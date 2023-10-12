@@ -66,78 +66,30 @@ where
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
-    start_index: NoteCommitmentSubtreeIndex,
-    limit: Option<NoteCommitmentSubtreeIndex>,
+    range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
 ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>
 where
     C: AsRef<Chain>,
 {
-    let mut db_list = db.sapling_subtree_list_by_index_for_rpc(start_index, limit);
+    use std::ops::Bound::*;
 
-    if let Some(limit) = limit {
-        let subtrees_num = u16::try_from(db_list.len())
-            .expect("There can't be more than `u16::MAX` Sapling subtrees.");
-
-        // Return the subtrees if the amount of them reached the given limit.
-        if subtrees_num == limit.0 {
-            return db_list;
-        }
-
-        // If not, make sure the amount is below the limit.
-        debug_assert!(subtrees_num < limit.0);
-    }
-
-    // If there's no chain, then we have the complete list.
-    let Some(chain) = chain else {
-        return db_list;
+    let start_index = match range.start_bound().cloned() {
+        Included(start_index) | Excluded(start_index) => start_index,
+        Unbounded => panic!("range provided to sapling_subtrees() must have start bound"),
     };
 
-    // Unlike the other methods, this returns any trees in the range,
-    // even if there is no tree for start_index.
-    let fork_list = chain.as_ref().sapling_subtrees_in_range(start_index, limit);
-
-    // If there's no subtrees in chain, then we have the complete list.
-    if fork_list.is_empty() {
-        return db_list;
+    let results = match chain.map(|chain| chain.as_ref().sapling_subtrees_in_range(range.clone())) {
+        Some(results) if results.contains_key(&start_index) => results,
+        Some(mut results) => {
+            results.append(&mut db.sapling_subtree_list_by_index_for_rpc(range));
+            results
+        }
+        None => db.sapling_subtree_list_by_index_for_rpc(range),
     };
 
-    // Check for inconsistent trees in the fork.
-    for (fork_index, fork_subtree) in fork_list {
-        // If there's no matching index, just update the list of trees.
-        let Some(db_subtree) = db_list.get(&fork_index) else {
-            db_list.insert(fork_index, fork_subtree);
-
-            // Stop adding new subtrees once their amount reaches the given limit.
-            if let Some(limit) = limit {
-                let subtrees_num = u16::try_from(db_list.len())
-                    .expect("There can't be more than `u16::MAX` Sapling subtrees.");
-
-                if subtrees_num == limit.0 {
-                    break;
-                }
-            }
-
-            continue;
-        };
-
-        // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
-        if &fork_subtree != db_subtree {
-            break;
-        }
-
-        // Otherwise, the subtree is already in the list, so we don't need to add it.
-    }
-
-    // Make sure the amount of retrieved subtrees does not exceed the given limit.
-    #[cfg(debug_assertions)]
-    if let Some(limit) = limit {
-        assert!(db_list.len() <= limit.0.into());
-    }
-
-    // Check that we got the start subtree from the non-finalized or finalized state.
-    // (The non-finalized state doesn't do this check.)
-    if db_list.get(&start_index).is_some() {
-        db_list
+    // Check that we got the start subtree
+    if results.contains_key(&start_index) {
+        results
     } else {
         BTreeMap::new()
     }

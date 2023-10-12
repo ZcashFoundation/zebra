@@ -698,8 +698,7 @@ impl Chain {
             .map(|(index, subtree)| subtree.with_index(*index))
     }
 
-    /// Returns a list of Sapling [`NoteCommitmentSubtree`]s at or after `start_index`.
-    /// If `limit` is provided, the list is limited to `limit` entries.
+    /// Returns a list of Sapling [`NoteCommitmentSubtree`]s in the provided range.
     ///
     /// Unlike the finalized state and `ReadRequest::SaplingSubtrees`, the returned subtrees
     /// can start after `start_index`. These subtrees are continuous up to the tip.
@@ -709,17 +708,10 @@ impl Chain {
     /// finalized updates.
     pub fn sapling_subtrees_in_range(
         &self,
-        start_index: NoteCommitmentSubtreeIndex,
-        limit: Option<NoteCommitmentSubtreeIndex>,
+        range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
     ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
-        let limit = limit
-            .map(|limit| usize::from(limit.0))
-            .unwrap_or(usize::MAX);
-
-        // Since we're working in memory, it's ok to iterate through the whole range here.
         self.sapling_subtrees
-            .range(start_index..)
-            .take(limit)
+            .range(range)
             .map(|(index, subtree)| (*index, *subtree))
             .collect()
     }
