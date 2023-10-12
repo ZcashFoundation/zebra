@@ -1548,14 +1548,29 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
+                        let end_index = limit
+                            .and_then(|limit| start_index.0.checked_add(limit.0))
+                            .map(NoteCommitmentSubtreeIndex);
+
                         let orchard_subtrees = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                read::orchard_subtrees(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    start_index,
-                                    limit,
-                                )
+                                if let Some(end_index) = end_index {
+                                    read::orchard_subtrees(
+                                        non_finalized_state.best_chain(),
+                                        &state.db,
+                                        start_index..end_index,
+                                    )
+                                } else {
+                                    // If there is no end bound, just return all the trees.
+                                    // If the end bound would overflow, just returns all the trees, because that's what
+                                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+                                    // the trees run out.)
+                                    read::orchard_subtrees(
+                                        non_finalized_state.best_chain(),
+                                        &state.db,
+                                        start_index..,
+                                    )
+                                }
                             },
                         );
 
