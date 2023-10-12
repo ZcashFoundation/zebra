@@ -401,6 +401,10 @@ impl DiskWriteBatch {
 impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
+    /// Accepts a `reverse` argument and creates the iterator with an [`IteratorMode`](rocksdb::IteratorMode)
+    /// of [`End`](rocksdb::IteratorMode::End), or [`From`](rocksdb::IteratorMode::From)
+    /// with [`Direction::Reverse`](rocksdb::Direction::Reverse).
+    ///
     /// Holding this iterator open might delay block commit transactions.
     pub fn zs_range_iter<C, K, V, R>(
         &self,
@@ -496,15 +500,33 @@ impl DiskDb {
     where
         R: RangeBounds<Vec<u8>>,
     {
-        use std::ops::Bound::*;
-
         let mut opts = ReadOptions::default();
+        let (lower_bound, upper_bound) = Self::zs_iter_bounds(range);
 
-        if let Included(bound) | Excluded(bound) = range.start_bound() {
-            opts.set_iterate_lower_bound(bound.clone());
+        if let Some(bound) = lower_bound {
+            opts.set_iterate_lower_bound(bound);
         };
 
-        match range.end_bound().cloned() {
+        if let Some(bound) = upper_bound {
+            opts.set_iterate_upper_bound(bound);
+        };
+
+        opts
+    }
+
+    /// Returns a lower and upper iterate bounds for a range.
+    fn zs_iter_bounds<R>(range: &R) -> (Option<Vec<u8>>, Option<Vec<u8>>)
+    where
+        R: RangeBounds<Vec<u8>>,
+    {
+        use std::ops::Bound::*;
+
+        let lower_bound = match range.start_bound() {
+            Included(bound) | Excluded(bound) => Some(bound.clone()),
+            Unbounded => None,
+        };
+
+        let upper_bound = match range.end_bound().cloned() {
             Included(mut bound) => {
                 // Skip adding an upper bound if every byte is u8::MAX, or
                 // increment the last byte in the upper bound that is less than u8::MAX,
@@ -515,17 +537,13 @@ impl DiskDb {
                     v == &0
                 });
 
-                if !is_max_key {
-                    opts.set_iterate_upper_bound(bound);
-                }
+                (!is_max_key).then_some(bound)
             }
-            Excluded(bound) => {
-                opts.set_iterate_upper_bound(bound);
-            }
-            Unbounded => {}
+            Excluded(bound) => Some(bound),
+            Unbounded => None,
         };
 
-        opts
+        (lower_bound, upper_bound)
     }
 
     /// Returns the RocksDB iterator "from" mode for `range`.
