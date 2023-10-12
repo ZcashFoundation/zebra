@@ -39,7 +39,7 @@ pub mod index;
 
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Chain {
     // Config
     //
@@ -67,7 +67,7 @@ pub struct Chain {
 }
 
 /// The internal state of [`Chain`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
