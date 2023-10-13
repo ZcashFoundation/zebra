@@ -41,10 +41,10 @@ Node miner address is required. At the moment zebra only allows `p2pkh` or `p2sh
 
 ```
 [mining]
-miner_address = 't3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd'
+miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 ```
 
-The above address is just the first address of the [Founders' Reward](https://zips.z.cash/protocol/protocol.pdf#foundersreward) section of the Zcash protocol. It's a Mainnet address and it is used here purely as an example.
+The above address is the ZF Mainnet funding stream address. It is used here purely as an example.
 
 ### RPC section
 [#rpc-section]: #rpc-section
