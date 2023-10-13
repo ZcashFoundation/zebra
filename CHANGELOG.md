@@ -51,8 +51,7 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 ### Changed
 
-- Check database format is valid every 5 minutes, to catch format errors in new block code (#7602)
-- Check database format is valid on shutdown, to catch format errors in new block code (#7606)
+- Check database format is valid on shutdown in production, to catch rare database edge-cases (#7606). We expect to catch almost all of these errors in CI (#7602, #7627).
 - Return errors instead of panicking in methods for Heights (#7591)
 - Update tests for compatibility with the ECC's `lightwalletd` fork (#7349)
 
