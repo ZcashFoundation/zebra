@@ -30,7 +30,7 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 ### Security
 
-- Fix database concurrency bugs that could have led to panics or incorrect history tree data (#7590)
+- Fix database concurrency bugs that could have led to panics or incorrect history tree data (#7590, #7663)
 
 ### Added
 
@@ -38,11 +38,11 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 - Add missing elasticsearch flag feature to lib docs (#7568)
 - Add missing Docker variables and examples (#7552)
 
-#### Spend before Sync support
+#### Spend before Sync Support
 
-- Add state requests and support code for the `z_getsubtreesbyindex` RPC (#7408)
+- Add state requests and support code for the `z_getsubtreesbyindex` RPC (#7408, #7734)
 - Implement the `z_getsubtreesbyindex` RPC (#7436)
-- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566, #7514)
+- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566, #7514, #7628)
 - Format subtree roots in little-endian order (#7466)
 - Add note subtree indexes for new and existing blocks (#7437)
 - Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
@@ -50,14 +50,17 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 ### Changed
 
-- Check database format is valid on shutdown in production, to catch rare database edge-cases (#7606). We expect to catch almost all of these errors in CI (#7602, #7627).
 - Return errors instead of panicking in methods for Heights (#7591)
 - Update tests for compatibility with the ECC's `lightwalletd` fork (#7349)
+- Put chain data into an inner struct (#7608)
 
 ### Fixed
 
 - Refactor docs for feature flags (#7567)
 - Match zcashd's getblockchaininfo capitalisation for NU5 (#7454)
+- Populate subtree fields in the `NoteCommitmentTrees` struct (#7636)
+- Checking if transactions get into the mempool fails in lightwalletd tests (#7644)
+- Fix bugs and performance of `getnetworksolps` & `getnetworkhashps` RPCs (#7647)
 
 ### Contributors
 
