@@ -537,12 +537,17 @@ impl DiskDb {
                 // increment the last byte in the upper bound that is less than u8::MAX,
                 // and clear any bytes after it to increment the big-endian number this
                 // Vec represents to RocksDB.
-                let is_max_key = bound.iter_mut().rev().all(|v| {
+                let is_zero = bound.iter_mut().rev().all(|v| {
                     *v = v.wrapping_add(1);
                     v == &0
                 });
 
-                (!is_max_key).then_some(bound)
+                if is_zero {
+                    bound.push(0);
+                    *bound.get_mut(0).expect("should have at least 1 element") += 1;
+                }
+
+                Some(bound)
             }
             Excluded(bound) => Some(bound),
             Unbounded => None,
