@@ -5,11 +5,11 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-09-25
+## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-10-16
 
-This release adds RPC methods for the "Spend before Sync" light wallet synchronization
-strategy, and fixes performance issues and bugs in the mining solution rate RPCs.
-Progress bars can now be enabled using a config, please help us test them!
+This release adds RPC methods for the "Spend before Sync" light wallet feature,
+and fixes performance issues and bugs in the mining solution rate RPCs. Progress
+bars can now be enabled using a config, please help us test them!
 
 It contains the following updates:
  
@@ -42,8 +42,7 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 - Add state requests and support code for the `z_getsubtreesbyindex` RPC (#7408)
 - Implement the `z_getsubtreesbyindex` RPC (#7436)
-- Add snapshot tests for the `z_getsubtreesbyindex` RPC (#7514)
-- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566)
+- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566, #7514)
 - Format subtree roots in little-endian order (#7466)
 - Add note subtree indexes for new and existing blocks (#7437)
 - Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
