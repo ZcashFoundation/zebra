@@ -79,10 +79,26 @@ where
     };
 
     let results = match chain.map(|chain| chain.as_ref().sapling_subtrees_in_range(range.clone())) {
-        Some(results) if results.contains_key(&start_index) => results,
-        Some(mut results) => {
-            results.append(&mut db.sapling_subtree_list_by_index_for_rpc(range));
-            results
+        Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,
+        Some(chain_results) => {
+            let mut db_results = db.sapling_subtree_list_by_index_for_rpc(range);
+
+            // Check for inconsistent trees in the fork.
+            for (chain_index, chain_subtree) in chain_results {
+                // If there's no matching index, just update the list of trees.
+                let Some(db_subtree) = db_results.get(&chain_index) else {
+                    db_results.insert(chain_index, chain_subtree);
+                    continue;
+                };
+
+                // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
+                if &chain_subtree != db_subtree {
+                    break;
+                }
+                // Otherwise, the subtree is already in the list, so we don't need to add it.
+            }
+
+            db_results
         }
         None => db.sapling_subtree_list_by_index_for_rpc(range),
     };
@@ -147,10 +163,26 @@ where
     };
 
     let results = match chain.map(|chain| chain.as_ref().orchard_subtrees_in_range(range.clone())) {
-        Some(results) if results.contains_key(&start_index) => results,
-        Some(mut results) => {
-            results.append(&mut db.orchard_subtree_list_by_index_for_rpc(range));
-            results
+        Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,
+        Some(chain_results) => {
+            let mut db_results = db.orchard_subtree_list_by_index_for_rpc(range);
+
+            // Check for inconsistent trees in the fork.
+            for (chain_index, chain_subtree) in chain_results {
+                // If there's no matching index, just update the list of trees.
+                let Some(db_subtree) = db_results.get(&chain_index) else {
+                    db_results.insert(chain_index, chain_subtree);
+                    continue;
+                };
+
+                // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
+                if &chain_subtree != db_subtree {
+                    break;
+                }
+                // Otherwise, the subtree is already in the list, so we don't need to add it.
+            }
+
+            db_results
         }
         None => db.orchard_subtree_list_by_index_for_rpc(range),
     };
