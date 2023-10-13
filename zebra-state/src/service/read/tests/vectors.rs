@@ -124,40 +124,40 @@ async fn test_sapling_subtrees() -> Result<()> {
     // the non-finalized state.
 
     // Retrieve only the first subtree and check its properties.
-    let subtrees = sapling_subtrees(chain.clone(), &db, 0.into(), Some(1.into()));
+    let subtrees = sapling_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..1.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
 
     // Retrieve both subtrees using a limit and check their properties.
-    let subtrees = sapling_subtrees(chain.clone(), &db, 0.into(), Some(2.into()));
+    let subtrees = sapling_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..2.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 2);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve both subtrees without using a limit and check their properties.
-    let subtrees = sapling_subtrees(chain.clone(), &db, 0.into(), None);
+    let subtrees = sapling_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..);
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 2);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree and check its properties.
-    let subtrees = sapling_subtrees(chain.clone(), &db, 1.into(), Some(1.into()));
+    let subtrees = sapling_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(1)..2.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree, using a limit that would allow for more trees if they were
     // present, and check its properties.
-    let subtrees = sapling_subtrees(chain.clone(), &db, 1.into(), Some(2.into()));
+    let subtrees = sapling_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(1)..3.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree, without using any limit, and check its properties.
-    let subtrees = sapling_subtrees(chain, &db, 1.into(), None);
+    let subtrees = sapling_subtrees(chain, &db, NoteCommitmentSubtreeIndex(1)..);
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
@@ -189,40 +189,40 @@ async fn test_orchard_subtrees() -> Result<()> {
     // the non-finalized state.
 
     // Retrieve only the first subtree and check its properties.
-    let subtrees = orchard_subtrees(chain.clone(), &db, 0.into(), Some(1.into()));
+    let subtrees = orchard_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..1.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
 
     // Retrieve both subtrees using a limit and check their properties.
-    let subtrees = orchard_subtrees(chain.clone(), &db, 0.into(), Some(2.into()));
+    let subtrees = orchard_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..2.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 2);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve both subtrees without using a limit and check their properties.
-    let subtrees = orchard_subtrees(chain.clone(), &db, 0.into(), None);
+    let subtrees = orchard_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(0)..);
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 2);
     assert!(subtrees_eq(subtrees.next().unwrap(), &db_subtree));
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree and check its properties.
-    let subtrees = orchard_subtrees(chain.clone(), &db, 1.into(), Some(1.into()));
+    let subtrees = orchard_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(1)..2.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree, using a limit that would allow for more trees if they were
     // present, and check its properties.
-    let subtrees = orchard_subtrees(chain.clone(), &db, 1.into(), Some(2.into()));
+    let subtrees = orchard_subtrees(chain.clone(), &db, NoteCommitmentSubtreeIndex(1)..3.into());
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
 
     // Retrieve only the second subtree, without using any limit, and check its properties.
-    let subtrees = orchard_subtrees(chain, &db, 1.into(), None);
+    let subtrees = orchard_subtrees(chain, &db, NoteCommitmentSubtreeIndex(1)..);
     let mut subtrees = subtrees.iter();
     assert_eq!(subtrees.len(), 1);
     assert!(subtrees_eq(subtrees.next().unwrap(), &chain_subtree));
