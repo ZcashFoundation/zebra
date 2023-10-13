@@ -206,8 +206,7 @@ pub fn sync_until(
     let reuse_tempdir = reuse_tempdir.into();
 
     // Use a persistent state, so we can handle large syncs
-    let mut config = persistent_test_config()?;
-    config.network.network = network;
+    let mut config = persistent_test_config(network)?;
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
     config.consensus.checkpoint_sync = checkpoint_sync;
@@ -338,8 +337,8 @@ pub fn check_sync_logs_until(
 }
 
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
-pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
-    let mut config = persistent_test_config()?;
+pub fn cached_mandatory_checkpoint_test_config(network: Network) -> Result<ZebradConfig> {
+    let mut config = persistent_test_config(network)?;
     config.state.cache_dir = "/zebrad-cache".into();
 
     // To get to the mandatory checkpoint, we need to sync lots of blocks.
@@ -387,9 +386,8 @@ pub fn create_cached_database_height(
     eprintln!("creating cached database");
 
     // Use a persistent state, so we can handle large syncs
-    let mut config = cached_mandatory_checkpoint_test_config()?;
+    let mut config = cached_mandatory_checkpoint_test_config(network)?;
     // TODO: add convenience methods?
-    config.network.network = network;
     config.state.debug_stop_at_height = Some(height.0);
     config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
     config.consensus.checkpoint_sync = checkpoint_sync;
