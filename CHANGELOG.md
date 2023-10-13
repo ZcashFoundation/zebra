@@ -34,6 +34,7 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 ### Added
 
+- Zebra's progress bars can now be enabled using a `zebrad.toml` config (#7615)
 - Add missing elasticsearch flag feature to lib docs (#7568)
 - Add missing Docker variables and examples (#7552)
 
