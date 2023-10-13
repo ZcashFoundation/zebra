@@ -21,6 +21,8 @@ use zebrad::{
     config::ZebradConfig,
 };
 
+use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
+
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost, and
 /// - an ephemeral state,
@@ -56,14 +58,16 @@ pub fn default_test_config() -> Result<ZebradConfig> {
         env::var("ZEBRA_FORCE_USE_COLOR"),
         Err(env::VarError::NotPresent)
     );
-    let tracing = tracing::Config {
-        force_use_color,
-        ..tracing::Config::default()
-    };
+
+    let mut tracing = tracing::Config::default();
+    tracing.force_use_color = force_use_color;
+
+    let mut state = zebra_state::Config::ephemeral();
+    state.debug_validity_check_interval = Some(DATABASE_FORMAT_CHECK_INTERVAL);
 
     let config = ZebradConfig {
         network,
-        state: zebra_state::Config::ephemeral(),
+        state,
         sync,
         mempool,
         consensus,

@@ -42,7 +42,7 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_D
 
 pub(super) use zebra_db::ZebraDb;
 
-use disk_db::DiskWriteBatch;
+pub(super) use disk_db::DiskWriteBatch;
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -242,8 +242,8 @@ impl FinalizedState {
 
                 let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
-                let prev_note_commitment_trees =
-                    prev_note_commitment_trees.unwrap_or_else(|| self.db.note_commitment_trees());
+                let prev_note_commitment_trees = prev_note_commitment_trees
+                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
                 // Update the note commitment trees.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();

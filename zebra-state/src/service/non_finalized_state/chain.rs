@@ -4,7 +4,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ops::{Deref, RangeInclusive},
+    ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
@@ -39,15 +39,36 @@ pub mod index;
 
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Chain {
-    // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
-
     // Config
     //
     /// The configured network for this chain.
     network: Network,
 
+    /// The internal state of this chain.
+    inner: ChainInner,
+
+    // Diagnostics
+    //
+    /// The last height this chain forked at. Diagnostics only.
+    ///
+    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
+    /// for equality.
+    ///
+    /// We keep the same last fork height in both sides of a clone, because every new block clones
+    /// a chain, even if it's just growing that chain.
+    pub(super) last_fork_height: Option<Height>,
+    // # Note
+    //
+    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
+    // Some diagnostics only use the best chain, and others need to modify the Chain state,
+    // but that's difficult with `Arc<Chain>`s.
+}
+
+/// The internal state of [`Chain`].
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
@@ -185,22 +206,6 @@ pub struct Chain {
     /// When a new chain is created from the finalized tip,
     /// it is initialized with the finalized tip chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
-
-    // Diagnostics
-    //
-    /// The last height this chain forked at. Diagnostics only.
-    ///
-    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
-    /// for equality.
-    ///
-    /// We keep the same last fork height in both sides of a clone, because every new block clones
-    /// a chain, even if it's just growing that chain.
-    pub(super) last_fork_height: Option<Height>,
-    // # Note
-    //
-    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
-    // Some diagnostics only use the best chain, and others need to modify the Chain state,
-    // but that's difficult with `Arc<Chain>`s.
 }
 
 impl Chain {
@@ -214,8 +219,7 @@ impl Chain {
         history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
-        let mut chain = Self {
-            network,
+        let inner = ChainInner {
             blocks: Default::default(),
             height_by_hash: Default::default(),
             tx_loc_by_hash: Default::default(),
@@ -240,6 +244,11 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+        };
+
+        let mut chain = Self {
+            network,
+            inner,
             last_fork_height: None,
         };
 
@@ -263,49 +272,7 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn eq_internal_state(&self, other: &Chain) -> bool {
-        // blocks, heights, hashes
-        self.blocks == other.blocks &&
-            self.height_by_hash == other.height_by_hash &&
-            self.tx_loc_by_hash == other.tx_loc_by_hash &&
-
-            // transparent UTXOs
-            self.created_utxos == other.created_utxos &&
-            self.spent_utxos == other.spent_utxos &&
-
-            // note commitment trees
-            self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
-            self.sprout_trees_by_height == other.sprout_trees_by_height &&
-            self.sapling_trees_by_height == other.sapling_trees_by_height &&
-            self.orchard_trees_by_height == other.orchard_trees_by_height &&
-
-            // history trees
-            self.history_trees_by_height == other.history_trees_by_height &&
-
-            // note commitment subtrees
-            self.sapling_subtrees == other.sapling_subtrees &&
-            self.orchard_subtrees == other.orchard_subtrees &&
-
-            // anchors
-            self.sprout_anchors == other.sprout_anchors &&
-            self.sprout_anchors_by_height == other.sprout_anchors_by_height &&
-            self.sapling_anchors == other.sapling_anchors &&
-            self.sapling_anchors_by_height == other.sapling_anchors_by_height &&
-            self.orchard_anchors == other.orchard_anchors &&
-            self.orchard_anchors_by_height == other.orchard_anchors_by_height &&
-
-            // nullifiers
-            self.sprout_nullifiers == other.sprout_nullifiers &&
-            self.sapling_nullifiers == other.sapling_nullifiers &&
-            self.orchard_nullifiers == other.orchard_nullifiers &&
-
-            // transparent address indexes
-            self.partial_transparent_transfers == other.partial_transparent_transfers &&
-
-            // proof of work
-            self.partial_cumulative_work == other.partial_cumulative_work &&
-
-            // chain value pool balances
-            self.chain_value_pools == other.chain_value_pools
+        self.inner == other.inner
     }
 
     /// Returns the last fork height if that height is still in the non-finalized state.
@@ -483,8 +450,28 @@ impl Chain {
 
     /// Returns true is the chain contains the given block hash.
     /// Returns false otherwise.
-    pub fn contains_block_hash(&self, hash: &block::Hash) -> bool {
-        self.height_by_hash.contains_key(hash)
+    pub fn contains_block_hash(&self, hash: block::Hash) -> bool {
+        self.height_by_hash.contains_key(&hash)
+    }
+
+    /// Returns true is the chain contains the given block height.
+    /// Returns false otherwise.
+    pub fn contains_block_height(&self, height: Height) -> bool {
+        self.blocks.contains_key(&height)
+    }
+
+    /// Returns true is the chain contains the given block hash or height.
+    /// Returns false otherwise.
+    #[allow(dead_code)]
+    pub fn contains_hash_or_height(&self, hash_or_height: impl Into<HashOrHeight>) -> bool {
+        use HashOrHeight::*;
+
+        let hash_or_height = hash_or_height.into();
+
+        match hash_or_height {
+            Hash(hash) => self.contains_block_hash(hash),
+            Height(height) => self.contains_block_height(height),
+        }
     }
 
     /// Returns the non-finalized tip block height and hash.
@@ -504,7 +491,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no sprout trees. (This should be impossible.)
-    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
+    pub fn sprout_note_commitment_tree_for_tip(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         self.sprout_trees_by_height
             .last_key_value()
             .expect("only called while sprout_trees_by_height is populated")
@@ -668,7 +655,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no sapling trees. (This should be impossible.)
-    pub fn sapling_note_commitment_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
+    pub fn sapling_note_commitment_tree_for_tip(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         self.sapling_trees_by_height
             .last_key_value()
             .expect("only called while sapling_trees_by_height is populated")
@@ -735,6 +722,16 @@ impl Chain {
             .take(limit)
             .map(|(index, subtree)| (*index, *subtree))
             .collect()
+    }
+
+    /// Returns the Sapling [`NoteCommitmentSubtree`] if it was completed at the tip height.
+    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+        if !self.is_empty() {
+            let tip = self.non_finalized_tip_height();
+            self.sapling_subtree(tip.into())
+        } else {
+            None
+        }
     }
 
     /// Adds the Sapling `tree` to the tree and anchor indexes at `height`.
@@ -869,7 +866,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no orchard trees. (This should be impossible.)
-    pub fn orchard_note_commitment_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
+    pub fn orchard_note_commitment_tree_for_tip(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         self.orchard_trees_by_height
             .last_key_value()
             .expect("only called while orchard_trees_by_height is populated")
@@ -937,6 +934,16 @@ impl Chain {
             .take(limit)
             .map(|(index, subtree)| (*index, *subtree))
             .collect()
+    }
+
+    /// Returns the Orchard [`NoteCommitmentSubtree`] if it was completed at the tip height.
+    pub fn orchard_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        if !self.is_empty() {
+            let tip = self.non_finalized_tip_height();
+            self.orchard_subtree(tip.into())
+        } else {
+            None
+        }
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
@@ -1387,11 +1394,11 @@ impl Chain {
 
         // Prepare data for parallel execution
         let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree(),
-            sapling: self.sapling_note_commitment_tree(),
-            sapling_subtree: None,
-            orchard: self.orchard_note_commitment_tree(),
-            orchard_subtree: None,
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
         };
 
         let mut tree_result = None;
@@ -1427,8 +1434,8 @@ impl Chain {
                 .insert(subtree.index, subtree.into_data());
         }
 
-        let sapling_root = self.sapling_note_commitment_tree().root();
-        let orchard_root = self.orchard_note_commitment_tree().root();
+        let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
+        let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let mut history_tree = self.history_block_commitment_tree();
@@ -1557,6 +1564,20 @@ impl Chain {
         self.update_chain_tip_with(chain_value_pool_change)?;
 
         Ok(())
+    }
+}
+
+impl Deref for Chain {
+    type Target = ChainInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Chain {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -2076,14 +2097,14 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     /// When forking from the tip, subtract the block's chain value pool change.
     ///
     /// When finalizing the root, leave the chain value pool balances unchanged.
-    /// [`Self::chain_value_pools`] tracks the chain value pools for all
-    /// finalized blocks, and the non-finalized blocks in this chain. So
-    /// finalizing the root doesn't change the set of blocks it tracks.
+    /// [`ChainInner::chain_value_pools`] tracks the chain value pools for all finalized blocks, and
+    /// the non-finalized blocks in this chain. So finalizing the root doesn't change the set of
+    /// blocks it tracks.
     ///
     /// # Panics
     ///
-    /// Panics if the chain pool value balance is invalid
-    /// after we subtract the block value pool change.
+    /// Panics if the chain pool value balance is invalid after we subtract the block value pool
+    /// change.
     fn revert_chain_with(
         &mut self,
         block_value_pool_change: &ValueBalance<NegativeAllowed>,
@@ -2203,3 +2224,26 @@ impl PartialEq for Chain {
 }
 
 impl Eq for Chain {}
+
+#[cfg(test)]
+impl Chain {
+    /// Inserts the supplied Sapling note commitment subtree into the chain.
+    pub(crate) fn insert_sapling_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+    ) {
+        self.inner
+            .sapling_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+
+    /// Inserts the supplied Orchard note commitment subtree into the chain.
+    pub(crate) fn insert_orchard_subtree(
+        &mut self,
+        subtree: NoteCommitmentSubtree<orchard::tree::Node>,
+    ) {
+        self.inner
+            .orchard_subtrees
+            .insert(subtree.index, subtree.into_data());
+    }
+}

@@ -284,9 +284,9 @@ impl NonFinalizedState {
         let chain = Chain::new(
             self.network,
             finalized_tip_height,
-            finalized_state.sprout_tree(),
-            finalized_state.sapling_tree(),
-            finalized_state.orchard_tree(),
+            finalized_state.sprout_tree_for_tip(),
+            finalized_state.sapling_tree_for_tip(),
+            finalized_state.orchard_tree_for_tip(),
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );
@@ -436,16 +436,20 @@ impl NonFinalizedState {
             .any(|chain| chain.height_by_hash.contains_key(hash))
     }
 
-    /// Removes and returns the first chain satisfying the given predicate.
+    /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
     /// (Using the tip block hash tie-breaker.)
-    fn find_chain<P>(&mut self, mut predicate: P) -> Option<&Arc<Chain>>
+    pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,
     {
         // Reverse the iteration order, to find highest difficulty chains first.
-        self.chain_set.iter().rev().find(|chain| predicate(chain))
+        self.chain_set
+            .iter()
+            .rev()
+            .find(|chain| predicate(chain))
+            .cloned()
     }
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
@@ -460,7 +464,9 @@ impl NonFinalizedState {
     }
 
     /// Returns the `block` with the given hash in any chain.
+    #[allow(dead_code)]
     pub fn any_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        // This performs efficiently because the number of chains is limited to 10.
         for chain in self.chain_set.iter().rev() {
             if let Some(prepared) = chain
                 .height_by_hash
@@ -472,6 +478,14 @@ impl NonFinalizedState {
         }
 
         None
+    }
+
+    /// Returns the previous block hash for the given block hash in any chain.
+    #[allow(dead_code)]
+    pub fn any_prev_block_hash_for_hash(&self, hash: block::Hash) -> Option<block::Hash> {
+        // This performs efficiently because the blocks are in memory.
+        self.any_block_by_hash(hash)
+            .map(|block| block.header.previous_block_hash)
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
@@ -510,6 +524,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the height of `hash` in any chain.
+    #[allow(dead_code)]
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         for chain in self.chain_set.iter().rev() {
             if let Some(height) = chain.height_by_hash.get(&hash) {
@@ -568,10 +583,7 @@ impl NonFinalizedState {
     /// The chain can be an existing chain in the non-finalized state, or a freshly
     /// created fork.
     #[allow(clippy::unwrap_in_result)]
-    fn parent_chain(
-        &mut self,
-        parent_hash: block::Hash,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
+    fn parent_chain(&self, parent_hash: block::Hash) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state
             Some(chain) => Ok(chain.clone()),

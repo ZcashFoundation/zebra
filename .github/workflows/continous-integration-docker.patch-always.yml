@@ -14,7 +14,7 @@ jobs:
       - run: 'echo "No build required"'
 
   test-full-sync:
-    name: Zebra tip / Run full-sync-to-tip test
+    name: Zebra tip / Run full-sync test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

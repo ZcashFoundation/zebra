@@ -2,6 +2,7 @@
 
 use std::iter;
 
+use itertools::Itertools;
 use regex::{Error, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 /// A trait for converting a value to a [`Regex`].
@@ -135,15 +136,17 @@ pub trait CollectRegexSet {
 impl<I> CollectRegexSet for I
 where
     I: IntoIterator,
-    I::Item: ToRegex,
+    I::Item: ToRegexSet,
 {
     fn collect_regex_set(self) -> Result<RegexSet, Error> {
-        let regexes: Result<Vec<Regex>, Error> =
-            self.into_iter().map(|item| item.to_regex()).collect();
+        let regexes: Result<Vec<RegexSet>, Error> = self
+            .into_iter()
+            .map(|item| item.to_regex_set())
+            .try_collect();
         let regexes = regexes?;
 
         // This conversion discards flags and limits from Regex and RegexBuilder.
-        let regexes = regexes.iter().map(|regex| regex.as_str());
+        let regexes = regexes.iter().flat_map(|regex_set| regex_set.patterns());
 
         RegexSet::new(regexes)
     }

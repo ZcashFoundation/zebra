@@ -53,7 +53,7 @@ jobs:
   build:
     name: Build images
     timeout-minutes: 210
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
@@ -61,7 +61,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.0.0
+      - uses: actions/checkout@v4.1.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -134,7 +134,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v4.1.1
+        uses: docker/build-push-action@v5.0.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
