@@ -57,7 +57,7 @@
 //!
 //! ### JSON-RPC
 //!
-//! * `getblocktemplate-rpcs`: Experimental mining pool RPC support (currently incomplete)
+//! * `getblocktemplate-rpcs`: Mining pool RPC support, enabled by default in production builds.
 //!
 //! ### Metrics
 //!

@@ -1,10 +1,10 @@
 # Mining Zcash with zebra
 
-Zebra's RPC methods support miners and mining pools. 
+Zebra's RPC methods support miners and mining pools.
 
 Contents:
 
-- [Download and build Zebra](#download-and-build-zebra)
+- [Download Zebra](#download-and-build-zebra)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
   - [RPC section](#rpc-section)
@@ -12,18 +12,13 @@ Contents:
 - [Testing the setup](#testing-the-setup)
 - [Run a mining pool](#run-a-mining-pool)
 
-## Download and build Zebra for mining
+## Download Zebra
 [#download-and-build-zebra]: #download-and-build-zebra
 
-Before installing please make sure you have the [Zebra dependencies](https://github.com/ZcashFoundation/zebra#build-instructions) in your OS.
+The easiest way to run Zebra for mining is [our docker images](https://zebra.zfnd.org/user/mining-docker.html).
 
-```console
-cargo install --locked --features getblocktemplate-rpcs --git https://github.com/ZcashFoundation/zebra zebrad
-```
-
-Zebra binary will be at ` ~/.cargo/bin/zebrad`.
-
-It is important to install with the `getblocktemplate-rpcs` feature so the final binary will contain mining support.
+If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.html), follow the
+instructions below to start mining:
 
 ## Configure zebra for mining
 [#configure-zebra-for-mining]: #configure-zebra-for-mining
