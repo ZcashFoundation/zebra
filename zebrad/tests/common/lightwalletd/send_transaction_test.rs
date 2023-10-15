@@ -159,10 +159,12 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call
+    // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
+    //
+    // So we need to wait longer than that here.
     let sleep_until_lwd_last_mempool_refresh =
-        tokio::time::sleep(std::time::Duration::from_secs(2));
+        tokio::time::sleep(std::time::Duration::from_secs(3));
 
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
@@ -201,7 +203,7 @@ pub async fn run() -> Result<()> {
     zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
     // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L537>
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     sleep_until_lwd_last_mempool_refresh.await;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
@@ -210,11 +212,10 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    if has_tx_with_shielded_elements {
-        // check that lightwalletd queries the mempool.
-        zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
-    }
+    tracing::info!("waiting for lightwalletd to query the mempool...");
+    zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
+    tracing::info!("checking the mempool contains some of the sent transactions...");
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
