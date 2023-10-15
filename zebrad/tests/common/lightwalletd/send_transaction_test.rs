@@ -159,10 +159,12 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call
+    // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
+    //
+    // So we need to wait longer than that here.
     let sleep_until_lwd_last_mempool_refresh =
-        tokio::time::sleep(std::time::Duration::from_secs(2));
+        tokio::time::sleep(std::time::Duration::from_secs(3));
 
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
@@ -201,7 +203,7 @@ pub async fn run() -> Result<()> {
     zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
     // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L537>
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     sleep_until_lwd_last_mempool_refresh.await;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
@@ -210,10 +212,10 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // check that lightwalletd queries the mempool.
+    tracing::info!("waiting for lightwalletd to query the mempool...");
     zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    tracing::info!("checking the mempool contains some of the sent transactions...");
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
@@ -228,6 +230,8 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    //
     // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
     //       only check if a transaction from the first block has shielded elements
     assert!(
@@ -235,7 +239,7 @@ pub async fn run() -> Result<()> {
         "failed to read v4+ transactions with shielded elements from future blocks in mempool via lightwalletd"
     );
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
