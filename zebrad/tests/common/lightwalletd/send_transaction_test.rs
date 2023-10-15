@@ -210,10 +210,11 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // check that lightwalletd queries the mempool.
-    zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
+    if has_tx_with_shielded_elements {
+        // check that lightwalletd queries the mempool.
+        zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds")?;
+    }
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
@@ -228,6 +229,8 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    //
     // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
     //       only check if a transaction from the first block has shielded elements
     assert!(
@@ -235,7 +238,7 @@ pub async fn run() -> Result<()> {
         "failed to read v4+ transactions with shielded elements from future blocks in mempool via lightwalletd"
     );
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
