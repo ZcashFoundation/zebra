@@ -164,7 +164,7 @@ pub async fn run() -> Result<()> {
     //
     // So we need to wait longer than that here.
     let sleep_until_lwd_last_mempool_refresh =
-        tokio::time::sleep(std::time::Duration::from_secs(3));
+        tokio::time::sleep(std::time::Duration::from_secs(5));
 
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
