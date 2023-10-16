@@ -78,21 +78,15 @@ jobs:
         # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
         os: [ubuntu-latest]
         rust: [stable, beta]
-        features: ["", " --features getblocktemplate-rpcs"]
+        # When vars.EXPERIMENTAL_FEATURES is empty this should become a single matrix item
+        features: ["", ${{ vars.EXPERIMENTAL_FEATURES }}]
         exclude:
-        # We're excluding macOS for the following reasons:
+        # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
         # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
         # - macOS is a second-tier Zebra support platform
           - os: macos-latest
             rust: beta
-          - os: macos-latest
-            features: " --features getblocktemplate-rpcs"
-        # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
-        # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
-          - os: ubuntu-latest
-            rust: beta
-            features: " --features getblocktemplate-rpcs"
 
     steps:
       - uses: actions/checkout@v4.1.0
@@ -119,7 +113,7 @@ jobs:
         #with:
         #  workspaces: ". -> C:\\zebra-target"
         with:
-          # Split the getblocktemplate-rpcs cache from the regular cache, to avoid linker errors.
+          # Split the experimental features cache from the regular cache, to avoid linker errors.
           # (These might be "disk full" errors, or they might be dependency resolution issues.)
           key: ${{ matrix.features }}
 
@@ -196,8 +190,6 @@ jobs:
 
       - name: Run zebrad large sync tests${{ matrix.features }}
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
-        # Currently, this also skips large sync with `getblocktemplate-rpcs`,
-        # but that is already covered by the Docker tests.
         if: matrix.os == 'macos-latest'
         run: |
           cargo test ${{ matrix.features }} --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
