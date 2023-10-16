@@ -35,7 +35,21 @@ please paste the token found on https://crates.io/me below
        Login token for `crates.io` saved
 ```
 
-## Crate Ownership
+## Publishing New Crates
+
+We publish a new placeholder crate as soon as we have a good idea for a crate name.
+
+To publish a new placeholder and set the owners:
+```sh
+cargo new new-crate-name
+cd new-crate-name
+cargo release publish --verbose --package new-crate-name --execute
+cargo owner --add oxarbitrage
+cargo owner --add teor2345
+cargo owner --add ZcashFoundation/owners
+```
+
+## Changing Crate Ownership
 
 crates.io has two kinds of owners: group owners and individual owners. All owners can publish and yank crates.
 But [only individual owners can change crate owners](https://doc.rust-lang.org/cargo/reference/publishing.html#cargo-owner).
