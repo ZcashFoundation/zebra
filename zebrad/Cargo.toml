@@ -179,7 +179,7 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
-tracing = "0.1.37"
+tracing = "0.1.39"
 
 metrics = "0.21.1"
 
