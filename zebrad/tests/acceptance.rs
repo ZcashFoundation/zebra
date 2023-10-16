@@ -161,7 +161,12 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
-use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
+use zebra_test::{
+    args,
+    command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
+    prelude::*,
+};
 
 mod common;
 
@@ -605,7 +610,7 @@ fn config_tests() -> Result<()> {
     // Check that Zebra's previous configurations still work
     stored_configs_work()?;
 
-    // Runs `zebrad` serially to avoid potential port conflicts
+    // We run the `zebrad` app test after the config tests, to avoid potential port conflicts
     app_no_args()?;
 
     Ok(())
@@ -618,6 +623,8 @@ fn app_no_args() -> Result<()> {
 
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+
+    tracing::info!(?testdir, "running zebrad with no config (default settings)");
 
     let mut child = testdir.spawn_child(args![])?;
 
@@ -651,6 +658,8 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     // Add a config file name to tempdir path
     let generated_config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(?generated_config_path, "generating valid config");
+
     // Generate configuration in temp dir path
     let child =
         testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
@@ -663,6 +672,8 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
         &output,
         "generated config file not found"
     );
+
+    tracing::info!(?generated_config_path, "testing valid config parsing");
 
     // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(args![command])?;
@@ -702,6 +713,8 @@ fn last_config_is_stored() -> Result<()> {
     // Add a config file name to tempdir path
     let generated_config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(?generated_config_path, "generated current config");
+
     // Generate configuration in temp dir path
     let child =
         testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
@@ -713,6 +726,11 @@ fn last_config_is_stored() -> Result<()> {
         generated_config_path.exists(),
         &output,
         "generated config file not found"
+    );
+
+    tracing::info!(
+        ?generated_config_path,
+        "testing current config is in stored configs"
     );
 
     // Get the contents of the generated config file
@@ -815,6 +833,11 @@ fn invalid_generated_config() -> Result<()> {
     // Add a config file name to tempdir path.
     let config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(
+        ?config_path,
+        "testing invalid config parsing: generating valid config"
+    );
+
     // Generate a valid config file in the temp dir.
     let child = testdir.spawn_child(args!["generate", "-o": config_path.to_str().unwrap()])?;
 
@@ -849,9 +872,13 @@ fn invalid_generated_config() -> Result<()> {
             secs = 3600
     ";
 
+    tracing::info!(?config_path, "writing invalid config");
+
     // Write the altered config file so that Zebra can pick it up.
     fs::write(config_path.to_str().unwrap(), config_file.as_bytes())
         .expect("Could not write the altered config file.");
+
+    tracing::info!(?config_path, "testing invalid config parsing");
 
     // Run Zebra in a temp dir so that it loads the config.
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -883,6 +910,8 @@ fn invalid_generated_config() -> Result<()> {
 fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
+    tracing::info!(?old_configs_dir, "testing older config parsing");
+
     for config_file in old_configs_dir
         .read_dir()
         .expect("read_dir call failed")
@@ -892,10 +921,10 @@ fn stored_configs_work() -> Result<()> {
         let config_file_name = config_file_path
             .file_name()
             .expect("config files must have a file name")
-            .to_string_lossy();
+            .to_str()
+            .expect("config file names are valid unicode");
 
-        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
-        {
+        if config_file_name.starts_with('.') || config_file_name.starts_with('#') {
             // Skip editor files and other invalid config paths
             tracing::info!(
                 ?config_file_path,
@@ -907,10 +936,7 @@ fn stored_configs_work() -> Result<()> {
         // ignore files starting with getblocktemplate prefix
         // if we were not built with the getblocktemplate-rpcs feature.
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file_name
-            .as_ref()
-            .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
-        {
+        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
             tracing::info!(
                 ?config_file_path,
                 "skipping getblocktemplate-rpcs config file path"
@@ -921,12 +947,41 @@ fn stored_configs_work() -> Result<()> {
         let run_dir = testdir()?;
         let stored_config_path = config_file_full_path(config_file.path());
 
+        tracing::info!(
+            ?stored_config_path,
+            "testing old config can be parsed by current zebrad"
+        );
+
         // run zebra with stored config
         let mut child =
             run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-        // zebra was able to start with the stored config
-        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+        let success_regexes = [
+            // When logs are sent to the terminal, we see the config loading message and path.
+            format!(
+                "loaded zebrad config.*config_path.*=.*{}",
+                regex::escape(config_file_name)
+            ),
+            // If they are sent to a file, we see a log file message on stdout,
+            // and a logo, welcome message, and progress bar on stderr.
+            "Sending logs to".to_string(),
+            // TODO: add expect_stdout_or_stderr_line_matches() and check for this instead:
+            //"Thank you for running a mainnet zebrad".to_string(),
+        ];
+
+        tracing::info!(
+            ?stored_config_path,
+            ?success_regexes,
+            "waiting for zebrad to parse config and start logging"
+        );
+
+        let success_regexes = success_regexes
+            .iter()
+            .collect_regex_set()
+            .expect("regexes are valid");
+
+        // Zebra was able to start with the stored config.
+        child.expect_stdout_line_matches(success_regexes)?;
 
         // finish
         child.kill(false)?;
