@@ -128,11 +128,15 @@ In future releases, the `progress_bar = "summary"` config will show a few key me
 and the "detailed" config will show all available metrics. Please let us know which metrics are
 important to you!
 
+##### Configuring Mining
+
+Zebra can be configured for mining by passing a `MINER_ADDRESS` and port mapping to Docker.
+See the [mining support docs](https://zebra.zfnd.org/user/mining-docker.html) for more details.
+
 ##### Custom Build Features
 
 You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
 
-- `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html)
 - `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
 - `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
