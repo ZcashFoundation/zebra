@@ -57,7 +57,7 @@ indexmap = { version = "2.0.1", features = ["serde"] }
 tokio = { version = "1.33.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
-tracing = "0.1.37"
+tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.188", features = ["serde_derive"] }
