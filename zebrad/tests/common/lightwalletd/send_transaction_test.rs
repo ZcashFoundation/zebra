@@ -219,7 +219,8 @@ pub async fn run() -> Result<()> {
 
     // We need a short timeout here, because sometimes this message is not logged.
     zebrad = zebrad.with_timeout(Duration::from_secs(60));
-    let tx_log = zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds");
+    let tx_log =
+        zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds");
     // Reset the failed timeout and give the rest of the test enough time to finish.
     zebrad = zebrad.with_timeout(LARGE_CHECKPOINT_TIMEOUT);
 
