@@ -37,6 +37,7 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 - Zebra's progress bars can now be enabled using a `zebrad.toml` config (#7615)
 - Add missing elasticsearch flag feature to lib docs (#7568)
 - Add missing Docker variables and examples (#7552)
+- Check database format is valid on startup and shutdown (#7566, #7606). We expect to catch almost all database validity errors in CI (#7602, #7627), so users are unlikely to see them on startup or shutdown.
 
 #### Spend before Sync Support
 
