@@ -53,14 +53,11 @@ read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-
 
 - Return errors instead of panicking in methods for Heights (#7591)
 - Update tests for compatibility with the ECC's `lightwalletd` fork (#7349)
-- Put chain data into an inner struct (#7608)
 
 ### Fixed
 
 - Refactor docs for feature flags (#7567)
 - Match zcashd's getblockchaininfo capitalisation for NU5 (#7454)
-- Populate subtree fields in the `NoteCommitmentTrees` struct (#7636)
-- Checking if transactions get into the mempool fails in lightwalletd tests (#7644)
 - Fix bugs and performance of `getnetworksolps` & `getnetworkhashps` RPCs (#7647)
 
 ### Contributors
