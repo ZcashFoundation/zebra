@@ -14,6 +14,12 @@ on:
     types:
       - released
 
+
+env:
+  EXPERIMENTAL_FEATURES: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_EXPERIMENTAL_FEATURES) }}
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+
 jobs:
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from git
@@ -31,15 +37,15 @@ jobs:
     secrets: inherit
 
   # The image will be named `zebra:<semver>.experimental`
-  build-mining-testnet:
-    name: Build Release Testnet Mining Docker
+  build-experimental:
+    name: Build Experimental Features Release Docker
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
       tag_suffix: .experimental
-      features: "default-release-binaries getblocktemplate-rpcs"
+      features: ${{ env.EXPERIMENTAL_FEATURES }}
       rust_log: info
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
