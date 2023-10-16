@@ -222,13 +222,14 @@ pub async fn run() -> Result<()> {
     let tx_log =
         zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds");
     // Reset the failed timeout and give the rest of the test enough time to finish.
+    #[allow(unused_assignments)]
     zebrad = zebrad.with_timeout(LARGE_CHECKPOINT_TIMEOUT);
 
     if tx_log.is_err() {
         tracing::info!("lightwalletd didn't query the mempool, skipping mempool contents checks");
         return Ok(());
     }
-    
+
     tracing::info!("checking the mempool contains some of the sent transactions...");
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
