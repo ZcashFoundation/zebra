@@ -42,6 +42,7 @@ fn scanning_from_zebra() {
         Some(0),
     );
 
+    // The fake block function will have our transaction and a random one.
     assert_eq!(cb.vtx.len(), 2);
 
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
@@ -51,8 +52,8 @@ fn scanning_from_zebra() {
         zcash_client_backend::scanning::scan_block(&network, cb, &vks[..], &[(account, nf)], None)
             .unwrap();
 
-    dbg!(res.transactions().len());
-    assert_eq!(res.metadata().block_height(), BlockHeight::from(1));
+    // The response should have one transaction relevant to the key we provided.
+    assert_eq!(res.transactions().len(), 1);
 }
 
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
