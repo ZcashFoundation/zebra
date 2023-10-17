@@ -14,6 +14,10 @@ on:
         description: 'Patterns to grep for in the logs'
 
       # Test selection and parameters
+      docker_image:
+        required: true
+        type: string
+        description: 'Docker image to test'
       test_variables:
         required: true
         type: string
@@ -43,8 +47,8 @@ jobs:
 
       - name: Run ${{ inputs.test_id }} test
         run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run ${{ inputs.test_variables }} --detach --name ${{ inputs.test_id }} -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
+          docker pull ${{ inputs.docker_image }}
+          docker run ${{ inputs.test_variables }} --detach --name ${{ inputs.test_id }} -t ${{ inputs.docker_image }} zebrad start
           # Use a subshell to handle the broken pipe error gracefully
           (
             trap "" PIPE;
