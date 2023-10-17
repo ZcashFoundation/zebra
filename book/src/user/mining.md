@@ -15,7 +15,7 @@ Contents:
 ## Download Zebra
 [#download-and-build-zebra]: #download-and-build-zebra
 
-The easiest way to run Zebra for mining is [our docker images](https://zebra.zfnd.org/user/mining-docker.html).
+The easiest way to run Zebra for mining is with [our docker images](https://zebra.zfnd.org/user/mining-docker.html).
 
 If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.html), follow the
 instructions below to start mining:
