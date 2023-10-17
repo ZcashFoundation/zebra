@@ -39,7 +39,8 @@ pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
 /// but long enough that it doesn't impact performance.
 pub const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Is the current state version upgrade longer than the typical CI sync time?
+/// Is the current state version upgrade longer than the typical CI update sync time?
+/// This is the time it takes Zebra to sync from a previously cached state to the current tip.
 ///
 /// If this is set to `false`, but the state upgrades finish after zebrad is synced,
 /// incomplete upgrades will be written to the cached state.
