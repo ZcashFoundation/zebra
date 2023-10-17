@@ -11,7 +11,7 @@
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
-    - [Optional Configs & Features](#optional-features)
+    - [Optional Configs & Features](#optional-configs--features)
 - [Known Issues](#known-issues)
 - [Future Work](#future-work)
 - [Documentation](#documentation)

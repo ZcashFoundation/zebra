@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.29"
+version = "1.0.0-beta.30"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
@@ -40,7 +40,7 @@ progress-bar = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
-bitflags = "2.4.0"
+bitflags = "2.4.1"
 byteorder = "1.5.0"
 bytes = "1.5.0"
 chrono = { version = "0.4.31", default-features = false, features = ["clock", "std"] }
@@ -55,7 +55,7 @@ ordered-map = "0.4.2"
 pin-project = "1.1.3"
 rand = "0.8.5"
 rayon = "1.7.0"
-regex = "1.10.0"
+regex = "1.10.2"
 serde = { version = "1.0.188", features = ["serde_derive"] }
 tempfile = "3.8.0"
 thiserror = "1.0.48"
@@ -69,7 +69,7 @@ tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-she
 metrics = "0.21.1"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
-tracing = "0.1.37"
+tracing = "0.1.39"
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
@@ -83,7 +83,7 @@ howudoin = { version = "0.1.2", optional = true }
 proptest = { version = "1.3.1", optional = true }
 proptest-derive = { version = "0.4.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.30", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = "1.3.1"
