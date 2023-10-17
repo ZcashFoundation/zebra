@@ -25,8 +25,8 @@ on:
         description: 'Zcash network to test against'
 
 jobs:
-  test-zebra-config:
-    name: Test Zebra Docker Config
+  test-docker-config:
+    name: Test ${{ inputs.test_id }} in Docker
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +41,7 @@ jobs:
 
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
-      - name: Run ${{ inputs.test_id }} config test
+      - name: Run ${{ inputs.test_id }} test
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run ${{ inputs.test_variables }} --detach --name ${{ inputs.test_id }} -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start

@@ -209,34 +209,35 @@ jobs:
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
-    name: Test Zebra default Docker config file
+    name: Test default config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf-tests'
+      test_id: 'default-conf'
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: '-e NETWORK'
       network: 'Mainnet'
 
   # Test reconfiguring the the docker image for tesnet.
   test-configuration-file-testnet:
-    name: Test Zebra testnet Docker config file
+    name: Test testnet config file
     needs: build
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'testnet-conf-tests'
+      test_id: 'testnet-conf'
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml"'
+      # TODO: improve the entrypoint to avoid using `ENTRYPOINT_FEATURES=""`
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml" -e ENTRYPOINT_FEATURES=""'
       network: 'Testnet'
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
+    name: Test custom config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'variable-conf-tests'
+      test_id: 'custom-conf'
       grep_patterns: '-e "v1.0.0-rc.2.toml"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}

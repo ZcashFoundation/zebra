@@ -102,7 +102,7 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf-tests'
+      test_id: 'default-conf'
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: '-e NETWORK'
       network: 'Mainnet'
@@ -114,7 +114,7 @@ jobs:
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'testnet-conf-tests'
+      test_id: 'testnet-conf'
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml"'
       network: 'Testnet'
@@ -125,7 +125,7 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'variable-conf-tests'
+      test_id: 'custom-conf'
       grep_patterns: '-e "v1.0.0-rc.2.toml"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
