@@ -39,14 +39,16 @@ please paste the token found on https://crates.io/me below
 
 We publish a new placeholder crate as soon as we have a good idea for a crate name.
 
-To publish a new placeholder and set the owners:
+Before starting with the publishing, please clone zebra and use the `main` branch to create the placeholder crate, you need `cargo release` installed in the system and be logged to crates.io with `cargo login`.
+
+Next, execute the following commands to publish a new placeholder and set the owners:
 ```sh
 cargo new new-crate-name
 cd new-crate-name
 cargo release publish --verbose --package new-crate-name --execute
 cargo owner --add oxarbitrage
 cargo owner --add teor2345
-cargo owner --add ZcashFoundation/owners
+cargo owner --add github:zcashfoundation:owners
 ```
 
 ## Changing Crate Ownership
