@@ -30,7 +30,6 @@ on:
       - '**/clippy.toml'
       # workflow definitions
       - '.github/workflows/ci-unit-tests-os.yml'
-      - '.github/workflows/sub-build-docker-image.yml'
 
   push:
     branches:

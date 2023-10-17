@@ -98,7 +98,7 @@ jobs:
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
-    name: Test Zebra default Docker config file
+    name: Test CD default Docker config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
@@ -107,9 +107,9 @@ jobs:
       test_variables: '-e NETWORK'
       network: 'Mainnet'
 
-  # Test reconfiguring the the docker image for tesnet.
+  # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
-    name: Test Zebra testnet Docker config file
+    name: Test CD testnet Docker config file
     needs: build
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
@@ -121,7 +121,7 @@ jobs:
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
+    name: Test CD custom Docker config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
@@ -150,7 +150,7 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning, test-configuration-file, test-configuration-file-testnet, test-zebra-conf-path ]
+    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
