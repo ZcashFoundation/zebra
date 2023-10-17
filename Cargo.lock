@@ -5801,13 +5801,18 @@ name = "zebra-scanner"
 version = "1.0.0-beta.29"
 dependencies = [
  "bls12_381",
+ "color-eyre",
  "ff",
  "group",
  "jubjub",
  "rand 0.8.5",
+ "tokio",
  "zcash_client_backend",
  "zcash_note_encryption",
  "zcash_primitives 0.13.0",
+ "zebra-chain",
+ "zebra-consensus",
+ "zebra-state",
 ]
 
 [[package]]

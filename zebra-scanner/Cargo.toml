@@ -30,6 +30,13 @@ jubjub = "0.10.0"
 ff = "0.13.0"
 group = "0.13.0"
 
-# zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29", features = ["async-error"] }
+tokio = { version = "1.33.0", features = ["full", "tracing", "test-util"] }
+
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.30" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.30" }
+
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.30", features = ["async-error"] }
 
 [dev-dependencies]
+
+color-eyre = { version = "0.6.2" }
