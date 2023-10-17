@@ -102,6 +102,8 @@ jobs:
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
+      # avoid rate-limit errors by only launching a few of these jobs at a time
+      max-parallel: 2
       fail-fast: true
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
