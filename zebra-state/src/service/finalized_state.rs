@@ -42,7 +42,7 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_D
 
 pub(super) use zebra_db::ZebraDb;
 
-use disk_db::DiskWriteBatch;
+pub(super) use disk_db::DiskWriteBatch;
 
 /// The finalized part of the chain state, stored in the db.
 ///

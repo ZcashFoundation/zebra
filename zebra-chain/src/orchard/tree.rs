@@ -171,7 +171,7 @@ impl ZcashDeserialize for Root {
 }
 
 /// A node of the Orchard Incremental Note Commitment Tree.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Default)]
 pub struct Node(pallas::Base);
 
 impl Node {

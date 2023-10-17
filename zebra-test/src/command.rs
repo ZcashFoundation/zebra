@@ -21,10 +21,11 @@ use tracing::instrument;
 
 #[macro_use]
 mod arguments;
+
 pub mod to_regex;
 
 pub use self::arguments::Arguments;
-use self::to_regex::{CollectRegexSet, ToRegex, ToRegexSet};
+use self::to_regex::{CollectRegexSet, ToRegexSet};
 
 /// A super-trait for [`Iterator`] + [`Debug`].
 pub trait IteratorDebug: Iterator + Debug {}
@@ -791,7 +792,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -823,7 +824,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -855,7 +856,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -887,7 +888,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stderr_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -1246,9 +1247,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stdout_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.output_check(
             |stdout| re.is_match(stdout),
@@ -1270,9 +1271,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stdout_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),
@@ -1300,9 +1301,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stderr_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.output_check(
             |stderr| re.is_match(stderr),
@@ -1324,9 +1325,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stderr_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),

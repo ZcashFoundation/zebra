@@ -5,6 +5,66 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-10-16
+
+This release adds RPC methods for the "Spend before Sync" light wallet feature,
+and fixes performance issues and bugs in the mining solution rate RPCs. Progress
+bars can now be enabled using a config, please help us test them!
+
+It contains the following updates:
+ 
+### User Testing: Progress Bars
+ 
+Zebra has progress bars! When progress bars are enabled, you can see Zebra's blocks,
+transactions, and peer connections in your terminal. We're asking Zebra users to test this
+feature, and give us [feedback on the forums](https://forum.zcashcommunity.com/t/zebra-progress-bars/44485).
+
+To show progress bars while running Zebra, add these lines to your `zebrad.toml`:
+```toml
+[tracing]
+progress_bar = "summary"
+```
+
+For more details, including a known issue with time estimates,
+read our [progress bars blog post](https://zfnd.org/experimental-zebra-progress-bars/).
+
+### Security
+
+- Fix database concurrency bugs that could have led to panics or incorrect history tree data (#7590, #7663)
+
+### Added
+
+- Zebra's progress bars can now be enabled using a `zebrad.toml` config (#7615)
+- Add missing elasticsearch flag feature to lib docs (#7568)
+- Add missing Docker variables and examples (#7552)
+- Check database format is valid on startup and shutdown (#7566, #7606). We expect to catch almost all database validity errors in CI (#7602, #7627), so users are unlikely to see them on startup or shutdown.
+
+#### Spend before Sync Support
+
+- Add state requests and support code for the `z_getsubtreesbyindex` RPC (#7408, #7734)
+- Implement the `z_getsubtreesbyindex` RPC (#7436)
+- Test the `z_getsubtreesbyindex` RPC (#7515, #7521, #7566, #7514, #7628)
+- Format subtree roots in little-endian order (#7466)
+- Add note subtree indexes for new and existing blocks (#7437)
+- Upgrade subtrees from the tip backwards, for compatibility with wallet syncing (#7531)
+- Handle a subtree comparison edge case correctly (#7587)
+
+### Changed
+
+- Return errors instead of panicking in methods for Heights (#7591)
+- Update tests for compatibility with the ECC's `lightwalletd` fork (#7349)
+
+### Fixed
+
+- Refactor docs for feature flags (#7567)
+- Match zcashd's getblockchaininfo capitalisation for NU5 (#7454)
+- Fix bugs and performance of `getnetworksolps` & `getnetworkhashps` RPCs (#7647)
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @oxarbitrage, @rex4539, @teor2345 and @upbqdn.
+
 ## [Zebra 1.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.2.0) - 2023-09-01
 
 ### Highlights
