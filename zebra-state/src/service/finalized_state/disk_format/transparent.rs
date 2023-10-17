@@ -417,15 +417,16 @@ impl AddressTransaction {
     }
 
     /// Create a range of [`AddressTransaction`]s which starts iteration for the supplied
-    /// address. Starts at the first UTXO, or at the `query_start` height,
-    /// whichever is greater. Ends at the last transaction index for an [`AddressLocation`].
+    /// address. Starts at the first UTXO, or at the `query` start height, whichever is greater.
+    /// Ends at the maximum possible transaction index for the end height.
     ///
-    /// Used to look up transactions with
-    /// [`DiskDb::zs_range_iter`][1].
+    /// Used to look up transactions with [`DiskDb::zs_range_iter`][1].
     ///
-    /// The transaction location might be invalid, if it is based on the
-    /// `query_start` height. But this is not an issue, since
-    /// [`DiskDb::zs_range_iter`][1] will fetch all existing
+    /// The transaction locations in the:
+    /// - start bound might be invalid, if it is based on the `query` start height.
+    /// - end bound will always be invalid.
+    ///
+    /// But this is not an issue, since [`DiskDb::zs_range_iter`][1] will fetch all existing
     /// (valid) values in the range.
     ///
     /// [1]: super::super::disk_db::DiskDb
@@ -439,7 +440,7 @@ impl AddressTransaction {
         // and addresses can not spend funds until they receive their first UTXO.
         let first_utxo_location = address_location.transaction_location();
 
-        // Iterating from the start height filters out transactions that aren't needed.
+        // Iterating from the start height to the end height filters out transactions that aren't needed.
         let query_start_location = TransactionLocation::from_index(*query.start(), 0);
         let query_end_location = TransactionLocation::from_index(*query.end(), u16::MAX);
 
