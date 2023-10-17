@@ -518,8 +518,7 @@ impl DiskDb {
     ///
     /// Note: Since upper iterate bounds are always exclusive in RocksDB, this method
     ///       will increment the upper bound by 1 if the end bound of the provided range
-    ///       is inclusive, or will return an upper bound of `None` if the end bound of a
-    ///       provided range is inclusive and already the max key for that column family.
+    ///       is inclusive.
     fn zs_iter_bounds<R>(range: &R) -> (Option<Vec<u8>>, Option<Vec<u8>>)
     where
         R: RangeBounds<Vec<u8>>,
@@ -533,8 +532,7 @@ impl DiskDb {
 
         let upper_bound = match range.end_bound().cloned() {
             Included(mut bound) => {
-                // Skip adding an upper bound if every byte is u8::MAX, or
-                // increment the last byte in the upper bound that is less than u8::MAX,
+                // Increment the last byte in the upper bound that is less than u8::MAX,
                 // and clear any bytes after it to increment the big-endian number this
                 // Vec represents to RocksDB.
                 let is_zero = bound.iter_mut().rev().all(|v| {
