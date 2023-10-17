@@ -401,9 +401,9 @@ impl DiskWriteBatch {
 impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
-    /// Accepts a `reverse` argument and creates the iterator with an [`IteratorMode`](rocksdb::IteratorMode)
-    /// of [`End`](rocksdb::IteratorMode::End), or [`From`](rocksdb::IteratorMode::From)
-    /// with [`Direction::Reverse`](rocksdb::Direction::Reverse).
+    /// Accepts a `reverse` argument. If it is `true`, creates the iterator with an
+    /// [`IteratorMode`](rocksdb::IteratorMode) of [`End`](rocksdb::IteratorMode::End), or
+    /// [`From`](rocksdb::IteratorMode::From) with [`Direction::Reverse`](rocksdb::Direction::Reverse).
     ///
     /// Holding this iterator open might delay block commit transactions.
     pub fn zs_range_iter<C, K, V, R>(
@@ -532,17 +532,16 @@ impl DiskDb {
 
         let upper_bound = match range.end_bound().cloned() {
             Included(mut bound) => {
-                // Increment the last byte in the upper bound that is less than u8::MAX,
-                // and clear any bytes after it to increment the big-endian number this
-                // Vec represents to RocksDB.
-                let is_zero = bound.iter_mut().rev().all(|v| {
+                // Increment the last byte in the upper bound that is less than u8::MAX, and
+                // clear any bytes after it to increment the next key in lexicographic order
+                // (next big-endian number) this Vec represents to RocksDB.
+                let is_wrapped_overflow = bound.iter_mut().rev().all(|v| {
                     *v = v.wrapping_add(1);
                     v == &0
                 });
 
-                if is_zero {
-                    bound.push(0);
-                    *bound.get_mut(0).expect("should have at least 1 element") += 1;
+                if is_wrapped_overflow {
+                    bound.insert(0, 0x01)
                 }
 
                 Some(bound)
