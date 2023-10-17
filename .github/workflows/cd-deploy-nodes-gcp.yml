@@ -96,6 +96,40 @@ jobs:
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
 
+  # Test that Zebra works using the default config with the latest Zebra version.
+  test-configuration-file:
+    name: Test Zebra default Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'default-conf'
+      grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK'
+      network: 'Mainnet'
+
+  # Test reconfiguring the the docker image for tesnet.
+  test-configuration-file-testnet:
+    name: Test Zebra testnet Docker config file
+    needs: build
+    # Make sure Zebra can sync the genesis block on testnet
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'testnet-conf'
+      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml"'
+      network: 'Testnet'
+
+  # Test that Zebra works using $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test Zebra custom Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'custom-conf'
+      grep_patterns: '-e "v1.0.0-rc.2.toml"'
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
   #
@@ -116,7 +150,7 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning ]
+    needs: [ build, versioning, test-configuration-file, test-configuration-file-testnet, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
