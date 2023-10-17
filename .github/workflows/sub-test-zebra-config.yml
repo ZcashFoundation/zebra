@@ -8,10 +8,6 @@ on:
         required: true
         type: string
         description: 'Unique identifier for the test'
-      test_description:
-        required: true
-        type: string
-        description: 'Explains what the test does'
       grep_patterns:
         required: true
         type: string
