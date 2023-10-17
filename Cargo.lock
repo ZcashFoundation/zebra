@@ -4051,7 +4051,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c19f96dde3a8693874f7e7c53d95616569b4009379a903789efbd448f4ea9cc7"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.4.1",
  "either",
  "incrementalmerkletree 0.5.0",
  "tracing",

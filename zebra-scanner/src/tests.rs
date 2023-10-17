@@ -53,7 +53,6 @@ fn scanning_from_zebra() {
 
     dbg!(res.transactions().len());
     assert_eq!(res.metadata().block_height(), BlockHeight::from(1));
-
 }
 
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
