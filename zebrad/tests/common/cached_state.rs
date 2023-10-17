@@ -41,7 +41,7 @@ pub const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60)
 
 /// Is the current state version upgrade longer than the typical CI sync time?
 ///
-/// If is is set to `false`, but the state upgrades finish after zebrad is synced.
+/// If this is set to `false`, but the state upgrades finish after zebrad is synced,
 /// incomplete upgrades will be written to the cached state.
 ///
 /// If this is set to `true`, but the state upgrades finish before zebrad is synced,

@@ -40,7 +40,7 @@ pub fn run(
 
     // Fix the cached root of the Sprout genesis tree in its anchors column family.
 
-    // It's ok to write the genesis tree to the tip tree index, because is overwritten by
+    // It's ok to write the genesis tree to the tip tree index, because it's overwritten by
     // the actual tip before the batch is written to the database.
     batch.update_sprout_tree(upgrade_db, &sprout_genesis_tree);
     // This method makes sure the sprout tip tree has a cached root, even if it's the genesis tree.

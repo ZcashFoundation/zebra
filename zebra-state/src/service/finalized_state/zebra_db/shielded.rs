@@ -649,7 +649,7 @@ impl DiskWriteBatch {
     /// Legacy method: Deletes the range of Sprout note commitment trees at the given [`Height`]s.
     /// Doesn't delete anchors from the anchor index. Doesn't delete the upper bound.
     ///
-    /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
+    /// From state format 25.3.0 onwards, the Sprout trees are indexed by an empty key,
     /// so this method does nothing.
     pub fn delete_range_sprout_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
         let sprout_tree_cf = zebra_db

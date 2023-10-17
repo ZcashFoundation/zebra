@@ -50,7 +50,7 @@ impl ZebraDb {
         // # Concurrency
         //
         // There is only one entry in this column family, which is atomically updated by a block
-        // write batch (database transaction). If we used a height as the column family tree,
+        // write batch (database transaction). If we used a height as the key in this column family,
         // any updates between reading the tip height and reading the tree could cause panics.
         //
         // So we use the empty key `()`. Since the key has a constant value, we will always read

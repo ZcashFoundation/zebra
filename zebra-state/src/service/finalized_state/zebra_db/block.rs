@@ -463,7 +463,7 @@ impl DiskWriteBatch {
         // So this means the genesis anchor is the same as the empty anchor,
         // which is already present from height 1 to the first shielded transaction.
         //
-        // In Zebra we include their nullifiers and note commitments because it simplifies our code.
+        // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
         self.prepare_shielded_transaction_batch(db, &finalized.verified)?;
         self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 

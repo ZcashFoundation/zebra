@@ -54,7 +54,7 @@ See the performance notes and bug reports in:
 - https://tracker.ceph.com/issues/55324
 - https://jira.mariadb.org/browse/MDEV-19670
 
-But need to use iterators for some operations, so our alternatives are (in preferred order):
+But we need to use iterators for some operations, so our alternatives are (in preferred order):
 1. Minimise the number of keys we delete, and how often we delete them
 2. Avoid using iterators on column families where we delete keys
 3. If we must use iterators on those column families, set read bounds to minimise the amount of deleted data that is read
