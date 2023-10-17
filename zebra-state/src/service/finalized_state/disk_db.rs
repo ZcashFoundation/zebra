@@ -325,8 +325,7 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, .., false).next()
+        self.zs_seek(cf, |iter| iter.seek_to_first())
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -336,8 +335,7 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, .., true).next()
+        self.zs_seek(cf, |iter| iter.seek_to_last())
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -347,8 +345,7 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, lower_bound.., false).next()
+        self.zs_seek(cf, |iter| iter.seek(lower_bound.as_bytes()))
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -358,8 +355,7 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, ..=upper_bound, true).next()
+        self.zs_seek(cf, |iter| iter.seek_for_prev(upper_bound.as_bytes()))
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
@@ -419,6 +415,22 @@ impl DiskDb {
         R: RangeBounds<K>,
     {
         self.zs_range_iter_with_direction(cf, range, reverse)
+    }
+
+    /// Returns the sought item in `cf`.
+    ///
+    /// Accepts a closure for seeking a key in a raw iterator over the items in `cf`.
+    pub fn zs_seek<C, K, V, F>(&self, cf: &C, seek_fn: F) -> Option<(K, V)>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+        F: FnOnce(&mut rocksdb::DBRawIteratorWithThreadMode<DB>),
+    {
+        let mut iter = self.db.raw_iterator_cf(cf);
+        seek_fn(&mut iter);
+        iter.item()
+            .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
     }
 
     /// Returns a reverse iterator over the items in `cf` in `range`.
