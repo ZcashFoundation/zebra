@@ -51,7 +51,7 @@ fn zs_iter_opts_increments_key_by_one() {
         let (_, bytes) = DiskDb::zs_iter_bounds(&..=key.to_be_bytes().to_vec());
         let mut bytes = bytes.expect("there should be an upper bound");
         let upper_bound_bytes = bytes.split_off(bytes.len() - 4);
-        let upper_bound = u32::from_be_bytes(upper_bound_bytes.try_into().unwrap());
+        let upper_bound = u32::from_be_bytes(upper_bound_bytes.try_into().expect("no added bytes"));
         let expected_upper_bound = key.wrapping_add(1);
 
         assert_eq!(
