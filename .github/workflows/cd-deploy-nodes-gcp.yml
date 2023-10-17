@@ -104,7 +104,7 @@ jobs:
     needs: build
     steps:
       - name: Test Zebra with default config file
-        uses: ./.github/workflows/test-zebra-config-files.yml
+        uses: ./.github/workflows/sub-test-zebra-config.yml
         with:
           test_id: 'default-conf-tests'
           test_description: 'Test Zebra default Docker config file'
@@ -121,7 +121,7 @@ jobs:
     steps:
       # Make sure Zebra can sync the genesis block on testnet
       - name: Test Zebra with Testnet config file
-        uses: ./.github/workflows/test-zebra-config-files.yml
+        uses: ./.github/workflows/sub-test-zebra-config.yml
         with:
           test_id: 'testnet-conf-tests'
           test_description: 'Test Zebra testnet Docker config file'
@@ -137,7 +137,7 @@ jobs:
     needs: build
     steps:
       - name: Test Zebra with $ZEBRA_CONF_PATH config file
-        uses: ./.github/workflows/test-zebra-config-files.yml
+        uses: ./.github/workflows/sub-test-zebra-config.yml
         with:
           test_id: 'variable-conf-tests'
           test_description: 'Test Zebra custom Docker config file'
