@@ -50,19 +50,8 @@ where
 
 /// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
 ///
-/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
-/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
-///
-/// # Correctness
-///
-/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
-/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
-/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
-/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
-/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
-/// diverged.)
-/// 2. APIs that return single subtrees can't be used here, because they can create
-/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -75,7 +64,7 @@ where
         chain,
         range,
         |chain, range| chain.sapling_subtrees_in_range(range),
-        |range| db.sapling_subtree_list_by_index_for_rpc(range),
+        |range| db.sapling_subtree_list_by_index_range(range),
     )
 }
 
@@ -100,21 +89,10 @@ where
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
-/// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
+/// Returns a list of Orchard [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
-/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
-/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
-///
-/// # Correctness
-///
-/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
-/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
-/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
-/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
-/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
-/// diverged.)
-/// 2. APIs that return single subtrees can't be used here, because they can create
-/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
 pub fn orchard_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -127,11 +105,19 @@ where
         chain,
         range,
         |chain, range| chain.orchard_subtrees_in_range(range),
-        |range| db.orchard_subtree_list_by_index_for_rpc(range),
+        |range| db.orchard_subtree_list_by_index_range(range),
     )
 }
 
 /// Returns a list of [`NoteCommitmentSubtree`]s starting at `start_index`.
+///
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
+///
+/// # Correctness
+///
+/// APIs that return single subtrees can't be used here, because they can create
+/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
 fn subtrees<C, R, N, F1, F2>(
     chain: Option<C>,
     range: R,
@@ -152,6 +138,15 @@ where
         Excluded(start_index) => (start_index.0 + 1).into(),
         Unbounded => 0.into(),
     };
+
+    // # Correctness
+    //
+    // After `chain` was cloned, the StateService can commit additional blocks to the finalized state `db`.
+    // Usually, the subtrees of these blocks are consistent. But if the `chain` is a different fork to `db`,
+    // then the trees can be inconsistent. In that case, if `chain` does not contain a subtree at the first
+    // index in the provided range, we ignore all the trees in `chain` after the first inconsistent tree,
+    // because we know they will be inconsistent as well. (It is cryptographically impossible for tree roots
+    // to be equal once the leaves have diverged.)
 
     let results = match chain.map(|chain| read_chain(chain.as_ref(), range.clone())) {
         Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,

@@ -249,16 +249,8 @@ impl ZebraDb {
     }
 
     /// Returns a list of Sapling [`NoteCommitmentSubtree`]s in the provided range.
-    ///
-    /// If there is no subtree at `start_index`, the returned list is empty.
-    /// Otherwise, subtrees are continuous up to the finalized tip.
-    ///
-    /// # Correctness
-    ///
-    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
-    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_subtree_list_by_index_for_rpc(
+    pub fn sapling_subtree_list_by_index_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
     ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
@@ -383,16 +375,8 @@ impl ZebraDb {
     }
 
     /// Returns a list of Orchard [`NoteCommitmentSubtree`]s in the provided range.
-    ///
-    /// If there is no subtree at `start_index`, the returned list is empty.
-    /// Otherwise, subtrees are continuous up to the finalized tip.
-    ///
-    /// # Correctness
-    ///
-    /// This method is specifically designed for the `z_getsubtreesbyindex` state request.
-    /// It might not work for other RPCs or state checks.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_subtree_list_by_index_for_rpc(
+    pub fn orchard_subtree_list_by_index_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
     ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>> {
