@@ -33,10 +33,25 @@ We try to use Mergify as much as we can, so all PRs get consistent checks.
 Some PRs don't use Mergify:
 - Mergify config updates
 - Admin merges, which happen when there are multiple failures on the `main` branch
-- Manual merges
+  (these are disabled by our branch protection rules, but admins can remove the "don't allow bypassing these rules" setting)
+- Manual merges (these are usually disabled by our branch protection rules)
 
 We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
-For example, some workflow changes skip Rust code checks.
+For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create a patch workflow
+with an empty job with the same name. This lets the branch protection rules pass when the job is skipped. In Zebra, we name these
+workflows with the extension `.patch.yml`.
+
+Branch protecion rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
+We also add branch protection rules for developer or devops features that we need to keep working, like coverage.
+
+But the following jobs don't need branch protection rules:
+* Testnet jobs: testnet is unreliable.
+* Optional linting jobs: some lint jobs are required, but some jobs like spelling and actions are optional.
+* Jobs that rarely run: for example, cached state rebuild jobs.
+* Setup jobs that will fail another later job which always runs, for example: Google Cloud setup jobs.
+  We have branch protection rules for build jobs, but we could remove them if we want.
+
+When a new job is added in a PR, use the `#devops` Slack channel ask a GitHub admin to add a branch protection rule after it merges.
 
 ### Pull Requests from Forked Repositories
 
