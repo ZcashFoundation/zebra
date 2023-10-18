@@ -12,7 +12,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       - 'codecov.yml'
-      - '.github/workflows/coverage.yml'
+      - '.github/workflows/ci-coverage.yml'
 
 jobs:
   coverage:

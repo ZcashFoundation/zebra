@@ -1,5 +1,5 @@
 # This workflow is meant to trigger a build of Docker binaries when a release
-# is published, it uses the existing `build-docker-image.yml` workflow
+# is published, it uses the existing `sub-build-docker-image.yml` workflow
 #
 # We use a separate action as we might want to trigger this under
 # different circumstances than a Continuous Deployment, for example.
@@ -21,7 +21,7 @@ jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
-    uses: ./.github/workflows/build-docker-image.yml
+    uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
@@ -33,7 +33,7 @@ jobs:
   # The image will be named `zebra:<semver>.experimental`
   build-mining-testnet:
     name: Build Release Testnet Mining Docker
-    uses: ./.github/workflows/build-docker-image.yml
+    uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime

@@ -14,7 +14,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
 
 jobs:
   matrix:

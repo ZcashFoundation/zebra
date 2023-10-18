@@ -79,7 +79,7 @@ fi
 : "${ENTRYPOINT_FEATURES:=}"
 
 # Configuration file path
-if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]]; then
+if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]] && [[ -z "${ZEBRA_CONF_PATH}" ]]; then
   ZEBRA_CONF_PATH="${ZEBRA_CONF_DIR}/${ZEBRA_CONF_FILE}"
 fi
 
@@ -90,8 +90,7 @@ fi
 # Users have to opt-in to additional functionality by setting environmental variables.
 if [[ -n "${ZEBRA_CONF_PATH}" ]] && [[ ! -f "${ZEBRA_CONF_PATH}" ]] && [[ -z "${ENTRYPOINT_FEATURES}" ]]; then
   # Create the conf path and file
-  mkdir -p "${ZEBRA_CONF_DIR}" || { echo "Error creating directory ${ZEBRA_CONF_DIR}"; exit 1; }
-  touch "${ZEBRA_CONF_PATH}" || { echo "Error creating file ${ZEBRA_CONF_PATH}"; exit 1; }
+  (mkdir -p "$(dirname "${ZEBRA_CONF_PATH}")" && touch "${ZEBRA_CONF_PATH}") || { echo "Error creating file ${ZEBRA_CONF_PATH}"; exit 1; }
   # Populate the conf file
   cat <<EOF > "${ZEBRA_CONF_PATH}"
 [network]

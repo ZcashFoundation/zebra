@@ -1,4 +1,4 @@
-name: CI Docker
+name: Integration Tests on GCP
 
 # These jobs *don't* depend on cached Google Cloud state disks,
 # so they can be skipped when the modified files make the actual workflow run.
@@ -20,10 +20,10 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.dockerignore'
-      - '.github/workflows/continous-integration-docker.yml'
-      - '.github/workflows/deploy-gcp-tests.yml'
-      - '.github/workflows/find-cached-disks.yml'
-      - '.github/workflows/build-docker-image.yml'
+      - '.github/workflows/ci-unit-tests-docker.yml'
+      - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
@@ -35,48 +35,6 @@ jobs:
 
   build:
     name: Build CI Docker / Build images
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-all:
-    name: Test all
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-all-getblocktemplate-rpcs:
-    name: Test all with getblocktemplate-rpcs feature
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-fake-activation-heights:
-    name: Test with fake activation heights
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-empty-sync:
-    name: Test checkpoint sync from empty state
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-lightwalletd-integration:
-    name: Test integration with lightwalletd
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-configuration-file:
-    name: Test Zebra default Docker config file
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
