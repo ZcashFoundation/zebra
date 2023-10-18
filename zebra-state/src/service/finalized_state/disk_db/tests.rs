@@ -50,9 +50,9 @@ fn zs_iter_opts_increments_key_by_one() {
 
     for key in keys {
         let (_, bytes) = DiskDb::zs_iter_bounds(&..=key.to_be_bytes().to_vec());
-        let mut bytes = bytes.expect("there should be an upper bound");
-        let upper_bound_bytes = bytes.split_off(bytes.len() - 4);
-        let upper_bound = u32::from_be_bytes(upper_bound_bytes.try_into().expect("no added bytes"));
+        let mut extra_bytes = bytes.expect("there should be an upper bound");
+        let bytes = extra_bytes.split_off(extra_bytes.len() - 4);
+        let upper_bound = u32::from_be_bytes(bytes.clone().try_into().expect("should be 4 bytes"));
         let expected_upper_bound = key.wrapping_add(1);
 
         assert_eq!(
@@ -62,21 +62,18 @@ fn zs_iter_opts_increments_key_by_one() {
 
         if expected_upper_bound == 0 {
             assert_eq!(
-                bytes,
+                extra_bytes,
                 vec![1],
                 "there should be an extra byte with a value of 1"
             );
         } else {
-            assert_eq!(
-                key.to_be_bytes().len(),
-                bytes.len(),
-                "there should be no extra bytes"
-            );
+            assert_eq!(extra_bytes.len(), 0, "there should be no extra bytes");
         }
 
         assert_ne!(
-            bytes[0], 0x00,
-            "there must be at least one byte, and the first byte can't be zero"
+            extra_bytes.last().expect("there must be at least one byte"),
+            &0,
+            "the last byte can't be zero"
         );
     }
 }
