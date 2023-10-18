@@ -848,7 +848,7 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line of the child's stdout, until it finds every regex in `success_regexes`,
+    /// Checks each line of the child's stdout, until it finds every regex in `unordered_regexes`,
     /// and returns all the lines matched by any regex. Prints all stdout lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
@@ -891,7 +891,7 @@ impl<T> TestChild<T> {
         Ok(matched_lines)
     }
 
-    /// Checks each line of the child's stderr, until it finds every regex in `success_regexes`,
+    /// Checks each line of the child's stderr, until it finds every regex in `unordered_regexes`,
     /// and returns all the lines matched by any regex. Prints all stderr lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
