@@ -849,7 +849,9 @@ impl<T> TestChild<T> {
     }
 
     /// Checks each line of the child's stdout, until it finds every regex in `unordered_regexes`,
-    /// and returns all the lines matched by any regex. Prints all stdout lines.
+    /// and returns all lines matched by any regex, until each regex has been matched at least once.
+    /// If the output finishes or the command times out before all regexes are matched, returns an error with
+    /// a list of unmatched regexes. Prints all stdout lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
@@ -892,7 +894,9 @@ impl<T> TestChild<T> {
     }
 
     /// Checks each line of the child's stderr, until it finds every regex in `unordered_regexes`,
-    /// and returns all the lines matched by any regex. Prints all stderr lines.
+    /// and returns all lines matched by any regex, until each regex has been matched at least once.
+    /// If the output finishes or the command times out before all regexes are matched, returns an error with
+    /// a list of unmatched regexes. Prints all stderr lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
