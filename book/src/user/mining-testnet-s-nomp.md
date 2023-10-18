@@ -82,7 +82,7 @@ These fixes disable mining pool operator payments and miner payments: they just 
 ## Install `s-nomp`
 
 <details><summary>General instructions with Debian/Ubuntu examples</summary>
-    
+
 #### Install dependencies
 
 1. Install `redis` and run it on the default port: <https://redis.io/docs/getting-started/>
@@ -136,7 +136,7 @@ These fixes disable mining pool operator payments and miner payments: they just 
 </details>
 
 <details><summary>Arch-specific instructions</summary>
-    
+
 #### Install dependencies
 
 1. Install [`redis`](https://redis.io/docs/getting-started/) and run it on the default port:
