@@ -21,6 +21,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
+use rocksdb::ReadOptions;
 use zebra_chain::parameters::Network;
 
 use crate::{
@@ -194,7 +195,7 @@ pub trait ReadDisk {
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk;
 
     /// Returns the highest key in `cf`, and the corresponding value.
@@ -203,7 +204,7 @@ pub trait ReadDisk {
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk;
 
     /// Returns the first key greater than or equal to `lower_bound` in `cf`,
@@ -321,34 +322,22 @@ impl ReadDisk for DiskDb {
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, .., false).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
-        K: FromDisk,
+        K: IntoDisk + FromDisk,
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, .., true).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -358,17 +347,8 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        let lower_bound = lower_bound.as_bytes();
-        let from = rocksdb::IteratorMode::From(lower_bound.as_ref(), rocksdb::Direction::Forward);
-
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, from)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, lower_bound.., false).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -378,17 +358,8 @@ impl ReadDisk for DiskDb {
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        let upper_bound = upper_bound.as_bytes();
-        let from = rocksdb::IteratorMode::From(upper_bound.as_ref(), rocksdb::Direction::Reverse);
-
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.db
-            .iterator_cf(cf, from)
-            .next()?
-            .map(|(key_bytes, value_bytes)| {
-                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
-            })
-            .expect("unexpected database failure")
+        self.zs_range_iter(cf, ..=upper_bound, true).next()
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
@@ -398,7 +369,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range).collect()
+        self.zs_range_iter(cf, range, false).collect()
     }
 
     fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
@@ -408,7 +379,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range).collect()
+        self.zs_range_iter(cf, range, false).collect()
     }
 }
 
@@ -430,15 +401,24 @@ impl DiskWriteBatch {
 impl DiskDb {
     /// Returns an iterator over the items in `cf` in `range`.
     ///
+    /// Accepts a `reverse` argument. If it is `true`, creates the iterator with an
+    /// [`IteratorMode`](rocksdb::IteratorMode) of [`End`](rocksdb::IteratorMode::End), or
+    /// [`From`](rocksdb::IteratorMode::From) with [`Direction::Reverse`](rocksdb::Direction::Reverse).
+    ///
     /// Holding this iterator open might delay block commit transactions.
-    pub fn zs_range_iter<C, K, V, R>(&self, cf: &C, range: R) -> impl Iterator<Item = (K, V)> + '_
+    pub fn zs_range_iter<C, K, V, R>(
+        &self,
+        cf: &C,
+        range: R,
+        reverse: bool,
+    ) -> impl Iterator<Item = (K, V)> + '_
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter_with_direction(cf, range, false)
+        self.zs_range_iter_with_direction(cf, range, reverse)
     }
 
     /// Returns a reverse iterator over the items in `cf` in `range`.
@@ -495,11 +475,12 @@ impl DiskDb {
         let range = (start_bound, end_bound);
 
         let mode = Self::zs_iter_mode(&range, reverse);
+        let opts = Self::zs_iter_opts(&range);
 
         // Reading multiple items from iterators has caused database hangs,
         // in previous RocksDB versions
         self.db
-            .iterator_cf(cf, mode)
+            .iterator_cf_opt(cf, opts, mode)
             .map(|result| result.expect("unexpected database failure"))
             .map(|(key, value)| (key.to_vec(), value))
             // Skip excluded "from" bound and empty ranges. The `mode` already skips keys
@@ -512,6 +493,64 @@ impl DiskDb {
             // or we're after the included "to" bound.
             .take_while(move |(key, _value)| range.contains(key))
             .map(|(key, value)| (K::from_bytes(key), V::from_bytes(value)))
+    }
+
+    /// Returns the RocksDB ReadOptions with a lower and upper bound for a range.
+    fn zs_iter_opts<R>(range: &R) -> ReadOptions
+    where
+        R: RangeBounds<Vec<u8>>,
+    {
+        let mut opts = ReadOptions::default();
+        let (lower_bound, upper_bound) = Self::zs_iter_bounds(range);
+
+        if let Some(bound) = lower_bound {
+            opts.set_iterate_lower_bound(bound);
+        };
+
+        if let Some(bound) = upper_bound {
+            opts.set_iterate_upper_bound(bound);
+        };
+
+        opts
+    }
+
+    /// Returns a lower and upper iterate bounds for a range.
+    ///
+    /// Note: Since upper iterate bounds are always exclusive in RocksDB, this method
+    ///       will increment the upper bound by 1 if the end bound of the provided range
+    ///       is inclusive.
+    fn zs_iter_bounds<R>(range: &R) -> (Option<Vec<u8>>, Option<Vec<u8>>)
+    where
+        R: RangeBounds<Vec<u8>>,
+    {
+        use std::ops::Bound::*;
+
+        let lower_bound = match range.start_bound() {
+            Included(bound) | Excluded(bound) => Some(bound.clone()),
+            Unbounded => None,
+        };
+
+        let upper_bound = match range.end_bound().cloned() {
+            Included(mut bound) => {
+                // Increment the last byte in the upper bound that is less than u8::MAX, and
+                // clear any bytes after it to increment the next key in lexicographic order
+                // (next big-endian number) this Vec represents to RocksDB.
+                let is_wrapped_overflow = bound.iter_mut().rev().all(|v| {
+                    *v = v.wrapping_add(1);
+                    v == &0
+                });
+
+                if is_wrapped_overflow {
+                    bound.insert(0, 0x01)
+                }
+
+                Some(bound)
+            }
+            Excluded(bound) => Some(bound),
+            Unbounded => None,
+        };
+
+        (lower_bound, upper_bound)
     }
 
     /// Returns the RocksDB iterator "from" mode for `range`.
