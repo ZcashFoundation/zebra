@@ -52,6 +52,8 @@ But the following jobs don't need branch protection rules:
   We have branch protection rules for build jobs, but we could remove them if we want.
 
 When a new job is added in a PR, use the `#devops` Slack channel ask a GitHub admin to add a branch protection rule after it merges.
+Adding a new Zebra crate automatically adds a new job to build that crate by itself in [ci-build-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-build-crates.yml),
+so new crate PRs also need to add a branch protection rule.
 
 ### Pull Requests from Forked Repositories
 
