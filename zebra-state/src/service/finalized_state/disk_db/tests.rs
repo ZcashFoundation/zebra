@@ -30,6 +30,7 @@ impl DiskDb {
 fn zs_iter_opts_increments_key_by_one() {
     let _init_guard = zebra_test::init();
 
+    // TODO: add an empty key (`()` type or `[]` when serialized) test case
     let keys: [u32; 14] = [
         0,
         1,
@@ -65,6 +66,18 @@ fn zs_iter_opts_increments_key_by_one() {
                 vec![1],
                 "there should be an extra byte with a value of 1"
             );
+        } else {
+            assert_eq!(
+                key.len(),
+                bytes.len(),
+                "there should be no extra bytes"
+            );
         }
+
+        assert_ne!(
+            bytes[0],
+            0x00,
+            "there must be at least one byte, and the first byte can't be zero"
+        );
     }
 }
