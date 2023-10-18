@@ -18,7 +18,7 @@ use super::CancelFormatChange;
 #[allow(clippy::unwrap_in_result)]
 #[instrument(skip(upgrade_db, cancel_receiver))]
 pub fn run(
-    initial_tip_height: Height,
+    _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
     cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
