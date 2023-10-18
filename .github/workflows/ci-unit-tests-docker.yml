@@ -117,7 +117,7 @@ jobs:
       - name: Run zebrad tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests --tty${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --workspace -- --include-ignored
+          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --workspace -- --include-ignored
           if [[ -n "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" ]]; then
             docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.EXPERIMENTAL_FEATURES }} " --workspace -- --include-ignored
           fi
