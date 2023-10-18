@@ -70,13 +70,13 @@ jobs:
       - run: 'echo "No build required"'
 
   test-configuration-file:
-    name: Test Zebra default Docker config file
+    name: Test CI default Docker config file / Test default-conf in Docker
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
+    name: Test CI custom Docker config file / Test custom-conf in Docker
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

@@ -47,8 +47,27 @@ on:
   #    # workflow definitions
   #    - 'docker/**'
   #    - '.dockerignore'
-  #    - '.github/workflows/continous-delivery.yml'
+  #    - '.github/workflows/cd-deploy-nodes-gcp.yml'
   #    - '.github/workflows/sub-build-docker-image.yml'
+
+  # Only runs the Docker image tests, doesn't deploy any instances
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/cd-deploy-nodes-gcp.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
   release:
     types:
@@ -98,34 +117,37 @@ jobs:
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
-    name: Test Zebra default Docker config file
+    name: Test CD default Docker config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
       test_id: 'default-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: '-e NETWORK'
       network: 'Mainnet'
 
-  # Test reconfiguring the the docker image for tesnet.
+  # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
-    name: Test Zebra testnet Docker config file
+    name: Test CD testnet Docker config file
     needs: build
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
       test_id: 'testnet-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml"'
+      test_variables: '-e NETWORK'
       network: 'Testnet'
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
-    name: Test Zebra custom Docker config file
+    name: Test CD custom Docker config file
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
       test_id: 'custom-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "v1.0.0-rc.2.toml"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -150,7 +172,7 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning, test-configuration-file, test-configuration-file-testnet, test-zebra-conf-path ]
+    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -252,7 +274,7 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build ]
+    needs: [ build, test-configuration-file, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

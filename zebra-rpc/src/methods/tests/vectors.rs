@@ -16,6 +16,7 @@ use zebra_chain::{
 };
 use zebra_node_services::BoxError;
 
+use zebra_state::{LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -674,19 +675,36 @@ async fn rpc_getaddresstxids_response() {
             .address(network)
             .unwrap();
 
+        // Create a populated state service
+        let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+            zebra_state::populated_state(blocks.to_owned(), network).await;
+
         if network == Mainnet {
             // Exhaustively test possible block ranges for mainnet.
             //
             // TODO: if it takes too long on slower machines, turn this into a proptest with 10-20 cases
             for start in 1..=10 {
                 for end in start..=10 {
-                    rpc_getaddresstxids_response_with(network, start..=end, &blocks, &address)
-                        .await;
+                    rpc_getaddresstxids_response_with(
+                        network,
+                        start..=end,
+                        &address,
+                        &read_state,
+                        &latest_chain_tip,
+                    )
+                    .await;
                 }
             }
         } else {
             // Just test the full range for testnet.
-            rpc_getaddresstxids_response_with(network, 1..=10, &blocks, &address).await;
+            rpc_getaddresstxids_response_with(
+                network,
+                1..=10,
+                &address,
+                &read_state,
+                &latest_chain_tip,
+            )
+            .await;
         }
     }
 }
@@ -694,13 +712,11 @@ async fn rpc_getaddresstxids_response() {
 async fn rpc_getaddresstxids_response_with(
     network: Network,
     range: RangeInclusive<u32>,
-    blocks: &[Arc<Block>],
     address: &transparent::Address,
+    read_state: &ReadStateService,
+    latest_chain_tip: &LatestChainTip,
 ) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    // Create a populated state service
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.to_owned(), network).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -710,7 +726,7 @@ async fn rpc_getaddresstxids_response_with(
         true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
-        latest_chain_tip,
+        latest_chain_tip.clone(),
     );
 
     // call the method with valid arguments

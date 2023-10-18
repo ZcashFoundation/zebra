@@ -79,7 +79,7 @@ fi
 : "${ENTRYPOINT_FEATURES:=}"
 
 # Configuration file path
-if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]]; then
+if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]] && [[ -z "${ZEBRA_CONF_PATH}" ]]; then
   ZEBRA_CONF_PATH="${ZEBRA_CONF_DIR}/${ZEBRA_CONF_FILE}"
 fi
 
