@@ -79,7 +79,7 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable, beta]
         # When vars.EXPERIMENTAL_FEATURES is empty this should become a single matrix item
-        features: ${{ fromJSON(format('["", {0}]', vars.EXPERIMENTAL_FEATURES)) }}
+        features: ${{ fromJSON(format('["", "--features {0}"]', vars.EXPERIMENTAL_FEATURES)) }}
         exclude:
         # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
