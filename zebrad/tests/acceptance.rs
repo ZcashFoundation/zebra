@@ -207,7 +207,7 @@ fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let child = testdir()?
-        .with_config(&mut default_test_config()?)?
+        .with_config(&mut default_test_config(Mainnet)?)?
         .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -269,7 +269,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
 
     let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
@@ -314,7 +314,7 @@ fn start_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
 
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
@@ -341,7 +341,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -366,7 +366,7 @@ fn start_args() -> Result<()> {
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let config = default_test_config()?;
+    let config = default_test_config(Mainnet)?;
 
     let start = Instant::now();
 
@@ -392,7 +392,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
@@ -457,7 +457,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let _init_guard = zebra_test::init();
 
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
@@ -547,7 +547,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
 
     let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
@@ -568,7 +568,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     // unrecognized option `-f`
@@ -622,7 +622,7 @@ fn app_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
 
     tracing::info!(?testdir, "running zebrad with no config (default settings)");
 
@@ -1319,7 +1319,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1376,7 +1376,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1483,7 +1483,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(parallel_cpu_threads)?;
+    let mut config = random_known_rpc_port_config(parallel_cpu_threads, Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1542,7 +1542,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(true)?;
+    let mut config = random_known_rpc_port_config(true, Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1628,7 +1628,7 @@ fn non_blocking_logger() -> Result<()> {
 
         // Write a configuration that has RPC listen_addr set
         // [Note on port conflict](#Note on port conflict)
-        let mut config = random_known_rpc_port_config(false)?;
+        let mut config = random_known_rpc_port_config(false, Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
         let zebra_rpc_address = config.rpc.listen_addr.unwrap();
@@ -2049,7 +2049,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -2078,7 +2078,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -2107,7 +2107,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -2141,7 +2141,7 @@ fn zebra_rpc_conflict() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     //
     // This is the required setting to detect port conflicts.
-    let mut config = random_known_rpc_port_config(false)?;
+    let mut config = random_known_rpc_port_config(false, Mainnet)?;
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
@@ -2168,7 +2168,7 @@ fn zebra_state_conflict() -> Result<()> {
 
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
-    let mut config = persistent_test_config()?;
+    let mut config = persistent_test_config(Mainnet)?;
     let dir_conflict = testdir()?.with_config(&mut config)?;
 
     // Windows problems with this match will be worked on at #1654
@@ -2333,7 +2333,7 @@ async fn delete_old_databases() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 
@@ -2449,7 +2449,7 @@ async fn submit_block() -> Result<()> {
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.
@@ -2608,10 +2608,9 @@ async fn state_format_test(
         let test_name = &format!("{base_test_name}/apply_fake_version/{fake_version}");
         tracing::info!(?network, "running {test_name} using zebra-state");
 
-        let mut config = UseAnyState
-            .zebrad_config(test_name, false, Some(dir.path()))
+        let config = UseAnyState
+            .zebrad_config(test_name, false, Some(dir.path()), network)
             .expect("already checked config")?;
-        config.network.network = network;
 
         zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
             .expect("can't write fake database version to disk");

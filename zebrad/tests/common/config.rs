@@ -15,6 +15,7 @@ use std::{
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
+use zebra_chain::parameters::Network::{self, *};
 use zebra_test::net::random_known_port;
 use zebrad::{
     components::{mempool, sync, tracing},
@@ -28,10 +29,11 @@ use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
-pub fn default_test_config() -> Result<ZebradConfig> {
+pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
     let network = zebra_network::Config {
+        network: net,
         // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse()?,
         crawl_new_peer_interval: TEST_DURATION,
@@ -65,6 +67,21 @@ pub fn default_test_config() -> Result<ZebradConfig> {
     let mut state = zebra_state::Config::ephemeral();
     state.debug_validity_check_interval = Some(DATABASE_FORMAT_CHECK_INTERVAL);
 
+    // These are the ZF funding stream addresses for mainnet and testnet.
+    #[allow(unused_mut)]
+    let mut mining = zebra_rpc::config::mining::Config::default();
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    {
+        let miner_address = if network.network == Mainnet {
+            "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
+        } else {
+            "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
+        };
+
+        mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
+    }
+
     let config = ZebradConfig {
         network,
         state,
@@ -72,14 +89,15 @@ pub fn default_test_config() -> Result<ZebradConfig> {
         mempool,
         consensus,
         tracing,
+        mining,
         ..ZebradConfig::default()
     };
 
     Ok(config)
 }
 
-pub fn persistent_test_config() -> Result<ZebradConfig> {
-    let mut config = default_test_config()?;
+pub fn persistent_test_config(network: Network) -> Result<ZebradConfig> {
+    let mut config = default_test_config(network)?;
     config.state.ephemeral = false;
     Ok(config)
 }
@@ -105,7 +123,10 @@ pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
 /// Returns a `zebrad` config with a random known RPC port.
 ///
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
-pub fn random_known_rpc_port_config(parallel_cpu_threads: bool) -> Result<ZebradConfig> {
+pub fn random_known_rpc_port_config(
+    parallel_cpu_threads: bool,
+    network: Network,
+) -> Result<ZebradConfig> {
     // [Note on port conflict](#Note on port conflict)
     let listen_port = random_known_port();
     let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
@@ -113,7 +134,7 @@ pub fn random_known_rpc_port_config(parallel_cpu_threads: bool) -> Result<Zebrad
 
     // Write a configuration that has the rpc listen_addr option set
     // TODO: split this config into another function?
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(network)?;
     config.rpc.listen_addr = Some(zebra_rpc_listener);
     if parallel_cpu_threads {
         // Auto-configure to the number of CPU cores: most users configre this
