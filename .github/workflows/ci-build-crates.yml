@@ -22,7 +22,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
   pull_request:
     paths:
       # production code and test code
@@ -34,7 +34,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}

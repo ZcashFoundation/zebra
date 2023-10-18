@@ -1,6 +1,6 @@
 # TODO: we should stop using this build approach with lightwalletd and move to using our
 # reusable workflow to building all the docker images of our repo 
-name: zcash-lightwalletd
+name: Build lightwalletd
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -29,7 +29,7 @@ on:
       - 'zebrad/src/commands/start.rs'
       # these workflow definitions actually change the docker image
       - 'docker/zcash-lightwalletd/Dockerfile'
-      - '.github/workflows/zcash-lightwalletd.yml'
+      - '.github/workflows/sub-build-lightwalletd.yml'
 
   # Update the lightwalletd image when each related PR changes
   pull_request:
@@ -42,7 +42,7 @@ on:
       - 'zebrad/src/commands/start.rs'
       # these workflow definitions actually change the docker image
       - 'docker/zcash-lightwalletd/Dockerfile'
-      - '.github/workflows/zcash-lightwalletd.yml'
+      - '.github/workflows/sub-build-lightwalletd.yml'
 
 env:
   IMAGE_NAME: lightwalletd
