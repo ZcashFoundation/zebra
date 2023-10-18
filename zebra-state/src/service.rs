@@ -389,8 +389,7 @@ impl StateService {
         let full_verifier_utxo_lookahead = max_checkpoint_height
             - HeightDiff::try_from(checkpoint_verify_concurrency_limit)
                 .expect("fits in HeightDiff");
-        let full_verifier_utxo_lookahead =
-            full_verifier_utxo_lookahead.expect("unexpected negative height");
+        let full_verifier_utxo_lookahead = full_verifier_utxo_lookahead.unwrap_or(block::Height(0));
 
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
