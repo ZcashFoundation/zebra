@@ -78,8 +78,11 @@ jobs:
         # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
         os: [ubuntu-latest]
         rust: [stable, beta]
-        # When vars.EXPERIMENTAL_FEATURES is empty this should become a single matrix item
-        features: ${{ fromJSON(format('["", "--features {0}"]', vars.EXPERIMENTAL_FEATURES)) }}
+        # TODO: When vars.EXPERIMENTAL_FEATURES has features in it, add it here.
+        #       Or work out a way to trim the space from the variable: GitHub doesn't allow empty variables.
+        #       Or use `default` for the empty feature set and EXPERIMENTAL_FEATURES, and update the branch protection rules.
+        #features: ${{ fromJSON(format('["", "{0}"]', vars.EXPERIMENTAL_FEATURES)) }}
+        features: [""]
         exclude:
         # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
@@ -184,7 +187,7 @@ jobs:
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
       - name: Run tests${{ matrix.features }}
         run: |
-          cargo test ${{ matrix.features }} --release --verbose --workspace
+          cargo test --features "${{ matrix.features }}" --release --verbose --workspace
 
       # Explicitly run any tests that are usually #[ignored]
 
@@ -192,7 +195,7 @@ jobs:
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
         if: matrix.os == 'macos-latest'
         run: |
-          cargo test ${{ matrix.features }} --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          cargo test --features "${{ matrix.features }}" --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   # Install Zebra with lockfile dependencies, with no caching and default features
   install-from-lockfile-no-cache:
