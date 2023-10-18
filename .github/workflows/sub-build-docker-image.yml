@@ -29,7 +29,7 @@ on:
       features:
         required: false
         type: string
-      # defaults to: vars.RUST_TEST_FEATURES and vars.RUST_PROD_FEATURES
+      # defaults to: vars.RUST_TEST_FEATURES (and entrypoint.sh adds vars.RUST_PROD_FEATURES)
       test_features:
         required: false
         type: string
