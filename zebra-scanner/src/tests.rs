@@ -1,9 +1,12 @@
 //! Test that we can scan blocks.
 //!
 
+use std::sync::Arc;
+
 use zcash_client_backend::{
     proto::compact_formats::{
-        self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+        self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
+        CompactTx,
     },
     scanning::scan_block,
 };
@@ -28,7 +31,11 @@ use rand::{rngs::OsRng, RngCore};
 
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
-use zebra_chain::block::Height;
+use zebra_chain::{
+    block::{Block, Height},
+    serialization::ZcashSerialize,
+    transaction::Transaction,
+};
 
 #[tokio::test]
 async fn scanning_from_zebra() -> Result<()> {
@@ -43,8 +50,29 @@ async fn scanning_from_zebra() -> Result<()> {
     let db = read_only_state_service.db();
     let mut height = Height(0);
 
-    while let Some(_block) = db.block(height.into()) {
-        // TODO: Convert block to compact block, scan, and update state
+    while let Some(block) = db.block(height.into()) {
+        // Get chain metadata
+        let sapling_tree_size = db
+            .sapling_tree_by_hash_or_height(height.into())
+            .expect("should exist")
+            .count();
+        let orchard_tree_size = db
+            .orchard_tree_by_hash_or_height(height.into())
+            .expect("should exist")
+            .count();
+
+        let chain_metadata = ChainMetadata {
+            sapling_commitment_tree_size: sapling_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+            orchard_commitment_tree_size: orchard_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+        };
+
+        let _compact_block = block_to_compact(block, chain_metadata);
+
+        // TODO: scan block and update state
 
         // let res = scan_block(&network, cb, &vks[..], &[(account, nf)], None).unwrap();
 
@@ -79,6 +107,81 @@ async fn scanning_from_zebra() -> Result<()> {
     assert_eq!(res.transactions().len(), 1);
 
     Ok(())
+}
+
+fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
+    CompactBlock {
+        height: block
+            .coinbase_height()
+            .expect("verified block should have a valid height")
+            .0
+            .into(),
+        hash: block.hash().bytes_in_display_order().to_vec(),
+        prev_hash: block
+            .header
+            .previous_block_hash
+            .bytes_in_display_order()
+            .to_vec(),
+        time: block
+            .header
+            .time
+            .timestamp()
+            .try_into()
+            .expect("should work during 21st century"),
+        header: block
+            .header
+            .zcash_serialize_to_vec()
+            .expect("verified block should serialize"),
+        vtx: block
+            .transactions
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(transaction_to_compact)
+            .collect(),
+        chain_metadata: Some(chain_metadata),
+
+        ..Default::default()
+    }
+}
+
+fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
+    CompactTx {
+        index: index
+            .try_into()
+            .expect("tx index in block should fit in u64"),
+        hash: tx.hash().bytes_in_display_order().to_vec(),
+
+        // `fee` is not checked by the `scan_block` function.
+        fee: 0,
+
+        spends: tx
+            .sapling_nullifiers()
+            .map(|nf| CompactSaplingSpend {
+                nf: <[u8; 32]>::from(*nf).to_vec(),
+            })
+            .collect(),
+        outputs: tx
+            .sapling_outputs()
+            .map(|output| CompactSaplingOutput {
+                cmu: output.cm_u.to_bytes().to_vec(),
+                ephemeral_key: output
+                    .ephemeral_key
+                    .zcash_serialize_to_vec()
+                    .expect("verified output should serialize successfully"),
+                ciphertext: output
+                    .enc_ciphertext
+                    .zcash_serialize_to_vec()
+                    .expect("verified output should serialize successfully")
+                    .into_iter()
+                    .take(52)
+                    .collect(),
+            })
+            .collect(),
+
+        // `actions` is not checked by the `scan_block` function.
+        actions: vec![],
+    }
 }
 
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
