@@ -68,15 +68,14 @@ fn zs_iter_opts_increments_key_by_one() {
             );
         } else {
             assert_eq!(
-                key.len(),
+                key.to_be_bytes().len(),
                 bytes.len(),
                 "there should be no extra bytes"
             );
         }
 
         assert_ne!(
-            bytes[0],
-            0x00,
+            bytes[0], 0x00,
             "there must be at least one byte, and the first byte can't be zero"
         );
     }
