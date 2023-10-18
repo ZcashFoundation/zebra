@@ -71,44 +71,12 @@ pub fn sapling_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
-    use std::ops::Bound::*;
-
-    let start_index = match range.start_bound().cloned() {
-        Included(start_index) | Excluded(start_index) => start_index,
-        Unbounded => panic!("range provided to sapling_subtrees() must have start bound"),
-    };
-
-    let results = match chain.map(|chain| chain.as_ref().sapling_subtrees_in_range(range.clone())) {
-        Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,
-        Some(chain_results) => {
-            let mut db_results = db.sapling_subtree_list_by_index_for_rpc(range);
-
-            // Check for inconsistent trees in the fork.
-            for (chain_index, chain_subtree) in chain_results {
-                // If there's no matching index, just update the list of trees.
-                let Some(db_subtree) = db_results.get(&chain_index) else {
-                    db_results.insert(chain_index, chain_subtree);
-                    continue;
-                };
-
-                // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
-                if &chain_subtree != db_subtree {
-                    break;
-                }
-                // Otherwise, the subtree is already in the list, so we don't need to add it.
-            }
-
-            db_results
-        }
-        None => db.sapling_subtree_list_by_index_for_rpc(range),
-    };
-
-    // Check that we got the start subtree
-    if results.contains_key(&start_index) {
-        results
-    } else {
-        BTreeMap::new()
-    }
+    subtrees(
+        chain,
+        range,
+        |chain, range| chain.sapling_subtrees_in_range(range),
+        |range| db.sapling_subtree_list_by_index_for_rpc(range),
+    )
 }
 
 /// Returns the Orchard
@@ -155,17 +123,40 @@ pub fn orchard_subtrees<C>(
 where
     C: AsRef<Chain>,
 {
+    subtrees(
+        chain,
+        range,
+        |chain, range| chain.orchard_subtrees_in_range(range),
+        |range| db.orchard_subtree_list_by_index_for_rpc(range),
+    )
+}
+
+/// Returns a list of [`NoteCommitmentSubtree`]s starting at `start_index`.
+fn subtrees<C, R, N, F1, F2>(
+    chain: Option<C>,
+    range: R,
+    read_chain: F1,
+    read_disk: F2,
+) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>
+where
+    C: AsRef<Chain>,
+    N: PartialEq,
+    R: std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
+    F1: FnOnce(&Chain, R) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>,
+    F2: FnOnce(R) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>,
+{
     use std::ops::Bound::*;
 
     let start_index = match range.start_bound().cloned() {
-        Included(start_index) | Excluded(start_index) => start_index,
-        Unbounded => panic!("range provided to orchard_subtrees() must have start bound"),
+        Included(start_index) => start_index,
+        Excluded(start_index) => (start_index.0 + 1).into(),
+        Unbounded => 0.into(),
     };
 
-    let results = match chain.map(|chain| chain.as_ref().orchard_subtrees_in_range(range.clone())) {
+    let results = match chain.map(|chain| read_chain(chain.as_ref(), range.clone())) {
         Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,
         Some(chain_results) => {
-            let mut db_results = db.orchard_subtree_list_by_index_for_rpc(range);
+            let mut db_results = read_disk(range);
 
             // Check for inconsistent trees in the fork.
             for (chain_index, chain_subtree) in chain_results {
@@ -184,7 +175,7 @@ where
 
             db_results
         }
-        None => db.orchard_subtree_list_by_index_for_rpc(range),
+        None => read_disk(range),
     };
 
     // Check that we got the start subtree
