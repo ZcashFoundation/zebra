@@ -110,7 +110,6 @@ pub async fn run() -> Result<()> {
         ?zebra_rpc_address,
         "launched zebrad, waiting for zebrad to open its RPC port..."
     );
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
     // Wait for the state to upgrade, if the upgrade is short.
     //
@@ -124,6 +123,7 @@ pub async fn run() -> Result<()> {
             &mut zebrad,
             &state_version_message,
             database_format_version_in_code(),
+            [format!("Opened RPC endpoint at {zebra_rpc_address}")],
         )?;
     }
 
@@ -160,6 +160,7 @@ pub async fn run() -> Result<()> {
             &mut zebrad,
             &state_version_message,
             database_format_version_in_code(),
+            None,
         )?;
     }
 

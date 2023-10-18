@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 use std::{
+    iter,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -74,6 +75,7 @@ pub fn wait_for_state_version_message<T>(zebrad: &mut TestChild<T>) -> Result<St
 }
 
 /// Waits for the `required_version` state upgrade to complete, if needed.
+/// If `extra_required_log_regexes` are supplied, also waits for those logs before returning.
 ///
 /// This function should be called with the output of [`wait_for_state_version_message()`].
 #[tracing::instrument(skip(zebrad))]
@@ -81,24 +83,33 @@ pub fn wait_for_state_version_upgrade<T>(
     zebrad: &mut TestChild<T>,
     state_version_message: &str,
     required_version: Version,
+    extra_required_log_regexes: impl IntoIterator<Item = String> + std::fmt::Debug,
 ) -> Result<()> {
     if state_version_message.contains("launching upgrade task") {
         tracing::info!(
             zebrad = ?zebrad.cmd,
             %state_version_message,
             %required_version,
+            ?extra_required_log_regexes,
             "waiting for zebrad state upgrade..."
         );
 
-        let upgrade_message = zebrad.expect_stdout_line_matches(&format!(
+        let upgrade_pattern = format!(
             "marked database format as upgraded.*format_upgrade_version.*=.*{required_version}"
-        ))?;
+        );
+        let extra_required_log_regexes = extra_required_log_regexes.into_iter();
+        let required_logs: Vec<String> = iter::once(upgrade_pattern)
+            .chain(extra_required_log_regexes)
+            .collect();
+
+        let upgrade_messages = zebrad.expect_stdout_line_matches_all_unordered(&required_logs)?;
 
         tracing::info!(
             zebrad = ?zebrad.cmd,
             %state_version_message,
             %required_version,
-            %upgrade_message,
+            ?required_logs,
+            ?upgrade_messages,
             "zebrad state has been upgraded"
         );
     }
