@@ -48,7 +48,7 @@ async fn scanning_from_zebra() -> Result<()> {
 
     let (state_config, network) = Default::default();
     let (_state_service, read_only_state_service, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::spawn_init(state_config, network, Height(0), 3000).await?;
+        zebra_state::spawn_init(state_config, network, Height::MAX, 3000).await?;
     let db = read_only_state_service.db();
 
     let mut height = Height(0);
