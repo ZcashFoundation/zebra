@@ -38,18 +38,21 @@ use zebra_chain::{
 };
 
 #[tokio::test]
+#[allow(clippy::print_stdout)]
 async fn scanning_from_zebra() -> Result<()> {
-    let (consensus_config, state_config, network) = Default::default();
+    let account = AccountId::from(12);
+    let extsk = ExtendedSpendingKey::master(&[]);
+    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
+    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
+    let nf = Nullifier([7; 32]);
 
-    let (_, max_checkpoint_height) =
-        zebra_consensus::router::init_checkpoint_list(consensus_config, network);
-
+    let (state_config, network) = Default::default();
     let (_state_service, read_only_state_service, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::spawn_init(state_config, network, max_checkpoint_height, 3000).await?;
-
+        zebra_state::spawn_init(state_config, network, Height(0), 3000).await?;
     let db = read_only_state_service.db();
-    let mut height = Height(0);
 
+    let mut height = Height(0);
+    let mut num_transactions = 0;
     while let Some(block) = db.block(height.into()) {
         // Get chain metadata
         let sapling_tree_size = db
@@ -70,20 +73,22 @@ async fn scanning_from_zebra() -> Result<()> {
                 .expect("position should fit in u32"),
         };
 
-        let _compact_block = block_to_compact(block, chain_metadata);
+        let compact_block = block_to_compact(block, chain_metadata);
 
-        // TODO: scan block and update state
+        let res = scan_block(
+            &zcash_primitives::consensus::MainNetwork,
+            compact_block,
+            &vks[..],
+            &[(account, nf)],
+            None,
+        )
+        .unwrap();
 
-        // let res = scan_block(&network, cb, &vks[..], &[(account, nf)], None).unwrap();
-
+        num_transactions += res.transactions().len();
         height = height.next()?;
     }
 
-    let account = AccountId::from(12);
-    let extsk = ExtendedSpendingKey::master(&[]);
-    let dfvk = extsk.to_diversifiable_full_viewing_key();
-
-    let nf = Nullifier([7; 32]);
+    println!("num_transactions: {num_transactions}");
 
     let cb = fake_compact_block(
         1u32.into(),
@@ -98,10 +103,14 @@ async fn scanning_from_zebra() -> Result<()> {
     // The fake block function will have our transaction and a random one.
     assert_eq!(cb.vtx.len(), 2);
 
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
-    let network = zcash_primitives::consensus::TestNetwork;
-
-    let res = scan_block(&network, cb, &vks[..], &[(account, nf)], None).unwrap();
+    let res = scan_block(
+        &zcash_primitives::consensus::MainNetwork,
+        cb,
+        &vks[..],
+        &[(account, nf)],
+        None,
+    )
+    .unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
