@@ -132,7 +132,6 @@ pub struct TransactionLocation {
 
 impl TransactionLocation {
     /// Creates a transaction location from a block height and transaction index.
-    #[allow(dead_code)]
     pub fn from_index(height: Height, transaction_index: u16) -> TransactionLocation {
         TransactionLocation {
             height,
