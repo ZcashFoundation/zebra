@@ -1,0 +1,39 @@
+name: Deploy Nodes to GCP
+
+on:
+  pull_request:
+   paths-ignore:
+     # code and tests
+     - '**/*.rs'
+     # hard-coded checkpoints and proptest regressions
+     - '**/*.txt'
+     # dependencies
+     - '**/Cargo.toml'
+     - '**/Cargo.lock'
+     # configuration files
+     - '.cargo/config.toml'
+     - '**/clippy.toml'
+     # workflow definitions
+     - 'docker/**'
+     - '.dockerignore'
+     - '.github/workflows/cd-deploy-nodes-gcp.yml'
+     - '.github/workflows/sub-build-docker-image.yml'
+
+jobs:
+  build:
+    name: Build CD Docker / Build images
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-configuration-file:
+    name: Test CD default Docker config file / Test default-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-zebra-conf-path:
+    name: Test CD custom Docker config file / Test custom-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'

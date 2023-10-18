@@ -1,4 +1,4 @@
-name: CI OSes
+name: Multi-OS Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -12,6 +12,25 @@ on:
   # we build Rust and Zcash parameter caches on main,
   # so they can be shared by all branches:
   # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - '.github/workflows/ci-unit-tests-os.yml'
+
   push:
     branches:
       - main
@@ -31,24 +50,8 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/continous-integration-os.yml'
-  pull_request:
-    paths:
-      # code and tests
-      - '**/*.rs'
-      # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
-      # test data snapshots
-      - '**/*.snap'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/deny.toml'
-      # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
-      # workflow definitions
-      - '.github/workflows/continous-integration-os.yml'
+      - '.github/workflows/ci-unit-tests-os.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -58,6 +61,9 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
+  ########################################
+  ### Build and test Zebra on all OSes ###
+  ########################################
   test:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
     # The large timeout is to accommodate:
@@ -233,7 +239,6 @@ jobs:
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v2.1.0
         with:
-          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
           version: '23.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
