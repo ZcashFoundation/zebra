@@ -118,6 +118,7 @@ jobs:
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
     name: Test CD default Docker config file
+    timeout-minutes: 60
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
@@ -130,6 +131,7 @@ jobs:
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
     name: Test CD testnet Docker config file
+    timeout-minutes: 60
     needs: build
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
@@ -143,6 +145,7 @@ jobs:
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
     name: Test CD custom Docker config file
+    timeout-minutes: 60
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:

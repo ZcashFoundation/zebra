@@ -91,6 +91,7 @@ jobs:
   # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
+    timeout-minutes: 180
     runs-on: ubuntu-latest-xl
     needs: build
     steps:
@@ -144,6 +145,7 @@ jobs:
   # (The gRPC feature is a zebrad feature, so it isn't needed here.)
   test-fake-activation-heights:
     name: Test with fake activation heights
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -167,6 +169,7 @@ jobs:
   # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-empty-sync:
     name: Test checkpoint sync from empty state
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -189,6 +192,7 @@ jobs:
   # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -210,6 +214,7 @@ jobs:
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
     name: Test CI default Docker config file
+    timeout-minutes: 60
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
@@ -222,6 +227,7 @@ jobs:
   # Test reconfiguring the the docker image for tesnet.
   test-configuration-file-testnet:
     name: Test CI testnet Docker config file
+    timeout-minutes: 60
     needs: build
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
@@ -236,6 +242,7 @@ jobs:
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
     name: Test CI custom Docker config file
+    timeout-minutes: 60
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
