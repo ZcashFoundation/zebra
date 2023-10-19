@@ -14,8 +14,8 @@ This release contains the following changes:
 ### Mining RPCs in Production Builds
 
 Zebra's mining RPCs are now available in release builds (#7740). Any Zebra instance can be used
-by a miner or mining pool. This stabilises 12 RPCs, including  `getblocktemplate`, `submitblock`,
-`getmininginfo`, `getnetworksolps`, `[z_]validateaddress` and `getblocksubsidy`. For more infomation,
+by a solo miner or mining pool. This stabilises 12 RPCs, including  `getblocktemplate`, `submitblock`,
+`getmininginfo`, `getnetworksolps`, `[z_]validateaddress` and `getblocksubsidy`. For more information,
 read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebra/).
 
 Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
