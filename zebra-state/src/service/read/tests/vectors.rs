@@ -104,7 +104,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 /// non-finalized states correctly.
 #[tokio::test]
 async fn test_read_subtrees() -> Result<()> {
-    use std::ops::Bound::{self, *};
+    use std::ops::Bound::*;
 
     let dummy_subtree = |(index, height)| {
         NoteCommitmentSubtree::new(
@@ -183,26 +183,12 @@ async fn test_read_subtrees() -> Result<()> {
 
     // Check that Zebra retrieves subtrees correctly when using a range with an Excluded start bound
 
-    #[derive(Clone, Default, PartialEq, Eq, Hash)]
-    struct RangeExclusiveStart<Idx> {
-        pub start: Idx,
-        pub end: Option<Idx>,
-    }
-
-    impl<T> std::ops::RangeBounds<T> for RangeExclusiveStart<T> {
-        fn start_bound(&self) -> Bound<&T> {
-            Excluded(&self.start)
-        }
-        fn end_bound(&self) -> Bound<&T> {
-            self.end.as_ref().map(Excluded).unwrap_or(Unbounded)
-        }
-    }
-
-    let range = RangeExclusiveStart::default();
-    let subtrees = sapling_subtrees(Some(chain), &db, range.clone());
+    let start = 0.into();
+    let range = (Excluded(start), Unbounded);
+    let subtrees = sapling_subtrees(Some(chain), &db, range);
     assert_eq!(subtrees.len(), 11);
     assert!(
-        !subtrees.contains_key(&range.start),
+        !subtrees.contains_key(&start),
         "should not contain excluded start bound"
     );
 
