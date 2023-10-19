@@ -99,6 +99,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.crate }} crate
+    timeout-minutes: 90
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
