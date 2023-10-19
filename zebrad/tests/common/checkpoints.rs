@@ -87,12 +87,19 @@ pub async fn run(network: Network) -> Result<()> {
 
         // Before we write a cached state image, wait for a database upgrade.
         //
+        // It is ok if the logs are in the wrong order and the test sometimes fails,
+        // because testnet is unreliable anyway.
+        //
         // TODO: this line will hang if the state upgrade is slower than the RPC server spawn.
         // But that is unlikely, because both 25.1 and 25.2 are quick on testnet.
+        //
+        // TODO: combine this check with the CHECKPOINT_VERIFIER_REGEX and RPC endpoint checks.
+        // This is tricky because we need to get the last checkpoint log.
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
             database_format_version_in_code(),
+            None,
         )?;
     }
 
@@ -105,6 +112,7 @@ pub async fn run(network: Network) -> Result<()> {
     );
 
     let last_checkpoint = zebrad.expect_stdout_line_matches(CHECKPOINT_VERIFIER_REGEX)?;
+
     // TODO: do this with a regex?
     let (_prefix, last_checkpoint) = last_checkpoint
         .split_once("max_checkpoint_height")
