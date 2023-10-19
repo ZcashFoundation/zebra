@@ -100,6 +100,71 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
     Ok(())
 }
 
+/// Tests if Zebra combines the note commitment subtrees from the finalized and
+/// non-finalized states correctly.
+#[tokio::test]
+async fn test_subtrees() -> Result<()> {
+    let dummy_subtree = |(index, height)| {
+        NoteCommitmentSubtree::new(
+            u16::try_from(index).expect("should fit in u16"),
+            Height(height),
+            sapling::tree::Node::default(),
+        )
+    };
+
+    let num_db_subtrees = 10;
+    let num_chain_subtrees = 2;
+    let index_offset = usize::try_from(num_db_subtrees).expect("constant should fit in usize");
+    let db_height_range = 0..num_db_subtrees;
+    let chain_height_range = num_db_subtrees..(num_db_subtrees + num_chain_subtrees);
+
+    // Prepare the finalized state.
+    let db = {
+        let db = ZebraDb::new(&Config::ephemeral(), Mainnet, true);
+        let db_subtrees = db_height_range.enumerate().map(dummy_subtree);
+        for db_subtree in db_subtrees {
+            let mut db_batch = DiskWriteBatch::new();
+            db_batch.insert_sapling_subtree(&db, &db_subtree);
+            db.write(db_batch)
+                .expect("Writing a batch with a Sapling subtree should succeed.");
+        }
+        db
+    };
+
+    // Prepare the non-finalized state.
+    let chain = {
+        let mut chain = Chain::default();
+        let chain_subtrees = chain_height_range
+            .enumerate()
+            .map(|(index, height)| dummy_subtree((index_offset + index, height)));
+
+        for chain_subtree in chain_subtrees {
+            chain.insert_sapling_subtree(chain_subtree);
+        }
+
+        Arc::new(chain)
+    };
+
+    let modify_chain = |chain: &Arc<Chain>, index: usize, height| {
+        let mut chain = chain.as_ref().clone();
+        chain.insert_sapling_subtree(dummy_subtree((index, height)));
+        Some(Arc::new(chain))
+    };
+
+    // There should be 10 entries in db and 2 in chain with no overlap
+    // Unbounded range should start at 0
+    let all_subtrees = sapling_subtrees(Some(chain.clone()), &db, ..);
+    assert_eq!(all_subtrees.len(), 12, "should have 12 subtrees in state");
+
+    // Add a subtree to `chain` that overlaps and is not consistent with the db subtrees
+    // The inconsistent entry and any later entries should be omitted
+    let modified_chain = modify_chain(&chain, index_offset - 1, 400_000);
+    let all_subtrees = sapling_subtrees(modified_chain, &db, ..);
+    assert_eq!(all_subtrees.len(), 10, "should have 10 subtrees in state");
+
+    Ok(())
+}
+
 /// Tests if Zebra combines the Sapling note commitment subtrees from the finalized and
 /// non-finalized states correctly.
 #[tokio::test]
@@ -114,7 +179,7 @@ async fn test_sapling_subtrees() -> Result<()> {
     db.write(db_batch)
         .expect("Writing a batch with a Sapling subtree should succeed.");
 
-    // Prepare the non-fianlized state.
+    // Prepare the non-finalized state.
     let chain_subtree = NoteCommitmentSubtree::new(1, Height(3), dummy_subtree_root);
     let mut chain = Chain::default();
     chain.insert_sapling_subtree(chain_subtree);
@@ -179,7 +244,7 @@ async fn test_orchard_subtrees() -> Result<()> {
     db.write(db_batch)
         .expect("Writing a batch with an Orchard subtree should succeed.");
 
-    // Prepare the non-fianlized state.
+    // Prepare the non-finalized state.
     let chain_subtree = NoteCommitmentSubtree::new(1, Height(3), dummy_subtree_root);
     let mut chain = Chain::default();
     chain.insert_orchard_subtree(chain_subtree);
