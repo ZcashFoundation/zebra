@@ -92,7 +92,7 @@ jobs:
             rust: beta
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -226,7 +226,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -269,7 +269,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -290,7 +290,7 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v4.1.0
+        uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0

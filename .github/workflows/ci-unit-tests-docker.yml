@@ -98,6 +98,7 @@ jobs:
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
   test-all:
     name: Test all
+    timeout-minutes: 180
     runs-on: ubuntu-latest-xl
     needs: build
     steps:
@@ -135,6 +136,7 @@ jobs:
   # (We activate the test features to avoid recompiling dependencies, but we don't actually run any gRPC tests.)
   test-fake-activation-heights:
     name: Test with fake activation heights
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -157,6 +159,7 @@ jobs:
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
   test-empty-sync:
     name: Test checkpoint sync from empty state
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -178,6 +181,7 @@ jobs:
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
