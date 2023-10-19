@@ -37,11 +37,11 @@ Some PRs don't use Mergify:
 - Manual merges (these are usually disabled by our branch protection rules)
 
 We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
-For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create a patch workflow
-with an empty job with the same name. This lets the branch protection rules pass when the job is skipped. In Zebra, we name these
-workflows with the extension `.patch.yml`.
+For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create [a patch workflow](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks)
+with an empty job with the same name. This is a [known Actions issue](https://github.com/orgs/community/discussions/13690#discussioncomment-6653382).
+This lets the branch protection rules pass when the job is skipped. In Zebra, we name these workflows with the extension `.patch.yml`.
 
-Branch protecion rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
+Branch protection rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
 We also add branch protection rules for developer or devops features that we need to keep working, like coverage.
 
 But the following jobs don't need branch protection rules:
@@ -60,7 +60,7 @@ so new crate PRs also need to add a branch protection rule.
 GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
 This means that Google Cloud CI fails on these PRs.
 
-Unril we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
+Until we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
 1. Reviewing the code to make sure it won't give our secret keys to anyone
 2. Pushing a copy of the branch to the Zebra repository
 3. Opening a PR using that branch
