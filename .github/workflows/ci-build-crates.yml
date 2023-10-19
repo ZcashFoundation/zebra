@@ -22,7 +22,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
   pull_request:
     paths:
       # production code and test code
@@ -34,7 +34,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -50,7 +50,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       # Setup Rust with stable toolchain and minimal profile
@@ -99,14 +99,17 @@ jobs:
 
   build:
     name: Build ${{ matrix.crate }} crate
+    timeout-minutes: 90
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
+      # avoid rate-limit errors by only launching a few of these jobs at a time
+      max-parallel: 2
       fail-fast: true
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0

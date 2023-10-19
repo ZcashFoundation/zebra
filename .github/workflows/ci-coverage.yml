@@ -27,7 +27,7 @@ on:
       - '**/clippy.toml'
       # workflow definitions
       - 'codecov.yml'
-      - '.github/workflows/coverage.yml'
+      - '.github/workflows/ci-coverage.yml'
   pull_request:
     paths:
       - '**/*.rs'
@@ -38,7 +38,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       - 'codecov.yml'
-      - '.github/workflows/coverage.yml'
+      - '.github/workflows/ci-coverage.yml'
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest-xl
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
 

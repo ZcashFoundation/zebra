@@ -1,6 +1,6 @@
 //! Convenience traits for converting to [`Regex`] and [`RegexSet`].
 
-use std::iter;
+use std::{collections::HashSet, iter};
 
 use itertools::Itertools;
 use regex::{Error, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
@@ -149,5 +149,22 @@ where
         let regexes = regexes.iter().flat_map(|regex_set| regex_set.patterns());
 
         RegexSet::new(regexes)
+    }
+}
+
+/// A trait for getting additional information from a [`RegexSet`].
+pub trait RegexSetExt {
+    /// Returns the regex patterns for the supplied `indexes`.
+    fn patterns_for_indexes(&self, indexes: &HashSet<usize>) -> Vec<String>;
+}
+
+impl RegexSetExt for RegexSet {
+    fn patterns_for_indexes(&self, indexes: &HashSet<usize>) -> Vec<String> {
+        self.patterns()
+            .iter()
+            .enumerate()
+            .filter(|(index, _regex)| indexes.contains(index))
+            .map(|(_index, regex)| regex.to_string())
+            .collect()
     }
 }
