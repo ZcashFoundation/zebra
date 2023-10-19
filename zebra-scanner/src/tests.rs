@@ -32,33 +32,43 @@ use rand::{rngs::OsRng, RngCore};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use zebra_chain::{
-    block::{Block, Height},
-    serialization::ZcashSerialize,
+    block::Block,
+    chain_tip::ChainTip,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::Transaction,
 };
 
 #[tokio::test]
-#[allow(clippy::print_stdout)]
-async fn scanning_from_zebra() -> Result<()> {
+async fn scanning_from_populated_zebra_state() -> Result<()> {
     let account = AccountId::from(12);
     let extsk = ExtendedSpendingKey::master(&[]);
     let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
 
-    let (state_config, network) = Default::default();
-    let (_state_service, read_only_state_service, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::spawn_init(state_config, network, Height::MAX, 3000).await?;
+    let network = zebra_chain::parameters::Network::default();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service.
+    let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), network).await;
+
     let db = read_only_state_service.db();
 
-    let mut height = Height(0);
-    let mut num_transactions = 0;
+    // use the tip as starting height
+    let mut height = latest_chain_tip.best_tip_height().unwrap();
+
+    let mut transactions_found = 0;
+    let mut transactions_scanned = 0;
+    let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        // Get chain metadata
-        let sapling_tree_size = db
-            .sapling_tree_by_hash_or_height(height.into())
-            .expect("should exist")
-            .count();
+        // We fake the sapling tree size to 1 because we are not in Sapling heights.
+        let sapling_tree_size = 1;
         let orchard_tree_size = db
             .orchard_tree_by_hash_or_height(height.into())
             .expect("should exist")
@@ -77,18 +87,30 @@ async fn scanning_from_zebra() -> Result<()> {
 
         let res = scan_block(
             &zcash_primitives::consensus::MainNetwork,
-            compact_block,
+            compact_block.clone(),
             &vks[..],
             &[(account, nf)],
             None,
         )
         .unwrap();
 
-        num_transactions += res.transactions().len();
-        height = height.next()?;
+        transactions_found += res.transactions().len();
+        transactions_scanned += compact_block.vtx.len();
+        blocks_scanned += 1;
+
+        // scan backwards
+        if height.is_min() {
+            break;
+        }
+        height = height.previous()?;
     }
 
-    println!("num_transactions: {num_transactions}");
+    // make sure all blocks and transactions were scanned
+    assert_eq!(blocks_scanned, 11);
+    assert_eq!(transactions_scanned, 11);
+
+    // no relevant transactions should be found
+    assert_eq!(transactions_found, 0);
 
     let cb = fake_compact_block(
         1u32.into(),
@@ -118,6 +140,43 @@ async fn scanning_from_zebra() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn scanning_from_fake_generated_blocks() -> Result<()> {
+    let account = AccountId::from(12);
+    let extsk = ExtendedSpendingKey::master(&[]);
+    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
+    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
+    let nf = Nullifier([7; 32]);
+
+    let cb = fake_compact_block(
+        1u32.into(),
+        BlockHash([0; 32]),
+        nf,
+        &dfvk,
+        1,
+        false,
+        Some(0),
+    );
+
+    // The fake block function will have our transaction and a random one.
+    assert_eq!(cb.vtx.len(), 2);
+
+    let res = scan_block(
+        &zcash_primitives::consensus::MainNetwork,
+        cb,
+        &vks[..],
+        &[(account, nf)],
+        None,
+    )
+    .unwrap();
+
+    // The response should have one transaction relevant to the key we provided.
+    assert_eq!(res.transactions().len(), 1);
+
+    Ok(())
+}
+
+// Convert a zebra block and meta data into a compact block.
 fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
     CompactBlock {
         height: block
@@ -154,6 +213,7 @@ fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> Compact
     }
 }
 
+// Convert a zebra transaction into a compact transaction.
 fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
     CompactTx {
         index: index

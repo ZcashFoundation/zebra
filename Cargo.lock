@@ -5813,6 +5813,7 @@ dependencies = [
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",
+ "zebra-test",
 ]
 
 [[package]]
