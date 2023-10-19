@@ -241,7 +241,11 @@ impl ZebraDb {
             AddressTransaction::address_iterator_range(address_location, query_height_range);
 
         self.db
-            .zs_range_iter(&tx_loc_by_transparent_addr_loc, transaction_location_range)
+            .zs_range_iter(
+                &tx_loc_by_transparent_addr_loc,
+                transaction_location_range,
+                false,
+            )
             .map(|(tx_loc, ())| tx_loc)
             .collect()
     }
