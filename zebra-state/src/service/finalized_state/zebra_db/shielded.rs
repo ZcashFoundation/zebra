@@ -153,7 +153,7 @@ impl ZebraDb {
         &self,
     ) -> impl Iterator<Item = (RawBytes, Arc<sprout::tree::NoteCommitmentTree>)> + '_ {
         let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&sprout_trees, ..)
+        self.db.zs_range_iter(&sprout_trees, .., false)
     }
 
     // # Sapling trees
