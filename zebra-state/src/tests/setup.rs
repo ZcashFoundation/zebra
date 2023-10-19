@@ -92,9 +92,11 @@ pub(crate) fn new_state_with_mainnet_genesis(
     let config = Config::ephemeral();
     let network = Mainnet;
 
-    let mut finalized_state = FinalizedState::new(
+    let mut finalized_state = FinalizedState::new_with_debug(
         &config,
         network,
+        // The tests that use this setup function also commit invalid blocks to the state.
+        true,
         #[cfg(feature = "elasticsearch")]
         None,
     );

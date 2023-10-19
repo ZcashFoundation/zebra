@@ -190,7 +190,9 @@ use common::{
     test_type::TestType::{self, *},
 };
 
-use crate::common::cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade};
+use crate::common::cached_state::{
+    wait_for_state_version_message, wait_for_state_version_upgrade, DATABASE_FORMAT_UPGRADE_IS_LONG,
+};
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
@@ -1847,18 +1849,36 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         zebrad.expect_stdout_line_matches("loaded Zebra state cache .*tip.*=.*None")?;
     }
 
-    // Launch lightwalletd, if needed
-    let lightwalletd_and_port = if test_type.launches_lightwalletd() {
+    // Wait for the state to upgrade and the RPC port, if the upgrade is short.
+    //
+    // If incompletely upgraded states get written to the CI cache,
+    // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
+    if test_type.launches_lightwalletd() && !DATABASE_FORMAT_UPGRADE_IS_LONG {
         tracing::info!(
             ?test_type,
             ?zebra_rpc_address,
             "waiting for zebrad to open its RPC port..."
         );
-        zebrad.expect_stdout_line_matches(format!(
-            "Opened RPC endpoint at {}",
-            zebra_rpc_address.expect("lightwalletd test must have RPC port")
-        ))?;
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            [format!(
+                "Opened RPC endpoint at {}",
+                zebra_rpc_address.expect("lightwalletd test must have RPC port")
+            )],
+        )?;
+    } else {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            None,
+        )?;
+    }
 
+    // Launch lightwalletd, if needed
+    let lightwalletd_and_port = if test_type.launches_lightwalletd() {
         tracing::info!(
             ?zebra_rpc_address,
             "launching lightwalletd connected to zebrad",
@@ -1957,17 +1977,17 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                     use_internet_connection,
                 )?;
 
-                // Before we write a cached state image, wait for a database upgrade.
-                //
-                // TODO: this line will hang if the state upgrade finishes before zebra is synced.
-                // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-                // If it happens for a later upgrade, this code can be moved earlier in the test,
-                // as long as all the cached states are version 25.2.2 or later.
-                wait_for_state_version_upgrade(
-                    &mut zebrad,
-                    &state_version_message,
-                    database_format_version_in_code(),
-                )?;
+                // Wait for the state to upgrade, if the upgrade is long.
+                // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false,
+                // or combine "wait for sync" with "wait for state version upgrade".
+                if DATABASE_FORMAT_UPGRADE_IS_LONG {
+                    wait_for_state_version_upgrade(
+                        &mut zebrad,
+                        &state_version_message,
+                        database_format_version_in_code(),
+                        None,
+                    )?;
+                }
 
                 (zebrad, Some(lightwalletd))
             }
@@ -1984,17 +2004,16 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
             tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
             zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
-            // Before we write a cached state image, wait for a database upgrade.
-            //
-            // TODO: this line will hang if the state upgrade finishes before zebra is synced.
-            // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-            // If it happens for a later upgrade, this code can be moved earlier in the test,
-            // as long as all the cached states are version 25.2.2 or later.
-            wait_for_state_version_upgrade(
-                &mut zebrad,
-                &state_version_message,
-                database_format_version_in_code(),
-            )?;
+            // Wait for the state to upgrade, if the upgrade is long.
+            // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
+            if DATABASE_FORMAT_UPGRADE_IS_LONG {
+                wait_for_state_version_upgrade(
+                    &mut zebrad,
+                    &state_version_message,
+                    database_format_version_in_code(),
+                    None,
+                )?;
+            }
 
             (zebrad, None)
         }
@@ -2719,6 +2738,15 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     // Store the state version message so we can wait for the upgrade later if needed.
     let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
+    // It doesn't matter how long the state version upgrade takes,
+    // because the sync finished regex is repeated every minute.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        database_format_version_in_code(),
+        None,
+    )?;
+
     // Wait for zebrad to load the full cached blockchain.
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
@@ -2757,18 +2785,6 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
             r#"["orchard", 585, 1]"#.to_string(),
         ),
     ];
-
-    // Before we write a cached state image, wait for a database upgrade.
-    //
-    // TODO: this line will hang if the state upgrade finishes before zebra is synced.
-    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-    // If it happens for a later upgrade, this code can be moved earlier in the test,
-    // as long as all the cached states are version 25.2.2 or later.
-    wait_for_state_version_upgrade(
-        &mut zebrad,
-        &state_version_message,
-        database_format_version_in_code(),
-    )?;
 
     for i in zcashd_test_vectors {
         let res = client.call("z_getsubtreesbyindex", i.1).await?;
