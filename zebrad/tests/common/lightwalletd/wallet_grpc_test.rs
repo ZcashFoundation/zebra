@@ -43,10 +43,13 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
-use zebra_state::latest_version_for_adding_subtrees;
+use zebra_state::database_format_version_in_code;
 
 use crate::common::{
-    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -107,7 +110,22 @@ pub async fn run() -> Result<()> {
         ?zebra_rpc_address,
         "launched zebrad, waiting for zebrad to open its RPC port..."
     );
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+
+    // Wait for the state to upgrade, if the upgrade is short.
+    //
+    // If incompletely upgraded states get written to the CI cache,
+    // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
+    //
+    // If this line hangs, move it before the RPC port check.
+    // (The RPC port is usually much faster than even a quick state upgrade.)
+    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            [format!("Opened RPC endpoint at {zebra_rpc_address}")],
+        )?;
+    }
 
     tracing::info!(
         ?zebra_rpc_address,
@@ -134,6 +152,17 @@ pub async fn run() -> Result<()> {
         true,
         use_internet_connection,
     )?;
+
+    // Wait for the state to upgrade, if the upgrade is long.
+    // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
+    if DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            None,
+        )?;
+    }
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -383,18 +412,6 @@ pub async fn run() -> Result<()> {
         lightd_info.zcashd_subversion,
         zebrad::application::user_agent()
     );
-
-    // Before we call `z_getsubtreesbyindex`, we might need to wait for a database upgrade.
-    //
-    // TODO: this line will hang if the state upgrade finishes before the subtree tests start.
-    // But that is unlikely with the 25.2 upgrade, because it takes 20+ minutes.
-    // If it happens for a later upgrade, this code can be moved earlier in the test,
-    // as long as all the cached states are version 25.2.2 or later.
-    wait_for_state_version_upgrade(
-        &mut zebrad,
-        &state_version_message,
-        latest_version_for_adding_subtrees(),
-    )?;
 
     // Call `z_getsubtreesbyindex` separately for...
 
