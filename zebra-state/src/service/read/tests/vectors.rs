@@ -103,7 +103,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 /// Tests if Zebra combines the note commitment subtrees from the finalized and
 /// non-finalized states correctly.
 #[tokio::test]
-async fn test_subtrees() -> Result<()> {
+async fn test_read_subtrees() -> Result<()> {
     let dummy_subtree = |(index, height)| {
         NoteCommitmentSubtree::new(
             u16::try_from(index).expect("should fit in u16"),
@@ -152,15 +152,32 @@ async fn test_subtrees() -> Result<()> {
     };
 
     // There should be 10 entries in db and 2 in chain with no overlap
+
     // Unbounded range should start at 0
     let all_subtrees = sapling_subtrees(Some(chain.clone()), &db, ..);
     assert_eq!(all_subtrees.len(), 12, "should have 12 subtrees in state");
 
     // Add a subtree to `chain` that overlaps and is not consistent with the db subtrees
+    let first_chain_index = index_offset - 1;
+    let end_height = Height(400_000);
+    let modified_chain = modify_chain(&chain, first_chain_index, end_height.0);
+
     // The inconsistent entry and any later entries should be omitted
-    let modified_chain = modify_chain(&chain, index_offset - 1, 400_000);
-    let all_subtrees = sapling_subtrees(modified_chain, &db, ..);
+    let all_subtrees = sapling_subtrees(modified_chain.clone(), &db, ..);
     assert_eq!(all_subtrees.len(), 10, "should have 10 subtrees in state");
+
+    let first_chain_index =
+        NoteCommitmentSubtreeIndex(u16::try_from(first_chain_index).expect("should fit in u16"));
+
+    // Entries should be returned without reading from disk if the chain contains the first subtree index in the range
+    let mut chain_subtrees = sapling_subtrees(modified_chain, &db, first_chain_index..);
+    assert_eq!(chain_subtrees.len(), 3, "should have 3 subtrees in chain");
+
+    let (index, subtree) = chain_subtrees
+        .pop_first()
+        .expect("chain_subtrees should not be empty");
+    assert_eq!(first_chain_index, index, "subtree indexes should match");
+    assert_eq!(end_height, subtree.end, "subtree end heights should match");
 
     Ok(())
 }
