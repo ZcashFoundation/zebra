@@ -153,7 +153,7 @@ impl ZebraDb {
         &self,
     ) -> impl Iterator<Item = (RawBytes, Arc<sprout::tree::NoteCommitmentTree>)> + '_ {
         let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&sprout_trees, ..)
+        self.db.zs_range_iter(&sprout_trees, .., false)
     }
 
     // # Sapling trees
@@ -207,7 +207,7 @@ impl ZebraDb {
         R: std::ops::RangeBounds<Height>,
     {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&sapling_trees, range)
+        self.db.zs_range_iter(&sapling_trees, range, false)
     }
 
     /// Returns the Sapling note commitment trees in the reversed range, in decreasing height order.
@@ -331,7 +331,7 @@ impl ZebraDb {
         R: std::ops::RangeBounds<Height>,
     {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
-        self.db.zs_range_iter(&orchard_trees, range)
+        self.db.zs_range_iter(&orchard_trees, range, false)
     }
 
     /// Returns the Orchard note commitment trees in the reversed range, in decreasing height order.
