@@ -83,7 +83,7 @@ impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
             let mut ommers = frontier_data.ommers().to_vec();
             let position = usize::try_from(u64::from(frontier_data.position()))
                 .expect("new position should fit in a `usize`");
-            if frontier_data.position().is_odd() {
+            if frontier_data.position().is_right_child() {
                 let left = ommers.remove(0);
                 leaf = LegacyLeaf::Right(left, leaf_from_frontier);
             }
