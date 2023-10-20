@@ -1,4 +1,4 @@
-name: CD
+name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
 # already in process, won't get cancelled. Instead, we let the first to complete
@@ -47,8 +47,8 @@ on:
   #    # workflow definitions
   #    - 'docker/**'
   #    - '.dockerignore'
-  #    - '.github/workflows/continous-delivery.yml'
-  #    - '.github/workflows/build-docker-image.yml'
+  #    - '.github/workflows/cd-deploy-nodes-gcp.yml'
+  #    - '.github/workflows/sub-build-docker-image.yml'
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
@@ -66,13 +66,12 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.dockerignore'
-      - '.github/workflows/continous-delivery.yml'
-      - '.github/workflows/find-cached-disks.yml'
+      - '.github/workflows/cd-deploy-nodes-gcp.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
 
   release:
     types:
       - published
-
 
 jobs:
   # If a release was made we want to extract the first part of the semver from the
@@ -108,7 +107,7 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
-    uses: ./.github/workflows/build-docker-image.yml
+    uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
@@ -118,99 +117,40 @@ jobs:
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
-    name: Test Zebra CD Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
+    name: Test CD default Docker config file
     needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Make sure Zebra can sync at least one full checkpoint on mainnet
-      - name: Run tests using the default config
-        shell: /usr/bin/bash -exo pipefail {0}
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --detach --name default-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-
-          # Use a subshell to handle the broken pipe error gracefully
-          (
-            trap "" PIPE;
-            docker logs \
-            --tail all \
-            --follow \
-            default-conf-tests | \
-            tee --output-error=exit /dev/stderr | \
-            grep --max-count=1 --extended-regexp --color=always \
-            -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"
-          ) || true
-          LOGS_EXIT_STATUS=$?
-
-          docker stop default-conf-tests
-
-          EXIT_STATUS=$(docker wait default-conf-tests || echo "Error retrieving exit status");
-          echo "docker exit status: $EXIT_STATUS";
-
-          # If grep found the pattern, exit with the Docker container exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
-          fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1;
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'default-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK'
+      network: 'Mainnet'
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
-    name: Test testnet Zebra CD Docker config file
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
+    name: Test CD testnet Docker config file
     needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+    # Make sure Zebra can sync the genesis block on testnet
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'testnet-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK'
+      network: 'Testnet'
 
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      # Make sure Zebra can sync the genesis block on testnet
-      - name: Run tests using a testnet config
-        shell: /usr/bin/bash -exo pipefail {0}
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          docker run --env "NETWORK=Testnet" --detach --name testnet-conf-tests -t ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-          # Use a subshell to handle the broken pipe error gracefully
-          (
-            trap "" PIPE;
-            docker logs \
-            --tail all \
-            --follow \
-            testnet-conf-tests | \
-            tee --output-error=exit /dev/stderr | \
-            grep --max-count=1 --extended-regexp --color=always \
-            -e "net.*=.*Test.*estimated progress to chain tip.*Genesis" \
-            -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter";
-          ) || true
-          LOGS_EXIT_STATUS=$?
-
-          docker stop testnet-conf-tests
-
-          EXIT_STATUS=$(docker wait testnet-conf-tests || echo "Error retrieving exit status");
-          echo "docker exit status: $EXIT_STATUS";
-
-          # If grep found the pattern, exit with the Docker container exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
-          fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1;
+  # Test that Zebra works using $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test CD custom Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'custom-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "v1.0.0-rc.2.toml"'
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -225,14 +165,14 @@ jobs:
   #   otherwise a new major version is deployed in a new MiG.
   #
   # Runs:
-  # - on every push/merge to the `main` branch
+  # - on every push to the `main` branch
   # - on every release, when it's published
   deploy-nodes:
     strategy:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, test-configuration-file, versioning ]
+    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -241,7 +181,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
 
@@ -334,7 +274,7 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build, test-configuration-file ]
+    needs: [ build, test-configuration-file, test-zebra-conf-path ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -343,7 +283,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: false
 
@@ -401,7 +341,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ versioning, build,  test-configuration-file, deploy-nodes, deploy-instance ]
+    needs: [ versioning, build, deploy-nodes, deploy-instance ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)

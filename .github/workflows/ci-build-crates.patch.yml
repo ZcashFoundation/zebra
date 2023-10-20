@@ -14,7 +14,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/build-crates-individually.yml'
+      - '.github/workflows/ci-build-crates.yml'
 
 jobs:
   matrix:
@@ -23,7 +23,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4.1.0
+      - uses: actions/checkout@v4.1.1
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust

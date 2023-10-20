@@ -235,44 +235,19 @@ impl ZebraDb {
         let tx_loc_by_transparent_addr_loc =
             self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
-        // Manually fetch the entire addresses' transaction locations
-        let mut addr_transactions = BTreeSet::new();
-
         // A potentially invalid key representing the first UTXO send to the address,
         // or the query start height.
-        let mut transaction_location = AddressTransaction::address_iterator_start(
-            address_location,
-            *query_height_range.start(),
-        );
+        let transaction_location_range =
+            AddressTransaction::address_iterator_range(address_location, query_height_range);
 
-        loop {
-            // Seek to a valid entry for this address, or the first entry for the next address
-            transaction_location = match self
-                .db
-                .zs_next_key_value_from(&tx_loc_by_transparent_addr_loc, &transaction_location)
-            {
-                Some((transaction_location, ())) => transaction_location,
-                // We're finished with the final address in the column family
-                None => break,
-            };
-
-            // We found the next address, so we're finished with this address
-            if transaction_location.address_location() != address_location {
-                break;
-            }
-
-            // We're past the end height, so we're finished with this query
-            if transaction_location.transaction_location().height > *query_height_range.end() {
-                break;
-            }
-
-            addr_transactions.insert(transaction_location);
-
-            // A potentially invalid key representing the next possible output
-            transaction_location.address_iterator_next();
-        }
-
-        addr_transactions
+        self.db
+            .zs_range_iter(
+                &tx_loc_by_transparent_addr_loc,
+                transaction_location_range,
+                false,
+            )
+            .map(|(tx_loc, ())| tx_loc)
+            .collect()
     }
 
     // Address index queries
