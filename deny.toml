@@ -10,7 +10,7 @@
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "deny"
-
+tails
 # Don't allow wildcard ("any version") dependencies
 wildcards = "deny"
 # Allow private and dev wildcard dependencies.
@@ -72,13 +72,10 @@ skip-tree = [
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
 
+    # wait for jsonrpc-http-server to upgrade
+    { name = "redox_syscall", version = "=0.2.16" },
+
     # ECC crates
-
-    # wait for minreq and zcash_proofs to upgrade
-    { name = "rustls", version = "=0.20.9" },
-
-    # wait for zcash_proofs to upgrade
-    { name = "webpki-roots", version = "=0.22.6" },
 
     # zebra-utils dependencies
 
