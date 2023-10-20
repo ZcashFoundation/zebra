@@ -5,6 +5,26 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - TODO: DATE
+
+Zebra's mining RPCs are now available in release builds. TODO: rest of intro
+
+This release contains the following changes:
+ 
+### Mining RPCs in Production Builds
+
+Zebra's mining RPCs are now available in release builds (#7740). Any Zebra instance can be used
+by a solo miner or mining pool. This stabilises 12 RPCs, including  `getblocktemplate`, `submitblock`,
+`getmininginfo`, `getnetworksolps`, `[z_]validateaddress` and `getblocksubsidy`. For more information,
+read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebra/).
+
+Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
+if your mining pool needs extra RPC methods or fields.
+
+### Security
+
+TODO: rest of changelog
+
 ## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-10-16
 
 This release adds RPC methods for the "Spend before Sync" light wallet feature,
