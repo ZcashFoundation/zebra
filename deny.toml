@@ -10,7 +10,7 @@
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "deny"
-tails
+
 # Don't allow wildcard ("any version") dependencies
 wildcards = "deny"
 # Allow private and dev wildcard dependencies.
