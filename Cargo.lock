@@ -5412,9 +5412,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.10.0"
+version = "0.10.0-rc.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6a382af39be9ee5a3788157145c404b7cd19acc440903f6c34b09fb44f0e991"
+checksum = "ecc33f71747a93d509f7e1c047961e359a271bdf4869cc07f7f65ee1ba7df8c2"
 dependencies = [
  "base64 0.21.4",
  "bech32",
@@ -5440,7 +5440,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
- "zcash_primitives 0.13.0",
+ "zcash_primitives 0.13.0-rc.1",
 ]
 
 [[package]]
@@ -5515,9 +5515,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.13.0"
+version = "0.13.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17e4c94ca8d69d2fcf2be97522da5732a580eb2125cda3b150761952f8df8e6"
+checksum = "0cc4391d9325e0a51a7cbff02b5c4b5472d66087bd9c903ddb12dea7ec22f3e0"
 dependencies = [
  "aes",
  "bip0039",
@@ -5798,7 +5798,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-scanner"
-version = "1.0.0-beta.29"
+version = "1.0.0-beta.30"
 dependencies = [
  "bls12_381",
  "color-eyre",
@@ -5809,7 +5809,7 @@ dependencies = [
  "tokio",
  "zcash_client_backend",
  "zcash_note_encryption",
- "zcash_primitives 0.13.0",
+ "zcash_primitives 0.13.0-rc.1",
  "zebra-chain",
  "zebra-consensus",
  "zebra-state",

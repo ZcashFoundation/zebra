@@ -1,6 +1,6 @@
 [package]
 name = "zebra-scanner"
-version = "1.0.0-beta.29"
+version = "1.0.0-beta.30"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Blockchain scanner for the Zebra Zcash node"
 license = "MIT OR Apache-2.0"
@@ -19,8 +19,8 @@ categories = ["cryptography::cryptocurrencies"]
 # Production features that activate extra dependencies, or extra features in dependencies
 
 [dependencies]
-zcash_client_backend = "0.10.0"
-zcash_primitives = "0.13.0"
+zcash_client_backend = "0.10.0-rc.1"
+zcash_primitives = "=0.13.0-rc.1"
 zcash_note_encryption = "0.4.0"
 
 rand = "0.8.5"
