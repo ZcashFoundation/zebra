@@ -256,7 +256,9 @@ impl ZebraDb {
             .cf_handle("sapling_note_commitment_subtree")
             .unwrap();
 
-        self.db.zs_range_iter(&sapling_subtrees, range).collect()
+        self.db
+            .zs_range_iter(&sapling_subtrees, range, false)
+            .collect()
     }
 
     /// Get the sapling note commitment subtress for the finalized tip.
@@ -380,7 +382,9 @@ impl ZebraDb {
             .cf_handle("orchard_note_commitment_subtree")
             .unwrap();
 
-        self.db.zs_range_iter(&orchard_subtrees, range).collect()
+        self.db
+            .zs_range_iter(&orchard_subtrees, range, false)
+            .collect()
     }
 
     /// Get the orchard note commitment subtress for the finalized tip.
