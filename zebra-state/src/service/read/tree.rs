@@ -48,99 +48,26 @@ where
         .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
 }
 
-/// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
+/// Returns a list of Sapling [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
-/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
-/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
 ///
-/// # Correctness
-///
-/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
-/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
-/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
-/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
-/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
-/// diverged.)
-/// 2. APIs that return single subtrees can't be used here, because they can create
-/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+/// See [`subtrees`] for more details.
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
-    start_index: NoteCommitmentSubtreeIndex,
-    limit: Option<NoteCommitmentSubtreeIndex>,
+    range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
 ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>
 where
     C: AsRef<Chain>,
 {
-    let mut db_list = db.sapling_subtree_list_by_index_for_rpc(start_index, limit);
-
-    if let Some(limit) = limit {
-        let subtrees_num = u16::try_from(db_list.len())
-            .expect("There can't be more than `u16::MAX` Sapling subtrees.");
-
-        // Return the subtrees if the amount of them reached the given limit.
-        if subtrees_num == limit.0 {
-            return db_list;
-        }
-
-        // If not, make sure the amount is below the limit.
-        debug_assert!(subtrees_num < limit.0);
-    }
-
-    // If there's no chain, then we have the complete list.
-    let Some(chain) = chain else {
-        return db_list;
-    };
-
-    // Unlike the other methods, this returns any trees in the range,
-    // even if there is no tree for start_index.
-    let fork_list = chain.as_ref().sapling_subtrees_in_range(start_index, limit);
-
-    // If there's no subtrees in chain, then we have the complete list.
-    if fork_list.is_empty() {
-        return db_list;
-    };
-
-    // Check for inconsistent trees in the fork.
-    for (fork_index, fork_subtree) in fork_list {
-        // If there's no matching index, just update the list of trees.
-        let Some(db_subtree) = db_list.get(&fork_index) else {
-            db_list.insert(fork_index, fork_subtree);
-
-            // Stop adding new subtrees once their amount reaches the given limit.
-            if let Some(limit) = limit {
-                let subtrees_num = u16::try_from(db_list.len())
-                    .expect("There can't be more than `u16::MAX` Sapling subtrees.");
-
-                if subtrees_num == limit.0 {
-                    break;
-                }
-            }
-
-            continue;
-        };
-
-        // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
-        if &fork_subtree != db_subtree {
-            break;
-        }
-
-        // Otherwise, the subtree is already in the list, so we don't need to add it.
-    }
-
-    // Make sure the amount of retrieved subtrees does not exceed the given limit.
-    #[cfg(debug_assertions)]
-    if let Some(limit) = limit {
-        assert!(db_list.len() <= limit.0.into());
-    }
-
-    // Check that we got the start subtree from the non-finalized or finalized state.
-    // (The non-finalized state doesn't do this check.)
-    if db_list.get(&start_index).is_some() {
-        db_list
-    } else {
-        BTreeMap::new()
-    }
+    subtrees(
+        chain,
+        range,
+        |chain, range| chain.sapling_subtrees_in_range(range),
+        |range| db.sapling_subtree_list_by_index_range(range),
+    )
 }
 
 /// Returns the Orchard
@@ -164,96 +91,107 @@ where
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
-/// Returns a list of Orchard [`NoteCommitmentSubtree`]s starting at `start_index`.
+/// Returns a list of Orchard [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
-/// If `limit` is provided, the list is limited to `limit` entries. If there is no subtree at
-/// `start_index` in the non-finalized `chain` or finalized `db`, the returned list is empty.
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
 ///
-/// # Correctness
-///
-/// 1. After `chain` was cloned, the StateService can commit additional blocks to the finalized
-/// state `db`. Usually, the subtrees of these blocks are consistent. But if the `chain` is a
-/// different fork to `db`, then the trees can be inconsistent. In that case, we ignore all the
-/// trees in `chain` after the first inconsistent tree, because we know they will be inconsistent as
-/// well. (It is cryptographically impossible for tree roots to be equal once the leaves have
-/// diverged.)
-/// 2. APIs that return single subtrees can't be used here, because they can create
-/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+/// See [`subtrees`] for more details.
 pub fn orchard_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
-    start_index: NoteCommitmentSubtreeIndex,
-    limit: Option<NoteCommitmentSubtreeIndex>,
+    range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
 ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>
 where
     C: AsRef<Chain>,
 {
-    let mut db_list = db.orchard_subtree_list_by_index_for_rpc(start_index, limit);
+    subtrees(
+        chain,
+        range,
+        |chain, range| chain.orchard_subtrees_in_range(range),
+        |range| db.orchard_subtree_list_by_index_range(range),
+    )
+}
 
-    if let Some(limit) = limit {
-        let subtrees_num = u16::try_from(db_list.len())
-            .expect("There can't be more than `u16::MAX` Orchard subtrees.");
+/// Returns a list of [`NoteCommitmentSubtree`]s in the provided range.
+///
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
+///
+/// Accepts a `chain` from the non-finalized state, a `range` of subtree indexes to retrieve,
+/// a `read_chain` function for retrieving the `range` of subtrees from `chain`, and
+/// a `read_disk` function for retrieving the `range` from [`ZebraDb`].
+///
+/// Returns a consistent set of subtrees for the supplied chain fork and database.
+/// Avoids reading the database if the subtrees are present in memory.
+///
+/// # Correctness
+///
+/// APIs that return single subtrees can't be used for `read_chain` and `read_disk`, because they
+/// can create an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+fn subtrees<C, Range, Node, ChainSubtreeFn, DbSubtreeFn>(
+    chain: Option<C>,
+    range: Range,
+    read_chain: ChainSubtreeFn,
+    read_disk: DbSubtreeFn,
+) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>
+where
+    C: AsRef<Chain>,
+    Node: PartialEq,
+    Range: std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
+    ChainSubtreeFn: FnOnce(
+        &Chain,
+        Range,
+    )
+        -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>,
+    DbSubtreeFn:
+        FnOnce(Range) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>,
+{
+    use std::ops::Bound::*;
 
-        // Return the subtrees if the amount of them reached the given limit.
-        if subtrees_num == limit.0 {
-            return db_list;
-        }
-
-        // If not, make sure the amount is below the limit.
-        debug_assert!(subtrees_num < limit.0);
-    }
-
-    // If there's no chain, then we have the complete list.
-    let Some(chain) = chain else {
-        return db_list;
+    let start_index = match range.start_bound().cloned() {
+        Included(start_index) => start_index,
+        Excluded(start_index) => (start_index.0 + 1).into(),
+        Unbounded => 0.into(),
     };
 
-    // Unlike the other methods, this returns any trees in the range,
-    // even if there is no tree for start_index.
-    let fork_list = chain.as_ref().orchard_subtrees_in_range(start_index, limit);
+    // # Correctness
+    //
+    // After `chain` was cloned, the StateService can commit additional blocks to the finalized state `db`.
+    // Usually, the subtrees of these blocks are consistent. But if the `chain` is a different fork to `db`,
+    // then the trees can be inconsistent. In that case, if `chain` does not contain a subtree at the first
+    // index in the provided range, we ignore all the trees in `chain` after the first inconsistent tree,
+    // because we know they will be inconsistent as well. (It is cryptographically impossible for tree roots
+    // to be equal once the leaves have diverged.)
 
-    // If there's no subtrees in chain, then we have the complete list.
-    if fork_list.is_empty() {
-        return db_list;
-    };
+    let results = match chain.map(|chain| read_chain(chain.as_ref(), range.clone())) {
+        Some(chain_results) if chain_results.contains_key(&start_index) => return chain_results,
+        Some(chain_results) => {
+            let mut db_results = read_disk(range);
 
-    // Check for inconsistent trees in the fork.
-    for (fork_index, fork_subtree) in fork_list {
-        // If there's no matching index, just update the list of trees.
-        let Some(db_subtree) = db_list.get(&fork_index) else {
-            db_list.insert(fork_index, fork_subtree);
+            // Check for inconsistent trees in the fork.
+            for (chain_index, chain_subtree) in chain_results {
+                // If there's no matching index, just update the list of trees.
+                let Some(db_subtree) = db_results.get(&chain_index) else {
+                    db_results.insert(chain_index, chain_subtree);
+                    continue;
+                };
 
-            // Stop adding new subtrees once their amount reaches the given limit.
-            if let Some(limit) = limit {
-                let subtrees_num = u16::try_from(db_list.len())
-                    .expect("There can't be more than `u16::MAX` Orchard subtrees.");
-
-                if subtrees_num == limit.0 {
+                // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
+                if &chain_subtree != db_subtree {
                     break;
                 }
+                // Otherwise, the subtree is already in the list, so we don't need to add it.
             }
 
-            continue;
-        };
-
-        // We have an outdated chain fork, so skip this subtree and all remaining subtrees.
-        if &fork_subtree != db_subtree {
-            break;
+            db_results
         }
+        None => read_disk(range),
+    };
 
-        // Otherwise, the subtree is already in the list, so we don't need to add it.
-    }
-
-    // Make sure the amount of retrieved subtrees does not exceed the given limit.
-    #[cfg(debug_assertions)]
-    if let Some(limit) = limit {
-        assert!(db_list.len() <= limit.0.into());
-    }
-
-    // Check that we got the start subtree from the non-finalized or finalized state.
-    // (The non-finalized state doesn't do this check.)
-    if db_list.get(&start_index).is_some() {
-        db_list
+    // Check that we got the start subtree
+    if results.contains_key(&start_index) {
+        results
     } else {
         BTreeMap::new()
     }
