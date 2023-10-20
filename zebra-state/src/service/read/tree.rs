@@ -52,6 +52,8 @@ where
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.
 /// Otherwise, subtrees are continuous up to the finalized tip.
+///
+/// See [`subtrees`] for more details.
 pub fn sapling_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -93,6 +95,8 @@ where
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.
 /// Otherwise, subtrees are continuous up to the finalized tip.
+///
+/// See [`subtrees`] for more details.
 pub fn orchard_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -109,27 +113,40 @@ where
     )
 }
 
-/// Returns a list of [`NoteCommitmentSubtree`]s starting at `start_index`.
+/// Returns a list of [`NoteCommitmentSubtree`]s in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.
 /// Otherwise, subtrees are continuous up to the finalized tip.
 ///
+/// Accepts a `chain` from the non-finalized state, a `range` of subtree indexes to retrieve,
+/// a `read_chain` function for retrieving the `range` of subtrees from `chain`, and
+/// a `read_disk` function for retrieving the `range` from [`ZebraDb`].
+///
+/// Returns without calling `read_disk` if `read_chain` returns a subtree at the first subtree index
+/// in the provided `range`. Otherwise, if `read_chain` and `read_disk` return different subtrees for
+/// the same subtree index, ignores all the trees in `chain` after the first inconsistent tree.
+///
 /// # Correctness
 ///
-/// APIs that return single subtrees can't be used here, because they can create
-/// an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
-fn subtrees<C, R, N, F1, F2>(
+/// APIs that return single subtrees can't be used for `read_chain` and `read_disk`, because they
+/// can create an inconsistent list of subtrees after concurrent non-finalized and finalized updates.
+fn subtrees<C, Range, Node, ChainSubtreeFn, DbSubtreeFn>(
     chain: Option<C>,
-    range: R,
-    read_chain: F1,
-    read_disk: F2,
-) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>
+    range: Range,
+    read_chain: ChainSubtreeFn,
+    read_disk: DbSubtreeFn,
+) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>
 where
     C: AsRef<Chain>,
-    N: PartialEq,
-    R: std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
-    F1: FnOnce(&Chain, R) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>,
-    F2: FnOnce(R) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<N>>,
+    Node: PartialEq,
+    Range: std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
+    ChainSubtreeFn: FnOnce(
+        &Chain,
+        Range,
+    )
+        -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>,
+    DbSubtreeFn:
+        FnOnce(Range) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>,
 {
     use std::ops::Bound::*;
 
