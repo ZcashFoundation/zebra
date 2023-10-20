@@ -48,7 +48,7 @@ where
         .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
 }
 
-/// Returns a list of Sapling [`NoteCommitmentSubtree`]s starting at `start_index`.
+/// Returns a list of Sapling [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.
 /// Otherwise, subtrees are continuous up to the finalized tip.
@@ -122,9 +122,8 @@ where
 /// a `read_chain` function for retrieving the `range` of subtrees from `chain`, and
 /// a `read_disk` function for retrieving the `range` from [`ZebraDb`].
 ///
-/// Returns without calling `read_disk` if `read_chain` returns a subtree at the first subtree index
-/// in the provided `range`. Otherwise, if `read_chain` and `read_disk` return different subtrees for
-/// the same subtree index, ignores all the trees in `chain` after the first inconsistent tree.
+/// Returns a consistent set of subtrees for the supplied chain fork and database.
+/// Avoids reading the database if the subtrees are present in memory.
 ///
 /// # Correctness
 ///
