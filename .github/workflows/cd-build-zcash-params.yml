@@ -28,7 +28,7 @@ on:
       # workflow definitions
       - 'docker/zcash-params/Dockerfile'
       - '.dockerignore'
-      - '.github/workflows/sub-build-zcash-params.yml'
+      - '.github/workflows/cd-build-zcash-params.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
 jobs:
