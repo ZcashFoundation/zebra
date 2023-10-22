@@ -21,19 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
         os: [ubuntu-latest]
         rust: [stable, beta]
-        features: ["", " --features getblocktemplate-rpcs"]
+        features: [""]
         exclude:
           - os: macos-latest
             rust: beta
-          - os: macos-latest
-            features: " --features getblocktemplate-rpcs"
-          - os: ubuntu-latest
-            rust: beta
-            features: " --features getblocktemplate-rpcs"
 
     steps:
       - run: 'echo "No build required"'
