@@ -213,8 +213,13 @@ We use the following rocksdb column families:
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
-Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
-Other structures are encoded using `IntoDisk`/`FromDisk`.
+### Data Formats
+[rocksdb-data-format]: #rocksdb-data-format
+
+We use big-endian encoding for keys, to allow database index prefix searches.
+
+Most Zcash protocol structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
+Other structures are encoded using custom `IntoDisk`/`FromDisk` implementations.
 
 Block and Transaction Data:
 - `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
@@ -234,17 +239,21 @@ Block and Transaction Data:
 - `NoteCommitmentSubtreeIndex`: 16 bits, big-endian, unsigned
 - `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
 
-We use big-endian encoding for keys, to allow database index prefix searches.
-
 Amounts:
 - `Amount`: 64 bits, little-endian, signed
 - `ValueBalance`: `[Amount; 4]`
 
-Derived Formats:
+Derived Formats (legacy):
 - `*::NoteCommitmentTree`: `bincode` using `serde`
   - stored note commitment trees always have cached roots
-- `NonEmptyHistoryTree`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
+- `NonEmptyHistoryTree`: `bincode` using `serde`, using our copy of an old `zcash_history` `serde`
+  implementation
 
+`bincode` is a risky format to use, because it depends on the exact order and type of struct fields.
+Do not use it for new column families.
+
+#### Address Format
+[rocksdb-address-format]: #rocksdb-address-format
 
 The following figure helps visualizing the address index, which is the most complicated part.
 Numbers in brackets are array sizes; bold arrows are compositions (i.e. `TransactionLocation` is the
@@ -289,6 +298,7 @@ Each column family handles updates differently, based on its specific consensus 
   - Each key-value entry is created once.
   - Keys can be deleted, but values are never updated.
   - Code called by ReadStateService must ignore deleted keys, or use a read lock.
+  - We avoid deleting keys, and avoid using iterators on Delete column families, for performance.
   - TODO: should we prevent re-inserts of keys that have been deleted?
 - Update:
   - Each key-value entry is created once.
@@ -442,8 +452,6 @@ So they should not be used for consensus-critical checks.
   the Merkle tree nodes as required to insert new items.
   For each block committed, the old tree is deleted and a new one is inserted
   by its new height.
-  **TODO:** store the sprout note commitment tree by `()`,
-  to avoid ReadStateService concurrent write issues.
 
 - The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
   state for every height, for the specific pool. Each tree is stored
@@ -457,7 +465,6 @@ So they should not be used for consensus-critical checks.
   state. There is always a single entry for it. The tree is stored as the set of "peaks"
   of the "Merkle mountain range" tree structure, which is what is required to
   insert new items.
-  **TODO:** store the history tree by `()`, to avoid ReadStateService concurrent write issues.
 
 - Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
   tree of a certain block. We only use the keys since we just need the set of anchors,
