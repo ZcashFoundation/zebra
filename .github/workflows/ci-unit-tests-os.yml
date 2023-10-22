@@ -78,21 +78,18 @@ jobs:
         # TODO: macOS tests were removed for now, see https://github.com/ZcashFoundation/zebra/issues/6824
         os: [ubuntu-latest]
         rust: [stable, beta]
-        features: ["", " --features getblocktemplate-rpcs"]
+        # TODO: When vars.EXPERIMENTAL_FEATURES has features in it, add it here.
+        #       Or work out a way to trim the space from the variable: GitHub doesn't allow empty variables.
+        #       Or use `default` for the empty feature set and EXPERIMENTAL_FEATURES, and update the branch protection rules.
+        #features: ${{ fromJSON(format('["", "{0}"]', vars.EXPERIMENTAL_FEATURES)) }}
+        features: [""]
         exclude:
-        # We're excluding macOS for the following reasons:
+        # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
         # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
         # - macOS is a second-tier Zebra support platform
           - os: macos-latest
             rust: beta
-          - os: macos-latest
-            features: " --features getblocktemplate-rpcs"
-        # getblocktemplate-rpcs is an experimental feature, so we just need to test it on stable Rust
-        # beta is unlikely to fail just for this feature, and if it does, we can fix it when it reaches stable.
-          - os: ubuntu-latest
-            rust: beta
-            features: " --features getblocktemplate-rpcs"
 
     steps:
       - uses: actions/checkout@v4.1.1
@@ -119,7 +116,7 @@ jobs:
         #with:
         #  workspaces: ". -> C:\\zebra-target"
         with:
-          # Split the getblocktemplate-rpcs cache from the regular cache, to avoid linker errors.
+          # Split the experimental features cache from the regular cache, to avoid linker errors.
           # (These might be "disk full" errors, or they might be dependency resolution issues.)
           key: ${{ matrix.features }}
 
@@ -190,17 +187,15 @@ jobs:
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
       - name: Run tests${{ matrix.features }}
         run: |
-          cargo test ${{ matrix.features }} --release --verbose --workspace
+          cargo test --features "${{ matrix.features }}" --release --verbose --workspace
 
       # Explicitly run any tests that are usually #[ignored]
 
       - name: Run zebrad large sync tests${{ matrix.features }}
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
-        # Currently, this also skips large sync with `getblocktemplate-rpcs`,
-        # but that is already covered by the Docker tests.
         if: matrix.os == 'macos-latest'
         run: |
-          cargo test ${{ matrix.features }} --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          cargo test --features "${{ matrix.features }}" --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   # Install Zebra with lockfile dependencies, with no caching and default features
   install-from-lockfile-no-cache:
