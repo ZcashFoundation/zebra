@@ -14,19 +14,22 @@
 use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use zebra_chain::{
-    amount::NonNegative, history_tree::HistoryTree, transparent, value_balance::ValueBalance,
+    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
-    request::SemanticallyVerifiedBlockWithTrees,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
     BoxError, SemanticallyVerifiedBlock,
 };
 
 impl ZebraDb {
+    // History tree methods
+
     /// Returns the ZIP-221 history tree of the finalized tip.
     ///
     /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
@@ -36,22 +39,9 @@ impl ZebraDb {
             return Arc::<HistoryTree>::default();
         }
 
-        // # Performance
-        //
-        // Using `zs_last_key_value()` on this column family significantly reduces sync performance
-        // (#7618). But it seems to work for other column families. This is probably because
-        // `zs_delete()` is also used on the same column family:
-        // <https://tracker.ceph.com/issues/55324>
-        // <https://jira.mariadb.org/browse/MDEV-19670>
-        //
-        // See also the performance notes in:
-        // <https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound>
-        //
-        // This bug will be fixed by PR #7392, because it changes this column family to update the
-        // existing key, rather than deleting old keys.
         let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
 
-        // # Forwards Compatibility
+        // # Backwards Compatibility
         //
         // This code can read the column family format in 1.2.0 and earlier (tip height key),
         // and after PR #7392 is merged (empty key). The height-based code can be removed when
@@ -59,18 +49,12 @@ impl ZebraDb {
         //
         // # Concurrency
         //
-        // There is only one tree in this column family, which is atomically updated by a block
-        // write batch (database transaction). If this update runs between the height read and
-        // the tree read, the height will be wrong, and the tree will be missing.
-        // That could cause consensus bugs.
+        // There is only one entry in this column family, which is atomically updated by a block
+        // write batch (database transaction). If we used a height as the key in this column family,
+        // any updates between reading the tip height and reading the tree could cause panics.
         //
-        // Instead, try reading the new empty-key format (from PR #7392) first,
-        // then read the old format if needed.
-        //
-        // See ticket #7581 for more details.
-        //
-        // TODO: this concurrency bug will be permanently fixed in PR #7392,
-        //       by changing the block update to overwrite the tree, rather than deleting it.
+        // So we use the empty key `()`. Since the key has a constant value, we will always read
+        // the latest tree.
         let mut history_tree: Option<Arc<HistoryTree>> = self.db.zs_get(&history_tree_cf, &());
 
         if history_tree.is_none() {
@@ -84,6 +68,18 @@ impl ZebraDb {
         history_tree.unwrap_or_default()
     }
 
+    /// Returns all the history tip trees.
+    /// We only store the history tree for the tip, so this method is mainly used in tests.
+    pub fn history_trees_full_tip(
+        &self,
+    ) -> impl Iterator<Item = (RawBytes, Arc<HistoryTree>)> + '_ {
+        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+
+        self.db.zs_range_iter(&history_tree_cf, .., false)
+    }
+
+    // Value pool methods
+
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
@@ -94,42 +90,30 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
-    /// Prepare a database batch containing the history tree updates
-    /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Returns any errors from updating the history tree
-    #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_history_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlockWithTrees,
-    ) -> Result<(), BoxError> {
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+    // History tree methods
 
-        let height = finalized.verified.height;
+    /// Updates the history tree for the tip, if it is not empty.
+    pub fn update_history_tree(&mut self, zebra_db: &ZebraDb, tree: &HistoryTree) {
+        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
 
-        // Update the tree in state
-        let current_tip_height = height - 1;
-        if let Some(h) = current_tip_height {
-            self.zs_delete(&history_tree_cf, h);
+        if let Some(tree) = tree.as_ref().as_ref() {
+            self.zs_insert(&history_tree_cf, (), tree);
         }
-
-        // TODO: if we ever need concurrent read-only access to the history tree,
-        // store it by `()`, not height.
-        // Otherwise, the ReadStateService could access a height
-        // that was just deleted by a concurrent StateService write.
-        // This requires a database version update.
-        if let Some(history_tree) = finalized.treestate.history_tree.as_ref().as_ref() {
-            self.zs_insert(&history_tree_cf, height, history_tree);
-        }
-
-        Ok(())
     }
+
+    /// Legacy method: Deletes the range of history trees at the given [`Height`]s.
+    /// Doesn't delete the upper bound.
+    ///
+    /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
+    /// so this method does nothing.
+    pub fn delete_range_history_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
+        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
+
+        // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+        self.zs_delete_range(&history_tree_cf, from, to);
+    }
+
+    // Value pool methods
 
     /// Prepare a database batch containing the chain value pool update from `finalized.block`,
     /// and return it (without actually writing anything).

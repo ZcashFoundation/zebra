@@ -43,15 +43,12 @@ set -o pipefail
 : "${TRACING_ENDPOINT_PORT:=3000}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:=0.0.0.0}"
-# if ${RPC_PORT} is not set and ${FEATURES} contains getblocktemplate-rpcs,
-# set ${RPC_PORT} to the default value for the current network
+# if ${RPC_PORT} is not set, use the default value for the current network
 if [[ -z "${RPC_PORT}" ]]; then
-  if [[ " ${FEATURES} " =~ " getblocktemplate-rpcs " ]]; then
-    if [[ "${NETWORK}" = "Mainnet" ]]; then
-      : "${RPC_PORT:=8232}"
-    elif [[ "${NETWORK}" = "Testnet" ]]; then
-      : "${RPC_PORT:=18232}"
-    fi
+  if [[ "${NETWORK}" = "Mainnet" ]]; then
+    : "${RPC_PORT:=8232}"
+  elif [[ "${NETWORK}" = "Testnet" ]]; then
+    : "${RPC_PORT:=18232}"
   fi
 fi
 
@@ -319,16 +316,15 @@ case "$1" in
         run_cargo_test "${ENTRYPOINT_FEATURES}" "sending_transactions_using_lightwalletd"
 
       # These tests use mining code, but don't use gRPC.
-      # We add the mining feature here because our other code needs to pass tests without it.
       elif [[ "${TEST_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
         # Starting with a cached Zebra tip, test getting a block template from Zebra's RPC server.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
-        run_cargo_test "getblocktemplate-rpcs,${ENTRYPOINT_FEATURES}" "get_block_template"
+        run_cargo_test "${ENTRYPOINT_FEATURES}" "get_block_template"
 
       elif [[ "${TEST_SUBMIT_BLOCK}" -eq "1" ]]; then
         # Starting with a cached Zebra tip, test sending a block to Zebra's RPC port.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
-        run_cargo_test "getblocktemplate-rpcs,${ENTRYPOINT_FEATURES}" "submit_block"
+        run_cargo_test "${ENTRYPOINT_FEATURES}" "submit_block"
 
       else
           exec "$@"

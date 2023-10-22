@@ -33,17 +33,34 @@ We try to use Mergify as much as we can, so all PRs get consistent checks.
 Some PRs don't use Mergify:
 - Mergify config updates
 - Admin merges, which happen when there are multiple failures on the `main` branch
-- Manual merges
+  (these are disabled by our branch protection rules, but admins can remove the "don't allow bypassing these rules" setting)
+- Manual merges (these are usually disabled by our branch protection rules)
 
 We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
-For example, some workflow changes skip Rust code checks.
+For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create [a patch workflow](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks)
+with an empty job with the same name. This is a [known Actions issue](https://github.com/orgs/community/discussions/13690#discussioncomment-6653382).
+This lets the branch protection rules pass when the job is skipped. In Zebra, we name these workflows with the extension `.patch.yml`.
+
+Branch protection rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
+We also add branch protection rules for developer or devops features that we need to keep working, like coverage.
+
+But the following jobs don't need branch protection rules:
+* Testnet jobs: testnet is unreliable.
+* Optional linting jobs: some lint jobs are required, but some jobs like spelling and actions are optional.
+* Jobs that rarely run: for example, cached state rebuild jobs.
+* Setup jobs that will fail another later job which always runs, for example: Google Cloud setup jobs.
+  We have branch protection rules for build jobs, but we could remove them if we want.
+
+When a new job is added in a PR, use the `#devops` Slack channel to ask a GitHub admin to add a branch protection rule after it merges.
+Adding a new Zebra crate automatically adds a new job to build that crate by itself in [ci-build-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-build-crates.yml),
+so new crate PRs also need to add a branch protection rule.
 
 ### Pull Requests from Forked Repositories
 
 GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
 This means that Google Cloud CI fails on these PRs.
 
-Unril we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
+Until we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
 1. Reviewing the code to make sure it won't give our secret keys to anyone
 2. Pushing a copy of the branch to the Zebra repository
 3. Opening a PR using that branch

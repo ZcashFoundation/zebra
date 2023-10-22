@@ -6,8 +6,9 @@ use zebra_chain::{
     amount::Amount,
     block::{Block, Height},
     primitives::Groth16Proof,
+    sapling,
     serialization::ZcashDeserializeInto,
-    sprout::JoinSplit,
+    sprout::{self, JoinSplit},
     transaction::{JoinSplitData, LockTime, Transaction, UnminedTx},
 };
 
@@ -18,7 +19,7 @@ use crate::{
         write::validate_and_commit_non_finalized,
     },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    SemanticallyVerifiedBlock, ValidateContextError,
+    DiskWriteBatch, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // Sprout
@@ -31,12 +32,22 @@ fn check_sprout_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Bootstrap a block at height == 1.
+    // Delete the empty anchor from the database
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_sprout_anchor(
+        &finalized_state,
+        &sprout::tree::NoteCommitmentTree::default().root(),
+    );
+    finalized_state
+        .write_batch(batch)
+        .expect("unexpected I/O error");
+
+    // Create a block at height 1.
     let block_1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    // Bootstrap a block just before the first Sprout anchors.
+    // Create a block just before the first Sprout anchors.
     let block_395 = zebra_test::vectors::BLOCK_MAINNET_395_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -44,7 +55,7 @@ fn check_sprout_anchors() {
     // Add initial transactions to [`block_1`].
     let block_1 = prepare_sprout_block(block_1, block_395);
 
-    // Bootstrap a block at height == 2 that references the Sprout note commitment tree state
+    // Create a block at height == 2 that references the Sprout note commitment tree state
     // from [`block_1`].
     let block_2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into::<Block>()
@@ -74,10 +85,13 @@ fn check_sprout_anchors() {
         )
     });
 
-    assert!(matches!(
-        check_unmined_tx_anchors_result,
-        Err(ValidateContextError::UnknownSproutAnchor { .. })
-    ));
+    assert!(
+        matches!(
+            check_unmined_tx_anchors_result,
+            Err(ValidateContextError::UnknownSproutAnchor { .. }),
+        ),
+        "unexpected result: {check_unmined_tx_anchors_result:?}",
+    );
 
     // Validate and commit [`block_1`]. This will add an anchor referencing the
     // empty note commitment tree to the state.
@@ -182,7 +196,17 @@ fn check_sapling_anchors() {
 
     let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
-    // Bootstrap a block at height == 1 that has the first Sapling note commitments
+    // Delete the empty anchor from the database
+    let mut batch = DiskWriteBatch::new();
+    batch.delete_sapling_anchor(
+        &finalized_state,
+        &sapling::tree::NoteCommitmentTree::default().root(),
+    );
+    finalized_state
+        .write_batch(batch)
+        .expect("unexpected I/O error");
+
+    // Create a block at height 1 that has the first Sapling note commitments
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
@@ -227,7 +251,7 @@ fn check_sapling_anchors() {
 
     let block1 = Arc::new(block1).prepare();
 
-    // Bootstrap a block at height == 2 that references the Sapling note commitment tree state
+    // Create a block at height == 2 that references the Sapling note commitment tree state
     // from earlier block
     let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into::<Block>()
@@ -315,3 +339,5 @@ fn check_sapling_anchors() {
         Ok(())
     );
 }
+
+// TODO: create a test for orchard anchors

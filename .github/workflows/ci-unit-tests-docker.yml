@@ -65,6 +65,16 @@ on:
       - '.github/workflows/sub-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
+env:
+  # We need to combine the features manually because some tests don't use the Docker entrypoint
+  TEST_FEATURES: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
+  EXPERIMENTAL_FEATURES: ${{ format('{0} {1} {2}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES, vars.RUST_EXPERIMENTAL_FEATURES) }}
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+
 jobs:
   # Build the docker image used by the tests.
   #
@@ -85,12 +95,10 @@ jobs:
 
   # Run all the zebra tests, including tests that are ignored by default.
   #
-  # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
-  #
-  # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
+    timeout-minutes: 180
     runs-on: ubuntu-latest-xl
     needs: build
     steps:
@@ -104,32 +112,17 @@ jobs:
       # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
       #
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
+      #
+      # TODO: move this test command into entrypoint.sh
+      #       add a separate experimental workflow job if this job is slow
       - name: Run zebrad tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --include-ignored
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
-
-  # zebrad tests without cached state with `getblocktemplate-rpcs` feature
-  #
-  # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
-  test-all-getblocktemplate-rpcs:
-    name: Test all with getblocktemplate-rpcs feature
-    runs-on: ubuntu-latest-xl
-    needs: build
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Run zebrad tests
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests --tty -e ${{ inputs.network || vars.ZCASH_NETWORK }} ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --include-ignored
+          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --workspace -- --include-ignored
+          # Currently GitHub doesn't allow empty variables
+          if [[ -n "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" && "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" != " " ]]; then
+            docker run -e NETWORK --name zebrad-tests-experimental --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.EXPERIMENTAL_FEATURES }} " --workspace -- --include-ignored
+          fi
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
@@ -141,9 +134,10 @@ jobs:
   #
   # Also, we don't want to accidentally use the fake heights in other tests.
   #
-  # (The gRPC feature is a zebrad feature, so it isn't needed here.)
+  # (We activate the test features to avoid recompiling dependencies, but we don't actually run any gRPC tests.)
   test-fake-activation-heights:
     name: Test with fake activation heights
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -154,19 +148,20 @@ jobs:
         with:
           short-length: 7
 
+      # TODO: move this test command into entrypoint.sh
+      #       make sure that at least one test runs, and that it doesn't skip itself due to the environmental variable
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
+          docker run -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "zebra-test" --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
-  #
-  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-empty-sync:
     name: Test checkpoint sync from empty state
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -177,18 +172,18 @@ jobs:
         with:
           short-length: 7
 
+      # TODO: move this test command into entrypoint.sh
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          docker run -e NETWORK --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-  #
-  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -199,10 +194,11 @@ jobs:
         with:
           short-length: 7
 
+      # TODO: move this test command into entrypoint.sh
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
+          docker run -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -251,7 +247,7 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ test-all, test-all-getblocktemplate-rpcs, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path ]
+    needs: [ test-all, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?

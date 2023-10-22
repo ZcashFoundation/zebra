@@ -35,10 +35,10 @@ them:
 
 - To generate transactions, [run Zebra with
   `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
-- To generate blocks, [enable mining
-  support](https://zebra.zfnd.org/user/mining.html), and use a mining pool or
-  miner with Zebra's mining JSON-RPCs. Mining support is currently incomplete,
-  experimental, and off by default.
+- To generate blocks, use a mining pool or miner with Zebra's mining JSON-RPCs.
+  Currently Zebra can only send mining rewards to a single fixed address.
+  To distribute rewards, use mining software that creates its own distribution transactions,
+  a light wallet or the `zcashd` wallet.
 
 Please [join us on Discord](https://discord.gg/na6QZNd) if you'd like to find
 out more or get involved!
