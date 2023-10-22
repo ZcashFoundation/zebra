@@ -1,7 +1,7 @@
 # This image is for caching Zcash Sprout and Sapling parameters.
 # We don't test it automatically in CI due to download server rate-limiting.
 # To manually run it on the PR branch before merging, go to:
-# https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml
+# https://github.com/ZcashFoundation/zebra/actions/workflows/cd-build-zcash-params.yml
 
 FROM debian:bullseye-slim AS release
 
