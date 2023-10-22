@@ -19,10 +19,33 @@ When Zebra gets more checkpoints in each new release, it checks the previously v
 state against those checkpoints. This checks that the two codepaths produce the same results.
 
 ## Upgrading the State Database
+[upgrades]: #upgrades
 
 For most state upgrades, we want to modify the database format of the existing database. If we
 change the major database version, every user needs to re-download and re-verify all the blocks,
 which can take days.
+
+### Writing Blocks to the State
+[write-block]: #write-block
+
+Zebra's state has two methods of getting to the latest format:
+- syncing from empty with the latest format, and
+- upgrading from a previous format to the latest format.
+
+This means that writing blocks uses two different codepaths, and they must produce the same results.
+This code is high risk, because discovering bugs is tricky, and fixing bugs can require a full reset
+and re-write of an entire column family.
+
+Most Zebra instances will do an upgrade, because they already have a cached state, and upgrades are
+faster. But we run a full sync in CI every week, because new users use that codepath. (And it is
+their first experience of Zebra.)
+
+When Zebra starts up and shuts down (and periodically in CI tests), we run checks on the state
+format. This makes sure that the two codepaths produce the same state on disk.
+
+To reduce code and testing complexity:
+- when a previous Zebra version opens a newer state, the entire state is considered to have that lower version, and
+- when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
 
 ### In-Place Upgrade Goals
 
