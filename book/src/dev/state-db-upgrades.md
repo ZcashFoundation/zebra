@@ -48,12 +48,16 @@ To reduce code and testing complexity:
 - when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
 
 ### In-Place Upgrade Goals
+[upgrade-goals]: #upgrade-goals
 
+Here are the goals of in-place upgrades:
 - avoid a full download and rebuild of the state
 - the previous state format must be able to be loaded by the new state
   - this is checked the first time CI runs on a PR with a new state version.
     After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
     again. If CI fails on the first run, any cached states with that version should be deleted.
+- the upgrade and full sync formats must be identical
+  - this is partially checked by the state validity checks for each upgrade (see above)
 - previous zebra versions should be able to load the new format
   - this is checked by other PRs running using the upgraded cached state, but only if a Rust PR
     runs after the new PR's CI finishes, but before it merges
@@ -71,17 +75,26 @@ This means that:
   - it can't give incorrect results, because that can affect verification or wallets
   - it can return an error
   - it can only return an `Option` if the caller handles it correctly
-- multiple upgrades must produce a valid state format
+- full syncs and upgrades must write the same format
+  - the same write method should be called from both the full sync and upgrade code,
+    this helps prevent data inconsistencies
+- repeated upgrades must produce a valid state format
   - if Zebra is restarted, the format upgrade will run multiple times
   - if an older Zebra version opens the state, data can be written in an older format
-- the format must be valid before and after each database transaction or API call, because an upgrade can be cancelled at any time
+- the format must be valid before and after each database transaction or API call, because an
+  upgrade can be cancelled at any time
   - multi-column family changes should made in database transactions
-  - if you are building new column family, disable state queries, then enable them once it's done
+  - if you are building new column family:
+    - disable state queries, then enable them once it's done, or
+    - do the upgrade in an order that produces correct results
+      (for example, some data is valid from genesis forward, and some from the tip backward)
   - if each database API call produces a valid format, transactions aren't needed
 
-If there is an upgrade failure, it can panic and tell the user to delete their cached state and re-launch Zebra.
+If there is an upgrade failure, panic and tell the user to delete their cached state and re-launch
+Zebra.
 
-### Performance Constraints
+#### Performance Constraints
+[performance]: #performance
 
 Some column family access patterns can lead to very poor performance.
 
