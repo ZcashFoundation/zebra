@@ -127,23 +127,18 @@ first time a cached state is upgraded to a new Zebra release.
 Some format bugs can't be fixed, and require an entire rebuild of the state. For example, deleting
 or corrupting transactions or block headers.
 
-So testing format upgrades is extremely important. Every state format upgrade should have these
-tests:
-- [ ] Randomised property tests on any new format serializations
-- [ ] Unit tests for any calculations or data processing
-- [ ] A state validity check that checks the entire format, or if that would take hours:
-  - [ ] A quick check that makes sure a few blocks of the format are correct, and
-  - [ ] A detailed check that covers all the alternative code paths.
-        For example, the subtrees needed mid-block, end-of-block, sapling, and orchard checks.
-- [ ] A manual full sync
-- [ ] An upgrade from the latest supported Zebra version
+So testing format upgrades is extremely important. Every state format upgrade should test:
+- new format serializations
+- new calculations or data processing
+- the upgrade produces a valid format
+- a full sync produces a valid format
 
 Each test should be followed by a restart, a sync of 200+ blocks, and another restart. This
 simulates typical user behaviour.
 
 And ideally:
-- [ ] An upgrade from the earliest supported Zebra version
-      (the CI sync-past-checkpoint tests do this on every PR)
+- An upgrade from the earliest supported Zebra version
+  (the CI sync-past-checkpoint tests do this on every PR)
 
 #### Manually Triggering a Format Upgrade
 [manual-upgrade]: #manual-upgrade
