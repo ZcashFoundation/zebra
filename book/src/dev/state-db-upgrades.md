@@ -116,17 +116,52 @@ But we need to use iterators for some operations, so our alternatives are (in pr
 Currently only UTXOs require key deletion, and only `utxo_loc_by_transparent_addr_loc` requires
 deletion and iterators.
 
-### Implementation Steps
+### Required Tests
+[testing]: #testing
 
-- [ ] update the [database format](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#current) in the Zebra docs
-- [ ] increment the state minor version
-- [ ] write the new format in the block write task
-- [ ] update older formats in the format upgrade task
-- [ ] test that the new format works when creating a new state, and updating an older state
+State upgrades are a high-risk change. They permanently modify the state format on production Zebra
+instances. Format issues are tricky to diagnose, and require extensive testing and a new release to
+fix. Deleting and rebuilding an entire column family can also be costly, taking minutes or hours the
+first time a cached state is upgraded to a new Zebra release.
 
-See the [upgrade design docs](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design) for more details.
+Some format bugs can't be fixed, and require an entire rebuild of the state. For example, deleting
+or corrupting transactions or block headers.
 
-These steps can be copied into tickets.
+So testing format upgrades is extremely important. Every state format upgrade should have these
+tests:
+- [ ] Randomised property tests on any new format serializations
+- [ ] Unit tests for any calculations or data processing
+- [ ] A state validity check that checks the entire format, or if that would take hours:
+  - [ ] A quick check that makes sure a few blocks of the format are correct, and
+  - [ ] A detailed check that covers all the alternative code paths.
+        For example, the subtrees needed mid-block, end-of-block, sapling, and orchard checks.
+- [ ] A manual full sync
+- [ ] An upgrade from the latest supported Zebra version
+
+Each test should be followed by a restart, a sync of 200+ blocks, and another restart. This
+simulates typical user behaviour.
+
+And ideally:
+- [ ] An upgrade from the earliest supported Zebra version
+      (the CI sync-past-checkpoint tests do this on every PR)
+
+#### Manually Triggering a Format Upgrade
+[manual-upgrade]: #manual-upgrade
+
+Zebra stores the current state minor and patch versions in a `version` file in the database
+directory. This path varies based on the OS, major state version, network, and config.
+
+For example, the default mainnet state version on Linux is at:
+`~/.cache/zebra/state/v25/mainnet/version`
+
+To upgrade from `v25.0.0`, delete the version file.
+To upgrade from a specific version `v25.x.y`, edit the file so it contains `x.y`.
+
+Editing the file will trigger a re-upgrade over an existing state. Re-upgrades can hide format bugs.
+For example, if the old code was correct, and the new code skips blocks, the validity checks won't
+find that bug.
+
+So it is better to test with a full sync, and an older cached state.
 
 ## Current State Database Format
 [current]: #current
