@@ -1,5 +1,23 @@
 # Zebra Cached State Database Implementation
 
+## Current Implementation
+
+### Verification Modes
+[verification]: #verification
+
+Zebra's state has two verification modes:
+- block hash checkpoints, and
+- full verification.
+
+This means that verification uses two different codepaths, and they must produce the same results.
+
+By default, Zebra uses as many checkpoints as it can, because they are more secure against rollbacks
+(and some other kinds of chain attacks). Then it uses full verification for the last few thousand
+blocks.
+
+When Zebra gets more checkpoints in each new release, it checks the previously verified cached
+state against those checkpoints. This checks that the two codepaths produce the same results.
+
 ## Upgrading the State Database
 
 For most state upgrades, we want to modify the database format of the existing database. If we
