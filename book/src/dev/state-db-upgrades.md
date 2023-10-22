@@ -133,6 +133,9 @@ So testing format upgrades is extremely important. Every state format upgrade sh
 - the upgrade produces a valid format
 - a full sync produces a valid format
 
+Together, the tests should cover every code path. For example, the subtrees needed mid-block,
+end-of-block, sapling, and orchard tests. They mainly used the validity checks for coverage.
+
 Each test should be followed by a restart, a sync of 200+ blocks, and another restart. This
 simulates typical user behaviour.
 
