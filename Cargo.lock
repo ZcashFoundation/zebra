@@ -4918,9 +4918,9 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "wagyu-zcash-parameters"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "955763984e7d1e7bfb1d796c6ec303913a288c138774fa67a86cdf4f2adad08b"
+checksum = "61c904628658374e651288f000934c33ef738b2d8b3e65d4100b70b395dbe2bb"
 dependencies = [
  "wagyu-zcash-parameters-1",
  "wagyu-zcash-parameters-2",
@@ -4932,39 +4932,39 @@ dependencies = [
 
 [[package]]
 name = "wagyu-zcash-parameters-1"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30f179c3951340a68e6ae2d00add39ed72263fd99f6693b399b1ae0ea4dca6f1"
+checksum = "90bf2e21bb027d3f8428c60d6a720b54a08bf6ce4e6f834ef8e0d38bb5695da8"
 
 [[package]]
 name = "wagyu-zcash-parameters-2"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e08a39cf68902082af6fb8129cbfe5f100c731cf1e4c49a81e456146249fb21"
+checksum = "a616ab2e51e74cc48995d476e94de810fb16fc73815f390bf2941b046cc9ba2c"
 
 [[package]]
 name = "wagyu-zcash-parameters-3"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f1ae3f133131bfb34ee27c0749fe79c310a766a3370ce676908a7e3d3987512"
+checksum = "14da1e2e958ff93c0830ee68e91884069253bf3462a67831b02b367be75d6147"
 
 [[package]]
 name = "wagyu-zcash-parameters-4"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "049f697efaa5fcded7e43f8095c359325b7f92371e147530397917dd6d32b23c"
+checksum = "f058aeef03a2070e8666ffb5d1057d8bb10313b204a254a6e6103eb958e9a6d6"
 
 [[package]]
 name = "wagyu-zcash-parameters-5"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80adeea7cd72a33e72e4093f17c211df54b221cc047ad6c3a64ac3a8542617a8"
+checksum = "3ffe916b30e608c032ae1b734f02574a3e12ec19ab5cc5562208d679efe4969d"
 
 [[package]]
 name = "wagyu-zcash-parameters-6"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ad468482ce2ea9fc0bbe80c729f628b2f729fa2ec10c7d95b0b60fd7f4658c9"
+checksum = "a7b6d5a78adc3e8f198e9cd730f219a695431467f7ec29dcfc63ade885feebe1"
 
 [[package]]
 name = "wait-timeout"
