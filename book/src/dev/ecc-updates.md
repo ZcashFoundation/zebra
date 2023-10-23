@@ -57,7 +57,9 @@ cargo test
 
 ### Check `deny.toml`
 
-- Review Zebra's `deny.toml` file for potential duplicates that can be removed due to the upgrade. You may also need to add new entries to `deny.toml`. Push your changes and let the CI identify any problems.
+- Review Zebra's `deny.toml` file for potential duplicates that can be removed due to the upgrade. You may also need to add new entries to `deny.toml`.
+- You can identify issues with the dependencies using `cargo deny check bans` command, need to have [cargo deny](https://crates.io/crates/cargo-deny) installed.
+- Push your changes and let the CI identify any additional problems.
 
 ### Push the Pull Request (PR)
 
