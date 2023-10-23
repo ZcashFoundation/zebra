@@ -172,6 +172,12 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
 
 4. Repeat step 3 until the dependency warnings are fixed. Adding a single `skip-tree` exception can resolve multiple warnings.
 
+#### Fixing "unmatched skip root" warnings in `Check deny.toml bans`
+
+1. Run `cargo deny --all-features check bans`, or look at the output of the latest "Check deny.toml bans --all-features" job on the `main` branch
+
+2. If there are any "skip tree root was not found in the dependency graph" warnings, delete those versions from `deny.toml`
+
 ### Fixing Disk Full Errors and Zcash Parameter Errors
 
 If the Docker cached state disks are full, increase the disk sizes in:
