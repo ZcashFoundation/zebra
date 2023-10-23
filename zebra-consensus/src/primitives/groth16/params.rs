@@ -76,31 +76,43 @@ impl Groth16Parameters {
         let sapling_output_path = params_directory.join(zcash_proofs::SAPLING_OUTPUT_NAME);
         let sprout_path = params_directory.join(zcash_proofs::SPROUT_NAME);
 
+        // TODO: remove sapling download when sprout is also built into the binary.
         Groth16Parameters::download_sapling_parameters(&sapling_spend_path, &sapling_output_path);
         Groth16Parameters::download_sprout_parameters(&sprout_path);
 
-        // TODO: if loading fails, log a message including `failure_hint`
+        // TODO: remove file load when sprout is also built into the binary.
         tracing::info!("checking and loading Zcash Sapling and Sprout parameters");
-        let parameters = zcash_proofs::load_parameters(
+        let file_parameters = zcash_proofs::load_parameters(
             &sapling_spend_path,
             &sapling_output_path,
             Some(&sprout_path),
         );
 
+        let (sapling_spend_bytes, sapling_output_bytes) =
+            wagyu_zcash_parameters::load_sapling_parameters();
+
+        // TODO: add sprout bytes here
+        let bin_parameters = zcash_proofs::parse_parameters(
+            sapling_spend_bytes.as_slice(),
+            sapling_output_bytes.as_slice(),
+            None,
+        );
+
         let sapling = SaplingParameters {
-            spend: parameters.spend_params,
-            spend_prepared_verifying_key: parameters.spend_vk,
-            output: parameters.output_params,
-            output_prepared_verifying_key: parameters.output_vk,
+            spend: bin_parameters.spend_params,
+            spend_prepared_verifying_key: bin_parameters.spend_vk,
+            output: bin_parameters.output_params,
+            output_prepared_verifying_key: bin_parameters.output_vk,
         };
 
+        // TODO: remove sprout extract when sprout is also built into the binary.
         let sprout = SproutParameters {
-            joinsplit_prepared_verifying_key: parameters
+            joinsplit_prepared_verifying_key: file_parameters
                 .sprout_vk
                 .expect("unreachable code: sprout loader panics on failure"),
         };
 
-        tracing::info!("Zcash Sapling and Sprout parameters downloaded and/or verified");
+        tracing::info!("Zcash Sapling and Sprout parameters loaded and verified");
 
         Groth16Parameters { sapling, sprout }
     }

@@ -4917,6 +4917,56 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
+name = "wagyu-zcash-parameters"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "955763984e7d1e7bfb1d796c6ec303913a288c138774fa67a86cdf4f2adad08b"
+dependencies = [
+ "wagyu-zcash-parameters-1",
+ "wagyu-zcash-parameters-2",
+ "wagyu-zcash-parameters-3",
+ "wagyu-zcash-parameters-4",
+ "wagyu-zcash-parameters-5",
+ "wagyu-zcash-parameters-6",
+]
+
+[[package]]
+name = "wagyu-zcash-parameters-1"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30f179c3951340a68e6ae2d00add39ed72263fd99f6693b399b1ae0ea4dca6f1"
+
+[[package]]
+name = "wagyu-zcash-parameters-2"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e08a39cf68902082af6fb8129cbfe5f100c731cf1e4c49a81e456146249fb21"
+
+[[package]]
+name = "wagyu-zcash-parameters-3"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f1ae3f133131bfb34ee27c0749fe79c310a766a3370ce676908a7e3d3987512"
+
+[[package]]
+name = "wagyu-zcash-parameters-4"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "049f697efaa5fcded7e43f8095c359325b7f92371e147530397917dd6d32b23c"
+
+[[package]]
+name = "wagyu-zcash-parameters-5"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80adeea7cd72a33e72e4093f17c211df54b221cc047ad6c3a64ac3a8542617a8"
+
+[[package]]
+name = "wagyu-zcash-parameters-6"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ad468482ce2ea9fc0bbe80c729f628b2f729fa2ec10c7d95b0b60fd7f4658c9"
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5516,6 +5566,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
+ "wagyu-zcash-parameters",
  "zcash_proofs",
  "zebra-chain",
  "zebra-node-services",
