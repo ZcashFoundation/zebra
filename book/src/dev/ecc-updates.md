@@ -51,7 +51,7 @@ cargo build
 cargo test
 ```
 
-- When upgrading, it's common for things to break, such as deprecated functions or removed functionality. Address these issues by referring to the crate's changelog, which often provides explanations and workarounds.
+- When upgrading, it's common for things to break, such as deprecated or removed functionality. Address these issues by referring to the crate's changelog, which often provides explanations and workarounds.
 
 - If you encounter issues that you can't resolve, consider reaching out to ECC team members who worked on the upgrade, as they may have more context.
 
