@@ -856,7 +856,6 @@ impl ReadStateService {
 
     /// Test-only access to the inner database.
     /// Can be used to modify the database without doing any consensus checks.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn db(&self) -> &ZebraDb {
         &self.db
     }
