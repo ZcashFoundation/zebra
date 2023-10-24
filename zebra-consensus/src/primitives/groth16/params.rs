@@ -13,11 +13,15 @@ use crate::BoxError;
 /// Zebra assumes that it's running on at least a 10 Mbps connection.
 /// So the parameter files should download in about 15 minutes using `zebrad download`.
 /// But `zebrad start` downloads blocks at the same time, so we allow some extra time.
+//
+// TODO: delete this after we have sprout in the binary.
 pub const PARAMETER_DOWNLOAD_TIMEOUT: u64 = 60 * 60;
 
 /// The maximum number of times Zebra retries to download the parameters.
 ///
 /// Zebra will retry the download only if the previous attempt fails.
+//
+// TODO: delete this after we have sprout in the binary.
 pub const PARAMETER_DOWNLOAD_MAX_RETRIES: usize = 2;
 
 lazy_static::lazy_static! {
@@ -118,6 +122,8 @@ impl Groth16Parameters {
     }
 
     /// Returns the path to the Groth16 parameters directory.
+    //
+    // TODO: delete this after we have sprout in the binary.
     pub fn directory() -> PathBuf {
         zcash_proofs::default_params_folder().expect("unable to find user home directory")
     }
@@ -133,6 +139,8 @@ impl Groth16Parameters {
     ///
     /// - If the parameters were downloaded to a wrong path.
     /// - After [`PARAMETER_DOWNLOAD_MAX_RETRIES`] failed download retries.
+    //
+    // TODO: delete this after we have sprout in the binary.
     fn download_sapling_parameters(sapling_spend_path: &Path, sapling_output_path: &Path) {
         // TODO: instead of the path check, add a zcash_proofs argument to skip hashing existing files
         //       (we check them on load anyway)
@@ -168,6 +176,8 @@ impl Groth16Parameters {
     ///
     /// If the parameters were downloaded to paths different to `sapling_spend_path` or
     /// `sapling_output_path`.
+    //
+    // TODO: delete this after we have sprout in the binary.
     fn download_sapling_parameters_once(
         sapling_spend_path: &Path,
         sapling_output_path: &Path,
@@ -187,6 +197,8 @@ impl Groth16Parameters {
     ///
     /// - If the parameters were downloaded to a wrong path.
     /// - After [`PARAMETER_DOWNLOAD_MAX_RETRIES`] failed download retries.
+    //
+    // TODO: delete this after we have sprout in the binary.
     fn download_sprout_parameters(sprout_path: &Path) {
         if !sprout_path.exists() {
             tracing::info!("downloading Zcash Sprout parameters");
@@ -216,6 +228,8 @@ impl Groth16Parameters {
     /// # Panics
     ///
     /// If the parameters were downloaded to a path different to `sprout_path`.
+    //
+    // TODO: delete this after we have sprout in the binary.
     fn download_sprout_parameters_once(sprout_path: &Path) -> Result<PathBuf, BoxError> {
         let new_sprout_path =
             zcash_proofs::download_sprout_parameters(Some(PARAMETER_DOWNLOAD_TIMEOUT))?;
