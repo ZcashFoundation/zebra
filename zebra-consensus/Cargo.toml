@@ -60,8 +60,7 @@ tracing-futures = "0.2.5"
 
 orchard = "0.6.0"
 
-# TODO: remove local-prover and download-params when sprout is built into the binary
-zcash_proofs = { version = "0.13.0-rc.1", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.13.0-rc.1", features = ["multicore" ] }
 wagyu-zcash-parameters = "0.2.0"
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.6" }
