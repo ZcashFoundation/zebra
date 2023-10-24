@@ -32,11 +32,75 @@ use rand::{rngs::OsRng, RngCore};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
     chain_tip::ChainTip,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::Transaction,
 };
+
+#[tokio::test]
+#[allow(clippy::print_stdout)]
+async fn scanning_cached_zebra_state() -> Result<()> {
+    let account = AccountId::from(12);
+    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
+    let nf = Nullifier([7; 32]);
+
+    let (state_config, network) = Default::default();
+    let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::spawn_init(state_config, network, Height::MAX, 3000).await?;
+    let db = read_only_state_service.db();
+
+    // use the tip as starting height
+    let mut height = latest_chain_tip
+        .best_tip_height()
+        .expect("cached state must have at least 1 block");
+
+    let mut transactions_found = 0;
+    let mut transactions_scanned = 0;
+    let mut blocks_scanned = 0;
+    while let Some(block) = db.block(height.into()) {
+        // We fake the sapling tree size to 1 because we are not in Sapling heights.
+        let sapling_tree_size = 1;
+        let orchard_tree_size = db
+            .orchard_tree_by_hash_or_height(height.into())
+            .expect("should exist")
+            .count();
+
+        let chain_metadata = ChainMetadata {
+            sapling_commitment_tree_size: sapling_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+            orchard_commitment_tree_size: orchard_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+        };
+
+        let compact_block = block_to_compact(block, chain_metadata);
+
+        let res = scan_block(
+            &zcash_primitives::consensus::MainNetwork,
+            compact_block.clone(),
+            &vks[..],
+            &[(account, nf)],
+            None,
+        )
+        .unwrap();
+
+        transactions_found += res.transactions().len();
+        transactions_scanned += compact_block.vtx.len();
+        blocks_scanned += 1;
+
+        // scan backwards
+        if height.is_min() {
+            break;
+        }
+        height = height.previous()?;
+    }
+
+    println!("transactions_found: {transactions_found}, transactions_scanned: {transactions_scanned}, blocks_scanned: {blocks_scanned}");
+
+    Ok(())
+}
 
 #[tokio::test]
 async fn scanning_from_populated_zebra_state() -> Result<()> {
