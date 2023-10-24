@@ -17,23 +17,23 @@ Let's dive into the details of each step required to perform an upgrade:
 
 - Upgrading the `zcash_script` crate can be challenging, depending on changes in the latest `zcashd` release. Follow the instructions in the project's [README](https://github.com/ZcashFoundation/zcash_script/blob/master/README.md) for guidance.
 
-- If you haven't upgraded `zcash_script`, don't proceed with upgrading other ECC dependencies in Zebra.
+- Upgrade and release `zcash_script` before upgrading other ECC dependencies in Zebra.
 
 - Ensure that the crate versions in the `Cargo.toml` of the zcashd release, `Cargo.toml` of `zcash_script`, and the `Cargo.toml` files of Zebra crates are all the same. Version consistency is crucial.
 
 ### Upgrade versions
 
-- You can upgrade versions manually or use a search and replace script in all `Cargo.toml` files within Zebra. Alternatively, you can use the `cargo upgrade` command. For example, in [this PR](https://github.com/ZcashFoundation/zebra/pull/7784), the following command was used:
+- Use the `cargo upgrade` command to upgrade all the ECC dependency versions in Zebra. For example, in [this PR](https://github.com/ZcashFoundation/zebra/pull/7784), the following command was used:
 
 ```
-cargo upgrade --incompatible -p bridgetree -p incrementalmerkletree -p orchard -p zcash_primitives@0.13.0-rc.1 -p zcash_proofs@0.13.0-rc.1 -p zcash_script
+cargo upgrade --incompatible -p bridgetree -p incrementalmerkletree -p orchard -p zcash_primitives -p zcash_proofs -p zcash_address -p zcash_encoding -p zcash_note_encryption -p zcash_script
 ```
 
 Notes:
 
 - Insert all the crate names to be updated to the command.
 
-- We can upgrade to specific versions in some crates instead of just the last one (no version specified). 
+- Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version. 
 
 - You need to have [cargo upgrade](https://crates.io/crates/cargo-upgrades) and [cargo edit](https://crates.io/crates/cargo-edit) installed for this command to work.
 
@@ -51,7 +51,7 @@ cargo build
 cargo test
 ```
 
-- When upgrading, it's common for things to break, such as deprecated or removed functionality. Address these issues by referring to the crate's changelog, which often provides explanations and workarounds.
+- When upgrading, it's common for things to break, such as deprecated or removed functionality. Address these issues by referring to the broken dependency's changelog, which often provides explanations and workarounds.
 
 - If you encounter issues that you can't resolve, consider reaching out to ECC team members who worked on the upgrade, as they may have more context.
 
