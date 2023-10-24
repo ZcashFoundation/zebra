@@ -80,7 +80,7 @@ impl Groth16Parameters {
         Groth16Parameters { sapling, sprout }
     }
 
-    /// Returns a hint that helps users recover from parameter download failures.
+    /// Returns a hint that helps users recover from parameter loading failures.
     pub fn failure_hint() -> String {
         "Hint: re-run `zebrad` or re-install it from a trusted source".to_string()
     }
