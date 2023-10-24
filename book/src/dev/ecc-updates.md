@@ -19,8 +19,6 @@ Let's dive into the details of each step required to perform an upgrade:
 
 - Upgrade and release `zcash_script` before upgrading other ECC dependencies in Zebra.
 
-- Ensure that the crate versions in the `Cargo.toml` of the zcashd release, `Cargo.toml` of `zcash_script`, and the `Cargo.toml` files of Zebra crates are all the same. Version consistency is crucial.
-
 ### Upgrade versions
 
 - Use the `cargo upgrade` command to upgrade all the ECC dependency versions in Zebra. For example, in [this PR](https://github.com/ZcashFoundation/zebra/pull/7784), the following command was used:
@@ -36,6 +34,10 @@ Notes:
 - Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version. 
 
 - You need to have [cargo upgrade](https://crates.io/crates/cargo-upgrades) and [cargo edit](https://crates.io/crates/cargo-edit) installed for this command to work.
+
+### Version consistency check
+
+- Ensure that the crate versions in the `Cargo.toml` of the zcashd release, `Cargo.toml` of `zcash_script`, and the `Cargo.toml` files of Zebra crates are all the same. Version consistency is crucial.
 
 ### Build/Test zebra & fix issues
 
