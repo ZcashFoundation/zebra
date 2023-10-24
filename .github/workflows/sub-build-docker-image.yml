@@ -21,19 +21,17 @@ on:
       rust_lib_backtrace:
         required: false
         type: string
+      # defaults to: vars.RUST_LOG
       rust_log:
         required: false
         type: string
-        default: info
-      # keep these in sync with:
-      # https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile#L83
+      # defaults to: vars.RUST_PROD_FEATURES
       features:
         required: false
-        default: "default-release-binaries"
         type: string
+      # defaults to: vars.RUST_TEST_FEATURES (and entrypoint.sh adds vars.RUST_PROD_FEATURES)
       test_features:
         required: false
-        default: "lightwalletd-grpc-tests zebra-checkpoints"
         type: string
       tag_suffix:
         required: false
@@ -48,6 +46,13 @@ on:
       image_digest:
         description: 'The image digest to be used on a caller workflow'
         value: ${{ jobs.build.outputs.image_digest }}
+
+
+env:
+  FEATURES: ${{ inputs.features || vars.RUST_PROD_FEATURES }}
+  TEST_FEATURES: ${{ inputs.test_features || vars.RUST_TEST_FEATURES }}
+  RUST_LOG: ${{ inputs.rust_log || vars.RUST_LOG }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
 jobs:
   build:
@@ -143,9 +148,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            RUST_LOG=${{ inputs.rust_log }}
-            FEATURES=${{ inputs.features }}
-            TEST_FEATURES=${{ inputs.test_features }}
+            RUST_LOG=${{ env.RUST_LOG }}
+            FEATURES=${{ env.FEATURES }}
+            TEST_FEATURES=${{ env.TEST_FEATURES }}
           push: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options

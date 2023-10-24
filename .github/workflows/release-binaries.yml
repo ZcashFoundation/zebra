@@ -26,28 +26,29 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
-      rust_log: info
+      features: ${{ vars.RUST_PROD_FEATURES }}
+      rust_log: ${{ vars.RUST_LOG }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
   # The image will be named `zebra:<semver>.experimental`
-  build-mining-testnet:
-    name: Build Release Testnet Mining Docker
+  build-experimental:
+    name: Build Experimental Features Release Docker
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
       tag_suffix: .experimental
-      features: "default-release-binaries getblocktemplate-rpcs"
-      rust_log: info
+      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_EXPERIMENTAL_FEATURES) }}
+      rust_log: ${{ vars.RUST_LOG }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, build-mining-testnet ]
+    needs: [ build, build-experimental ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest
