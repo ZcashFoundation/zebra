@@ -124,10 +124,7 @@ impl Groth16Parameters {
 
     /// Returns a hint that helps users recover from parameter download failures.
     pub fn failure_hint() -> String {
-        format!(
-            "Hint: try deleting {:?}, then running 'zebrad download' to re-download the parameters",
-            Groth16Parameters::directory(),
-        )
+        "Hint: re-run `zebrad` or re-install it from a trusted source".to_string()
     }
 
     /// Downloads the Sapling parameters.
