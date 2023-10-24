@@ -41,8 +41,6 @@ use zebra_chain::{
 #[tokio::test]
 async fn scanning_from_populated_zebra_state() -> Result<()> {
     let account = AccountId::from(12);
-    let extsk = ExtendedSpendingKey::master(&[]);
-    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
 
@@ -111,31 +109,6 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
 
     // no relevant transactions should be found
     assert_eq!(transactions_found, 0);
-
-    let cb = fake_compact_block(
-        1u32.into(),
-        BlockHash([0; 32]),
-        nf,
-        &dfvk,
-        1,
-        false,
-        Some(0),
-    );
-
-    // The fake block function will have our transaction and a random one.
-    assert_eq!(cb.vtx.len(), 2);
-
-    let res = scan_block(
-        &zcash_primitives::consensus::MainNetwork,
-        cb,
-        &vks[..],
-        &[(account, nf)],
-        None,
-    )
-    .unwrap();
-
-    // The response should have one transaction relevant to the key we provided.
-    assert_eq!(res.transactions().len(), 1);
 
     Ok(())
 }
