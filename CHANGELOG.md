@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 Zebra's mining RPCs are now available in release builds. TODO: rest of intro
 
 This release contains the following changes:
- 
+
 ### Mining RPCs in Production Builds
 
 Zebra's mining RPCs are now available in release builds (#7740). Any Zebra instance can be used
@@ -20,6 +20,25 @@ read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebr
 
 Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
 if your mining pool needs extra RPC methods or fields.
+
+### Parameters in Binary
+
+`zebrad` now bundles zk-SNARK parameters directly into its binary. This increases the binary size
+by a few megabytes, but these parameters do not need to be downloaded or stored separately.
+
+Previously, parameters were stored by default in these locations:
+
+* `~/.zcash-params` (on Linux); or
+* `~/Library/Application Support/ZcashParams` (on Mac); or
+* `C:\Users\Username\AppData\Roaming\ZcashParams` (on Windows)
+
+If you have upgraded `zebrad` to 1.4.0 or later, and `zcashd` to 5.7.0 or later, you can delete the
+parameter files in these directories to save approximately 700 MB disk space.
+
+[`zcashd` have deprecated their `fetch-params.sh` script](https://github.com/zcash/zcash/blob/master/doc/release-notes/release-notes-5.7.0.md#deprecation-of-fetch-paramssh),
+so it can't be used to retry failed downloads in `zebrad` 1.3.0 and earlier.
+
+We recommend upgrading to the latest Zebra release to avoid download issues in new installs.
 
 ### Security
 
@@ -32,9 +51,9 @@ and fixes performance issues and bugs in the mining solution rate RPCs. Progress
 bars can now be enabled using a config, please help us test them!
 
 It contains the following updates:
- 
+
 ### User Testing: Progress Bars
- 
+
 Zebra has progress bars! When progress bars are enabled, you can see Zebra's blocks,
 transactions, and peer connections in your terminal. We're asking Zebra users to test this
 feature, and give us [feedback on the forums](https://forum.zcashcommunity.com/t/zebra-progress-bars/44485).
