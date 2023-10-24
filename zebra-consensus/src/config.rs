@@ -4,18 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for parallel semantic verification:
 /// <https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#definitions>
-///
-/// Automatically downloads the Zcash Sprout and Sapling parameters to the default directory:
-/// - Linux: `$HOME/.zcash-params`
-/// - macOS: `$HOME/Library/Application Support/ZcashParams`
-/// - Windows: `%APPDATA%\ZcashParams` or `C:\Users\%USERNAME%\AppData\ZcashParams`
-///
-/// # Security
-///
-/// If you are running Zebra with elevated permissions ("root"), create the
-/// parameters directory before running Zebra, and make sure the Zebra user
-/// account has exclusive access to that directory, and other users can't modify
-/// its parent directories.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {

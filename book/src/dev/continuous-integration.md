@@ -178,14 +178,13 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
 
 2. If there are any "skip tree root was not found in the dependency graph" warnings, delete those versions from `deny.toml`
 
-### Fixing Disk Full Errors and Zcash Parameter Errors
+### Fixing Disk Full Errors
 
 If the Docker cached state disks are full, increase the disk sizes in:
 - [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
 - [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
 
-If the GitHub Actions disks are full, or the Zcash parameter downloads time out without any network messages or errors,
-follow these steps until the errors are fixed:
+If the GitHub Actions disks are full, follow these steps until the errors are fixed:
 
 0. Check if error is also happening on the `main` branch. If it is, skip the next step.
 1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache.
@@ -193,11 +192,6 @@ follow these steps until the errors are fixed:
 3. Clear the GitHub Actions code caches for all the branches and the `main` branch.
 
 These errors often happen after a new compiler version is released, because the caches can end up with files from both compiler versions.
-
-If the Zcash Parameter downloads have an error loading the parameters:
-1. Clear the Zcash parameter caches for all branches, including `main`
-
-The correct `*-sprout-and-sapling-params` caches should be around 765 MB.
 
 You can find a list of caches using:
 ```sh
