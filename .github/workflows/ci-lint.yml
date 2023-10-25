@@ -37,7 +37,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v39.2.3
+        uses: tj-actions/changed-files@v39.2.4
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v39.2.3
+        uses: tj-actions/changed-files@v39.2.4
         with:
           files: |
             .github/workflows/*.yml
