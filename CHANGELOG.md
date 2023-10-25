@@ -40,6 +40,13 @@ so it can't be used to retry failed downloads in `zebrad` 1.3.0 and earlier.
 
 We recommend upgrading to the latest Zebra release to avoid download issues in new installs.
 
+### DockerHub image tags
+
+Zebra 1.4.0 and later will not have a `v1.4.0` tag on [`zebrad` Docker images](https://hub.docker.com/r/zfnd/zebra/tags).
+If you need to stay on a particular version, use the `1.4.0`, `1.4` (patch releases only), or `1` (until NU6) tags.
+
+We recommend using the `latest` tag to always get the most recent Zebra release.
+
 ### Security
 
 TODO: rest of changelog
