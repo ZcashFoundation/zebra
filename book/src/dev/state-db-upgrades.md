@@ -52,7 +52,8 @@ To reduce code and testing complexity:
 
 Here are the goals of in-place upgrades:
 - avoid a full download and rebuild of the state
-- the previous state format must be able to be loaded by the new state
+- Zebra must be able to upgrade the format from previous minor or patch versions of its disk format
+  (Major disk format versions are breaking changes. They create a new empty state and re-sync the whole chain.)
   - this is checked the first time CI runs on a PR with a new state version.
     After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
     again. If CI fails on the first run, any cached states with that version should be deleted.
