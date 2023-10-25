@@ -115,6 +115,7 @@ jobs:
             # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
             type=ref,event=pr
             type=ref,event=branch
+            type=edge,enable={{is_default_branch}}
             type=schedule
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
