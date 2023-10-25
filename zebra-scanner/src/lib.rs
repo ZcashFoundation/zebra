@@ -1,4 +1,4 @@
-//! Blockchain scanner code for Zebra. 🦓
+//! Shielded transaction scanner for the Zcash blockchain.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
