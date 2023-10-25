@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - TODO: DATE
 
-Zebra's mining RPCs are now available in release builds. TODO: rest of intro
+Zebra's mining RPCs are now available in release builds. Our Docker images are significantly smaller,
+because the Zcash verification parameters are now built into the `zebrad` binary.
+TODO: rest of intro
 
 This release contains the following changes:
 
@@ -21,10 +23,11 @@ read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebr
 Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
 if your mining pool needs extra RPC methods or fields.
 
-### Parameters in Binary
+### Zcash Parameters in `zebrad` Binary
 
 `zebrad` now bundles zk-SNARK parameters directly into its binary. This increases the binary size
-by a few megabytes, but these parameters do not need to be downloaded or stored separately.
+by a few megabytes, but reduces the size of the Docker image by around 600 MB. The `zebrad download`
+command does nothing, so it has been removed.
 
 Previously, parameters were stored by default in these locations:
 
