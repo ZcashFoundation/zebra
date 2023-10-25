@@ -33,7 +33,7 @@ jobs:
     secrets: inherit
 
   # The image will be named `zebra:<semver>`
-  # It should be built last, so the `latest` tag is the production build, not the experimental build.
+  # It should be built last, so overlapping tags point to the production build, not the experimental build.
   build:
     name: Build Release Docker
     uses: ./.github/workflows/sub-build-docker-image.yml
@@ -41,6 +41,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
+      latest_tag: true
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
     # This step needs access to Docker Hub secrets to run successfully
