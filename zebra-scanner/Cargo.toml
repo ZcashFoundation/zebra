@@ -2,7 +2,7 @@
 name = "zebra-scanner"
 version = "1.0.0-beta.30"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
-description = "Blockchain scanner for the Zebra Zcash node"
+description = "Shielded transaction scanner for the Zcash blockchain"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
