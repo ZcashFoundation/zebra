@@ -73,9 +73,9 @@ These fixes disable mining pool operator payments and miner payments: they just 
 
     </details>
 
-2. [Build](https://github.com/ZcashFoundation/zebra#build-instructions) and [Run Zebra](https://zebra.zfnd.org/user/run.html) with the `getblocktemplate-rpcs` feature:
+2. [Run Zebra](https://zebra.zfnd.org/user/run.html) with the config you created:
     ```sh
-    cargo run --release --features "getblocktemplate-rpcs" --bin zebrad -- -c zebrad.toml
+    zebrad -c zebrad.toml
     ```
 3. Wait a few hours for Zebra to sync to the testnet tip (on mainnet this takes 2-3 days)
 
