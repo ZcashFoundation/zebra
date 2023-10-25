@@ -164,7 +164,7 @@ These fixes disable mining pool operator payments and miner payments: they just 
    git clone https://github.com/ZcashFoundation/s-nomp && cd s-nomp
    ```
 
-5. Use Node 8.11:
+5. Use Node 10:
 
     ```sh
     unset npm_config_prefix
