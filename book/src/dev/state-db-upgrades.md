@@ -28,11 +28,11 @@ which can take days.
 ### Writing Blocks to the State
 [write-block]: #write-block
 
-Zebra's state has two methods of getting to the latest format:
-- syncing from empty with the latest format, and
-- upgrading from a previous format to the latest format.
+Blocks can be written to the database via two different code paths, and both must produce the same results:
 
-This means that writing blocks uses two different codepaths, and they must produce the same results.
+- Upgrading pre-existing zebra-state databases/cache to the latest format
+- Writing newly-synced blocks in the latest format
+
 This code is high risk, because discovering bugs is tricky, and fixing bugs can require a full reset
 and re-write of an entire column family.
 
@@ -152,12 +152,12 @@ directory. This path varies based on the OS, major state version, network, and c
 For example, the default mainnet state version on Linux is at:
 `~/.cache/zebra/state/v25/mainnet/version`
 
-To upgrade from `v25.0.0`, delete the version file.
+To upgrade a cached Zebra state from `v25.0.0` to the latest disk format, delete the version file.
 To upgrade from a specific version `v25.x.y`, edit the file so it contains `x.y`.
 
-Editing the file will trigger a re-upgrade over an existing state. Re-upgrades can hide format bugs.
-For example, if the old code was correct, and the new code skips blocks, the validity checks won't
-find that bug.
+Editing the file and running Zebra will trigger a re-upgrade over an existing state.
+Re-upgrades can hide format bugs. For example, if the old code was correct, and the
+new code skips blocks, the validity checks won't find that bug.
 
 So it is better to test with a full sync, and an older cached state.
 
@@ -296,7 +296,7 @@ Each column family handles updates differently, based on its specific consensus 
   - Each key-value entry is created once.
   - Keys can be deleted, but values are never updated.
   - Code called by ReadStateService must ignore deleted keys, or use a read lock.
-  - We avoid deleting keys, and avoid using iterators on Delete column families, for performance.
+  - We avoid deleting keys, and avoid using iterators on `Delete` column families, for performance.
   - TODO: should we prevent re-inserts of keys that have been deleted?
 - Update:
   - Each key-value entry is created once.
