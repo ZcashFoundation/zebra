@@ -1,6 +1,7 @@
 ## Motivation
 <!--
 Thank you for your Pull Request.
+Does it close any issues?
 -->
 _What are the most important goals of the ticket or PR?_
 
