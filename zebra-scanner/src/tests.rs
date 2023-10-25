@@ -180,7 +180,7 @@ fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> Compact
             .time
             .timestamp()
             .try_into()
-            .expect("should work during 21st century"),
+            .expect("unsigned 32-bit times should work until 2105"),
         header: block
             .header
             .zcash_serialize_to_vec()
