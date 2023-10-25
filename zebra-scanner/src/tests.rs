@@ -194,7 +194,8 @@ fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> Compact
             .collect(),
         chain_metadata: Some(chain_metadata),
 
-        ..Default::default()
+        // The protocol version is used for the gRPC wire format, so it isn't needed here.
+        proto_version: 0,
     }
 }
 
