@@ -1,33 +1,41 @@
 ## Motivation
-
 <!--
 Thank you for your Pull Request.
-How does this change improve Zebra?
 -->
+_What are the most important goals of the ticket or PR?_
+
+
+### PR Author Checklist
+
+Check before marking the PR as ready for review:
+  - [ ] Will the PR name make sense to users?
+    - [ ] Does it need extra CHANGELOG info?
+    - [ ] Does the PR have a priority label?
+  - [ ] Have you added or updated tests?
+  - [ ] Is the documentation up to date?
 
 ### Specifications
 
 <!--
 If this PR changes consensus rules, quote them, and link to the Zcash spec or ZIP:
 https://zips.z.cash/#nu5-zips
-If this PR changes network behaviour, quote and link to the Bitcoin network reference:
-https://developer.bitcoin.org/reference/p2p_networking.html
 -->
+
 
 ### Complex Code or Requirements
 
 <!--
 Does this PR change concurrency, unsafe code, or complex consensus rules?
-If it does, ask for multiple reviewers on this PR.
+If it does, label this PR with `extra-reviews`.
 -->
+
 
 ## Solution
 
 <!--
 Summarize the changes in this PR.
-Does it close any issues?
-If this is a large change, list commits of key functional changes here.
 -->
+
 
 ## Review
 
@@ -36,14 +44,16 @@ Is this PR blocking any other work?
 If you want specific reviewers for this PR, tag them here.
 -->
 
+
 ### Reviewer Checklist
 
-  - [ ] Will the PR name make sense to users?
-    - [ ] Does it need extra CHANGELOG info? (new features, breaking changes, large changes)
-  - [ ] Are the PR labels correct?
-  - [ ] Does the code do what the ticket and PR says?
-    - [ ] Does it change concurrent code, unsafe code, or consensus rules?
-  - [ ] How do you know it works? Does it have tests?
+Check before approving the PR:
+  - [ ] Does the PR scope match the ticket?
+  - [ ] How do you know it works? Do the tests cover the PR motivation?
+  - [ ] Are there any blockers to merging this PR?
+    - [ ] Can some changes go in new tickets or PRs?
+
+_And check the PR Author checklist is complete._
 
 ## Follow Up Work
 
