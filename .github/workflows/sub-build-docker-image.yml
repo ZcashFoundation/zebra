@@ -90,17 +90,27 @@ jobs:
             suffix=${{ inputs.tag_suffix }}
           # generate Docker tags based on the following events/attributes
           tags: |
-            type=schedule
-            # semver and ref,tag automatically add a "latest" tag, but only on stable releases
+            # These DockerHub release tags support the following use cases:
+            # - `1.x.y`: always use the exact version, don't automatically upgrade
+            # - `sha-zzzzzz`: always use the exact commit (the same as `1.x.y`, but also used in CI and production image tests)
+            #
+            # Stopping publishing these tags is a breaking change for these use cases:
+            # - `latest`: always use the latest Zebra release when you pull or update
+            # - `1`: use the latest Zebra release, but require manual intervention for the next network upgrade
+            # - `1.x`: update to bug fix releases, but don't add any new features or incompatibilities
+            #
+            # semver automatically adds a "latest" tag, but only on stable releases
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=ref,event=tag
-            type=ref,event=branch
-            type=ref,event=pr
+            # DockerHub release and CI tags.
+            # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
             type=sha
-            # edge is the latest commit on the default branch.
-            type=edge,enable={{is_default_branch}}
+            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs. 
+            # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
+            type=ref,event=pr
+            type=ref,event=branch
+            type=schedule
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
