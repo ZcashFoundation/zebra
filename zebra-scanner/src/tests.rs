@@ -1,5 +1,7 @@
-//! Test that we can scan blocks.
+//! Test that we can scan the Zebra blockchain using the external `zcash_client_backend` crate
+//! scanning functionality.
 //!
+//! This tests belong to the proof of concept stage of the external wallet support functionality.
 
 use std::sync::Arc;
 
@@ -38,6 +40,10 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
+/// Prove that Zebra blocks can be scanned using the `zcash_client_backend::scanning::scan_block` function:
+/// - Populates the state with a continuous chain of mainnet blocks from genesis.
+/// - Scan the chain from the tip going backwards down to genesis.
+/// - Verifies that no relevant transaction is found in the chain when scanning for a fake account's nullifier.
 #[tokio::test]
 async fn scanning_from_populated_zebra_state() -> Result<()> {
     let account = AccountId::from(12);
@@ -113,6 +119,12 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
     Ok(())
 }
 
+/// Prove that we can create fake blocks with fake notes and scan them using the
+/// `zcash_client_backend::scanning::scan_block` function:
+/// - Function `fake_compact_block` will generate 1 block with one pre created fake nullifier in
+/// the transaction and one additional random transaction without it.
+/// - Verify one relevant transaction is found in the chain when scanning for the pre created fake
+/// account's nullifier.
 #[tokio::test]
 async fn scanning_from_fake_generated_blocks() -> Result<()> {
     let account = AccountId::from(12);
@@ -149,7 +161,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
     Ok(())
 }
 
-// Convert a zebra block and meta data into a compact block.
+/// Convert a zebra block and meta data into a compact block.
 fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
     CompactBlock {
         height: block
@@ -186,7 +198,7 @@ fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> Compact
     }
 }
 
-// Convert a zebra transaction into a compact transaction.
+/// Convert a zebra transaction into a compact transaction.
 fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
     CompactTx {
         index: index
@@ -226,6 +238,7 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
     }
 }
 
+/// Create a fake compact block with provided fake account data.
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
 // be a number for easier conversion:
 // https://github.com/zcash/librustzcash/blob/zcash_primitives-0.13.0/zcash_client_backend/src/scanning.rs#L635
@@ -310,6 +323,7 @@ fn fake_compact_block(
     cb
 }
 
+/// Create a random compact transaction.
 // This is an exact copy of `zcash_client_backend::scanning::random_compact_tx`:
 // https://github.com/zcash/librustzcash/blob/zcash_primitives-0.13.0/zcash_client_backend/src/scanning.rs#L597
 // We need to copy because this is a test private function upstream.
