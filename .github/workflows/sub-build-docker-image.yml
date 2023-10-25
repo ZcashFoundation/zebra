@@ -33,6 +33,10 @@ on:
       test_features:
         required: false
         type: string
+      latest_tag:
+        required: false
+        type: boolean
+        default: false
       tag_suffix:
         required: false
         type: string
@@ -88,6 +92,7 @@ jobs:
           # appends inputs.tag_suffix to image tags/names
           flavor: |
             suffix=${{ inputs.tag_suffix }}
+            latest=${{ inputs.latest_tag }}
           # generate Docker tags based on the following events/attributes
           tags: |
             # These DockerHub release tags support the following use cases:
