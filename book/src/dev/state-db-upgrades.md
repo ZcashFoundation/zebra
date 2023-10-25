@@ -30,7 +30,7 @@ which can take days.
 
 Blocks can be written to the database via two different code paths, and both must produce the same results:
 
-- Upgrading pre-existing zebra-state databases/cache to the latest format
+- Upgrading a pre-existing database to the latest format
 - Writing newly-synced blocks in the latest format
 
 This code is high risk, because discovering bugs is tricky, and fixing bugs can require a full reset
