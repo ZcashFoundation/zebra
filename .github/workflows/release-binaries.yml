@@ -33,9 +33,12 @@ jobs:
     secrets: inherit
 
   # The image will be named `zebra:<semver>`
-  # It should be built last, so overlapping tags point to the production build, not the experimental build.
+  # It should be built last, so tags with the same name point to the production build, not the experimental build.
   build:
     name: Build Release Docker
+    # Run this build last, regardless of whether experimental worked
+    needs: build-experimental
+    if: always()
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
