@@ -1,5 +1,15 @@
 //! Zebrad Subcommands
 
+use std::path::PathBuf;
+
+use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
+
+use crate::config::ZebradConfig;
+
+pub use self::{entry_point::EntryPoint, start::StartCmd};
+
+use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
+
 mod copy_state;
 mod entry_point;
 mod generate;
@@ -9,15 +19,7 @@ mod tip_height;
 #[cfg(test)]
 mod tests;
 
-use self::ZebradCmd::*;
-use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
-
-pub use self::{entry_point::EntryPoint, start::StartCmd};
-
-use crate::config::ZebradConfig;
-
-use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
-use std::path::PathBuf;
+use ZebradCmd::*;
 
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
