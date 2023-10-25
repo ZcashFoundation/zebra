@@ -148,7 +148,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     let res = scan_block(
         &zcash_primitives::consensus::MainNetwork,
-        cb,
+        cb.clone(),
         &vks[..],
         &[(account, nf)],
         None,
@@ -157,6 +157,11 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
+    // The transaction should be the one we provided, second one in the block.
+    // (random transaction is added before ours in `fake_compact_block` function)
+    assert_eq!(res.transactions()[0].txid, cb.vtx[1].txid());
+    // The block hash of the response should be the same as the one provided.
+    assert_eq!(res.block_hash(), cb.hash());
 
     Ok(())
 }
