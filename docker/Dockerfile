@@ -12,8 +12,9 @@
 # Each stage must define the build arguments (ARGs) it uses.
 #
 # Build zebrad with these features
-# Keep these in sync with:
-# https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/sub-build-docker-image.yml#L37
+#
+# Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
+# https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 
