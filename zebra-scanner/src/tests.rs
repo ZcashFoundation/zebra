@@ -207,7 +207,8 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
             .expect("tx index in block should fit in u64"),
         hash: tx.hash().bytes_in_display_order().to_vec(),
 
-        // `fee` is not checked by the `scan_block` function.
+        // `fee` is not checked by the `scan_block` function. It is allowed to be unset.
+        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactTx.html#structfield.fee>
         fee: 0,
 
         spends: tx
@@ -216,6 +217,10 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
                 nf: <[u8; 32]>::from(*nf).to_vec(),
             })
             .collect(),
+
+        // > output encodes the cmu field, ephemeralKey field, and a 52-byte prefix of the encCiphertext field of a Sapling Output
+        //
+        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactSaplingOutput.html>
         outputs: tx
             .sapling_outputs()
             .map(|output| CompactSaplingOutput {
