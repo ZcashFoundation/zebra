@@ -77,8 +77,7 @@ These fixes disable mining pool operator payments and miner payments: they just 
     ```sh
     zebrad -c zebrad.toml
     ```
-3. Wait for Zebra to sync to the testnet tip. This takes 2-3 days on Mainnet at
-   the time of writing this manual.
+3. Wait for Zebra to sync to the testnet tip. This takes 8-12 hours on testnet (or 2-3 days on mainnet) as of October 2023.
 
 ## Install `s-nomp`
 
