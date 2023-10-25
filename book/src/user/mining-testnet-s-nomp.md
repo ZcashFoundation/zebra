@@ -138,43 +138,49 @@ These fixes disable mining pool operator payments and miner payments: they just 
 
 <details><summary>Arch-specific instructions</summary>
 
-#### Install dependencies
+#### Install `s-nomp`
 
-1. Install [`redis`](https://redis.io/docs/getting-started/) and run it on the default port:
+1. Install Redis, and development libraries required by S-nomp
 
     ```sh
-    sudo pacman -S redis
+    sudo pacman -S redis boost libsodium
+    ```
+    
+2. Install `nvm`, Python 3.10 and `virtualenv`
+
+    ```sh
+    paru -S python310 nvm
+    sudo pacman -S python-virtualenv
+    ```
+
+3. Start Redis
+    ```sh
     sudo systemctl start redis
     ```
 
-2. Install and activate [`nvm`](https://github.com/nvm-sh/nvm#installing-and-updating):
+4. Clone the repository
+
+   ```sh
+   git clone https://github.com/ZcashFoundation/s-nomp && cd s-nomp
+   ```
+
+5. Use Node 8.11:
 
     ```sh
-    sudo pacman -S nvm
     unset npm_config_prefix
     source /usr/share/nvm/init-nvm.sh
+    nvm install 10
+    nvm use 10
     ```
 
-3. Install `boost` and `libsodium` development libraries:
+6. Use Python 3.10
 
     ```sh
-    sudo pacman -S boost libsodium
+    virtualenv -p 3.10 s-nomp
+    source s-nomp/bin/activate
     ```
 
-#### Install `s-nomp`
-
-1. `git clone https://github.com/ZcashFoundation/s-nomp && cd s-nomp`
-
-2. Use the Zebra configs: `git checkout zebra-mining`
-
-3. Use node 8.11.0:
-
-    ```sh
-    nvm install 8.11.0
-    nvm use 8.11.0
-    ```
-
-4. Update dependencies and install:
+7. Update dependencies and install:
 
     ```sh
     npm update
