@@ -20,7 +20,7 @@ categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
 zcash_client_backend = "0.10.0-rc.1"
-zcash_primitives = "=0.13.0-rc.1"
+zcash_primitives = "0.13.0-rc.1"
 zcash_note_encryption = "0.4.0"
 
 rand = "0.8.5"
