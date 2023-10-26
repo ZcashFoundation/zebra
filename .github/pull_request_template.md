@@ -61,7 +61,7 @@ Check before approving the PR:
   - [ ] Does the PR scope match the ticket?
   - [ ] Are there enough tests to make sure it works? Do the tests cover the PR motivation?
   - [ ] Are all the PR blockers dealt with?
-  PR blockers can be dealt with in new tickets or PRs.
+        PR blockers can be dealt with in new tickets or PRs.
 
 _And check the PR Author checklist is complete._
 
