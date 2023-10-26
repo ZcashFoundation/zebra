@@ -15,6 +15,8 @@ Check before marking the PR as ready for review:
   - [ ] Have you added or updated tests?
   - [ ] Is the documentation up to date?
 
+_If a checkbox isn't relevant to the PR, mark it as done._
+
 ### Specifications
 
 <!--
