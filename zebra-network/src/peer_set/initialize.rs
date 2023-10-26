@@ -896,7 +896,7 @@ where
                             // There weren't any peers, so try to get more peers.
                             debug!("demand for peers but no available candidates");
 
-                            crawl(candidates, demand_tx).await?;
+                            crawl(candidates, demand_tx, false).await?;
 
                             Ok(DemandCrawlFinished)
                         }
@@ -918,7 +918,7 @@ where
                             "crawling for more peers in response to the crawl timer"
                         );
 
-                        crawl(candidates, demand_tx).await?;
+                        crawl(candidates, demand_tx, true).await?;
 
                         Ok(TimerCrawlFinished)
                     }
@@ -957,11 +957,12 @@ where
 }
 
 /// Try to get more peers using `candidates`, then queue a connection attempt using `demand_tx`.
-/// If there were no new peers, the connection attempt is skipped.
+/// If there were no new peers and `should_always_dial` is false, the connection attempt is skipped.
 #[instrument(skip(candidates, demand_tx))]
 async fn crawl<S>(
     candidates: Arc<futures::lock::Mutex<CandidateSet<S>>>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+    should_always_dial: bool,
 ) -> Result<(), BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
@@ -976,7 +977,7 @@ where
         result
     };
     let more_peers = match result {
-        Ok(more_peers) => more_peers,
+        Ok(more_peers) => more_peers.or_else(|| should_always_dial.then_some(MorePeers)),
         Err(e) => {
             info!(
                 ?e,
