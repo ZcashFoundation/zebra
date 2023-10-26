@@ -23,12 +23,6 @@ cargo build --bin zebrad || exit $?
 
 EXIT_STATUS=0
 while [ $EXIT_STATUS -eq 0 ] && [ $SHUTDOWN_DELAY -le $SHUTDOWN_DELAY_LIMIT ]; do
-    # remove previously downloaded Zcash parameter files
-    #
-    # if you don't have these downloaded already, the killed downloads will be incomplete,
-    # which causes an error in Zebra
-    # rm -r ~/.zcash-params
-
     echo
     echo "Running Zebra for $SHUTDOWN_DELAY seconds"
     echo
