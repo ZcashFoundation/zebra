@@ -19,10 +19,14 @@ categories = ["cryptography::cryptocurrencies"]
 # Production features that activate extra dependencies, or extra features in dependencies
 
 [dependencies]
+
+[dev-dependencies]
+
 zcash_client_backend = "0.10.0-rc.1"
 zcash_primitives = "0.13.0-rc.1"
 zcash_note_encryption = "0.4.0"
 
+color-eyre = { version = "0.6.2" }
 rand = "0.8.5"
 bls12_381 = "0.8.0"
 jubjub = "0.10.0"
@@ -33,7 +37,3 @@ tokio = { version = "1.33.0", features = ["test-util"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.30" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.30" }
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.30" }
-
-[dev-dependencies]
-
-color-eyre = { version = "0.6.2" }
