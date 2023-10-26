@@ -30,9 +30,6 @@ pub struct Config {
     /// For security reasons, this option might be deprecated or ignored in a future Zebra
     /// release.
     pub checkpoint_sync: bool,
-
-    /// Skip the pre-download of Groth16 parameters if this option is true.
-    pub debug_skip_parameter_preload: bool,
 }
 
 // we like our default configs to be explicit
@@ -42,7 +39,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             checkpoint_sync: true,
-            debug_skip_parameter_preload: false,
         }
     }
 }
