@@ -235,7 +235,7 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // Give other tasks priority before spawning the download and checkpoint tasks.
+    // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.

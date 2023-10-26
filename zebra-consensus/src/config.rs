@@ -51,13 +51,16 @@ impl From<Config> for InnerConfig {
     fn from(Config { checkpoint_sync }: Config) -> Self {
         Self {
             checkpoint_sync,
-            ..Default::default()
+            _debug_skip_parameter_preload: false,
         }
     }
 }
 
-/// Inner consensus configuration for backwards compatibility with fields that have been removed.  
-#[derive(Clone, Debug, Eq, PartialEq, Default, Deserialize, Serialize)]
+/// Inner consensus configuration for backwards compatibility with older `zebrad.toml` files,
+/// which contain fields that have been removed.
+///
+/// Rust API callers should use [`Config`].
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct InnerConfig {
     /// See [`Config`] for more details.
@@ -75,6 +78,15 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             checkpoint_sync: true,
+        }
+    }
+}
+
+impl Default for InnerConfig {
+    fn default() -> Self {
+        Self {
+            checkpoint_sync: true,
+            _debug_skip_parameter_preload: false,
         }
     }
 }
