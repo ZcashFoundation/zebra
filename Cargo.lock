@@ -5731,7 +5731,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-scanner"
-version = "1.0.0-beta.30"
+version = "0.1.0-alpha.0"
 dependencies = [
  "bls12_381",
  "color-eyre",
