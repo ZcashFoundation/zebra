@@ -10,7 +10,7 @@ _What are the most important goals of the ticket or PR?_
 
 Check before marking the PR as ready for review:
   - [ ] Will the PR name make sense to users?
-    - [ ] Does it need extra CHANGELOG info?
+    - [ ] For significant changes: Is there a summary in the CHANGELOG?
     - [ ] Does the PR have a priority label?
   - [ ] Have you added or updated tests?
   - [ ] Is the documentation up to date?
@@ -58,8 +58,8 @@ If you want specific reviewers for this PR, tag them here.
 Check before approving the PR:
   - [ ] Does the PR scope match the ticket?
   - [ ] How do you know it works? Do the tests cover the PR motivation?
-  - [ ] Are there any blockers to merging this PR?
-    - [ ] Can some changes go in new tickets or PRs?
+  - [ ] Are all the PR blockers dealt with?
+  PR blockers can be dealt with in new tickets or PRs.
 
 _And check the PR Author checklist is complete._
 
