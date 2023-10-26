@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 /// Configuration for parallel semantic verification:
 /// <https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#definitions>
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[serde(
+    deny_unknown_fields,
+    default,
+    from = "InnerConfig",
+    into = "InnerConfig"
+)]
 pub struct Config {
     /// Should Zebra make sure that it follows the consensus chain while syncing?
     /// This is a developer-only option.
@@ -30,6 +35,33 @@ pub struct Config {
     /// For security reasons, this option might be deprecated or ignored in a future Zebra
     /// release.
     pub checkpoint_sync: bool,
+}
+
+impl From<InnerConfig> for Config {
+    fn from(
+        InnerConfig {
+            checkpoint_sync, ..
+        }: InnerConfig,
+    ) -> Self {
+        Self { checkpoint_sync }
+    }
+}
+
+impl From<Config> for InnerConfig {
+    fn from(Config { checkpoint_sync }: Config) -> Self {
+        Self {
+            checkpoint_sync,
+            ..Default::default()
+        }
+    }
+}
+
+/// Inner consensus configuration for backwards compatibility with fields that have been removed.  
+#[derive(Clone, Debug, Eq, PartialEq, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct InnerConfig {
+    /// See [`Config`] for more details.
+    pub checkpoint_sync: bool,
 
     #[serde(skip_serializing, rename = "debug_skip_parameter_preload")]
     /// Unused config field for backwards compatibility.
@@ -43,7 +75,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             checkpoint_sync: true,
-            _debug_skip_parameter_preload: false,
         }
     }
 }
