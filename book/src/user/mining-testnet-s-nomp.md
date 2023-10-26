@@ -20,7 +20,6 @@ These fixes disable mining pool operator payments and miner payments: they just 
     ```console
     [consensus]
     checkpoint_sync = true
-    debug_skip_parameter_preload = false
 
     [mempool]
     eviction_memory_time = '1h'
