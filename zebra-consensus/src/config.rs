@@ -85,7 +85,7 @@ impl Default for Config {
 impl Default for InnerConfig {
     fn default() -> Self {
         Self {
-            checkpoint_sync: true,
+            checkpoint_sync: Config::default().checkpoint_sync,
             _debug_skip_parameter_preload: false,
         }
     }
