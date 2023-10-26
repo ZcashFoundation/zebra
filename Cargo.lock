@@ -5744,7 +5744,6 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zebra-chain",
- "zebra-consensus",
  "zebra-state",
  "zebra-test",
 ]
