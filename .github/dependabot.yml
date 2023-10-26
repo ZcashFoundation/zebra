@@ -28,8 +28,10 @@ updates:
             - "bs58"
             - "ripemd"
         # groups are limited to 10 items
-        crypto:
+        prod:
           patterns:
+        # crypto:
+        #   patterns:
             - "bellman"
             # reddsa, redjubjub
             - "red*"
@@ -41,8 +43,8 @@ updates:
             - "sha2"
             - "*25519*"
             - "rand*"
-        async:
-          patterns:
+        # async:
+        #   patterns:
             - "tokio*"
             - "console-subscriber"
             - "tower*"
@@ -51,8 +53,8 @@ updates:
             - "reqwest"
             - "futures*"
             - "pin-project*"
-        log-time:
-          patterns:
+        # log-time:
+        #   patterns:
             - "tracing*"
             - "log"
             - "*eyre*"
@@ -65,19 +67,19 @@ updates:
             # time, humantime
             - "*time*"
             - "chrono*"
-        concurrency:
-          patterns:
+        # concurrency:
+        #   patterns:
             - "once_cell"
             - "lazy_static"
             - "rayon*"
             - "crossbeam*"
             - "num_cpus"
-        progress-bar:
-          patterns:
+        # progress-bar:
+        #   patterns:
             - "indicatif"
             - "howudoin"
-        app:
-          patterns:
+        # app:
+        #   patterns:
             - "abscissa*"
             - "structopt*"
             - "clap*"
@@ -89,8 +91,8 @@ updates:
             - "*git*"
             - "toml*"
             - "rlimit"
-        formats:
-          patterns:
+        # formats:
+        #   patterns:
             - "serde*"
             - "jsonrpc*"
             - "hex*"
@@ -98,8 +100,8 @@ updates:
             - "byteorder"
             - "bytes"
             - "bincode"    
-        data-structures:
-          patterns:
+        # data-structures:
+        #   patterns:
             - "bitflags*"
             - "bitvec"
             - "indexmap"
