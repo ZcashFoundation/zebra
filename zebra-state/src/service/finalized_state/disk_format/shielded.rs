@@ -178,11 +178,11 @@ impl IntoDisk for orchard::tree::Node {
     }
 }
 
-impl<Node: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtreeData<Node> {
+impl<Root: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtreeData<Root> {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        [self.end.as_bytes().to_vec(), self.node.as_bytes()].concat()
+        [self.end.as_bytes().to_vec(), self.root.as_bytes()].concat()
     }
 }
 

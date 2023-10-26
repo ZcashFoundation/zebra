@@ -1172,7 +1172,7 @@ where
                 let subtrees = subtrees
                     .values()
                     .map(|subtree| SubtreeRpcData {
-                        node: subtree.node.encode_hex(),
+                        root: subtree.root.encode_hex(),
                         end: subtree.end,
                     })
                     .collect();
@@ -1202,7 +1202,7 @@ where
                 let subtrees = subtrees
                     .values()
                     .map(|subtree| SubtreeRpcData {
-                        node: subtree.node.encode_hex(),
+                        root: subtree.root.encode_hex(),
                         end: subtree.end,
                     })
                     .collect();

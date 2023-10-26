@@ -171,7 +171,7 @@ fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node>
     // ```
     NoteCommitmentSubtree {
         index: 0.into(),
-        node: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+        root: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
             .as_slice()
             .try_into()
             .expect("test vector is valid"),
@@ -187,7 +187,7 @@ fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node>
     // ```
     NoteCommitmentSubtree {
         index: 0.into(),
-        node: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+        root: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
             .as_slice()
             .try_into()
             .expect("test vector is valid"),
@@ -373,7 +373,7 @@ fn check_sapling_subtrees(
                 error!(?result);
             }
 
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -438,7 +438,7 @@ fn check_sapling_subtrees(
 
         // Check the root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -503,7 +503,7 @@ fn check_orchard_subtrees(
                 error!(?result);
             }
 
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -568,7 +568,7 @@ fn check_orchard_subtrees(
 
         // Check the root if the orchard note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
