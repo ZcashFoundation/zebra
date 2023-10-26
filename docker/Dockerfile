@@ -95,9 +95,7 @@ ENV CARGO_HOME="/opt/zebrad/.cargo/"
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
-# TODO: do not hardcode the user /root/ even though is a safe assumption
-# Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
-COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/zcash-params:edge /root/.zcash-params /root/.zcash-params
+
 COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/lightwalletd:edge /opt/lightwalletd /usr/local/bin
 
 # cargo uses timestamps for its cache, so they need to be in this order:
@@ -176,11 +174,10 @@ RUN chmod u+x /entrypoint.sh
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
 # To save space, this step starts from scratch using debian, and only adds the resulting
-# binary from the `release` stage, and the Zcash Sprout & Sapling parameters from ZCash
+# binary from the `release` stage
 FROM debian:bullseye-slim AS runtime
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
 COPY --from=release /entrypoint.sh /
-COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/zcash-params:edge /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
