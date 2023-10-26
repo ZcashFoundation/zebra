@@ -59,7 +59,7 @@ If you want specific reviewers for this PR, tag them here.
 
 Check before approving the PR:
   - [ ] Does the PR scope match the ticket?
-  - [ ] How do you know it works? Do the tests cover the PR motivation?
+  - [ ] Are there enough tests to make sure it works? Do the tests cover the PR motivation?
   - [ ] Are all the PR blockers dealt with?
   PR blockers can be dealt with in new tickets or PRs.
 
