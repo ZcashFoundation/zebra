@@ -61,19 +61,27 @@ pub struct NoteCommitmentSubtree<Root> {
     /// Root of this subtree.
     pub root: Root,
     /// End boundary of this subtree, the block height of its last leaf.
-    pub end: Height,
+    pub end_height: Height,
 }
 
 impl<Root> NoteCommitmentSubtree<Root> {
     /// Creates new [`NoteCommitmentSubtree`]
-    pub fn new(index: impl Into<NoteCommitmentSubtreeIndex>, end: Height, root: Root) -> Self {
+    pub fn new(
+        index: impl Into<NoteCommitmentSubtreeIndex>,
+        end_height: Height,
+        root: Root,
+    ) -> Self {
         let index = index.into();
-        Self { index, end, root }
+        Self {
+            index,
+            end_height,
+            root,
+        }
     }
 
     /// Converts struct to [`NoteCommitmentSubtreeData`].
     pub fn into_data(self) -> NoteCommitmentSubtreeData<Root> {
-        NoteCommitmentSubtreeData::new(self.end, self.root)
+        NoteCommitmentSubtreeData::new(self.end_height, self.root)
     }
 }
 
@@ -86,14 +94,13 @@ pub struct NoteCommitmentSubtreeData<Root> {
     pub root: Root,
 
     /// Height of the block containing the note that completed this subtree.
-    #[serde(rename = "end_height")]
-    pub end: Height,
+    pub end_height: Height,
 }
 
 impl<Root> NoteCommitmentSubtreeData<Root> {
     /// Creates new [`NoteCommitmentSubtreeData`]
-    pub fn new(end: Height, root: Root) -> Self {
-        Self { end, root }
+    pub fn new(end_height: Height, root: Root) -> Self {
+        Self { end_height, root }
     }
 
     /// Creates new [`NoteCommitmentSubtree`] from a [`NoteCommitmentSubtreeData`] and index
@@ -101,6 +108,6 @@ impl<Root> NoteCommitmentSubtreeData<Root> {
         self,
         index: impl Into<NoteCommitmentSubtreeIndex>,
     ) -> NoteCommitmentSubtree<Root> {
-        NoteCommitmentSubtree::new(index, self.end, self.root)
+        NoteCommitmentSubtree::new(index, self.end_height, self.root)
     }
 }

@@ -182,7 +182,7 @@ impl<Root: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtreeData<Roo
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        [self.end.as_bytes().to_vec(), self.root.as_bytes()].concat()
+        [self.end_height.as_bytes().to_vec(), self.root.as_bytes()].concat()
     }
 }
 

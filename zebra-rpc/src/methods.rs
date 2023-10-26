@@ -1173,7 +1173,7 @@ where
                     .values()
                     .map(|subtree| SubtreeRpcData {
                         root: subtree.root.encode_hex(),
-                        end: subtree.end,
+                        end_height: subtree.end_height,
                     })
                     .collect();
 
@@ -1203,7 +1203,7 @@ where
                     .values()
                     .map(|subtree| SubtreeRpcData {
                         root: subtree.root.encode_hex(),
-                        end: subtree.end,
+                        end_height: subtree.end_height,
                     })
                     .collect();
 
