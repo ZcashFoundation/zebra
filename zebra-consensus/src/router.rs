@@ -195,7 +195,7 @@ where
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, transaction verifier,
-/// the Groth16 parameter download task [`JoinHandle`],
+/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
 /// and the maximum configured checkpoint verification height.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -207,12 +207,6 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
-///
-/// Pre-downloads the Sapling and Sprout Groth16 parameters if needed,
-/// checks they were downloaded correctly, and loads them into Zebra.
-/// (The transaction verifier automatically downloads the parameters on first use.
-/// But the parameter downloads can take around 10 minutes.
-/// So we pre-download the parameters, to avoid verification timeouts.)
 ///
 /// This function should only be called once for a particular state service.
 ///

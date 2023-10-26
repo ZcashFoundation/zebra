@@ -164,10 +164,6 @@ impl MempoolBehavior {
 ///
 /// If `reuse_tempdir` is supplied, use it as the test's temporary directory.
 ///
-/// If `height` is higher than the mandatory checkpoint,
-/// configures `zebrad` to preload the Zcash parameters.
-/// If it is lower, skips the parameter preload.
-///
 /// Configures `zebrad` to debug-enable the mempool based on `mempool_behavior`,
 /// then check the logs for the expected `mempool_behavior`.
 ///
