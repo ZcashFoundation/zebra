@@ -500,12 +500,15 @@ where
     ///
     /// Puts inserted services in the unready list.
     /// Drops removed services, after cancelling any pending requests.
-    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
+    ///
+    /// If the peer connector channel is closed, returns an error.
+    /// Otherwise, returns `Poll::Pending`, and registers a wakeup for new peers.
+    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         loop {
             // If the changes are finished, return.
             let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
-                // We've finished processing the entire list.
-                return Ok(());
+                // We've finished processing the entire list, but there could be new peers later.
+                return Poll::Pending;
             };
 
             // If the change channel has a permanent error, return that error.
