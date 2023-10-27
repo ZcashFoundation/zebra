@@ -511,7 +511,7 @@ impl Transaction {
     pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
             && matches!(
-                self.inputs().get(0),
+                self.inputs().first(),
                 Some(transparent::Input::Coinbase { .. })
             )
     }
