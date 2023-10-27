@@ -425,21 +425,23 @@ where
     /// Move newly ready services to the ready list if they are for peers with supported protocol
     /// versions, otherwise they are dropped. Also drop failed services.
     ///
-    /// Never returns an error. If there are no unready peers, returns `Ok` immediately.
-    /// Otherwise, returns `Poll::Pending`, and registers a wakeup for the next task that becomes
-    /// ready.
+    /// Never returns an error. If there are no unready peers, returns `Ok`, and preserves the
+    /// original waker. Otherwise, returns `Poll::Pending`, and registers a wakeup for the next
+    /// peer that becomes ready.
     fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         if self.unready_services.is_empty() {
             // Don't replace the previous waker, because we have no peers to wake the task.
             return Poll::Ready(Ok(()));
         }
 
-        loop {
-            // Return Pending if we've finished processing the unready service changes,
-            // but there are still some unready services.
-            match futures::ready!(Pin::new(&mut self.unready_services).poll_next(cx))
-                .expect("already checked for an empty list")
-            {
+        let original_waker = cx.waker();
+
+        // Return Pending if we've finished processing the unready service changes,
+        // but there are still some unready services.
+        while let Some(ready_peer) =
+            futures::ready!(Pin::new(&mut self.unready_services).poll_next(cx))
+        {
+            match ready_peer {
                 // Unready -> Ready
                 Ok((key, svc)) => {
                     trace!(?key, "service became ready");
@@ -480,6 +482,11 @@ where
                 }
             }
         }
+
+        // There are no unready peers, so the unready_peers waker will never wake pending tasks.
+        *cx = Context::from_waker(original_waker);
+
+        Poll::Ready(Ok(()))
     }
 
     /// Returns the number of peer connections Zebra already has with
@@ -1020,7 +1027,7 @@ where
         //
         // TODO: wake waiting tasks if there are new peers or unready peers become ready (#7858)
         let _ = self.poll_discover(cx)?;
-        // This waker skips itself if it is empty and will never wake.
+        // This method preserves the original waker if it has no unready peers and will never wake.
         // Otherwise, each connected peer should become ready or timeout within a few minutes.
         //
         // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
