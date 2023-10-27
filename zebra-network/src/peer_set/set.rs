@@ -110,11 +110,12 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
+    task::noop_waker,
 };
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
-    sync::{broadcast, oneshot::error::TryRecvError, watch},
+    sync::{broadcast, watch},
     task::JoinHandle,
 };
 use tower::{
@@ -254,7 +255,11 @@ where
     C: ChainTip,
 {
     fn drop(&mut self) {
-        self.shut_down_tasks_and_channels()
+        // We don't want to wake the current task, we just want to drop everything we can.
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        self.shut_down_tasks_and_channels(&mut cx);
     }
 }
 
@@ -324,15 +329,14 @@ where
     /// Check background task handles to make sure they're still running.
     ///
     /// If any background task exits, shuts down all other background tasks,
-    /// and returns an error.
-    fn poll_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxError> {
-        if let Some(result) = self.receive_tasks_if_needed() {
-            return result;
-        }
+    /// and returns an error. Otherwise, returns `Poll::Pending`, and registers a wakeup for
+    /// receiving the background tasks, or the background tasks exiting.
+    fn poll_background_errors(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        futures::ready!(self.receive_tasks_if_needed(cx))?;
 
         match Pin::new(&mut self.guards).poll_next(cx) {
             // All background tasks are still running.
-            Poll::Pending => Ok(()),
+            Poll::Pending => Poll::Pending,
 
             Poll::Ready(Some(res)) => {
                 info!(
@@ -340,35 +344,36 @@ where
                     "a peer set background task exited, shutting down other peer set tasks"
                 );
 
-                self.shut_down_tasks_and_channels();
+                self.shut_down_tasks_and_channels(cx);
 
                 // Flatten the join result and inner result,
                 // then turn Ok() task exits into errors.
-                res.map_err(Into::into)
-                    // TODO: replace with Result::flatten when it stabilises (#70142)
-                    .and_then(convert::identity)
-                    .and(Err("a peer set background task exited".into()))
+                Poll::Ready(
+                    res.map_err(Into::into)
+                        // TODO: replace with Result::flatten when it stabilises (#70142)
+                        .and_then(convert::identity)
+                        .and(Err("a peer set background task exited".into())),
+                )
             }
 
             Poll::Ready(None) => {
-                self.shut_down_tasks_and_channels();
-                Err("all peer set background tasks have exited".into())
+                self.shut_down_tasks_and_channels(cx);
+                Poll::Ready(Err("all peer set background tasks have exited".into()))
             }
         }
     }
 
-    /// Receive background tasks, if they've been sent on the channel,
-    /// but not consumed yet.
+    /// Receive background tasks, if they've been sent on the channel, but not consumed yet.
     ///
-    /// Returns a result representing the current task state,
-    /// or `None` if the background tasks should be polled to check their state.
-    fn receive_tasks_if_needed(&mut self) -> Option<Result<(), BoxError>> {
+    /// Returns a result representing the current task state, or `Poll::Pending` if the background
+    /// tasks should be polled again to check their state.
+    fn receive_tasks_if_needed(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         if self.guards.is_empty() {
-            match self.handle_rx.try_recv() {
-                // The tasks haven't been sent yet.
-                Err(TryRecvError::Empty) => Some(Ok(())),
+            // Return Pending if the tasks have not been sent yet.
+            let handles = futures::ready!(Pin::new(&mut self.handle_rx).poll(cx));
 
-                // The tasks have been sent, but not consumed.
+            match handles {
+                // The tasks have been sent, but not consumed yet.
                 Ok(handles) => {
                     // Currently, the peer set treats an empty background task set as an error.
                     //
@@ -381,21 +386,16 @@ where
 
                     self.guards.extend(handles);
 
-                    None
+                    Poll::Ready(Ok(()))
                 }
 
-                // The tasks have been sent and consumed, but then they exited.
-                //
-                // Correctness: the peer set must receive at least one task.
-                //
-                // TODO: refactor `handle_rx` and `guards` into an enum
-                //       for the background task state: Waiting/Running/Shutdown.
-                Err(TryRecvError::Closed) => {
-                    Some(Err("all peer set background tasks have exited".into()))
-                }
+                // The sender was dropped without sending the tasks.
+                Err(_) => Poll::Ready(Err(
+                    "sender did not send peer background tasks before it was dropped".into(),
+                )),
             }
         } else {
-            None
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -403,7 +403,7 @@ where
     /// - services by dropping the service lists
     /// - background tasks via their join handles or cancel handles
     /// - channels by closing the channel
-    fn shut_down_tasks_and_channels(&mut self) {
+    fn shut_down_tasks_and_channels(&mut self, cx: &mut Context<'_>) {
         // Drop services and cancel their background tasks.
         self.ready_services = HashMap::new();
 
@@ -416,9 +416,9 @@ where
         // so we don't add more peers to a shut down peer set.
         self.demand_signal.close_channel();
 
-        // Shut down background tasks.
+        // Shut down background tasks, ignoring pending polls.
         self.handle_rx.close();
-        self.receive_tasks_if_needed();
+        let _ = self.receive_tasks_if_needed(cx);
         for guard in self.guards.iter() {
             guard.abort();
         }
