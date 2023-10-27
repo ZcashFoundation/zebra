@@ -910,6 +910,7 @@ where
             Ok(TimerCrawl { tick }) => {
                 let candidates = candidates.clone();
                 let demand_tx = demand_tx.clone();
+                let should_always_dial = active_outbound_connections.update_count() == 0;
 
                 let crawl_handle = tokio::spawn(
                     async move {
@@ -918,7 +919,7 @@ where
                             "crawling for more peers in response to the crawl timer"
                         );
 
-                        crawl(candidates, demand_tx, true).await?;
+                        crawl(candidates, demand_tx, should_always_dial).await?;
 
                         Ok(TimerCrawlFinished)
                     }
