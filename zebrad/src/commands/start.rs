@@ -160,7 +160,6 @@ impl StartCmd {
                 config.consensus.clone(),
                 config.network.network,
                 state.clone(),
-                config.consensus.debug_skip_parameter_preload,
             )
             .await;
 
@@ -303,12 +302,8 @@ impl StartCmd {
 
         // startup tasks
         let BackgroundTaskHandles {
-            mut groth16_download_handle,
             mut state_checkpoint_verify_handle,
         } = consensus_task_handles;
-
-        let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
-        pin!(groth16_download_handle_fused);
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
@@ -371,19 +366,6 @@ impl StartCmd {
                     .expect("unexpected panic in the end of support task")
                     .map(|_| info!("end of support task exited")),
 
-
-                // Unlike other tasks, we expect the download task to finish while Zebra is running.
-                groth16_download_result = &mut groth16_download_handle_fused => {
-                    groth16_download_result
-                        .unwrap_or_else(|_| panic!(
-                            "unexpected panic in the Groth16 pre-download and check task. {}",
-                            zebra_consensus::groth16::Groth16Parameters::failure_hint())
-                        );
-
-                    exit_when_task_finishes = false;
-                    Ok(())
-                }
-
                 // We also expect the state checkpoint verify task to finish.
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
@@ -430,7 +412,6 @@ impl StartCmd {
         end_of_support_task_handle.abort();
 
         // startup tasks
-        groth16_download_handle.abort();
         state_checkpoint_verify_handle.abort();
         old_databases_task_handle.abort();
 

@@ -874,13 +874,8 @@ async fn rpc_getblockcount() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(
-        zebra_consensus::Config::default(),
-        Mainnet,
-        state.clone(),
-        true,
-    )
-    .await;
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+        .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -924,13 +919,8 @@ async fn rpc_getblockcount_empty_state() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(
-        zebra_consensus::Config::default(),
-        Mainnet,
-        state.clone(),
-        true,
-    )
-    .await;
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+        .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -976,13 +966,8 @@ async fn rpc_getpeerinfo() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(
-        zebra_consensus::Config::default(),
-        network,
-        state.clone(),
-        true,
-    )
-    .await;
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
+        .await;
 
     let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
         std::net::SocketAddr::new(
@@ -1051,13 +1036,8 @@ async fn rpc_getblockhash() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(
-        zebra_consensus::Config::default(),
-        Mainnet,
-        state.clone(),
-        true,
-    )
-    .await;
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+        .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1536,13 +1516,8 @@ async fn rpc_submitblock_errors() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(
-        zebra_consensus::Config::default(),
-        Mainnet,
-        state.clone(),
-        true,
-    )
-    .await;
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+        .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
