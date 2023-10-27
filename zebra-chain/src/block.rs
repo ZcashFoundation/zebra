@@ -78,8 +78,8 @@ impl Block {
     /// Verified blocks have a valid height.
     pub fn coinbase_height(&self) -> Option<Height> {
         self.transactions
-            .get(0)
-            .and_then(|tx| tx.inputs().get(0))
+            .first()
+            .and_then(|tx| tx.inputs().first())
             .and_then(|input| match input {
                 transparent::Input::Coinbase { ref height, .. } => Some(*height),
                 _ => None,
