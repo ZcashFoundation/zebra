@@ -28,9 +28,10 @@ impl<'a> Update<'a> {
 impl Future for Update<'_> {
     type Output = Result<(), BoxError>;
 
+    /// A future that returns when the next inventory update has been completed.
+    ///
+    /// See [`InventoryRegistry::poll_inventory()`] for details.
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // TODO: should the future wait until new changes arrive?
-        //       or for the rotation timer?
-        Poll::Ready(self.registry.poll_inventory(cx))
+        self.registry.poll_inventory(cx)
     }
 }

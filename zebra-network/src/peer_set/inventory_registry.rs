@@ -283,11 +283,15 @@ impl InventoryRegistry {
 
     /// Drive periodic inventory tasks
     ///
-    /// # Details
+    /// Rotates the inventory HashMaps on every timer tick.
+    /// Drains the inv_stream channel and registers all advertised inventory.
     ///
-    /// - rotates HashMaps based on interval events
-    /// - drains the inv_stream channel and registers all advertised inventory
-    pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
+    /// Returns an error if the inventory channel is closed. Otherwise returns `Poll::Pending`, and
+    /// registers a wakeup the next time there is new inventory.
+    ///
+    /// TODO: also register a wakeup for the next timer tick.
+    /// (Currently the timer never wakes the task.)
+    pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         // # Correctness
         //
         // Registers the current task for wakeup when the timer next becomes ready.
@@ -333,11 +337,11 @@ impl InventoryRegistry {
                 }
                 // This indicates all senders, including the one in the handshaker,
                 // have been dropped, which really is a permanent failure.
-                None => return Err(broadcast::error::RecvError::Closed.into()),
+                None => return Poll::Ready(Err(broadcast::error::RecvError::Closed.into())),
             }
         }
 
-        Ok(())
+        Poll::Pending
     }
 
     /// Record the given inventory `change` for the peer `addr`.
