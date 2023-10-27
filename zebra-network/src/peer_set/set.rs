@@ -509,17 +509,25 @@ where
         self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
     }
 
-    /// Checks for newly inserted or removed services.
+    /// Processes the entire list of newly inserted or removed services.
     ///
     /// Puts inserted services in the unready list.
     /// Drops removed services, after cancelling any pending requests.
-    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        use futures::ready;
+    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
         loop {
-            match ready!(Pin::new(&mut self.discover).poll_discover(cx))
+            // If the changes are finished, return.
+            let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
+                // We've finished processing the entire list.
+                return Ok(());
+            };
+
+            // If the change channel has a permanent error, return that error.
+            let change = discovered
                 .ok_or("discovery stream closed")?
-                .map_err(Into::into)?
-            {
+                .map_err(Into::into)?;
+
+            // Process each change.
+            match change {
                 Change::Remove(key) => {
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
@@ -998,7 +1006,7 @@ where
         self.poll_background_errors(cx)?;
 
         // Update peer statuses
-        let _ = self.poll_discover(cx)?;
+        self.poll_discover(cx)?;
         self.disconnect_from_outdated_peers();
         self.inventory_registry.poll_inventory(cx)?;
         self.poll_unready(cx);
