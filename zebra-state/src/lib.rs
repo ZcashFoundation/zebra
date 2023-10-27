@@ -25,12 +25,12 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod config;
 pub mod constants;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
-mod config;
 mod error;
 mod request;
 mod response;
@@ -71,7 +71,7 @@ pub use service::{
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use config::write_database_format_version_to_disk;
+pub use config::hidden::write_database_format_version_to_disk;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use constants::latest_version_for_adding_subtrees;

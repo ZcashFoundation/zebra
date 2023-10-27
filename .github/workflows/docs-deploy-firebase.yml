@@ -144,8 +144,8 @@ jobs:
 
       - name: Build external docs
         run: |
-          # Exclude zebra-utils, it is not for library or app users
-          cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir "$(pwd)"/target/external
+          # Exclude zebra-utils and zebra-test, they are not for library or app users
+          cargo doc --no-deps --workspace --all-features --exclude zebra-utils --exclude zebra-test --target-dir "$(pwd)"/target/external
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
