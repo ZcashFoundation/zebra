@@ -428,11 +428,19 @@ where
     ///
     /// Move newly ready services to the ready list if they are for peers with supported protocol
     /// versions, otherwise they are dropped. Also drop failed services.
-    fn poll_unready(&mut self, cx: &mut Context<'_>) {
+    ///
+    /// Never returns an error. If there are no unready tasks, returns `Ok(())`
+    /// Otherwise, returns `Poll::Pending`, and registers a wakeup for the next task that becomes
+    /// ready.
+    fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         loop {
             match Pin::new(&mut self.unready_services).poll_next(cx) {
-                // No unready service changes, or empty unready services
-                Poll::Pending | Poll::Ready(None) => return,
+                // Finished unready service changes, but there are still some unready services.
+                Poll::Pending => return Poll::Pending,
+
+                // There are no unready services, so the task won't be woken by this waker until
+                // some are added by code woken by other wakers.
+                Poll::Ready(None) => return Poll::Ready(Ok(())),
 
                 // Unready -> Ready
                 Poll::Ready(Some(Ok((key, svc)))) => {
