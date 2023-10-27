@@ -51,10 +51,7 @@ pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
         ..mempool::Config::default()
     };
 
-    let consensus = zebra_consensus::Config {
-        debug_skip_parameter_preload: true,
-        ..zebra_consensus::Config::default()
-    };
+    let consensus = zebra_consensus::Config::default();
 
     let force_use_color = !matches!(
         env::var("ZEBRA_FORCE_USE_COLOR"),
