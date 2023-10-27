@@ -324,10 +324,12 @@ impl InventoryRegistry {
         // rather than propagating it through the peer set's Service::poll_ready
         // implementation, where reporting a failure means reporting a permanent
         // failure of the peer set.
-        while let Poll::Ready(channel_result) = self.inv_stream.next().poll_unpin(cx) {
+
+        // Returns Pending if all messages are processed, but the channel could get more.
+        while let Some(channel_result) = futures::ready!(self.inv_stream.next().poll_unpin(cx)) {
             match channel_result {
-                Some(Ok(change)) => self.register(change),
-                Some(Err(BroadcastStreamRecvError::Lagged(count))) => {
+                Ok(change) => self.register(change),
+                Err(BroadcastStreamRecvError::Lagged(count)) => {
                     metrics::counter!("pool.inventory.dropped", 1);
                     metrics::counter!("pool.inventory.dropped.messages", count);
 
@@ -335,13 +337,12 @@ impl InventoryRegistry {
                     // or poll the registry or peer set in a separate task.
                     info!(count, "dropped lagged inventory advertisements");
                 }
-                // This indicates all senders, including the one in the handshaker,
-                // have been dropped, which really is a permanent failure.
-                None => return Poll::Ready(Err(broadcast::error::RecvError::Closed.into())),
             }
         }
 
-        Poll::Pending
+        // If the channel is empty and returns None, all senders, including the one in the
+        // handshaker, have been dropped, which really is a permanent failure.
+        Poll::Ready(Err(broadcast::error::RecvError::Closed.into()))
     }
 
     /// Record the given inventory `change` for the peer `addr`.

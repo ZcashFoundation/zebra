@@ -334,11 +334,9 @@ where
     fn poll_background_errors(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         futures::ready!(self.receive_tasks_if_needed(cx))?;
 
-        match Pin::new(&mut self.guards).poll_next(cx) {
-            // All background tasks are still running.
-            Poll::Pending => Poll::Pending,
-
-            Poll::Ready(Some(res)) => {
+        // Return Pending if all background tasks are still running.
+        match futures::ready!(Pin::new(&mut self.guards).poll_next(cx)) {
+            Some(res) => {
                 info!(
                     background_tasks = %self.guards.len(),
                     "a peer set background task exited, shutting down other peer set tasks"
@@ -346,17 +344,16 @@ where
 
                 self.shut_down_tasks_and_channels(cx);
 
-                // Flatten the join result and inner result,
-                // then turn Ok() task exits into errors.
-                Poll::Ready(
-                    res.map_err(Into::into)
-                        // TODO: replace with Result::flatten when it stabilises (#70142)
-                        .and_then(convert::identity)
-                        .and(Err("a peer set background task exited".into())),
-                )
+                // Flatten the join result and inner result, and return any errors.
+                res.map_err(Into::into)
+                    // TODO: replace with Result::flatten when it stabilises (#70142)
+                    .and_then(convert::identity)?;
+
+                // Turn Ok() task exits into errors.
+                Poll::Ready(Err("a peer set background task exited".into()))
             }
 
-            Poll::Ready(None) => {
+            None => {
                 self.shut_down_tasks_and_channels(cx);
                 Poll::Ready(Err("all peer set background tasks have exited".into()))
             }
@@ -434,16 +431,15 @@ where
     /// ready.
     fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         loop {
-            match Pin::new(&mut self.unready_services).poll_next(cx) {
-                // Finished unready service changes, but there are still some unready services.
-                Poll::Pending => return Poll::Pending,
-
+            // Return Pending if we've finished processing the unready service changes,
+            // but there are still some unready services.
+            match futures::ready!(Pin::new(&mut self.unready_services).poll_next(cx)) {
                 // There are no unready services, so the task won't be woken by this waker until
                 // some are added by code woken by other wakers.
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                None => return Poll::Ready(Ok(())),
 
                 // Unready -> Ready
-                Poll::Ready(Some(Ok((key, svc)))) => {
+                Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
@@ -454,7 +450,7 @@ where
                 }
 
                 // Unready -> Canceled
-                Poll::Ready(Some(Err((key, UnreadyError::Canceled)))) => {
+                Some(Err((key, UnreadyError::Canceled))) => {
                     // A service be canceled because we've connected to the same service twice.
                     // In that case, there is a cancel handle for the peer address,
                     // but it belongs to the service for the newer connection.
@@ -464,7 +460,7 @@ where
                         "service was canceled, dropping service"
                     );
                 }
-                Poll::Ready(Some(Err((key, UnreadyError::CancelHandleDropped(_))))) => {
+                Some(Err((key, UnreadyError::CancelHandleDropped(_)))) => {
                     // Similarly, services with dropped cancel handes can have duplicates.
                     trace!(
                         ?key,
@@ -474,7 +470,7 @@ where
                 }
 
                 // Unready -> Errored
-                Poll::Ready(Some(Err((key, UnreadyError::Inner(error))))) => {
+                Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
 
                     let cancel = self.cancel_handles.remove(&key);
@@ -513,11 +509,9 @@ where
     /// Otherwise, returns `Poll::Pending`, and registers a wakeup for new peers.
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         loop {
-            // If the changes are finished, return.
-            let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
-                // We've finished processing the entire list, but there could be new peers later.
-                return Poll::Pending;
-            };
+            // Return Pending if we've finished processing the entire list,
+            // but there could be new peers later.
+            let discovered = futures::ready!(Pin::new(&mut self.discover).poll_discover(cx));
 
             // If the change channel has a permanent error, return that error.
             let change = discovered
