@@ -20,30 +20,12 @@ updates:
           patterns:
             # deliberately include zcash_script (even though it is maintained by ZF)
             - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
-        # groups are limited to 10 items
         prod:
-          patterns:
-          # addresses
-            - "bs58|ripemd"
-          # crypto:
-            - "bellman|red*|jubjub|group|bls12_381|blake*|secp256k1|sha2|*25519*|rand*"
-          # async:
-            - "tokio*|console-subscriber|tower*|hyper*|h2|reqwest|futures*|pin-project*"
-          # log-time:
-            - "tracing*|log|*eyre*|thiserror|*doc|owo-colors|sentry*|metrics*|*time*|chrono*"
-          # concurrency:
-            - "once_cell|lazy_static|rayon*|crossbeam*|num_cpus"
-          # app:
-            - "abscissa*|structopt*|clap*|atty*|semver*|dir*|vergen|*git*|toml*|rlimit|indicatif|howudoin"
-          # formats:
-            - "serde|jsonrpc|hex|rege|byteorde|byte|bincode"    
-          # data-structures:
-            - "bitflags*|bitvec|indexmap|num-integer|primitive-types|uint|tinyvec|itertools|ordered-map|mset"
-        test:
-          patterns:
-            - "proptest*|insta|prost*|tonic*"
-            # depends on tonic and prost
-            - "console-subscriber|tempfile|static_assertions|criterion|inferno"
+          dependency-type: "production"
+          exclude-patterns:
+            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
+        dev:
+          dependency-type: "development"
   # Devops section
   - package-ecosystem: github-actions
     directory: '/'
