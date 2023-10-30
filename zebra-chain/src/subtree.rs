@@ -50,31 +50,38 @@ impl From<NoteCommitmentSubtreeIndex> for u64 {
 // TODO:
 // - consider defining sapling::SubtreeRoot and orchard::SubtreeRoot types or type wrappers,
 //   to avoid type confusion between the leaf Node and subtree root types.
-// - rename the `Node` generic to `SubtreeRoot`
 
 /// Subtree root of Sapling or Orchard note commitment tree,
 /// with its associated block height and subtree index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct NoteCommitmentSubtree<Node> {
+pub struct NoteCommitmentSubtree<SubtreeRoot> {
     /// Index of this subtree
     pub index: NoteCommitmentSubtreeIndex,
     /// Root of this subtree.
-    pub node: Node,
+    pub root: SubtreeRoot,
     /// End boundary of this subtree, the block height of its last leaf.
-    pub end: Height,
+    pub end_height: Height,
 }
 
-impl<Node> NoteCommitmentSubtree<Node> {
+impl<SubtreeRoot> NoteCommitmentSubtree<SubtreeRoot> {
     /// Creates new [`NoteCommitmentSubtree`]
-    pub fn new(index: impl Into<NoteCommitmentSubtreeIndex>, end: Height, node: Node) -> Self {
+    pub fn new(
+        index: impl Into<NoteCommitmentSubtreeIndex>,
+        end_height: Height,
+        root: SubtreeRoot,
+    ) -> Self {
         let index = index.into();
-        Self { index, end, node }
+        Self {
+            index,
+            end_height,
+            root,
+        }
     }
 
     /// Converts struct to [`NoteCommitmentSubtreeData`].
-    pub fn into_data(self) -> NoteCommitmentSubtreeData<Node> {
-        NoteCommitmentSubtreeData::new(self.end, self.node)
+    pub fn into_data(self) -> NoteCommitmentSubtreeData<SubtreeRoot> {
+        NoteCommitmentSubtreeData::new(self.end_height, self.root)
     }
 }
 
@@ -82,29 +89,25 @@ impl<Node> NoteCommitmentSubtree<Node> {
 /// Used for database key-value serialization, where the subtree index is the key, and this struct is the value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct NoteCommitmentSubtreeData<Node> {
+pub struct NoteCommitmentSubtreeData<SubtreeRoot> {
     /// Merkle root of the 2^16-leaf subtree.
-    //
-    // TODO: rename both Rust fields to match the RPC field names
-    #[serde(rename = "root")]
-    pub node: Node,
+    pub root: SubtreeRoot,
 
     /// Height of the block containing the note that completed this subtree.
-    #[serde(rename = "end_height")]
-    pub end: Height,
+    pub end_height: Height,
 }
 
-impl<Node> NoteCommitmentSubtreeData<Node> {
+impl<SubtreeRoot> NoteCommitmentSubtreeData<SubtreeRoot> {
     /// Creates new [`NoteCommitmentSubtreeData`]
-    pub fn new(end: Height, node: Node) -> Self {
-        Self { end, node }
+    pub fn new(end_height: Height, root: SubtreeRoot) -> Self {
+        Self { end_height, root }
     }
 
     /// Creates new [`NoteCommitmentSubtree`] from a [`NoteCommitmentSubtreeData`] and index
     pub fn with_index(
         self,
         index: impl Into<NoteCommitmentSubtreeIndex>,
-    ) -> NoteCommitmentSubtree<Node> {
-        NoteCommitmentSubtree::new(index, self.end, self.node)
+    ) -> NoteCommitmentSubtree<SubtreeRoot> {
+        NoteCommitmentSubtree::new(index, self.end_height, self.root)
     }
 }
