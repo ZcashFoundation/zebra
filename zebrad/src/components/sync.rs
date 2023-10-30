@@ -963,10 +963,7 @@ where
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
-            let response = self.downloads.download_and_verify(self.genesis_hash).await;
-            Self::handle_response(response).map_err(|e| eyre!(e))?;
-
-            let response = self.downloads.next().await.expect("downloads is nonempty");
+            let response = self.request_genesis_once().await?;
 
             match response {
                 Ok(response) => self
@@ -992,6 +989,20 @@ where
         }
 
         Ok(())
+    }
+
+    /// Try to download and verify the genesis block once.
+    ///
+    /// Fatal errors are returned in the outer result, temporary errors in the inner one.
+    async fn request_genesis_once(
+        &mut self,
+    ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
+        let response = self.downloads.download_and_verify(self.genesis_hash).await;
+        Self::handle_response(response).map_err(|e| eyre!(e))?;
+
+        let response = self.downloads.next().await.expect("downloads is nonempty");
+
+        Ok(response)
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.
