@@ -134,7 +134,7 @@ pub fn random_known_rpc_port_config(
     let mut config = default_test_config(network)?;
     config.rpc.listen_addr = Some(zebra_rpc_listener);
     if parallel_cpu_threads {
-        // Auto-configure to the number of CPU cores: most users configre this
+        // Auto-configure to the number of CPU cores: most users configure this
         config.rpc.parallel_cpu_threads = 0;
     } else {
         // Default config, users who want to detect port conflicts configure this
