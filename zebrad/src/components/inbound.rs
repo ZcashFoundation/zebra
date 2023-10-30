@@ -388,7 +388,7 @@ impl Service<zn::Request> for Inbound {
                 let peers = get_peers();
 
                 async move {
-                                        // Correctness: get the current time inside the future.
+                    // Correctness: get the current time inside the future.
                     //
                     // This time is used to filter outdated peers, so it doesn't matter much
                     // if we get it when the future is created, or when it starts running.
