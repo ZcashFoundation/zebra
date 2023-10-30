@@ -2,13 +2,17 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, pin::Pin, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, task::JoinError, time::sleep};
+use tokio::{
+    sync::watch,
+    task::JoinError,
+    time::{sleep, timeout},
+};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -557,69 +561,86 @@ where
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Check whether any block tasks are currently ready:
-            while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                self.handle_block_response(rsp)?;
-            }
-            self.update_metrics();
-
-            // Pause new downloads while the syncer or downloader are past their lookahead limits.
-            //
-            // To avoid a deadlock or long waits for blocks to expire, we ignore the download
-            // lookahead limit when there are only a small number of blocks waiting.
-            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-                || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                    && self.past_lookahead_limit_receiver.cloned_watch_data())
-            {
-                trace!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "waiting for pending blocks",
-                );
-
-                let response = self.downloads.next().await.expect("downloads is nonempty");
-
-                self.handle_block_response(response)?;
-                self.update_metrics();
-            }
-
-            // Once we're below the lookahead limit, we can request more blocks or hashes.
-            if !extra_hashes.is_empty() {
-                debug!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "requesting more blocks",
-                );
-
-                let response = self.request_blocks(extra_hashes).await;
-                extra_hashes = Self::handle_hash_response(response)?;
-            } else {
-                info!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "extending tips",
-                );
-
-                extra_hashes = self.extend_tips().await.map_err(|e| {
-                    info!("temporary error extending tips: {:#}", e);
-                    e
-                })?;
-            }
-            self.update_metrics();
+            extra_hashes = self.try_to_sync_once(extra_hashes).await?;
         }
 
         info!("exhausted prospective tip set");
 
         Ok(())
+    }
+
+    /// Tries to synchronize the chain once, using the existing `extra_hashes`.
+    ///
+    /// Tries to extend the existing tips and download the missing blocks.
+    ///
+    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
+    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
+    /// necessary.
+    #[instrument(skip(self))]
+    async fn try_to_sync_once(
+        &mut self,
+        mut extra_hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        // Check whether any block tasks are currently ready.
+        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+            self.handle_block_response(rsp)?;
+        }
+        self.update_metrics();
+
+        // Pause new downloads while the syncer or downloader are past their lookahead limits.
+        //
+        // To avoid a deadlock or long waits for blocks to expire, we ignore the download
+        // lookahead limit when there are only a small number of blocks waiting.
+        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
+            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
+                && self.past_lookahead_limit_receiver.cloned_watch_data())
+        {
+            trace!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "waiting for pending blocks",
+            );
+
+            let response = self.downloads.next().await.expect("downloads is nonempty");
+
+            self.handle_block_response(response)?;
+            self.update_metrics();
+        }
+
+        // Once we're below the lookahead limit, we can request more blocks or hashes.
+        if !extra_hashes.is_empty() {
+            debug!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "requesting more blocks",
+            );
+
+            let response = self.request_blocks(extra_hashes).await;
+            extra_hashes = Self::handle_hash_response(response)?;
+        } else {
+            info!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "extending tips",
+            );
+
+            extra_hashes = self.extend_tips().await.map_err(|e| {
+                info!("temporary error extending tips: {:#}", e);
+                e
+            })?;
+        }
+        self.update_metrics();
+
+        Ok(extra_hashes)
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
