@@ -694,7 +694,7 @@ impl Chain {
 
         self.sapling_subtrees
             .iter()
-            .find(|(_index, subtree)| subtree.end == height)
+            .find(|(_index, subtree)| subtree.end_height == height)
             .map(|(index, subtree)| subtree.with_index(*index))
     }
 
@@ -898,7 +898,7 @@ impl Chain {
 
         self.orchard_subtrees
             .iter()
-            .find(|(_index, subtree)| subtree.end == height)
+            .find(|(_index, subtree)| subtree.end_height == height)
             .map(|(index, subtree)| subtree.with_index(*index))
     }
 

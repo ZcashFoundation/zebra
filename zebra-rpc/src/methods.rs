@@ -1172,8 +1172,8 @@ where
                 let subtrees = subtrees
                     .values()
                     .map(|subtree| SubtreeRpcData {
-                        node: subtree.node.encode_hex(),
-                        end: subtree.end,
+                        root: subtree.root.encode_hex(),
+                        end_height: subtree.end_height,
                     })
                     .collect();
 
@@ -1202,8 +1202,8 @@ where
                 let subtrees = subtrees
                     .values()
                     .map(|subtree| SubtreeRpcData {
-                        node: subtree.node.encode_hex(),
-                        end: subtree.end,
+                        root: subtree.root.encode_hex(),
+                        end_height: subtree.end_height,
                     })
                     .collect();
 
