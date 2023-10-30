@@ -554,14 +554,24 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = self.obtain_tips().await.map_err(|e| {
-            info!("temporary error obtaining tips: {:#}", e);
-            e
-        })?;
+        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
+            .await
+            .map_err(Into::into)
+            // TODO: replace with flatten() when it stabilises (#70142)
+            .and_then(convert::identity)
+            .map_err(|e| {
+                info!("temporary error obtaining tips: {:#}", e);
+                e
+            })?;
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            extra_hashes = self.try_to_sync_once(extra_hashes).await?;
+            // Avoid hangs due to service readiness or other internal operations
+            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+                .await
+                .map_err(Into::into)
+                // TODO: replace with flatten() when it stabilises (#70142)
+                .and_then(convert::identity)?;
         }
 
         info!("exhausted prospective tip set");
