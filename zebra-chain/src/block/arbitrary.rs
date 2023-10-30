@@ -665,7 +665,7 @@ where
         attempts += 1;
 
         // Avoid O(n^2) algorithmic complexity by giving up early,
-        // rather than exhausively checking the entire UTXO set
+        // rather than exhaustively checking the entire UTXO set
         if attempts > 100 {
             return None;
         }
