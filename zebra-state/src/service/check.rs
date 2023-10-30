@@ -72,7 +72,7 @@ where
         .collect();
 
     let parent_block = relevant_chain
-        .get(0)
+        .first()
         .expect("state must contain parent block to do contextual validation");
     let parent_block = parent_block.borrow();
     let parent_height = parent_block
