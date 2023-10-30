@@ -55,21 +55,21 @@ impl From<NoteCommitmentSubtreeIndex> for u64 {
 /// with its associated block height and subtree index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct NoteCommitmentSubtree<Root> {
+pub struct NoteCommitmentSubtree<SubtreeRoot> {
     /// Index of this subtree
     pub index: NoteCommitmentSubtreeIndex,
     /// Root of this subtree.
-    pub root: Root,
+    pub root: SubtreeRoot,
     /// End boundary of this subtree, the block height of its last leaf.
     pub end_height: Height,
 }
 
-impl<Root> NoteCommitmentSubtree<Root> {
+impl<SubtreeRoot> NoteCommitmentSubtree<SubtreeRoot> {
     /// Creates new [`NoteCommitmentSubtree`]
     pub fn new(
         index: impl Into<NoteCommitmentSubtreeIndex>,
         end_height: Height,
-        root: Root,
+        root: SubtreeRoot,
     ) -> Self {
         let index = index.into();
         Self {
@@ -80,7 +80,7 @@ impl<Root> NoteCommitmentSubtree<Root> {
     }
 
     /// Converts struct to [`NoteCommitmentSubtreeData`].
-    pub fn into_data(self) -> NoteCommitmentSubtreeData<Root> {
+    pub fn into_data(self) -> NoteCommitmentSubtreeData<SubtreeRoot> {
         NoteCommitmentSubtreeData::new(self.end_height, self.root)
     }
 }
@@ -89,17 +89,17 @@ impl<Root> NoteCommitmentSubtree<Root> {
 /// Used for database key-value serialization, where the subtree index is the key, and this struct is the value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct NoteCommitmentSubtreeData<Root> {
+pub struct NoteCommitmentSubtreeData<SubtreeRoot> {
     /// Merkle root of the 2^16-leaf subtree.
-    pub root: Root,
+    pub root: SubtreeRoot,
 
     /// Height of the block containing the note that completed this subtree.
     pub end_height: Height,
 }
 
-impl<Root> NoteCommitmentSubtreeData<Root> {
+impl<SubtreeRoot> NoteCommitmentSubtreeData<SubtreeRoot> {
     /// Creates new [`NoteCommitmentSubtreeData`]
-    pub fn new(end_height: Height, root: Root) -> Self {
+    pub fn new(end_height: Height, root: SubtreeRoot) -> Self {
         Self { end_height, root }
     }
 
@@ -107,7 +107,7 @@ impl<Root> NoteCommitmentSubtreeData<Root> {
     pub fn with_index(
         self,
         index: impl Into<NoteCommitmentSubtreeIndex>,
-    ) -> NoteCommitmentSubtree<Root> {
+    ) -> NoteCommitmentSubtree<SubtreeRoot> {
         NoteCommitmentSubtree::new(index, self.end_height, self.root)
     }
 }
