@@ -963,13 +963,19 @@ where
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
-            let response = self.request_genesis_once().await?;
+            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
+                .await
+                .map_err(Into::into);
 
+            // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
-                Ok(response) => self
+                Ok(Ok(Ok(response))) => self
                     .handle_block_response(Ok(response))
                     .expect("never returns Err for Ok"),
-                Err(error) => {
+                // Handle fatal errors
+                Ok(Err(fatal_error)) => Err(fatal_error)?,
+                // Handle timeouts and block errors
+                Err(error) | Ok(Ok(Err(error))) => {
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
                         warn!(

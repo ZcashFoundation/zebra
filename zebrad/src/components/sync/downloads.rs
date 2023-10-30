@@ -154,6 +154,17 @@ pub enum BlockDownloadVerifyError {
         height: block::Height,
         hash: block::Hash,
     },
+
+    #[error(
+        "timeout during service readiness, download, verification, or internal downloader operation"
+    )]
+    Timeout,
+}
+
+impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
+    fn from(_value: tokio::time::error::Elapsed) -> Self {
+        BlockDownloadVerifyError::Timeout
+    }
 }
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
