@@ -214,7 +214,10 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 /// If this timeout is removed (or set too low), Zebra will immediately retry
 /// to download and verify the genesis block from its peers. This can cause
 /// a denial of service on those peers.
-const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(5);
+///
+/// If this timeout is too short, old or buggy nodes will keep making useless
+/// network requests. If there are a lot of them, it could overwhelm the network.
+const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
 /// Sync configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
