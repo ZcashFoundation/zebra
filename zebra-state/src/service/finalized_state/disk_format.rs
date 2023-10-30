@@ -16,7 +16,7 @@ pub mod upgrade;
 #[cfg(test)]
 mod tests;
 
-pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
+pub use block::{TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::{OutputIndex, OutputLocation};
 
 /// Helper type for writing types to disk as raw bytes.

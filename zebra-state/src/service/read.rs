@@ -28,21 +28,21 @@ mod tests;
 pub use address::{
     balance::transparent_balance,
     tx_id::transparent_tx_ids,
-    utxo::{address_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
+    utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
     any_utxo, block, block_header, mined_transaction, transaction_hashes_for_block, unspent_utxo,
-    utxo,
 };
 pub use find::{
-    best_tip, block_locator, chain_contains_hash, depth, finalized_state_contains_block_hash,
-    find_chain_hashes, find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
+    best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
+    find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
     non_finalized_state_contains_block_hash, tip, tip_height,
 };
 pub use tree::{orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree};
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub use difficulty::get_block_template_chain_info;
+#[cfg(any(test, feature = "proptest-impl"))]
+#[allow(unused_imports)]
+pub use address::utxo::ADDRESS_HEIGHTS_FULL_RANGE;
 
 /// If a finalized state query is interrupted by a new finalized block,
 /// retry this many times.

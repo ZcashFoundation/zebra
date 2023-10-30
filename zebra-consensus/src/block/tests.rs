@@ -103,7 +103,7 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<
     assert_eq!(block3.transactions.len(), 1);
 
     // Extract the coinbase transaction from the block
-    let coinbase_transaction = block3.transactions.get(0).unwrap().clone();
+    let coinbase_transaction = block3.transactions.first().unwrap().clone();
 
     // Add another coinbase transaction to block
     block3.transactions.push(coinbase_transaction);
@@ -373,7 +373,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     block.transactions.push(
         block
             .transactions
-            .get(0)
+            .first()
             .expect("block has coinbase")
             .clone(),
     );
@@ -436,7 +436,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     // Build the new transaction with modified coinbase outputs
     let tx = block
         .transactions
-        .get(0)
+        .first()
         .map(|transaction| {
             let mut output = transaction.outputs()[0].clone();
             output.value = Amount::try_from(i32::MAX).unwrap();
