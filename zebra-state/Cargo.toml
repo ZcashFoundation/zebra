@@ -60,7 +60,7 @@ rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.20"
 serde = { version = "1.0.190", features = ["serde_derive"] }
-tempfile = "3.8.0"
+tempfile = "3.8.1"
 thiserror = "1.0.48"
 
 rayon = "1.7.0"
