@@ -67,6 +67,9 @@ skip-tree = [
     # this duplicate dependency currently only exists in testing builds
     { name = "regex-syntax", version = "=0.6.29" },
 
+    # wait for `parking_lot` crate inside `jsonrpc-http-server` to upgrade
+    { name = "redox_syscall", version = "=0.2.16" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
