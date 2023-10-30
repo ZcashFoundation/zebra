@@ -81,7 +81,7 @@ const FANOUT: usize = 3;
 ///
 /// Using a prime number makes sure that mempool crawler fanouts
 /// don't synchronise with other crawls.
-const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
+pub const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
 
 /// The time to wait for a peer response.
 ///
