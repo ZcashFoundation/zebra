@@ -78,7 +78,7 @@ Admin:
 
 2. Go to the [branch protection rule settings](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
 3. Click on `Edit` for the `main` branch
-4. Scroll down to the `Require status checks to pass before merging` section
+4. Scroll down to the `Require status checks to pass before merging` section.
    (This section must always be enabled. If it is disabled, all the rules get deleted.)
 
 To add jobs:
