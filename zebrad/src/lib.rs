@@ -6,7 +6,10 @@
 //! which implement the different components of a Zcash node
 //! (networking, chain structures, validation, rpc, etc).
 //!
-//! [Rendered docs from the `main` branch](https://doc.zebra.zfnd.org).
+//! [Rendered docs for the latest crate releases](https://docs.rs/releases/search?query=zebra).
+//!
+//! [Rendered docs from the `main` branch](https://doc-internal.zebra.zfnd.org).
+//!
 //! [Join us on the Zcash Foundation Engineering Discord](https://discord.gg/na6QZNd).
 //!
 //! ## About Zcash

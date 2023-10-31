@@ -176,10 +176,12 @@ We will continue to add new features as part of future network upgrades, and in 
 
 The [Zebra website](https://zebra.zfnd.org/) contains user documentation, such
 as how to run or configure Zebra, set up metrics integrations, etc., as well as
-developer documentation, such as design documents. We also render [API
-documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
-as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
-private APIs.
+developer documentation, such as design documents. It also renders
+[internal documentation](https://doc-internal.zebra.zfnd.org) for private APIs
+on the `main` branch.
+
+`docs.rs` renders [API documentation](https://docs.rs/releases/search?query=zebra)
+for the external API of the latest releases of our crates.
 
 ## User support
 
