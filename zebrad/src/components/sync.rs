@@ -548,7 +548,8 @@ where
     /// following a fork. Either way, Zebra should attempt to obtain some more tips.
     ///
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary.
+    /// necessary. This includes outer timeouts, where an entire syncing step takes an extrememly
+    /// long time. (These usually indicate hangs.)
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
@@ -596,6 +597,9 @@ where
     ) -> Result<IndexSet<block::Hash>, Report> {
         // Check whether any block tasks are currently ready.
         while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+            // Some temporary errors are ignored, and syncing continues with other blocks.
+            // If it turns out they were actually important, syncing will run out of blocks, and
+            // the syncer will reset itself.
             self.handle_block_response(rsp)?;
         }
         self.update_metrics();
