@@ -68,26 +68,31 @@ can add or delete branch protection rules in the Zebra repository.
 To change branch protection rules:
 
 Any developer:
+
 0. Run a PR containing the new rule, so its name is available to autocomplete.
 1. If the job doesn't run on all PRs, add a patch job with the name of the job.
    If the job calls a reusable workflow, the name is `Caller job / Reusable step`.
    (The name of the job inside the reusable workflow is ignored.)
 
 Admin:
+
 2. Go to the [branch protection rule settings](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
 3. Click on `Edit` for the `main` branch
 4. Scroll down to the `Require status checks to pass before merging` section
    (This section must always be enabled. If it is disabled, all the rules get deleted.)
 
 To add jobs:
+
 5. Start typing the name of the job or step in the search box
 6. Select the name of the job or step to add it
 
 To remove jobs:
+
 7. Go to `Status checks that are required.`
 8. Find the job name, and click the cross on the right to remove it
 
 And finally:
+
 9. Click `Save changes`, using your security key if needed
 
 If you accidentally delete a lot of rules, and you can't remember what they were, ask a
