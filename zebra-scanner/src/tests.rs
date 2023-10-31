@@ -1,5 +1,4 @@
 //! Test that we can scan blocks.
-//!
 
 use std::sync::Arc;
 
@@ -34,30 +33,47 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use zebra_chain::{
     block::{Block, Height},
-    chain_tip::ChainTip,
     serialization::ZcashSerialize,
     transaction::Transaction,
 };
+
+use zcash_address::unified::{Container, Encoding, Fvk, Ufvk};
+
+/// The Unified viewing key containing the Sapling viewing key
+/// to be used to trial decrypt sapling transactions.
+const UNIFIED_VIEWING_KEY: &str = "";
 
 #[tokio::test]
 #[allow(clippy::print_stdout)]
 async fn scanning_cached_zebra_state() -> Result<()> {
     let account = AccountId::from(1);
-    let viewing_key =
-        FullViewingKey::read("".as_bytes()).expect("hard-coded viewing key should be valid");
+
+    let (_network, viewing_key) =
+        Ufvk::decode(UNIFIED_VIEWING_KEY).expect("hard-coded viewing key should be valid");
+
     let nf = Nullifier([7; 32]);
-    let ivk = viewing_key.vk.ivk();
+
+    let sapling_full_viewing_key_data: [u8; 96] = viewing_key
+        .items()
+        .into_iter()
+        .find_map(|fvk| match fvk {
+            // `(ak, nk, ovk, dk)` each 32 bytes.
+            Fvk::Sapling(data) => Some(data[..96].try_into().expect("should fit")),
+            _ => None,
+        })
+        .expect("unified viewing key must have sapling viewing key");
+
+    let fvk = FullViewingKey::read(sapling_full_viewing_key_data.as_slice()).expect("should parse");
+    let ivk = fvk.vk.ivk();
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
 
     let (state_config, network) = Default::default();
-    let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
+    let (_state_service, read_only_state_service, _latest_chain_tip, _chain_tip_change) =
         zebra_state::spawn_init(state_config, network, Height::MAX, 3000).await?;
     let db = read_only_state_service.db();
 
     // use the tip as starting height
-    let mut height = latest_chain_tip
-        .best_tip_height()
-        .expect("cached state must have at least 1 block");
+    let mut height = Height(0);
 
     let mut transactions_found = 0;
     let mut transactions_scanned = 0;
@@ -94,92 +110,21 @@ async fn scanning_cached_zebra_state() -> Result<()> {
         transactions_scanned += compact_block.vtx.len();
         blocks_scanned += 1;
 
-        // scan backwards
-        if height.is_min() {
-            break;
+        if !res.transactions().is_empty() {
+            println!("found more transactions, {}", res.transactions().len());
         }
-        height = height.previous()?;
+
+        if height.0 % 10000 == 0 {
+            println!("scanning at {:?}", height);
+        }
+
+        height = height.next()?;
     }
 
     println!("transactions_found: {transactions_found}, transactions_scanned: {transactions_scanned}, blocks_scanned: {blocks_scanned}");
 
     Ok(())
 }
-
-// #[tokio::test]
-// async fn scanning_from_populated_zebra_state() -> Result<()> {
-//     let account = AccountId::from(12);
-//     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
-//     let nf = Nullifier([7; 32]);
-
-//     let network = zebra_chain::parameters::Network::default();
-
-//     // Create a continuous chain of mainnet blocks from genesis
-//     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-//         .iter()
-//         .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
-//         .collect();
-
-//     // Create a populated state service.
-//     let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
-//         zebra_state::populated_state(blocks.clone(), network).await;
-
-//     let db = read_only_state_service.db();
-
-//     // use the tip as starting height
-//     let mut height = latest_chain_tip.best_tip_height().unwrap();
-
-//     let mut transactions_found = 0;
-//     let mut transactions_scanned = 0;
-//     let mut blocks_scanned = 0;
-//     while let Some(block) = db.block(height.into()) {
-//         // We fake the sapling tree size to 1 because we are not in Sapling heights.
-//         let sapling_tree_size = 1;
-//         let orchard_tree_size = db
-//             .orchard_tree_by_hash_or_height(height.into())
-//             .expect("should exist")
-//             .count();
-
-//         let chain_metadata = ChainMetadata {
-//             sapling_commitment_tree_size: sapling_tree_size
-//                 .try_into()
-//                 .expect("position should fit in u32"),
-//             orchard_commitment_tree_size: orchard_tree_size
-//                 .try_into()
-//                 .expect("position should fit in u32"),
-//         };
-
-//         let compact_block = block_to_compact(block, chain_metadata);
-
-//         let res = scan_block(
-//             &zcash_primitives::consensus::MainNetwork,
-//             compact_block.clone(),
-//             &vks[..],
-//             &[(account, nf)],
-//             None,
-//         )
-//         .unwrap();
-
-//         transactions_found += res.transactions().len();
-//         transactions_scanned += compact_block.vtx.len();
-//         blocks_scanned += 1;
-
-//         // scan backwards
-//         if height.is_min() {
-//             break;
-//         }
-//         height = height.previous()?;
-//     }
-
-//     // make sure all blocks and transactions were scanned
-//     assert_eq!(blocks_scanned, 11);
-//     assert_eq!(transactions_scanned, 11);
-
-//     // no relevant transactions should be found
-//     assert_eq!(transactions_found, 0);
-
-//     Ok(())
-// }
 
 #[tokio::test]
 async fn scanning_from_fake_generated_blocks() -> Result<()> {

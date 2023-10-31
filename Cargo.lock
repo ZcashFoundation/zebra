@@ -5733,6 +5733,7 @@ dependencies = [
 name = "zebra-scanner"
 version = "1.0.0-beta.30"
 dependencies = [
+ "bech32",
  "bls12_381",
  "color-eyre",
  "ff",
@@ -5740,6 +5741,7 @@ dependencies = [
  "jubjub",
  "rand 0.8.5",
  "tokio",
+ "zcash_address",
  "zcash_client_backend",
  "zcash_note_encryption",
  "zcash_primitives",
