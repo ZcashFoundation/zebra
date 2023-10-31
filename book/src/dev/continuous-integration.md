@@ -33,13 +33,17 @@ We try to use Mergify as much as we can, so all PRs get consistent checks.
 Some PRs don't use Mergify:
 - Mergify config updates
 - Admin merges, which happen when there are multiple failures on the `main` branch
-  (these are disabled by our branch protection rules, but admins can remove the "don't allow bypassing these rules" setting)
-- Manual merges (these are usually disabled by our branch protection rules)
+- Manual merges (these are allowed by our branch protection rules, but we almost always use Mergify)
+
+Merging with failing CI is usually disabled by our branch protection rules.
+See the `Admin: Manually Merging PRs` section below for manual merge instructions.
 
 We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
 For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create [a patch workflow](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks)
 with an empty job with the same name. This is a [known Actions issue](https://github.com/orgs/community/discussions/13690#discussioncomment-6653382).
 This lets the branch protection rules pass when the job is skipped. In Zebra, we name these workflows with the extension `.patch.yml`.
+
+### Branch Protection Rules
 
 Branch protection rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
 We also add branch protection rules for developer or devops features that we need to keep working, like coverage.
@@ -55,6 +59,55 @@ When a new job is added in a PR, use the `#devops` Slack channel to ask a GitHub
 Adding a new Zebra crate automatically adds a new job to build that crate by itself in [ci-build-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-build-crates.yml),
 so new crate PRs also need to add a branch protection rule.
 
+#### Admin: Changing Branch Protection Rules
+
+[Zebra repository admins](https://github.com/orgs/ZcashFoundation/teams/zebra-admins) and
+[Zcash Foundation organisation owners](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
+can add or delete branch protection rules in the Zebra repository.
+
+To change branch protection rules:
+
+Any developer:
+0. Run a PR containing the new rule, so its name is available to autocomplete.
+1. If the job doesn't run on all PRs, add a patch job with the name of the job.
+   If the job calls a reusable workflow, the name is `Caller job / Reusable step`.
+   (The name of the job inside the reusable workflow is ignored.)
+
+Admin:
+2. Go to the [branch protection rule settings](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
+3. Click on `Edit` for the `main` branch
+4. Scroll down to the `Require status checks to pass before merging` section
+   (This section must always be enabled. If it is disabled, all the rules get deleted.)
+
+To add jobs:
+5. Start typing the name of the job or step in the search box
+6. Select the name of the job or step to add it
+
+To remove jobs:
+7. Go to `Status checks that are required.`
+8. Find the job name, and click the cross on the right to remove it
+
+And finally:
+9. Click `Save changes`, using your security key if needed
+
+If you accidentally delete a lot of rules, and you can't remember what they were, ask a
+ZF organisation owner to send you a copy of the rules from the [audit log](https://github.com/organizations/ZcashFoundation/settings/audit-log).
+
+Organisation owners can also monitor rule changes and other security settings using this log.
+
+#### Admin: Manually Merging PRs
+
+Admins can allow merges with failing CI, to fix CI when multiple issues are causing failures.
+
+Admin:
+1. Follow steps 2 and 3 above to open the `main` branch protection rule settings
+2. Scroll down to `Do not allow bypassing the above settings`
+3. Uncheck it
+4. Click `Save changes`
+5. Do the manual merge, and put an explanation on the PR
+6. Re-open the branch protection rule settings, and re-enable `Do not allow bypassing the above settings`
+
+
 ### Pull Requests from Forked Repositories
 
 GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
@@ -64,7 +117,7 @@ Until we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529)
 1. Reviewing the code to make sure it won't give our secret keys to anyone
 2. Pushing a copy of the branch to the Zebra repository
 3. Opening a PR using that branch
-4. Closing the original PR with a note that it will be merged (this is reauired by Mergify)
+4. Closing the original PR with a note that it will be merged (closing duplicate PRs is required by Mergify)
 5. Asking another Zebra developer to approve the new PR
 
 ## Manual Testing Using Google Cloud
