@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use zcash_client_backend::{
+    data_api::BlockMetadata,
     proto::compact_formats::{
         self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
         CompactTx,
@@ -73,14 +74,20 @@ async fn scanning_cached_zebra_state() -> Result<()> {
     let db = read_only_state_service.db();
 
     // use the tip as starting height
-    let mut height = Height(0);
+    let mut height = Height(2_000_000);
 
     let mut transactions_found = 0;
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        // We fake the sapling tree size to 1 because we are not in Sapling heights.
-        let sapling_tree_size = 1;
+        let sapling_tree_size = db
+            .sapling_tree_by_hash_or_height(height.into())
+            .expect("should exist")
+            .count();
+        let previous_sapling_tree_size = db
+            .sapling_tree_by_hash_or_height(height.previous()?.into())
+            .expect("should exist")
+            .count();
         let orchard_tree_size = db
             .orchard_tree_by_hash_or_height(height.into())
             .expect("should exist")
@@ -95,6 +102,14 @@ async fn scanning_cached_zebra_state() -> Result<()> {
                 .expect("position should fit in u32"),
         };
 
+        let block_metadata = BlockMetadata::from_parts(
+            height.previous()?.0.into(),
+            BlockHash(block.header.previous_block_hash.0),
+            previous_sapling_tree_size
+                .try_into()
+                .expect("should fit in u32"),
+        );
+
         let compact_block = block_to_compact(block, chain_metadata);
 
         let res = scan_block(
@@ -102,7 +117,7 @@ async fn scanning_cached_zebra_state() -> Result<()> {
             compact_block.clone(),
             &vks[..],
             &[(account, nf)],
-            None,
+            Some(&block_metadata),
         )
         .unwrap();
 
