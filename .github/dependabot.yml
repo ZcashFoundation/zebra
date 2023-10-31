@@ -1,5 +1,6 @@
 version: 2
 updates:
+  # Rust section
   - package-ecosystem: cargo
     directory: '/'
     # serde, clap, and other dependencies sometimes have multiple updates in a week
@@ -18,110 +19,14 @@ updates:
         ecc:
           patterns:
             # deliberately include zcash_script (even though it is maintained by ZF)
-            - "zcash_*"
-            - "orchard"
-            - "halo2*"
-            - "incrementalmerkletree"
-            - "bridgetree"
-            - "equihash"
-            # addresses
-            - "bs58"
-            - "ripemd"
-        # groups are limited to 10 items
-        crypto:
-          patterns:
-            - "bellman"
-            # reddsa, redjubjub
-            - "red*"
-            - "jubjub"
-            - "group"
-            - "bls12_381"
-            - "blake*"
-            - "secp256k1"
-            - "sha2"
-            - "*25519*"
-            - "rand*"
-        async:
-          patterns:
-            - "tokio*"
-            - "console-subscriber"
-            - "tower*"
-            - "hyper*"
-            - "h2"
-            - "reqwest"
-            - "futures*"
-            - "pin-project*"
-        log-time:
-          patterns:
-            - "tracing*"
-            - "log"
-            - "*eyre*"
-            - "thiserror"
-            # displaydoc, spandoc
-            - "*doc"
-            - "owo-colors"
-            - "sentry*"
-            - "metrics*"
-            # time, humantime
-            - "*time*"
-            - "chrono*"
-        concurrency:
-          patterns:
-            - "once_cell"
-            - "lazy_static"
-            - "rayon*"
-            - "crossbeam*"
-            - "num_cpus"
-        progress-bar:
-          patterns:
-            - "indicatif"
-            - "howudoin"
-        app:
-          patterns:
-            - "abscissa*"
-            - "structopt*"
-            - "clap*"
-            - "atty*"
-            - "semver*"
-            # dirs, directories, directories-next
-            - "dir*"
-            - "vergen"
-            - "*git*"
-            - "toml*"
-            - "rlimit"
-        formats:
-          patterns:
-            - "serde*"
-            - "jsonrpc*"
-            - "hex*"
-            - "regex"
-            - "byteorder"
-            - "bytes"
-            - "bincode"    
-        data-structures:
-          patterns:
-            - "bitflags*"
-            - "bitvec"
-            - "indexmap"
-            - "num-integer"
-            - "primitive-types"
-            - "uint"
-            - "tinyvec"
-            - "itertools"
-            - "ordered-map"
-            - "mset"
-        test:
-          patterns:
-            - "proptest*"
-            - "insta"
-            - "prost*"
-            - "tonic*"
-            # depends on tonic and prost
-            - "console-subscriber"
-            - "tempfile"
-            - "static_assertions"
-            - "criterion"
-            - "inferno"
+            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
+        prod:
+          dependency-type: "production"
+          exclude-patterns:
+            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
+        dev:
+          dependency-type: "development"
+  # Devops section
   - package-ecosystem: github-actions
     directory: '/'
     schedule:
@@ -135,3 +40,7 @@ updates:
       - 'A-devops'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
+    groups:
+      devops:
+        patterns:
+          - "*"
