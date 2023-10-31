@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     convert::{self, TryFrom},
     pin::Pin,
-    sync::{Arc, TryLockError},
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -482,17 +482,11 @@ where
 
                     metrics::counter!("sync.max.height.limit.paused.count", 1);
                 } else if block_height <= lookahead_reset_height && past_lookahead_limit_receiver.cloned_watch_data() {
-                    // Try to reset the watched value to false, since we're well under the limit.
-                    match past_lookahead_limit_sender.try_lock() {
-                        Ok(watch_sender_guard) => {
-                            // If Zebra is shutting down, ignore the send error.
-                            let _ = watch_sender_guard.send(true);
-                            metrics::counter!("sync.max.height.limit.reset.count", 1);
-                        },
-                        Err(TryLockError::Poisoned(_)) => panic!("thread panicked while holding the past_lookahead_limit_sender mutex guard"),
-                        // We'll try allowing new downloads when we get the next block
-                        Err(TryLockError::WouldBlock) => {}
-                    }
+                    // Reset the watched value to false, since we're well under the limit.
+                    // We need to block here, because if we don't the syncer can hang.
+
+                    // But if Zebra is shutting down, ignore the send error.
+                    let _ = past_lookahead_limit_sender.lock().expect("thread panicked while holding the past_lookahead_limit_sender mutex guard").send(false);
 
                     metrics::counter!("sync.max.height.limit.reset.attempt.count", 1);
                 }
@@ -582,14 +576,26 @@ where
     pub fn cancel_all(&mut self) {
         // Replace the pending task list with an empty one and drop it.
         let _ = std::mem::take(&mut self.pending);
+
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
         for (_hash, cancel) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
+
+        // Set the lookahead limit to false, since we're empty (so we're under the limit).
+        //
+        // It is ok to block here, because we're doing a reset and sleep anyway.
+        // But if Zebra is shutting down, ignore the send error.
+        let _ = self
+            .past_lookahead_limit_sender
+            .lock()
+            .expect("thread panicked while holding the past_lookahead_limit_sender mutex guard")
+            .send(false);
     }
 
     /// Get the number of currently in-flight download and verify tasks.
