@@ -39,7 +39,7 @@ To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
 
 #### Checkpoint Generation Setup
 
-Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
+Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc-internal.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
 and synced to the network tip.
 
 If you are on a Debian system, `zcash-cli` [can be installed as a package](https://zcash.readthedocs.io/en/latest/rtd_pages/install_debian_bin_packages.html).
@@ -81,7 +81,7 @@ For more details about checkpoint lists, see the [`zebra-checkpoints` README.](h
 To update the testnet checkpoints, `zebra-checkpoints` needs to connect to a testnet node.
 
 To launch a testnet node, you can either:
-- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.network), or
+- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://doc-internal.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.network), or
 - run `zcashd -testnet`.
 
 Then use the commands above to regenerate the checkpoints.
