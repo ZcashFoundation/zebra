@@ -548,7 +548,7 @@ where
     /// following a fork. Either way, Zebra should attempt to obtain some more tips.
     ///
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary. This includes outer timeouts, where an entire syncing step takes an extrememly
+    /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
     /// long time. (These usually indicate hangs.)
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
