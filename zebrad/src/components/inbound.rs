@@ -414,14 +414,14 @@ impl Service<zn::Request> for Inbound {
                         // Sometimes we don't know if the peer response will be empty until we've
                         // sanitized them.
                         if is_busy {
-                            debug!(
-                                "ignoring `Peers` request from remote peer because our address \
-                                 book has no available peers"
-                            );
-                        } else {
                             info!(
                                 "ignoring `Peers` request from remote peer because our address \
                                  book is busy"
+                            );
+                        } else {
+                            debug!(
+                                "ignoring `Peers` request from remote peer because our address \
+                                 book has no available peers"
                             );
                         }
 
