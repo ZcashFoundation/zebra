@@ -46,8 +46,24 @@ We recommend upgrading to the latest Zebra release to avoid download issues in n
 
 ### DockerHub image tags
 
-Zebra 1.4.0 and later will not have a `v1.4.0` tag on [`zebrad` Docker images](https://hub.docker.com/r/zfnd/zebra/tags).
-If you need to stay on a particular version, use the `1.4.0`, `1.4` (patch releases only), or `1` (until NU6) tags.
+Zebra currently publishes 11 [DockerHub tags](https://hub.docker.com/r/zfnd/zebra/tags) for each new release.
+We want to reduce the number of DockerHub tags we publish at the next minor Zebra release 1.5.0.
+
+Based on usage and user feedback, we could stop publishing:
+- The `1` tag, which updates each release until NU6
+- The `1.x` tag, which updates each patch release until the next minor release
+- The `1.x.y` tag, which is the same as `v1.x.y`
+- The `sha-xxxxxxx` tag, which is the same as `v1.x.y` (for production releases)
+
+We also want to standardise experimental image tags to `-experimental`, rather than `.experimental`.
+
+So for release 1.5.0, we might only publish these tags:
+- `latest`
+- `latest-experimental` (a new tag)
+- `v1.5.0`
+- `v1.5.0-experimental`
+
+Please let us know if you need any other tags by [opening a GitHub ticket](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+).
 
 We recommend using the `latest` tag to always get the most recent Zebra release.
 
