@@ -129,10 +129,9 @@ Zebra also starts ongoing tasks to batch verify signatures and proofs.
 
 ```
 zebrad::commands::start: initializing verifiers
-init{config=Config { debug_skip_parameter_preload: false, ... } ... }: zebra_consensus::primitives::groth16::params: checking and loading Zcash Sapling and Sprout parameters
+init{config=Config { ... } ... }: zebra_consensus::primitives::groth16::params: checking and loading Zcash Sapling and Sprout parameters
 init{config=Config { checkpoint_sync: true, ... } ... }: zebra_consensus::chain: initializing chain verifier tip=None max_checkpoint_height=Height(1644839)
 ...
-init{config=Config { debug_skip_parameter_preload: false, ... } ... }: zebra_consensus::chain: Groth16 pre-download and check task finished
 ```
 
 ### Initialize Transaction Mempool

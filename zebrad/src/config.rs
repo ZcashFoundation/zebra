@@ -15,16 +15,18 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
     /// Consensus configuration
-    pub consensus: zebra_consensus::Config,
+    //
+    // These configs use full paths to avoid a rustdoc link bug (#7048).
+    pub consensus: zebra_consensus::config::Config,
 
     /// Metrics configuration
     pub metrics: crate::components::metrics::Config,
 
     /// Networking configuration
-    pub network: zebra_network::Config,
+    pub network: zebra_network::config::Config,
 
     /// State configuration
-    pub state: zebra_state::Config,
+    pub state: zebra_state::config::Config,
 
     /// Tracing configuration
     pub tracing: crate::components::tracing::Config,
