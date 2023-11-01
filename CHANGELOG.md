@@ -44,6 +44,17 @@ so it can't be used to retry failed downloads in `zebrad` 1.3.0 and earlier.
 
 We recommend upgrading to the latest Zebra release to avoid download issues in new installs.
 
+### Documentation Website Change
+
+We have replaced the API documentation on the [doc.zebra.zfnd.org](https://doc.zebra.zfnd.org)
+website with [docs.rs](https://docs.rs/releases/search?query=zebra). All links have been updated.
+
+Zebra's API documentation can be found on:
+- [`docs.rs`](https://docs.rs/releases/search?query=zebra), which renders documentation for the
+  public API of the latest crate releases;
+- [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/), which renders
+  documentation for the internal API on the `main` branch.
+
 ### Security
 
 TODO: rest of changelog
@@ -996,12 +1007,12 @@ When there are a lot of large user-generated transactions on the network, Zebra 
 
 ### Configuration Changes
 
-- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726, #4758):
+- Split the checkpoint and full verification [`sync` concurrency options](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html) (#4726, #4758):
   - Add a new `full_verify_concurrency_limit`
   - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
   - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
   For backwards compatibility, the old names are still accepted as aliases.
-- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4776).
+- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html) (#4776).
   This option sets the number of threads to use for CPU-bound tasks, such as proof and signature verification.
   By default, Zebra uses all available CPU cores.
 
