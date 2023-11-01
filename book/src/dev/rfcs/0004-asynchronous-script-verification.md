@@ -31,11 +31,11 @@ and in parallel on a thread pool.
 - unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.
   Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
 
-[transout]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html
-[outpoint]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.OutPoint.html
-[lock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html#structfield.lock_script
-[transin]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html
-[unlock_script]: https://doc.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html#variant.PrevOut.field.unlock_script
+[transout]: https://doc-internal.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html
+[outpoint]: https://doc-internal.zebra.zfnd.org/zebra_chain/transparent/struct.OutPoint.html
+[lock_script]: https://doc-internal.zebra.zfnd.org/zebra_chain/transparent/struct.Output.html#structfield.lock_script
+[transin]: https://doc-internal.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html
+[unlock_script]: https://doc-internal.zebra.zfnd.org/zebra_chain/transparent/enum.Input.html#variant.PrevOut.field.unlock_script
 
 
 # Guide-level explanation
