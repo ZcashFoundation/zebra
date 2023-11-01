@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 /// Configuration for parallel semantic verification:
 /// <https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#definitions>
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[serde(
+    deny_unknown_fields,
+    default,
+    from = "InnerConfig",
+    into = "InnerConfig"
+)]
 pub struct Config {
     /// Should Zebra make sure that it follows the consensus chain while syncing?
     /// This is a developer-only option.
@@ -30,9 +35,40 @@ pub struct Config {
     /// For security reasons, this option might be deprecated or ignored in a future Zebra
     /// release.
     pub checkpoint_sync: bool,
+}
 
-    /// Skip the pre-download of Groth16 parameters if this option is true.
-    pub debug_skip_parameter_preload: bool,
+impl From<InnerConfig> for Config {
+    fn from(
+        InnerConfig {
+            checkpoint_sync, ..
+        }: InnerConfig,
+    ) -> Self {
+        Self { checkpoint_sync }
+    }
+}
+
+impl From<Config> for InnerConfig {
+    fn from(Config { checkpoint_sync }: Config) -> Self {
+        Self {
+            checkpoint_sync,
+            _debug_skip_parameter_preload: false,
+        }
+    }
+}
+
+/// Inner consensus configuration for backwards compatibility with older `zebrad.toml` files,
+/// which contain fields that have been removed.
+///
+/// Rust API callers should use [`Config`].
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct InnerConfig {
+    /// See [`Config`] for more details.
+    pub checkpoint_sync: bool,
+
+    #[serde(skip_serializing, rename = "debug_skip_parameter_preload")]
+    /// Unused config field for backwards compatibility.
+    pub _debug_skip_parameter_preload: bool,
 }
 
 // we like our default configs to be explicit
@@ -42,7 +78,15 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             checkpoint_sync: true,
-            debug_skip_parameter_preload: false,
+        }
+    }
+}
+
+impl Default for InnerConfig {
+    fn default() -> Self {
+        Self {
+            checkpoint_sync: Config::default().checkpoint_sync,
+            _debug_skip_parameter_preload: false,
         }
     }
 }

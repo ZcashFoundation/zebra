@@ -84,7 +84,7 @@ To launch a testnet node, you can either:
 - start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.network), or
 - run `zcashd -testnet`.
 
-Then use the commands above to renegerate the checkpoints.
+Then use the commands above to regenerate the checkpoints.
 
 #### Submit new checkpoints as pull request
 

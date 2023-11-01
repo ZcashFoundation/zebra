@@ -71,7 +71,7 @@ async fn verifiers_from_network(
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = crate::router::init(Config::default(), network, state_service.clone(), true).await;
+    ) = crate::router::init(Config::default(), network, state_service.clone()).await;
 
     // We can drop the download task handle here, because:
     // - if the download task fails, the tests will panic, and
@@ -144,12 +144,10 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
 async fn verify_checkpoint_test() -> Result<(), Report> {
     verify_checkpoint(Config {
         checkpoint_sync: true,
-        debug_skip_parameter_preload: true,
     })
     .await?;
     verify_checkpoint(Config {
         checkpoint_sync: false,
-        debug_skip_parameter_preload: true,
     })
     .await?;
 
@@ -174,7 +172,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = super::init(config.clone(), network, zs::init_test(network), true).await;
+    ) = super::init(config.clone(), network, zs::init_test(network)).await;
 
     // Add a timeout layer
     let block_verifier_router =

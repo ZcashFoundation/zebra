@@ -275,7 +275,7 @@ impl ZebraDb {
         ) = self.db.zs_last_key_value(&sapling_subtrees)?;
 
         let tip_height = self.finalized_tip_height()?;
-        if subtree_data.end != tip_height {
+        if subtree_data.end_height != tip_height {
             return None;
         }
 
@@ -401,7 +401,7 @@ impl ZebraDb {
         ) = self.db.zs_last_key_value(&orchard_subtrees)?;
 
         let tip_height = self.finalized_tip_height()?;
-        if subtree_data.end != tip_height {
+        if subtree_data.end_height != tip_height {
             return None;
         }
 

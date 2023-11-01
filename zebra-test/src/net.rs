@@ -55,7 +55,7 @@ pub fn zebra_skip_ipv6_tests() -> bool {
 ///
 /// If you want a once-off random unallocated port, use
 /// `random_unallocated_port`. Don't use this function if you don't need
-/// to - it has a small risk of port conflcits.
+/// to - it has a small risk of port conflicts.
 ///
 /// Use this function when you need to use the same random port multiple
 /// times. For example: setting up both ends of a connection, or re-using

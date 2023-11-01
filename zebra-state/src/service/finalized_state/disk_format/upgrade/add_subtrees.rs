@@ -171,11 +171,11 @@ fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node>
     // ```
     NoteCommitmentSubtree {
         index: 0.into(),
-        node: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+        root: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
             .as_slice()
             .try_into()
             .expect("test vector is valid"),
-        end: Height(558822),
+        end_height: Height(558822),
     }
 }
 
@@ -187,11 +187,11 @@ fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node>
     // ```
     NoteCommitmentSubtree {
         index: 0.into(),
-        node: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+        root: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
             .as_slice()
             .try_into()
             .expect("test vector is valid"),
-        end: Height(1707429),
+        end_height: Height(1707429),
     }
 }
 
@@ -360,9 +360,9 @@ fn check_sapling_subtrees(
         };
 
         // Check that there was a sapling note at the subtree's end height.
-        let Some(tree) = db.sapling_tree_by_height(&subtree.end) else {
+        let Some(tree) = db.sapling_tree_by_height(&subtree.end_height) else {
             result = Err("missing note commitment tree at subtree completion height");
-            error!(?result, ?subtree.end);
+            error!(?result, ?subtree.end_height);
             continue;
         };
 
@@ -373,7 +373,7 @@ fn check_sapling_subtrees(
                 error!(?result);
             }
 
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -381,13 +381,13 @@ fn check_sapling_subtrees(
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let prev_height = subtree
-                .end
+                .end_height
                 .previous()
                 .expect("Note commitment subtrees should not end at the minimal height.");
 
             let Some(prev_tree) = db.sapling_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
-                error!(?result, ?subtree.end);
+                error!(?result, ?subtree.end_height);
                 continue;
             };
 
@@ -430,15 +430,15 @@ fn check_sapling_subtrees(
         };
 
         // Check that the subtree end height matches that in the sapling trees.
-        if subtree.end != height {
+        if subtree.end_height != height {
             let is_complete = tree.is_complete_subtree();
             result = Err("bad sapling subtree end height");
-            error!(?result, ?subtree.end, ?height, ?index, ?is_complete, );
+            error!(?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
         }
 
         // Check the root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -490,9 +490,9 @@ fn check_orchard_subtrees(
         };
 
         // Check that there was a orchard note at the subtree's end height.
-        let Some(tree) = db.orchard_tree_by_height(&subtree.end) else {
+        let Some(tree) = db.orchard_tree_by_height(&subtree.end_height) else {
             result = Err("missing note commitment tree at subtree completion height");
-            error!(?result, ?subtree.end);
+            error!(?result, ?subtree.end_height);
             continue;
         };
 
@@ -503,7 +503,7 @@ fn check_orchard_subtrees(
                 error!(?result);
             }
 
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -511,13 +511,13 @@ fn check_orchard_subtrees(
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let prev_height = subtree
-                .end
+                .end_height
                 .previous()
                 .expect("Note commitment subtrees should not end at the minimal height.");
 
             let Some(prev_tree) = db.orchard_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
-                error!(?result, ?subtree.end);
+                error!(?result, ?subtree.end_height);
                 continue;
             };
 
@@ -560,15 +560,15 @@ fn check_orchard_subtrees(
         };
 
         // Check that the subtree end height matches that in the orchard trees.
-        if subtree.end != height {
+        if subtree.end_height != height {
             let is_complete = tree.is_complete_subtree();
             result = Err("bad orchard subtree end height");
-            error!(?result, ?subtree.end, ?height, ?index, ?is_complete, );
+            error!(?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
         }
 
         // Check the root if the orchard note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
-            if subtree.node != node {
+            if subtree.root != node {
                 result = Err("completed subtree roots should match");
                 error!(?result);
             }
@@ -851,10 +851,10 @@ fn write_sapling_subtree(
         .expect("writing sapling note commitment subtrees should always succeed.");
 
     if subtree.index.0 % 100 == 0 {
-        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
+        info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added sapling subtree");
+    debug!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
 }
 
 /// Writes an Orchard note commitment subtree to `upgrade_db`.
@@ -871,8 +871,8 @@ fn write_orchard_subtree(
         .expect("writing orchard note commitment subtrees should always succeed.");
 
     if subtree.index.0 % 100 == 0 {
-        info!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added orchard subtree");
+        info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(end_height = ?subtree.end, index = ?subtree.index.0, "calculated and added orchard subtree");
+    debug!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
 }

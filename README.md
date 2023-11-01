@@ -33,8 +33,7 @@ benefits of Zebra.
 Zebra validates blocks and transactions, but needs extra software to generate
 them:
 
-- To generate transactions, [run Zebra with
-  `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
+- To generate transactions, [run Zebra with `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
 - To generate blocks, use a mining pool or miner with Zebra's mining JSON-RPCs.
   Currently Zebra can only send mining rewards to a single fixed address.
   To distribute rewards, use mining software that creates its own distribution transactions,
@@ -164,8 +163,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 - Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
-
-- Rust 1.70 [causes crashes during shutdown on macOS x86_64 (#6812)](https://github.com/ZcashFoundation/zebra/issues/6812). The state cache should stay valid despite the crash.
 
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
