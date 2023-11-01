@@ -13,30 +13,29 @@ use reddsa::{self, orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
-    issuance_zsa::BurnItem,
-    orchard::{tree, Action, Nullifier, ValueCommitment},
+    orchard::{
+        tree,
+        tx_version::{self, TxVersion},
+        Action, Nullifier, ValueCommitment,
+    },
     primitives::Halo2Proof,
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
 };
 
-// FIXME: replace 580 to ENCRYPTED_NOTE_SIZE_V5 in the rest of the code if needed
-pub const ENCRYPTED_NOTE_SIZE_V5: usize = 580;
-pub const ENCRYPTED_NOTE_SIZE_V6: usize = 590; // FIXME: use the proper number instead of 590!!!
+#[cfg(feature = "tx-v6")]
+use crate::orchard::burn::BurnItem;
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ShieldedData<const ENCRYPTED_NOTE_SIZE: usize> {
+pub struct ShieldedData<V: TxVersion> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
     /// The net value of Orchard spends minus outputs.
     /// Denoted as `valueBalanceOrchard` in the spec.
     pub value_balance: Amount,
-    /// Assets intended for burning
-    /// FIXME: add ref to spec
-    pub burn: Option<Vec<BurnItem>>,
     /// The shared anchor for all `Spend`s in this transaction.
     /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
@@ -45,16 +44,18 @@ pub struct ShieldedData<const ENCRYPTED_NOTE_SIZE: usize> {
     pub proof: Halo2Proof,
     /// The Orchard Actions, in the order they appear in the transaction.
     /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
-    pub actions: AtLeastOne<AuthorizedAction<ENCRYPTED_NOTE_SIZE>>,
+    pub actions: AtLeastOne<AuthorizedAction<V>>,
     /// A signature on the transaction `sighash`.
     /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
+
+    #[cfg(feature = "tx-v6")]
+    /// Assets intended for burning
+    /// TODO: FIXME: Add ref to spec
+    pub burn: Option<Vec<BurnItem>>,
 }
 
-//pub type ShieldedDataV5 = ShieldedData<580>;
-//pub type ShieldedDataV6 = ShieldedData<590>; // FIXME: use the proper number instead of 590!!!
-
-impl<const ENCRYPTED_NOTE_SIZE: usize> fmt::Display for ShieldedData<ENCRYPTED_NOTE_SIZE> {
+impl<V: TxVersion> fmt::Display for ShieldedData<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");
 
@@ -70,36 +71,10 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> fmt::Display for ShieldedData<ENCRYPTED_N
     }
 }
 
-impl<const ENCRYPTED_NOTE_SIZE: usize> ShieldedData<ENCRYPTED_NOTE_SIZE> {
-    /// The size of a single Action
-    ///
-    /// Actions are 5 * 32 + ENCRYPTED_NOTE_SIZE + 80 bytes so the total size of each Action is 820 bytes.
-    /// [7.5 Action Description Encoding and Consensus][ps]
-    ///
-    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
-    const ACTION_SIZE: u64 = 5 * 32 + (ENCRYPTED_NOTE_SIZE as u64) + 80;
-
-    /// The size of a single `Signature<SpendAuth>`.
-    ///
-    /// Each Signature is 64 bytes.
-    /// [7.1 Transaction Encoding and Consensus][ps]
-    ///
-    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
-    const SPEND_AUTH_SIG_SIZE: u64 = 64;
-
-    /// The size of a single AuthorizedAction
-    ///
-    /// Each serialized `Action` has a corresponding `Signature<SpendAuth>`.
-    const AUTHORIZED_ACTION_SIZE: u64 = Self::ACTION_SIZE + Self::SPEND_AUTH_SIG_SIZE;
-
-    // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
-    // and the signature is required,
-    // a valid max allocation can never exceed this size
-    const ACTION_MAX_ALLOCATION: u64 = (MAX_BLOCK_BYTES - 1) / Self::AUTHORIZED_ACTION_SIZE;
-
+impl<V: TxVersion> ShieldedData<V> {
     /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
     /// transaction, in the order they appear in it.
-    pub fn actions(&self) -> impl Iterator<Item = &Action<ENCRYPTED_NOTE_SIZE>> {
+    pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
         self.actions.actions()
     }
 
@@ -156,9 +131,9 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> ShieldedData<ENCRYPTED_NOTE_SIZE> {
     }
 }
 
-impl<const ENCRYPTED_NOTE_SIZE: usize> AtLeastOne<AuthorizedAction<ENCRYPTED_NOTE_SIZE>> {
+impl<V: TxVersion> AtLeastOne<AuthorizedAction<V>> {
     /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
-    pub fn actions(&self) -> impl Iterator<Item = &Action<ENCRYPTED_NOTE_SIZE>> {
+    pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
         self.iter()
             .map(|authorized_action| &authorized_action.action)
     }
@@ -168,26 +143,53 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> AtLeastOne<AuthorizedAction<ENCRYPTED_NOT
 ///
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct AuthorizedAction<const ENCRYPTED_NOTE_SIZE: usize> {
+pub struct AuthorizedAction<V: TxVersion> {
     /// The action description of this Action.
-    pub action: Action<ENCRYPTED_NOTE_SIZE>,
+    pub action: Action<V>,
     /// The spend signature.
     pub spend_auth_sig: Signature<SpendAuth>,
 }
 
-impl<const ENCRYPTED_NOTE_SIZE: usize> AuthorizedAction<ENCRYPTED_NOTE_SIZE> {
+impl<V: TxVersion> AuthorizedAction<V> {
+    /// The size of a single Action
+    ///
+    /// Actions are 5 * 32 + ENCRYPTED_NOTE_SIZE + 80 bytes so the total size of each Action is 820 bytes.
+    /// [7.5 Action Description Encoding and Consensus][ps]
+    ///
+    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
+    pub const ACTION_SIZE: u64 = 5 * 32 + (V::ENCRYPTED_NOTE_SIZE as u64) + 80;
+
+    /// The size of a single `Signature<SpendAuth>`.
+    ///
+    /// Each Signature is 64 bytes.
+    /// [7.1 Transaction Encoding and Consensus][ps]
+    ///
+    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
+    pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
+
+    /// The size of a single AuthorizedAction
+    ///
+    /// Each serialized `Action` has a corresponding `Signature<SpendAuth>`.
+    pub const AUTHORIZED_ACTION_SIZE: u64 = Self::ACTION_SIZE + Self::SPEND_AUTH_SIG_SIZE;
+
+    /// The maximum number of actions in the transaction.
+    // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
+    // and the signature is required,
+    // a valid max allocation can never exceed this size
+    pub const ACTION_MAX_ALLOCATION: u64 = (MAX_BLOCK_BYTES - 1) / Self::AUTHORIZED_ACTION_SIZE;
+
     /// Split out the action and the signature for V5 transaction
     /// serialization.
-    pub fn into_parts(self) -> (Action<ENCRYPTED_NOTE_SIZE>, Signature<SpendAuth>) {
+    pub fn into_parts(self) -> (Action<V>, Signature<SpendAuth>) {
         (self.action, self.spend_auth_sig)
     }
 
     // Combine the action and the spend auth sig from V5 transaction
     /// deserialization.
     pub fn from_parts(
-        action: Action<ENCRYPTED_NOTE_SIZE>,
+        action: Action<V>,
         spend_auth_sig: Signature<SpendAuth>,
-    ) -> AuthorizedAction<ENCRYPTED_NOTE_SIZE> {
+    ) -> AuthorizedAction<V> {
         AuthorizedAction {
             action,
             spend_auth_sig,
@@ -195,17 +197,24 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> AuthorizedAction<ENCRYPTED_NOTE_SIZE> {
     }
 }
 
-// FIXME: Add description for this?
-// FIXME: move to transaction.rs as it's not used here? Or use it here instead of transaction.rs?
+// TODO: FIXME: Consider moving it to transaction.rs as it's not used here. Or move its usage here from transaction.rs.
+/// A struct that contains references to several fields of an `Action` struct.
+/// Those fields are used in other parts of the code that call the `orchard_actions()` method of the `Transaction`.
+/// The goal of using `ActionRef` is that it's not a generic, unlike `Action`, so it can be returned from Transaction methods
+/// (the fields of `ActionRef` do not depend on the generic parameter `Version` of `Action`).
 pub struct ActionRef<'a> {
+    /// A reference to the value commitment to the net value of the input note minus the output note.
     pub cv: &'a super::commitment::ValueCommitment,
+    /// A reference to the nullifier of the input note being spent.
     pub nullifier: &'a super::note::Nullifier,
+    /// A reference to the randomized validating key for `spendAuthSig`.
     pub rk: &'a reddsa::VerificationKeyBytes<SpendAuth>,
+    /// A reference to the x-coordinate of the note commitment for the output note.
     pub cm_x: &'a pallas::Base,
 }
 
-impl<'a, const ENCRYPTED_NOTE_SIZE: usize> From<&'a Action<ENCRYPTED_NOTE_SIZE>> for ActionRef<'a> {
-    fn from(action: &'a Action<ENCRYPTED_NOTE_SIZE>) -> Self {
+impl<'a, V: TxVersion> From<&'a Action<V>> for ActionRef<'a> {
+    fn from(action: &'a Action<V>) -> Self {
         Self {
             cv: &action.cv,
             nullifier: &action.nullifier,
@@ -220,7 +229,7 @@ impl<'a, const ENCRYPTED_NOTE_SIZE: usize> From<&'a Action<ENCRYPTED_NOTE_SIZE>>
 /// If a transaction contains more actions than can fit in maximally large block, it might be
 /// valid on the network and in the mempool, but it can never be mined into a block. So
 /// rejecting these large edge-case transactions can never break consensus.
-impl<const ENCRYPTED_NOTE_SIZE: usize> TrustedPreallocate for Action<ENCRYPTED_NOTE_SIZE> {
+impl<V: TxVersion> TrustedPreallocate for Action<V> {
     fn max_allocation() -> u64 {
         // # Consensus
         //
@@ -231,17 +240,23 @@ impl<const ENCRYPTED_NOTE_SIZE: usize> TrustedPreallocate for Action<ENCRYPTED_N
         // This acts as nActionsOrchard and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.
-        // FIXME: find a way to use it: static_assertions::const_assert!(Self::MAX_ALLOCATION < (1 << 16));
-        ShieldedData::<ENCRYPTED_NOTE_SIZE>::ACTION_MAX_ALLOCATION
+        // TODO: FIXME: find a way to use it: static_assertions::const_assert!(Self::MAX_ALLOCATION < (1 << 16));
+        AuthorizedAction::<V>::ACTION_MAX_ALLOCATION
     }
 }
 
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
         // Each signature must have a corresponding action.
-        // FIXME: ENCRYPTED_NOTE_SIZE_V6 is used as it provieds the max size of the action.
-        // So it's used even for ENCRYPTED_NOTE_SIZE_V5 - is this correct?
-        Action::<ENCRYPTED_NOTE_SIZE_V6>::max_allocation()
+        #[cfg(not(feature = "tx-v6"))]
+        let result = Action::<tx_version::V5>::max_allocation();
+
+        // TODO: FIXME: Check this: V6 is used as it provides the max size of the action.
+        // So it's used even for V5 - is this correct?
+        #[cfg(feature = "tx-v6")]
+        let result = Action::<tx_version::V6>::max_allocation();
+
+        result
     }
 }
 

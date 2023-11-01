@@ -19,7 +19,8 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block, orchard,
+    block,
+    orchard::{self, tx_version},
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -406,11 +407,7 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } | Transaction::V6 {
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                }=> Self::verify_v5_transaction(
+                } => Self::verify_v5_transaction(
                     &req,
                     network,
                     script_verifier,
@@ -418,6 +415,14 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                }=> {
+                    // TODO: FIXME: Implement verify_v6_transaction
+                    AsyncChecks::new()
+                }
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -716,7 +721,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<tx_version::V5>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -1011,7 +1016,7 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<tx_version::V5>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();

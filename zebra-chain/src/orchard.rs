@@ -17,12 +17,23 @@ pub mod keys;
 pub mod shielded_data;
 pub mod tree;
 
+#[cfg(feature = "tx-v6")]
+pub mod zsa;
+
+#[cfg(feature = "tx-v6")]
+pub mod burn;
+
+#[cfg(feature = "tx-v6")]
+pub mod issuance;
+
+pub mod tx_version;
+
 pub use action::Action;
 pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use shielded_data::{
-    ActionRef, AuthorizedAction, Flags, ShieldedData, ENCRYPTED_NOTE_SIZE_V5,
-    ENCRYPTED_NOTE_SIZE_V6,
-};
+pub use shielded_data::{ActionRef, AuthorizedAction, Flags, ShieldedData};
+
+#[cfg(feature = "tx-v6")]
+pub use burn::BurnItem;

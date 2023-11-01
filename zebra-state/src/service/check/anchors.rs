@@ -102,7 +102,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
             && !finalized_state.contains_orchard_anchor(anchor)
         {
             return Err(ValidateContextError::UnknownOrchardAnchor {
-                anchor: anchor,
+                anchor: *anchor,
                 height,
                 tx_index_in_block,
                 transaction_hash,

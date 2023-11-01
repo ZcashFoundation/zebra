@@ -1,4 +1,3 @@
-
 //! Encrypted parts of Orchard notes.
 
 use std::{fmt, io};
@@ -132,7 +131,7 @@ use proptest::prelude::*;
 proptest! {
 
     #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
+    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote::<{ crate::orchard::tx_version::ENCRYPTED_NOTE_SIZE_V5 }>>()) {
         let _init_guard = zebra_test::init();
 
         let mut data = Vec::new();

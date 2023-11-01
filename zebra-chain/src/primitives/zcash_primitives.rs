@@ -9,7 +9,7 @@ use crate::{
     amount::{Amount, NonNegative},
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
-    transaction::{AuthDigest, HashType, SigHash, Transaction},
+    transaction::{tx_v5_and_v6, AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
 };
 
@@ -158,12 +158,10 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
     /// conversion for other versions.)
     fn try_from(trans: &Transaction) -> Result<Self, Self::Error> {
         let network_upgrade = match trans {
-            Transaction::V5 {
-                network_upgrade, ..
-            }
-            | Transaction::V6 {
-                network_upgrade, ..
-            } => network_upgrade,
+            tx_v5_and_v6!({
+                network_upgrade,
+                ..
+            }) => network_upgrade,
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }

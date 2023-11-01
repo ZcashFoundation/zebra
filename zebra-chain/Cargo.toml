@@ -15,7 +15,8 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
-default = []
+
+default = ["tx-v6"]
 
 # Production features that activate extra functionality
 
@@ -50,6 +51,9 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+# Support for transaction version 6
+tx-v6 = ["orchard_zsa"]
+
 [dependencies]
 
 # Cryptography
@@ -83,11 +87,6 @@ zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
 zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.12.0", features = ["transparent-inputs"] }
-
-# ZSA deps
-#orchard_zsa = { package = "orchard", version = "0.5", git = "https://github.com/QED-it/orchard", branch = "ivk-to-bytes-visibility-downgrade-with-burn-valid" }
-orchard_zsa = { package = "orchard", version = "0.5", path = "../../orchard" }
-#zcash_note_encryption_zsa = { version = "0.4", path = "../../librustzcash/components/zcash_note_encryption" }
 
 # Time
 chrono = { version = "0.4.26", default-features = false, features = ["clock", "std", "serde"] }
@@ -132,6 +131,9 @@ rand = { version = "0.8.5", optional = true }
 rand_chacha = { version = "0.3.1", optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.29", optional = true }
+
+# ZSA deps
+orchard_zsa = { package = "orchard", version = "0.5", git = "https://github.com/QED-it/orchard", branch = "zsa1", optional = true }
 
 [dev-dependencies]
 # Benchmarks
