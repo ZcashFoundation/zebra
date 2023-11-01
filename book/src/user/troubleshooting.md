@@ -48,7 +48,7 @@ Make sure you're using a release build on your native architecture.
 ### Syncer Lookahead Limit
 
 If your connection is slow, try
-[downloading fewer blocks at a time](https://docs.rs/zebrad/latest/zebrad/config/struct.SyncSection.html#structfield.lookahead_limit):
+[downloading fewer blocks at a time](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.lookahead_limit):
 
 ```toml
 [sync]
