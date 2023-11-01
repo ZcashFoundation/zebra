@@ -5767,7 +5767,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zebra-scanner"
+name = "zebra-scan"
 version = "0.1.0-alpha.0"
 dependencies = [
  "bls12_381",
