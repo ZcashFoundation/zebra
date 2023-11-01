@@ -27,7 +27,7 @@ Some important parts of the config are:
 - `state.cache_dir`: where the cached state is stored on disk
 - `rpc.listen_addr`: optional JSON-RPC listener port
 
-See [the full list of configuration options](https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html).
+See [the full list of configuration options](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html).
 
 ```
 zebrad::commands::start: Starting zebrad

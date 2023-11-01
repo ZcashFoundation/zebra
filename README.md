@@ -27,7 +27,7 @@ consensus-compatible implementation of a Zcash node.
 Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
 the features required to reach Zcash network consensus, including the validation
 of all the consensus rules for the NU5 network upgrade.
-[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are some
 benefits of Zebra.
 
 Zebra validates blocks and transactions, but needs extra software to generate
@@ -148,8 +148,7 @@ You can combine multiple features by listing them as parameters of the `--featur
 cargo install --features="<feature1> <feature2> ..." ...
 ```
 
-Our full list of experimental and developer features is in [the API
-documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags).
+Our full list of experimental and developer features is in [the API documentation](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags).
 
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
