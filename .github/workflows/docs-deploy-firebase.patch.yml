@@ -27,13 +27,6 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  build-docs-external:
-    name: Build and Deploy Zebra External Docs
-    timeout-minutes: 45
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
     timeout-minutes: 45
