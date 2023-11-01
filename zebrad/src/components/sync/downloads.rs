@@ -487,6 +487,7 @@ where
 
                     // But if Zebra is shutting down, ignore the send error.
                     let _ = past_lookahead_limit_sender.lock().expect("thread panicked while holding the past_lookahead_limit_sender mutex guard").send(false);
+                    metrics::counter!("sync.max.height.limit.reset.count", 1);
 
                     metrics::counter!("sync.max.height.limit.reset.attempt.count", 1);
                 }
