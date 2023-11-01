@@ -58,7 +58,7 @@ max_concurrent_block_requests = 25
 
 ### Peer Set Size
 
-If your connection is slow, try [connecting to fewer peers](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.peerset_initial_target_size):
+If your connection is slow, try [connecting to fewer peers](https://docs.rs/zebra-network/latest/zebra_network/struct.Config.html#structfield.peerset_initial_target_size):
 
 ```toml
 [network]
