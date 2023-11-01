@@ -8,12 +8,15 @@ _What are the most important goals of the ticket or PR?_
 
 ### PR Author Checklist
 
-Check before marking the PR as ready for review:
+#### Check before marking the PR as ready for review:
   - [ ] Will the PR name make sense to users?
-    - [ ] For significant changes: Is there a summary in the CHANGELOG?
-    - [ ] Does the PR have a priority label?
+  - [ ] Does the PR have a priority label?
   - [ ] Have you added or updated tests?
   - [ ] Is the documentation up to date?
+
+##### For significant changes:
+  - [ ] Is there a summary in the CHANGELOG?
+  - [ ] Can these changes be split into multiple PRs?
 
 _If a checkbox isn't relevant to the PR, mark it as done._
 
