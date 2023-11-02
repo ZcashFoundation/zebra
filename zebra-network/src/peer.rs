@@ -10,6 +10,7 @@ mod minimum_peer_version;
 mod priority;
 
 #[cfg(any(test, feature = "proptest-impl"))]
+#[allow(unused_imports)]
 pub use client::tests::ClientTestHarness;
 
 #[cfg(test)]
@@ -28,6 +29,7 @@ pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, ConnectionInfo, Handshake, HandshakeRequest};
 pub use load_tracked_client::LoadTrackedClient;
 pub use minimum_peer_version::MinimumPeerVersion;
+#[allow(unused_imports)]
 pub use priority::{
     address_is_valid_for_inbound_listeners, address_is_valid_for_outbound_connections,
     AttributePreference, PeerPreference,

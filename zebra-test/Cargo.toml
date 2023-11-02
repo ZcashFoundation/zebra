@@ -27,7 +27,7 @@ regex = "1.10.2"
 
 tokio = { version = "1.33.0", features = ["full", "tracing", "test-util"] }
 tower = { version = "0.4.13", features = ["util"] }
-futures = "0.3.28"
+futures = "0.3.29"
 
 color-eyre = "0.6.2"
 # This is a transitive dependency via color-eyre.
@@ -44,4 +44,4 @@ tracing-error = "0.2.0"
 tracing = "0.1.39"
 
 [dev-dependencies]
-tempfile = "3.8.0"
+tempfile = "3.8.1"

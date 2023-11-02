@@ -1167,8 +1167,6 @@ fn create_cached_database(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height,
-        // We don't need the ZK parameters, we're only using checkpoints
-        true,
         // Use checkpoints to increase sync performance while caching the database
         true,
         // Check that we're still using checkpoints when we finish the cached sync
@@ -1185,8 +1183,6 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
-        // We need the ZK parameters for full validation
-        false,
         // Test full validation by turning checkpoints off
         false,
         // Check that we're doing full validation when we finish the cached sync
@@ -1216,8 +1212,6 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             network,
             // Just keep going until we reach the chain tip
             block::Height::MAX,
-            // We need the ZK parameters for full validation
-            false,
             // Use the checkpoints to sync quickly, then do full validation until the chain tip
             true,
             // Finish when we reach the chain tip

@@ -164,10 +164,6 @@ impl MempoolBehavior {
 ///
 /// If `reuse_tempdir` is supplied, use it as the test's temporary directory.
 ///
-/// If `height` is higher than the mandatory checkpoint,
-/// configures `zebrad` to preload the Zcash parameters.
-/// If it is lower, skips the parameter preload.
-///
 /// Configures `zebrad` to debug-enable the mempool based on `mempool_behavior`,
 /// then check the logs for the expected `mempool_behavior`.
 ///
@@ -210,11 +206,6 @@ pub fn sync_until(
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
     config.consensus.checkpoint_sync = checkpoint_sync;
-
-    // Download the parameters at launch, if we're going to need them later.
-    if height > network.mandatory_checkpoint_height() {
-        config.consensus.debug_skip_parameter_preload = false;
-    }
 
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
@@ -356,9 +347,6 @@ pub fn cached_mandatory_checkpoint_test_config(network: Network) -> Result<Zebra
 ///
 /// # Test Settings
 ///
-/// If `debug_skip_parameter_preload` is true, configures `zebrad` to preload the Zcash parameters.
-/// If it is false, skips the parameter preload.
-///
 /// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
 /// If it is false, only use the mandatory checkpoints.
 ///
@@ -379,7 +367,6 @@ pub fn cached_mandatory_checkpoint_test_config(network: Network) -> Result<Zebra
 pub fn create_cached_database_height(
     network: Network,
     height: Height,
-    debug_skip_parameter_preload: bool,
     checkpoint_sync: bool,
     stop_regex: &str,
 ) -> Result<()> {
@@ -389,7 +376,6 @@ pub fn create_cached_database_height(
     let mut config = cached_mandatory_checkpoint_test_config(network)?;
     // TODO: add convenience methods?
     config.state.debug_stop_at_height = Some(height.0);
-    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
     config.consensus.checkpoint_sync = checkpoint_sync;
 
     let dir = PathBuf::from("/zebrad-cache");

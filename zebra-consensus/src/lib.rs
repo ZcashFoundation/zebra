@@ -32,7 +32,7 @@
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
-#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_consensus")]
+#![doc(html_root_url = "https://docs.rs/zebra_consensus")]
 //
 // Rust 1.72 has a false positive when nested generics are used inside Arc.
 // This makes the `arc_with_non_send_sync` lint trigger on a lot of proptest code.
@@ -46,11 +46,11 @@
 
 mod block;
 mod checkpoint;
-mod config;
 mod parameters;
 mod primitives;
 mod script;
 
+pub mod config;
 pub mod error;
 pub mod router;
 pub mod transaction;
