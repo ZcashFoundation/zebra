@@ -892,7 +892,7 @@ where
         let address_book = self.address_book.clone();
         async move {
             Ok(address_book
-                .recently_live_peers(chrono::Utc::now())
+                .all_peers()
                 .into_iter()
                 .map(PeerInfo::from)
                 .collect())

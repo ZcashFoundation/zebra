@@ -22,4 +22,9 @@ impl AddressBookPeers for MockAddressBookPeers {
     fn recently_live_peers(&self, _now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
         self.recently_live_peers.clone()
     }
+
+    fn all_peers(&self) -> Vec<MetaAddr> {
+        // This is wrong but we aren't going to merge this PR.
+        self.recently_live_peers.clone()
+    }
 }

@@ -770,6 +770,12 @@ impl AddressBookPeers for AddressBook {
             .cloned()
             .collect()
     }
+
+    fn all_peers(&self) -> Vec<MetaAddr> {
+        let _guard = self.span.enter();
+
+        self.peers().collect()
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -777,6 +783,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
+    }
+
+    fn all_peers(&self) -> Vec<MetaAddr> {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .all_peers()
     }
 }
 
