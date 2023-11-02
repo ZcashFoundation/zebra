@@ -11,9 +11,52 @@ Zebra's mining RPCs are now available in release builds. Our Docker images are s
 because the smaller Zcash verification parameters are now built into the `zebrad` binary.
 TODO: rest of intro
 
-This release contains the following changes:
+### Deprecation Warnings
 
-### Mining RPCs in Production Builds
+This release has the following deprecation warnings:
+
+#### Warning: Deprecation of DockerHub Image Tags in a future release
+
+Zebra currently publishes 11 [DockerHub tags](https://hub.docker.com/r/zfnd/zebra/tags) for each new release.
+We want to reduce the number of DockerHub tags we publish in a future minor Zebra release.
+
+Based on usage and user feedback, we could stop publishing:
+- The `1` tag, which updates each release until NU6
+- The `1.x` tag, which updates each patch release until the next minor release
+- The `1.x.y` tag, which is the same as `v1.x.y`
+- The `sha-xxxxxxx` tag, which is the same as `v1.x.y` (for production releases)
+
+We also want to standardise experimental image tags to `-experimental`, rather than `.experimental`.
+
+So for release 1.5.0, we might only publish these tags:
+- `latest`
+- `latest-experimental` (a new tag)
+- `v1.5.0`
+- `v1.5.0-experimental`
+
+Please let us know if you need any other tags by [opening a GitHub ticket](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+).
+
+We recommend using the `latest` tag to always get the most recent Zebra release.
+
+#### Warning: Documentation Website URL Change
+
+We have replaced the API documentation on the [doc.zebra.zfnd.org](https://doc.zebra.zfnd.org)
+website with [docs.rs](https://docs.rs/releases/search?query=zebra). All links have been updated.
+
+Zebra's API documentation can be found on:
+- [`docs.rs`](https://docs.rs/releases/search?query=zebra), which renders documentation for the
+  public API of the latest crate releases;
+- [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/), which renders
+  documentation for the internal API on the `main` branch.
+
+[doc.zebra.zfnd.org](https://doc.zebra.zfnd.org) stopped being updated a few days before this release,
+and it will soon be shut down.
+
+### Significant Changes
+
+This release contains the following significant changes:
+
+#### Mining RPCs in Production Builds
 
 Zebra's mining RPCs are now available in release builds (#7740). Any Zebra instance can be used
 by a solo miner or mining pool. This stabilises 12 RPCs, including  `getblocktemplate`, `submitblock`,
@@ -23,7 +66,7 @@ read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebr
 Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
 if your mining pool needs extra RPC methods or fields.
 
-### Zcash Parameters in `zebrad` Binary
+#### Zcash Parameters in `zebrad` Binary
 
 `zebrad` now bundles zk-SNARK parameters directly into its binary. This increases the binary size
 by a few megabytes, but reduces the size of the Docker image by around 600 MB because
@@ -43,17 +86,6 @@ parameter files in these directories to save approximately 700 MB disk space.
 so it can't be used to retry failed downloads in `zebrad` 1.3.0 and earlier.
 
 We recommend upgrading to the latest Zebra release to avoid download issues in new installs.
-
-### Documentation Website Change
-
-We have replaced the API documentation on the [doc.zebra.zfnd.org](https://doc.zebra.zfnd.org)
-website with [docs.rs](https://docs.rs/releases/search?query=zebra). All links have been updated.
-
-Zebra's API documentation can be found on:
-- [`docs.rs`](https://docs.rs/releases/search?query=zebra), which renders documentation for the
-  public API of the latest crate releases;
-- [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/), which renders
-  documentation for the internal API on the `main` branch.
 
 ### Security
 
