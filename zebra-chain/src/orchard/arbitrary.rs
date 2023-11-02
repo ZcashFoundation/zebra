@@ -14,7 +14,10 @@ use super::{
     ValueCommitment,
 };
 
-impl<V: TxVersion + 'static> Arbitrary for Action<V> {
+impl<V: TxVersion + 'static> Arbitrary for Action<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -55,7 +58,10 @@ impl Arbitrary for note::Nullifier {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<V: TxVersion + 'static> Arbitrary for AuthorizedAction<V> {
+impl<V: TxVersion + 'static> Arbitrary for AuthorizedAction<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

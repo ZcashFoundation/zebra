@@ -705,7 +705,10 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<V: tx_version::TxVersion + 'static> Arbitrary for orchard::ShieldedData<V> {
+impl<V: tx_version::TxVersion + 'static> Arbitrary for orchard::ShieldedData<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {

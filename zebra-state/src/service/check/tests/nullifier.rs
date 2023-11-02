@@ -8,7 +8,7 @@ use proptest::prelude::*;
 use zebra_chain::{
     block::{Block, Height},
     fmt::TypeNameToDebug,
-    orchard,
+    orchard::{self, tx_version},
     parameters::NetworkUpgrade::Nu5,
     primitives::Groth16Proof,
     sapling::{self, FieldNotPresent, PerSpendAnchor, TransferData::*},
@@ -1126,8 +1126,8 @@ fn transaction_v4_with_sapling_shielded_data(
 ///
 /// If there are no `AuthorizedAction`s in `authorized_actions`.
 fn transaction_v5_with_orchard_shielded_data(
-    orchard_shielded_data: impl Into<Option<orchard::ShieldedData>>,
-    authorized_actions: impl IntoIterator<Item = orchard::AuthorizedAction>,
+    orchard_shielded_data: impl Into<Option<orchard::ShieldedData<tx_version::V5>>>,
+    authorized_actions: impl IntoIterator<Item = orchard::AuthorizedAction<tx_version::V5>>,
 ) -> Transaction {
     let mut orchard_shielded_data = orchard_shielded_data.into();
     let authorized_actions: Vec<_> = authorized_actions.into_iter().collect();

@@ -7,26 +7,12 @@ use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 use super::note;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest::prelude::Arbitrary;
-
 /// The size of the encrypted note for the Orchard ShieldedData of `V5` transactions.
 pub const ENCRYPTED_NOTE_SIZE_V5: usize = 580;
 
 /// The size of the encrypted note for the Orchard ShieldedData of `V6` transactions.
 #[cfg(feature = "tx-v6")]
 pub const ENCRYPTED_NOTE_SIZE_V6: usize = orchard_zsa::note_encryption_v3::ENC_CIPHERTEXT_SIZE_V3;
-
-/// For test builds ('cargo test'), the Arbitrary trait is required for the EncryptedNote associated
-/// type of the TxVersion trait.
-#[cfg(any(test, feature = "proptest-impl"))]
-pub trait PropTest: Arbitrary {}
-
-/// An empty trait used in regular (non-test) builds, as Arbitrary is only needed for 'cargo test'.
-// FIXME: consider using another way to provide the Arbitrary constraint for tests.
-#[cfg(not(any(test, feature = "proptest-impl")))]
-pub trait PropTest {}
-impl<const N: usize> PropTest for note::EncryptedNote<N> {}
 
 /// A trait representing a version of the transaction with Orchard Shielded Protocol support.
 pub trait TxVersion: Clone + Debug {
@@ -44,8 +30,7 @@ pub trait TxVersion: Clone + Debug {
         + DeserializeOwned
         + Serialize
         + ZcashDeserialize
-        + ZcashSerialize
-        + PropTest;
+        + ZcashSerialize;
 }
 
 /// A structure representing a tag for the transaction version `V5` with Orchard protocol support.

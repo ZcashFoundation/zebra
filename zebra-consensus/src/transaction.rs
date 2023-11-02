@@ -416,8 +416,8 @@ where
                     orchard_shielded_data,
                 )?,
                 Transaction::V6 {
-                    sapling_shielded_data,
-                    orchard_shielded_data,
+                    sapling_shielded_data: _sapling_shielded_data,
+                    orchard_shielded_data: _orchard_shielded_data,
                     ..
                 }=> {
                     // TODO: FIXME: Implement verify_v6_transaction
