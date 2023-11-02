@@ -730,11 +730,12 @@ where
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
     if remote.version < min_version {
-        debug!(
+        info!(
             remote_ip = ?their_addr,
             ?remote.version,
             ?min_version,
             ?remote.user_agent,
+            ?remote.start_height,
             "disconnecting from peer with obsolete network protocol version",
         );
 

@@ -375,7 +375,7 @@ where
                 }
 
                 if expected_error {
-                    debug!(
+                    info!(
                         successes = ?handshake_success_total,
                         errors = ?handshake_error_total,
                         ?addr,
@@ -696,7 +696,7 @@ where
                 // The connection limit makes sure this send doesn't block
                 let _ = peerset_tx.send((addr, client)).await;
             } else {
-                debug!(?handshake_result, "error handshaking with inbound peer");
+                info!(?handshake_result, "error handshaking with inbound peer");
             }
         }
         .in_current_span(),
@@ -1069,7 +1069,7 @@ where
         }
         // The connection was never opened, or it failed the handshake and was dropped.
         Err(error) => {
-            debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            info!(?error, ?candidate.addr, "failed to make outbound connection to peer");
             report_failed(address_book.clone(), candidate).await;
 
             // The demand signal that was taken out of the queue to attempt to connect to the
