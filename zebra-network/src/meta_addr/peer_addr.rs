@@ -27,10 +27,11 @@ impl fmt::Debug for PeerSocketAddr {
 
 impl fmt::Display for PeerSocketAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ip_version = if self.is_ipv4() { "v4" } else { "v6" };
+        //let ip_version = if self.is_ipv4() { "v4" } else { "v6" };
 
         // The port is usually not sensitive, and it's useful for debugging.
-        f.pad(&format!("{}redacted:{}", ip_version, self.port()))
+        //f.pad(&format!("{}redacted:{}", ip_version, self.port()))
+        f.pad(&format!("{}", self.remove_socket_addr_privacy()))
     }
 }
 
