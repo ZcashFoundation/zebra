@@ -1289,11 +1289,15 @@ where
         // <https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
         //
         // The inbound service must be called immediately after a buffer slot is reserved.
+        //
+        // The inbound service never times out in readiness, because the load shed layer is always
+        // ready, and returns an error in response to the request instead.
         if self.svc.ready().await.is_err() {
             self.fail_with(PeerError::ServiceShutdown).await;
             return;
         }
 
+        // Inbound service request timeouts are handled by the timeout layer in `start::start()`.
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
                 if e.is::<tower::load_shed::error::Overloaded>() {
