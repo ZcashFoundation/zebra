@@ -445,7 +445,7 @@ impl MetaAddr {
     /// See the [`MetaAddr::last_seen`] method for details.
     //
     // TODO: pub(in crate::address_book) - move meta_addr into address_book
-    pub(crate) fn untrusted_last_seen(&self) -> Option<DateTime32> {
+    pub fn untrusted_last_seen(&self) -> Option<DateTime32> {
         self.untrusted_last_seen
     }
 
@@ -455,7 +455,7 @@ impl MetaAddr {
     //
     // TODO: pub(in crate::address_book) - move meta_addr into address_book
     #[allow(dead_code)]
-    pub(crate) fn last_response(&self) -> Option<DateTime32> {
+    pub fn last_response(&self) -> Option<DateTime32> {
         self.last_response
     }
 
@@ -674,6 +674,11 @@ impl MetaAddr {
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
         })
+    }
+
+    /// Returns the internal state.
+    pub fn last_connection_state(&self) -> PeerAddrState {
+        self.last_connection_state
     }
 }
 
