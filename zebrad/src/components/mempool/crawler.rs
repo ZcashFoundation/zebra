@@ -50,7 +50,11 @@
 use std::{collections::HashSet, time::Duration};
 
 use futures::{future, pin_mut, stream::FuturesUnordered, StreamExt};
-use tokio::{sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    sync::watch,
+    task::JoinHandle,
+    time::{sleep, timeout},
+};
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -77,7 +81,7 @@ const FANOUT: usize = 3;
 ///
 /// Using a prime number makes sure that mempool crawler fanouts
 /// don't synchronise with other crawls.
-const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
+pub const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
 
 /// The time to wait for a peer response.
 ///
@@ -191,7 +195,14 @@ where
 
         loop {
             self.wait_until_enabled().await?;
-            self.crawl_transactions().await?;
+            // Avoid hangs when the peer service is not ready, or due to bugs in async code.
+            timeout(RATE_LIMIT_DELAY, self.crawl_transactions())
+                .await
+                .unwrap_or_else(|timeout| {
+                    // Temporary errors just get logged and ignored.
+                    info!("mempool crawl timed out: {timeout:?}");
+                    Ok(())
+                })?;
             sleep(RATE_LIMIT_DELAY).await;
         }
     }

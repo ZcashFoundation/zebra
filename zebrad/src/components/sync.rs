@@ -2,13 +2,17 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, pin::Pin, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, task::JoinError, time::sleep};
+use tokio::{
+    sync::watch,
+    task::JoinError,
+    time::{sleep, timeout},
+};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -210,7 +214,10 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 /// If this timeout is removed (or set too low), Zebra will immediately retry
 /// to download and verify the genesis block from its peers. This can cause
 /// a denial of service on those peers.
-const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(5);
+///
+/// If this timeout is too short, old or buggy nodes will keep making useless
+/// network requests. If there are a lot of them, it could overwhelm the network.
+const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
 /// Sync configuration section.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -541,7 +548,8 @@ where
     /// following a fork. Either way, Zebra should attempt to obtain some more tips.
     ///
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary.
+    /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
+    /// long time. (These usually indicate hangs.)
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
@@ -550,76 +558,106 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = self.obtain_tips().await.map_err(|e| {
-            info!("temporary error obtaining tips: {:#}", e);
-            e
-        })?;
+        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
+            .await
+            .map_err(Into::into)
+            // TODO: replace with flatten() when it stabilises (#70142)
+            .and_then(convert::identity)
+            .map_err(|e| {
+                info!("temporary error obtaining tips: {:#}", e);
+                e
+            })?;
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Check whether any block tasks are currently ready:
-            while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                self.handle_block_response(rsp)?;
-            }
-            self.update_metrics();
-
-            // Pause new downloads while the syncer or downloader are past their lookahead limits.
-            //
-            // To avoid a deadlock or long waits for blocks to expire, we ignore the download
-            // lookahead limit when there are only a small number of blocks waiting.
-            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-                || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                    && self.past_lookahead_limit_receiver.cloned_watch_data())
-            {
-                trace!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "waiting for pending blocks",
-                );
-
-                let response = self.downloads.next().await.expect("downloads is nonempty");
-
-                self.handle_block_response(response)?;
-                self.update_metrics();
-            }
-
-            // Once we're below the lookahead limit, we can request more blocks or hashes.
-            if !extra_hashes.is_empty() {
-                debug!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "requesting more blocks",
-                );
-
-                let response = self.request_blocks(extra_hashes).await;
-                extra_hashes = Self::handle_hash_response(response)?;
-            } else {
-                info!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    extra_hashes = extra_hashes.len(),
-                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                    state_tip = ?self.latest_chain_tip.best_tip_height(),
-                    "extending tips",
-                );
-
-                extra_hashes = self.extend_tips().await.map_err(|e| {
-                    info!("temporary error extending tips: {:#}", e);
-                    e
-                })?;
-            }
-            self.update_metrics();
+            // Avoid hangs due to service readiness or other internal operations
+            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+                .await
+                .map_err(Into::into)
+                // TODO: replace with flatten() when it stabilises (#70142)
+                .and_then(convert::identity)?;
         }
 
         info!("exhausted prospective tip set");
 
         Ok(())
+    }
+
+    /// Tries to synchronize the chain once, using the existing `extra_hashes`.
+    ///
+    /// Tries to extend the existing tips and download the missing blocks.
+    ///
+    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
+    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
+    /// necessary.
+    #[instrument(skip(self))]
+    async fn try_to_sync_once(
+        &mut self,
+        mut extra_hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        // Check whether any block tasks are currently ready.
+        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+            // Some temporary errors are ignored, and syncing continues with other blocks.
+            // If it turns out they were actually important, syncing will run out of blocks, and
+            // the syncer will reset itself.
+            self.handle_block_response(rsp)?;
+        }
+        self.update_metrics();
+
+        // Pause new downloads while the syncer or downloader are past their lookahead limits.
+        //
+        // To avoid a deadlock or long waits for blocks to expire, we ignore the download
+        // lookahead limit when there are only a small number of blocks waiting.
+        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
+            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
+                && self.past_lookahead_limit_receiver.cloned_watch_data())
+        {
+            trace!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "waiting for pending blocks",
+            );
+
+            let response = self.downloads.next().await.expect("downloads is nonempty");
+
+            self.handle_block_response(response)?;
+            self.update_metrics();
+        }
+
+        // Once we're below the lookahead limit, we can request more blocks or hashes.
+        if !extra_hashes.is_empty() {
+            debug!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "requesting more blocks",
+            );
+
+            let response = self.request_blocks(extra_hashes).await;
+            extra_hashes = Self::handle_hash_response(response)?;
+        } else {
+            info!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "extending tips",
+            );
+
+            extra_hashes = self.extend_tips().await.map_err(|e| {
+                info!("temporary error extending tips: {:#}", e);
+                e
+            })?;
+        }
+        self.update_metrics();
+
+        Ok(extra_hashes)
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -932,16 +970,19 @@ where
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
-            let response = self.downloads.download_and_verify(self.genesis_hash).await;
-            Self::handle_response(response).map_err(|e| eyre!(e))?;
+            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
+                .await
+                .map_err(Into::into);
 
-            let response = self.downloads.next().await.expect("downloads is nonempty");
-
+            // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
-                Ok(response) => self
+                Ok(Ok(Ok(response))) => self
                     .handle_block_response(Ok(response))
                     .expect("never returns Err for Ok"),
-                Err(error) => {
+                // Handle fatal errors
+                Ok(Err(fatal_error)) => Err(fatal_error)?,
+                // Handle timeouts and block errors
+                Err(error) | Ok(Ok(Err(error))) => {
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
                         warn!(
@@ -961,6 +1002,20 @@ where
         }
 
         Ok(())
+    }
+
+    /// Try to download and verify the genesis block once.
+    ///
+    /// Fatal errors are returned in the outer result, temporary errors in the inner one.
+    async fn request_genesis_once(
+        &mut self,
+    ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
+        let response = self.downloads.download_and_verify(self.genesis_hash).await;
+        Self::handle_response(response).map_err(|e| eyre!(e))?;
+
+        let response = self.downloads.next().await.expect("downloads is nonempty");
+
+        Ok(response)
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.
