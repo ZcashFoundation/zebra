@@ -1431,10 +1431,8 @@ async fn handle_heartbeat_shutdown(
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
-        // The connection info was sent to the address book when we successfully opened the
-        // connection, so it isn't needed here.
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(book_addr, None))
+            .send(MetaAddr::new_shutdown(book_addr))
             .await;
     }
 
