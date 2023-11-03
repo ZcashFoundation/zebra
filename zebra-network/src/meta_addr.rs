@@ -715,6 +715,11 @@ impl MetaAddr {
     pub fn last_connection_state(&self) -> PeerAddrState {
         self.last_connection_state
     }
+
+    /// Returns the last version message sent by the peer, and the negotiated connection version.
+    pub fn last_connection_info(&self) -> &Option<Arc<ConnectionInfo>> {
+        &self.connection_info
+    }
 }
 
 #[cfg(test)]
