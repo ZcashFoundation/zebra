@@ -29,7 +29,6 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
-use tracing::Span;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
@@ -197,7 +196,7 @@ where
         config.clone(),
         outbound_connector.clone(),
         peerset_tx.clone(),
-        address_book_updater,
+        address_book_updater.clone(),
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
@@ -242,6 +241,7 @@ where
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
+        address_book_updater,
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
@@ -740,6 +740,7 @@ enum CrawlerAction {
 ///
 /// Uses `active_outbound_connections` to limit the number of active outbound connections
 /// across both the initial peers and crawler. The limit is based on `config`.
+#[allow(clippy::too_many_arguments)]
 #[instrument(
     skip(
         config,
@@ -749,6 +750,7 @@ enum CrawlerAction {
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
+        address_book_updater,
     ),
     fields(
         new_peer_interval = ?config.crawl_new_peer_interval,
@@ -762,6 +764,7 @@ async fn crawl_and_dial<C, S>(
     outbound_connector: C,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError>
 where
     C: Service<
@@ -782,8 +785,6 @@ where
         outbound_connections = ?active_outbound_connections.update_count(),
         "starting the peer address crawler",
     );
-
-    let address_book = candidates.address_book().await;
 
     // # Concurrency
     //
@@ -857,7 +858,7 @@ where
                 let candidates = candidates.clone();
                 let outbound_connector = outbound_connector.clone();
                 let peerset_tx = peerset_tx.clone();
-                let address_book = address_book.clone();
+                let address_book_updater = address_book_updater.clone();
                 let demand_tx = demand_tx.clone();
 
                 // Increment the connection count before we spawn the connection.
@@ -886,7 +887,7 @@ where
                                 outbound_connector,
                                 outbound_connection_tracker,
                                 peerset_tx,
-                                address_book,
+                                address_book_updater,
                                 demand_tx,
                             )
                             .await?;
@@ -1020,7 +1021,7 @@ where
     outbound_connector,
     outbound_connection_tracker,
     peerset_tx,
-    address_book,
+    address_book_updater,
     demand_tx
 ))]
 async fn dial<C>(
@@ -1028,7 +1029,7 @@ async fn dial<C>(
     mut outbound_connector: C,
     outbound_connection_tracker: ConnectionTracker,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
@@ -1070,7 +1071,7 @@ where
         // The connection was never opened, or it failed the handshake and was dropped.
         Err(error) => {
             info!(?error, ?candidate.addr, "failed to make outbound connection to peer");
-            report_failed(address_book.clone(), candidate).await;
+            report_failed(address_book_updater.clone(), candidate).await;
 
             // The demand signal that was taken out of the queue to attempt to connect to the
             // failed candidate never turned into a connection, so add it back.
@@ -1090,26 +1091,14 @@ where
     Ok(())
 }
 
-/// Mark `addr` as a failed peer in `address_book`.
-#[instrument(skip(address_book))]
-async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: MetaAddr) {
+/// Mark `addr` as a failed peer to `address_book_updater`.
+#[instrument(skip(address_book_updater))]
+async fn report_failed(
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    addr: MetaAddr,
+) {
     let addr = MetaAddr::new_errored(addr.addr, addr.services);
 
-    // # Correctness
-    //
-    // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-    let span = Span::current();
-    let addr2 = addr.clone();
-    let updated_addr = tokio::task::spawn_blocking(move || {
-        span.in_scope(|| address_book.lock().unwrap().update(addr2))
-    })
-    .wait_for_panics()
-    .await;
-
-    assert_eq!(
-        updated_addr.map(|addr| addr.addr()),
-        Some(addr.addr()),
-        "incorrect address updated by address book: \
-         original: {addr:?}, updated: {updated_addr:?}"
-    );
+    // Ignore send errors on Zebra shutdown.
+    let _ = address_book_updater.send(addr).await;
 }
