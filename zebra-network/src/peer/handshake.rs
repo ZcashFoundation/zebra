@@ -929,12 +929,13 @@ where
                 let _ = address_book_updater.send(alt_addr).await;
             }
 
-            // The handshake succeeded: update the peer status from AttemptPending to Responded
+            // The handshake succeeded: update the peer status from AttemptPending to Responded,
+            // and send initial connection info.
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
-                    .send(MetaAddr::new_responded(book_addr, &remote_services))
+                    .send(MetaAddr::new_connected(book_addr, &remote_services))
                     .await;
             }
 

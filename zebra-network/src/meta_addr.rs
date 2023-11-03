@@ -280,6 +280,16 @@ pub enum MetaAddrChange {
         addr: PeerSocketAddr,
     },
 
+    /// Updates an existing `MetaAddr` when we've made a successful connection with a peer.
+    UpdateConnected {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_peer_addr_strategy()")
+        )]
+        addr: PeerSocketAddr,
+        services: PeerServices,
+    },
+
     /// Updates an existing `MetaAddr` when a peer responds with a message.
     UpdateResponded {
         #[cfg_attr(
@@ -287,7 +297,6 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
-        services: PeerServices,
     },
 
     /// Updates an existing `MetaAddr` when a peer fails.
@@ -345,8 +354,8 @@ impl MetaAddr {
         })
     }
 
-    /// Returns a [`MetaAddrChange::UpdateResponded`] for a peer that has just
-    /// sent us a message.
+    /// Returns a [`MetaAddrChange::UpdateConnected`] for a peer that has just successfully
+    /// connected.
     ///
     /// # Security
     ///
@@ -354,13 +363,30 @@ impl MetaAddr {
     /// and the services must be the services from that peer's handshake.
     ///
     /// Otherwise:
-    /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook) state,
-    ///   or
+    /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
+    ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
-        UpdateResponded {
+    pub fn new_connected(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+        UpdateConnected {
             addr: canonical_peer_addr(*addr),
             services: *services,
+        }
+    }
+
+    /// Returns a [`MetaAddrChange::UpdateResponded`] for a peer that has just
+    /// sent us a message.
+    ///
+    /// # Security
+    ///
+    /// This address must be the remote address from an outbound connection.
+    ///
+    /// Otherwise:
+    /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
+    ///   state, or
+    /// - Zebra could advertise unreachable addresses to its own peers.
+    pub fn new_responded(addr: PeerSocketAddr) -> MetaAddrChange {
+        UpdateResponded {
+            addr: canonical_peer_addr(*addr),
         }
     }
 
@@ -692,6 +718,7 @@ impl MetaAddrChange {
             | NewAlternate { addr, .. }
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
+            | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
             | UpdateFailed { addr, .. } => *addr,
         }
@@ -708,6 +735,7 @@ impl MetaAddrChange {
             | NewAlternate { addr, .. }
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
+            | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
             | UpdateFailed { addr, .. } => *addr = new_addr,
         }
@@ -717,17 +745,18 @@ impl MetaAddrChange {
     pub fn untrusted_services(&self) -> Option<PeerServices> {
         match self {
             NewInitial { .. } => None,
+            // TODO: split untrusted and direct services (#2324)
             NewGossiped {
                 untrusted_services, ..
-            } => Some(*untrusted_services),
-            NewAlternate {
+            }
+            | NewAlternate {
                 untrusted_services, ..
             } => Some(*untrusted_services),
             // TODO: create a "services implemented by Zebra" constant (#2324)
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
-            // TODO: split untrusted and direct services (#2324)
-            UpdateResponded { services, .. } => Some(*services),
+            UpdateConnected { services, .. } => Some(*services),
+            UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
         }
     }
@@ -743,9 +772,10 @@ impl MetaAddrChange {
             NewAlternate { .. } => None,
             // We know that our local listener is available
             NewLocal { .. } => Some(now),
-            UpdateAttempt { .. } => None,
-            UpdateResponded { .. } => None,
-            UpdateFailed { .. } => None,
+            UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. } => None,
         }
     }
 
@@ -771,33 +801,29 @@ impl MetaAddrChange {
     /// Return the last attempt for this change, if available.
     pub fn last_attempt(&self, now: Instant) -> Option<Instant> {
         match self {
-            NewInitial { .. } => None,
-            NewGossiped { .. } => None,
-            NewAlternate { .. } => None,
-            NewLocal { .. } => None,
+            NewInitial { .. } | NewGossiped { .. } | NewAlternate { .. } | NewLocal { .. } => None,
             // Attempt changes are applied before we start the handshake to the
             // peer address. So the attempt time is a lower bound for the actual
             // handshake time.
             UpdateAttempt { .. } => Some(now),
-            UpdateResponded { .. } => None,
-            UpdateFailed { .. } => None,
+            UpdateConnected { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
         }
     }
 
     /// Return the last response for this change, if available.
     pub fn last_response(&self, now: DateTime32) -> Option<DateTime32> {
         match self {
-            NewInitial { .. } => None,
-            NewGossiped { .. } => None,
-            NewAlternate { .. } => None,
-            NewLocal { .. } => None,
-            UpdateAttempt { .. } => None,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewAlternate { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. } => None,
             // If there is a large delay applying this change, then:
             // - the peer might stay in the `AttemptPending` state for longer,
             // - we might send outdated last seen times to our peers, and
             // - the peer will appear to be live for longer, delaying future
             //   reconnection attempts.
-            UpdateResponded { .. } => Some(now),
+            UpdateConnected { .. } | UpdateResponded { .. } => Some(now),
             UpdateFailed { .. } => None,
         }
     }
@@ -805,12 +831,13 @@ impl MetaAddrChange {
     /// Return the last failure for this change, if available.
     pub fn last_failure(&self, now: Instant) -> Option<Instant> {
         match self {
-            NewInitial { .. } => None,
-            NewGossiped { .. } => None,
-            NewAlternate { .. } => None,
-            NewLocal { .. } => None,
-            UpdateAttempt { .. } => None,
-            UpdateResponded { .. } => None,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewAlternate { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdateResponded { .. } => None,
             // If there is a large delay applying this change, then:
             // - the peer might stay in the `AttemptPending` or `Responded`
             //   states for longer, and
@@ -829,7 +856,7 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            UpdateResponded { .. } => Responded,
+            UpdateConnected { .. } | UpdateResponded { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
     }
