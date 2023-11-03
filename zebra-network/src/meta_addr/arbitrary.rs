@@ -146,3 +146,13 @@ impl MetaAddrChange {
             .boxed()
     }
 }
+
+impl Default for PeerSocketAddr {
+    fn default() -> Self {
+        // This is a documentation and examples IP address:
+        // <https://en.wikipedia.org/wiki/Reserved_IP_addresses>
+        "203.0.113.0:8233"
+            .parse()
+            .expect("hard-coded address is valid")
+    }
+}

@@ -29,7 +29,7 @@ use super::{canonical_peer_addr, v1::ipv6_mapped_ip_addr};
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct AddrInVersion {
     /// The unverified services for the peer at `addr`.
     ///

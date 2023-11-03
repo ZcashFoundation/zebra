@@ -314,7 +314,7 @@ pub const MAX_USER_AGENT_LENGTH: usize = 256;
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
 #[derive(Clone, Eq, PartialEq, Debug)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct VersionMessage {
     /// The network version number supported by the sender.
     pub version: Version,

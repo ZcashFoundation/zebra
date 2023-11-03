@@ -51,7 +51,7 @@ use crate::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 mod tests;
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
@@ -125,7 +125,7 @@ where
 
 /// The metadata for a peer connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct ConnectionInfo {
     /// The connected peer address, if known.
     /// This address might not be valid for outbound connections.

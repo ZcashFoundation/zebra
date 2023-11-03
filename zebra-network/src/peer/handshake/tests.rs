@@ -13,3 +13,15 @@ where
         self.nonces.lock().await.len()
     }
 }
+
+impl Default for ConnectedAddr {
+    fn default() -> Self {
+        // This is a documentation and examples IP address:
+        // <https://en.wikipedia.org/wiki/Reserved_IP_addresses>
+        Self::OutboundDirect {
+            addr: "198.51.100.0:8233"
+                .parse()
+                .expect("hard-coded address is valid"),
+        }
+    }
+}

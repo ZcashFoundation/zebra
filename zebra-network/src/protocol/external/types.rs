@@ -36,6 +36,7 @@ impl From<Network> for Magic {
 
 /// A protocol version number.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct Version(pub u32);
 
 impl fmt::Display for Version {
