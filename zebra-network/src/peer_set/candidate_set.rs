@@ -326,7 +326,7 @@ where
         // - the number of addresses per peer is limited
         let addrs: Vec<MetaAddrChange> = addrs
             .into_iter()
-            .map(MetaAddr::new_gossiped_change)
+            .map(|addr| addr.new_gossiped_change())
             .map(|maybe_addr| maybe_addr.expect("Received gossiped peers always have services set"))
             .collect();
 

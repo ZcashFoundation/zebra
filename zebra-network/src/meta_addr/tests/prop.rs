@@ -71,7 +71,7 @@ proptest! {
         let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
         for change in changes {
-            if let Some(changed_addr) = change.apply_to_meta_addr(addr, instant_now, chrono_now) {
+            if let Some(changed_addr) = change.apply_to_meta_addr(Some(&addr), instant_now, chrono_now) {
                 // untrusted last seen times:
                 // check that we replace None with Some, but leave Some unchanged
                 if addr.untrusted_last_seen.is_some() {
@@ -120,7 +120,7 @@ proptest! {
             while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
                 // Simulate an attempt
                 addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
-                    .apply_to_meta_addr(addr, instant_now, chrono_now) {
+                    .apply_to_meta_addr(Some(&addr), instant_now, chrono_now) {
                         attempt_count += 1;
                         // Assume that this test doesn't last longer than MIN_PEER_RECONNECTION_DELAY
                         prop_assert!(attempt_count <= 1);
@@ -133,7 +133,7 @@ proptest! {
             }
 
             // If `change` is invalid for the current MetaAddr state, skip it.
-            if let Some(changed_addr) = change.apply_to_meta_addr(addr, instant_now, chrono_now) {
+            if let Some(changed_addr) = change.apply_to_meta_addr(Some(&addr), instant_now, chrono_now) {
                 prop_assert_eq!(changed_addr.addr, addr.addr);
                 addr = changed_addr;
             }
@@ -251,7 +251,7 @@ proptest! {
                 expected_result,
             );
 
-            if let Some(book_result) = book_result {
+            if let Some(book_result) = book_result.as_ref() {
                 prop_assert_eq!(book_result.addr, addr.addr);
                 // TODO: pass times to MetaAddrChange::apply_to_meta_addr and AddressBook::update,
                 //       so the times are equal
@@ -324,7 +324,7 @@ proptest! {
         // Only put valid addresses in the address book.
         // This means some tests will start with an empty address book.
         let addrs = if addr.last_known_info_is_valid_for_outbound(Mainnet) {
-            Some(addr)
+            Some(addr.clone())
         } else {
             None
         };
@@ -435,13 +435,13 @@ proptest! {
 
             for change_index in 0..MAX_ADDR_CHANGE {
                 for (addr, changes) in addr_changes_lists.iter() {
-                    let addr = addrs.entry(addr.addr).or_insert(*addr);
+                    let addr = addrs.entry(addr.addr).or_insert(addr.clone());
                     let change = changes.get(change_index);
 
                     while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
                         // Simulate an attempt
                         *addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
-                            .apply_to_meta_addr(*addr, instant_now, chrono_now) {
+                            .apply_to_meta_addr(Some(addr), instant_now, chrono_now) {
                                 *attempt_counts.entry(addr.addr).or_default() += 1;
                                 prop_assert!(
                                     *attempt_counts.get(&addr.addr).unwrap() <= LIVE_PEER_INTERVALS + 1
@@ -456,7 +456,7 @@ proptest! {
 
                     // If `change` is invalid for the current MetaAddr state, skip it.
                     // If we've run out of changes for this addr, do nothing.
-                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(*addr, instant_now, chrono_now))
+                    if let Some(changed_addr) = change.and_then(|change| change.apply_to_meta_addr(Some(addr), instant_now, chrono_now))
                     {
                         prop_assert_eq!(changed_addr.addr, addr.addr);
                         *addr = changed_addr;

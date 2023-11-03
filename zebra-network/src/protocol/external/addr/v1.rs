@@ -69,6 +69,12 @@ pub(in super::super) struct AddrV1 {
 
 impl From<MetaAddr> for AddrV1 {
     fn from(meta_addr: MetaAddr) -> Self {
+        AddrV1::from(&meta_addr)
+    }
+}
+
+impl From<&MetaAddr> for AddrV1 {
+    fn from(meta_addr: &MetaAddr) -> Self {
         let addr = canonical_peer_addr(meta_addr.addr);
 
         let untrusted_services = meta_addr.services.expect(

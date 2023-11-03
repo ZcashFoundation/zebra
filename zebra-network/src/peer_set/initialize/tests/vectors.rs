@@ -1202,17 +1202,17 @@ async fn self_connections_should_fail() {
         "inserting our own address into the address book failed: {real_self_listener:?}"
     );
     assert_eq!(
-        updated_addr.unwrap().addr(),
+        updated_addr.as_ref().unwrap().addr(),
         real_self_listener.addr(),
         "wrong address inserted into address book"
     );
     assert_ne!(
-        updated_addr.unwrap().addr().ip(),
+        updated_addr.as_ref().unwrap().addr().ip(),
         Ipv4Addr::UNSPECIFIED,
         "invalid address inserted into address book: ip must be valid for inbound connections"
     );
     assert_ne!(
-        updated_addr.unwrap().addr().port(),
+        updated_addr.as_ref().unwrap().addr().port(),
         0,
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
@@ -1521,7 +1521,6 @@ where
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
-    let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
         let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
         let addr = MetaAddr::new_gossiped_meta_addr(
@@ -1529,7 +1528,6 @@ where
             PeerServices::NODE_NETWORK,
             DateTime32::now(),
         );
-        fake_peer = Some(addr);
         let addr = addr
             .new_gossiped_change()
             .expect("created MetaAddr contains enough information to represent a gossiped address");
@@ -1545,7 +1543,7 @@ where
         let rsp = match req {
             // Return the correct response variant for Peers requests,
             // re-using one of the peers we already provided.
-            Request::Peers => Response::Peers(vec![fake_peer.unwrap()]),
+            Request::Peers => Response::Peers(vec![]),
             _ => unreachable!("unexpected request: {:?}", req),
         };
 

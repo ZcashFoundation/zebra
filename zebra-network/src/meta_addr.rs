@@ -164,7 +164,7 @@ impl PartialOrd for PeerAddrState {
 /// This struct can be created from `addr` or `addrv2` messages.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct MetaAddr {
     /// The peer's canonical socket address.
@@ -189,12 +189,18 @@ pub struct MetaAddr {
     ///
     /// ## Security
     ///
-    /// `services` from `NeverAttempted` peers may be invalid due to outdated
-    /// records, older peer versions, or buggy or malicious peers.
+    /// `services` may be invalid due to outdated records, older peer versions, or buggy or
+    /// malicious peers. The only state that is guaranteed to match what the peer itself sent is
+    /// `Responded`. (Although that data is unencrypted and can be modified in transit.)
     //
     // TODO: make services private
     //       split gossiped and handshake services? (#2324)
     pub(crate) services: Option<PeerServices>,
+
+    /// The last `Version` message sent by the peer, and the version negotiated with the peer.
+    ///
+    /// See the note on [`MetaAddr.services`] for security warnings, and more info.
+    connection_info: Option<Arc<ConnectionInfo>>,
 
     /// The unverified "last seen time" gossiped by the remote peer that sent us
     /// this address.
@@ -331,6 +337,7 @@ impl MetaAddr {
         MetaAddr {
             addr: canonical_peer_addr(addr),
             services: Some(untrusted_services),
+            connection_info: None,
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
             last_attempt: None,
@@ -344,7 +351,7 @@ impl MetaAddr {
     ///
     /// Returns [`None`] if the gossiped peer is missing the untrusted services field.
     #[allow(clippy::unwrap_in_result)]
-    pub fn new_gossiped_change(self) -> Option<MetaAddrChange> {
+    pub fn new_gossiped_change(&self) -> Option<MetaAddrChange> {
         let untrusted_services = self.services?;
 
         Some(NewGossiped {
@@ -692,6 +699,7 @@ impl MetaAddr {
             // TODO: split untrusted and direct services
             //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
             services: self.services.or(Some(PeerServices::NODE_NETWORK)),
+            connection_info: None,
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
             untrusted_last_seen: Some(last_seen),
@@ -773,6 +781,25 @@ impl MetaAddrChange {
             UpdateFailed {
                 connection_info, ..
             } => connection_info.as_ref().map(|info| info.remote.services),
+        }
+    }
+
+    /// Return the connection info for this change, if available.
+    pub fn connection_info(&self) -> Option<Arc<ConnectionInfo>> {
+        match self {
+            NewInitial { .. } | NewGossiped { .. } => None,
+            NewAlternate {
+                untrusted_connection_info,
+                ..
+            } => Some(untrusted_connection_info.clone()),
+            NewLocal { .. } | UpdateAttempt { .. } => None,
+            UpdateConnected {
+                connection_info, ..
+            } => Some(connection_info.clone()),
+            UpdateResponded { .. } => None,
+            UpdateFailed {
+                connection_info, ..
+            } => connection_info.clone(),
         }
     }
 
@@ -881,6 +908,7 @@ impl MetaAddrChange {
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
+            connection_info: self.connection_info(),
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
             last_attempt: self.last_attempt(instant_now),
@@ -903,6 +931,7 @@ impl MetaAddrChange {
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
+            connection_info: None,
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
             last_attempt: None,
@@ -918,13 +947,13 @@ impl MetaAddrChange {
     #[allow(clippy::unwrap_in_result)]
     pub fn apply_to_meta_addr(
         &self,
-        previous: impl Into<Option<MetaAddr>>,
+        previous: Option<&MetaAddr>,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> Option<MetaAddr> {
         let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
-        let Some(previous) = previous.into() else {
+        let Some(previous) = previous else {
             // no previous: create a new entry
             return Some(self.to_new_meta_addr(instant_now, local_now));
         };
@@ -1051,6 +1080,8 @@ impl MetaAddrChange {
             Some(MetaAddr {
                 addr: self.addr(),
                 services: previous.services.or_else(|| self.untrusted_services()),
+                // The peer has not been attempted, so this field must be None
+                connection_info: None,
                 untrusted_last_seen: previous
                     .untrusted_last_seen
                     .or_else(|| self.untrusted_last_seen(local_now)),
@@ -1071,6 +1102,7 @@ impl MetaAddrChange {
                 //
                 // We want up-to-date services, even if they have fewer bits
                 services: self.untrusted_services().or(previous.services),
+                connection_info: self.connection_info().or(previous.connection_info.clone()),
                 // Only NeverAttempted changes can modify the last seen field
                 untrusted_last_seen: previous.untrusted_last_seen,
                 // This is a wall clock time, but we already checked that responses are in order.

@@ -91,9 +91,10 @@ impl MetaAddrChange {
     ) -> BoxedStrategy<(MetaAddr, Vec<MetaAddrChange>)> {
         any::<MetaAddr>()
             .prop_flat_map(move |addr| {
+                let ip_addr = addr.addr;
                 (
                     Just(addr),
-                    vec(MetaAddrChange::addr_strategy(addr.addr), 1..max_addr_change),
+                    vec(MetaAddrChange::addr_strategy(ip_addr), 1..max_addr_change),
                 )
             })
             .boxed()

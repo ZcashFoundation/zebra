@@ -31,6 +31,7 @@ fn sanitize_extremes() {
     let min_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
         services: Default::default(),
+        connection_info: Default::default(),
         untrusted_last_seen: Some(u32::MIN.into()),
         last_response: Some(u32::MIN.into()),
         last_attempt: None,
@@ -41,6 +42,7 @@ fn sanitize_extremes() {
     let max_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
         services: Default::default(),
+        connection_info: Default::default(),
         untrusted_last_seen: Some(u32::MAX.into()),
         last_response: Some(u32::MAX.into()),
         last_attempt: None,
@@ -171,7 +173,7 @@ fn recently_responded_peer_is_gossipable() {
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     assert!(peer.is_active_for_gossip(chrono_now));
@@ -192,7 +194,7 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Tweak the peer's last response time to be within the limits of the reachable duration
@@ -223,7 +225,7 @@ fn responded_long_ago_peer_is_not_gossipable() {
 
     // Create a peer that has responded
     let mut peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Tweak the peer's last response time to be outside the limits of the reachable duration
@@ -254,7 +256,7 @@ fn long_delayed_change_is_not_applied() {
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Create an earlier change to Failed that has been delayed a long time.
@@ -270,7 +272,7 @@ fn long_delayed_change_is_not_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_errored(address, None);
-    let outcome = change.apply_to_meta_addr(peer, instant_early, chrono_early);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_early, chrono_early);
 
     assert_eq!(
         outcome, None,
@@ -298,7 +300,7 @@ fn later_revert_change_is_applied() {
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Create an earlier change to AttemptPending that happens a long time later.
@@ -314,7 +316,7 @@ fn later_revert_change_is_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer, instant_late, chrono_late);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_late, chrono_late);
 
     assert!(
         outcome.is_some(),
@@ -341,7 +343,7 @@ fn concurrent_state_revert_change_is_not_applied() {
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Create a concurrent change to AttemptPending.
@@ -356,7 +358,7 @@ fn concurrent_state_revert_change_is_not_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer, instant_early, chrono_early);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_early, chrono_early);
 
     assert_eq!(
         outcome, None,
@@ -374,7 +376,7 @@ fn concurrent_state_revert_change_is_not_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer, instant_late, chrono_late);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_late, chrono_late);
 
     assert_eq!(
         outcome, None,
@@ -401,7 +403,7 @@ fn concurrent_state_progress_change_is_applied() {
 
     // Create a peer that has responded
     let peer = MetaAddr::new_responded(address)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .apply_to_meta_addr(Some(&peer_seed), instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
     // Create a concurrent change to Failed.
@@ -416,7 +418,7 @@ fn concurrent_state_progress_change_is_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_errored(address, None);
-    let outcome = change.apply_to_meta_addr(peer, instant_early, chrono_early);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_early, chrono_early);
 
     assert!(
         outcome.is_some(),
@@ -434,7 +436,7 @@ fn concurrent_state_progress_change_is_applied() {
             .expect("constant is valid");
 
     let change = MetaAddr::new_errored(address, None);
-    let outcome = change.apply_to_meta_addr(peer, instant_late, chrono_late);
+    let outcome = change.apply_to_meta_addr(Some(&peer), instant_late, chrono_late);
 
     assert!(
         outcome.is_some(),

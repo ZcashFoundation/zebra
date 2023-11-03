@@ -278,7 +278,7 @@ impl Codec {
 
                 // Regardless of the way we received the address,
                 // Zebra always sends `addr` messages
-                let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
+                let v1_addrs: Vec<AddrV1> = addrs.iter().map(AddrV1::from).collect();
                 v1_addrs.zcash_serialize(&mut writer)?
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }

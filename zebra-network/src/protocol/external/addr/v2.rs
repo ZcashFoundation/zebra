@@ -126,9 +126,16 @@ pub(in super::super) enum AddrV2 {
 // https://zips.z.cash/zip-0155#deployment
 //
 // And Zebra doesn't use different codecs for different peer versions.
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl From<MetaAddr> for AddrV2 {
     fn from(meta_addr: MetaAddr) -> Self {
+        AddrV2::from(&meta_addr)
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl From<&MetaAddr> for AddrV2 {
+    fn from(meta_addr: &MetaAddr) -> Self {
         let untrusted_services = meta_addr.services.expect(
             "unexpected MetaAddr with missing peer services: \
              MetaAddrs should be sanitized before serialization",

@@ -51,7 +51,7 @@ fn address_book_peer_order() {
     );
 
     // Regardless of the order of insertion, the most recent address should be chosen first
-    let addrs = vec![meta_addr1, meta_addr2];
+    let addrs = vec![meta_addr1.clone(), meta_addr2.clone()];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
@@ -64,11 +64,11 @@ fn address_book_peer_order() {
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
             .next(),
-        Some(meta_addr2),
+        Some(meta_addr2.clone()),
     );
 
     // Reverse the order, check that we get the same result
-    let addrs = vec![meta_addr2, meta_addr1];
+    let addrs = vec![meta_addr2.clone(), meta_addr1.clone()];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
@@ -81,14 +81,14 @@ fn address_book_peer_order() {
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
             .next(),
-        Some(meta_addr2),
+        Some(meta_addr2.clone()),
     );
 
     // Now check that the order depends on the time, not the address
     meta_addr1.addr = addr2;
     meta_addr2.addr = addr1;
 
-    let addrs = vec![meta_addr1, meta_addr2];
+    let addrs = vec![meta_addr1.clone(), meta_addr2.clone()];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,
@@ -101,11 +101,11 @@ fn address_book_peer_order() {
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
             .next(),
-        Some(meta_addr2),
+        Some(meta_addr2.clone()),
     );
 
     // Reverse the order, check that we get the same result
-    let addrs = vec![meta_addr2, meta_addr1];
+    let addrs = vec![meta_addr2.clone(), meta_addr1.clone()];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
         Mainnet,

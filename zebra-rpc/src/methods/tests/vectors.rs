@@ -981,7 +981,7 @@ async fn rpc_getpeerinfo() {
         zebra_chain::serialization::DateTime32::now(),
     );
 
-    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
+    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address.clone()]);
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
