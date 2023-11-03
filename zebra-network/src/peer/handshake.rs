@@ -581,7 +581,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<Arc<ConnectionInfo>, HandshakeError>
+) -> Result<Arc<ConnectionInfo>, (HandshakeError, Option<Arc<ConnectionInfo>>)>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -603,7 +603,7 @@ where
         // and the nonce set is limited to a few hundred entries.
         let is_unique_nonce = locked_nonces.insert(local_nonce);
         if !is_unique_nonce {
-            return Err(HandshakeError::LocalDuplicateNonce);
+            return Err((HandshakeError::LocalDuplicateNonce, None));
         }
 
         // # Security
@@ -680,12 +680,16 @@ where
     .into();
 
     debug!(?our_version, "sending initial version message");
-    peer_conn.send(our_version).await?;
+    peer_conn
+        .send(our_version)
+        .await
+        .map_err(|error| (error.into(), None))?;
 
     let mut remote_msg = peer_conn
         .next()
         .await
-        .ok_or(HandshakeError::ConnectionClosed)??;
+        .ok_or((HandshakeError::ConnectionClosed, None))?
+        .map_err(|error| (error.into(), None))?;
 
     // Wait for next message if the one we got is not Version
     let remote: VersionMessage = loop {
@@ -698,11 +702,19 @@ where
                 remote_msg = peer_conn
                     .next()
                     .await
-                    .ok_or(HandshakeError::ConnectionClosed)??;
+                    .ok_or((HandshakeError::ConnectionClosed, None))?
+                    .map_err(|error| (error.into(), None))?;
                 debug!(?remote_msg, "ignoring non-version message from remote peer");
             }
         }
     };
+
+    // Use Arc to limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+    let mut connection_info = Arc::new(ConnectionInfo {
+        connected_addr: *connected_addr,
+        remote: remote.clone(),
+        negotiated_version: None,
+    });
 
     let remote_address_services = remote.address_from.untrusted_services();
     if remote_address_services != remote.services {
@@ -729,7 +741,10 @@ where
     let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
         info!(?connected_addr, "rejecting self-connection attempt");
-        Err(HandshakeError::RemoteNonceReuse)?;
+        Err((
+            HandshakeError::RemoteNonceReuse,
+            Some(connection_info.clone()),
+        ))?;
     }
 
     // # Security
@@ -766,10 +781,14 @@ where
         );
 
         // Disconnect if peer is using an obsolete version.
-        return Err(HandshakeError::ObsoleteVersion(remote.version));
+        return Err((
+            HandshakeError::ObsoleteVersion(remote.version),
+            Some(connection_info.clone()),
+        ));
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+    Arc::make_mut(&mut connection_info).negotiated_version = Some(negotiated_version);
 
     debug!(
         remote_ip = ?their_addr,
@@ -798,12 +817,19 @@ where
         "remote_ip" => their_addr.to_string(),
     );
 
-    peer_conn.send(Message::Verack).await?;
+    peer_conn
+        .send(Message::Verack)
+        .await
+        .map_err(|error| (error.into(), Some(connection_info.clone())))?;
 
     let mut remote_msg = peer_conn
         .next()
         .await
-        .ok_or(HandshakeError::ConnectionClosed)??;
+        .ok_or((
+            HandshakeError::ConnectionClosed,
+            Some(connection_info.clone()),
+        ))?
+        .map_err(|error| (error.into(), Some(connection_info.clone())))?;
 
     // Wait for next message if the one we got is not Verack
     loop {
@@ -816,18 +842,15 @@ where
                 remote_msg = peer_conn
                     .next()
                     .await
-                    .ok_or(HandshakeError::ConnectionClosed)??;
+                    .ok_or((
+                        HandshakeError::ConnectionClosed,
+                        Some(connection_info.clone()),
+                    ))?
+                    .map_err(|error| (error.into(), Some(connection_info.clone())))?;
                 debug!(?remote_msg, "ignoring non-verack message from remote peer");
             }
         }
     }
-
-    // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
-    let connection_info = Arc::new(ConnectionInfo {
-        connected_addr: *connected_addr,
-        remote,
-        negotiated_version: Some(negotiated_version),
-    });
 
     Ok(connection_info)
 }
@@ -911,7 +934,7 @@ where
                     .finish(),
             );
 
-            let connection_info = negotiate_version(
+            let connection_result = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -921,14 +944,39 @@ where
                 relay,
                 minimum_peer_version,
             )
-            .await?;
+            .await;
 
-            let remote_canonical_addr = connection_info.remote.address_from.addr();
-            let negotiated_version = connection_info
-                .negotiated_version
-                .expect("successful connections have negotiated versions");
+            let connection_info = match connection_result {
+                Ok(connection_info) => connection_info,
+                Err((error, connection_info)) => {
+                    // The handshake failed: update the peer status from AttemptPending to Failed,
+                    // and record failed connection info.
+                    if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                        // The outbound connector also sends an error update to the address book,
+                        // for handshake errors, timeouts, and task cancellations. This duplicate
+                        // update for handshake errors helps with debugging by providing connection
+                        // info for failed connections.
+                        //
+                        // The collector doesn't depend on network activity, so this await shouldn't
+                        // hang.
+                        let _ = address_book_updater
+                            .send(MetaAddr::new_errored(book_addr, connection_info))
+                            .await;
+                    }
 
-            // If we've learned potential peer addresses from an inbound
+                    return Err(error);
+                }
+            };
+
+            // The handshake succeeded: update the peer status from AttemptPending to Responded,
+            // and send initial connection info.
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                let _ = address_book_updater
+                    .send(MetaAddr::new_connected(book_addr, connection_info.clone()))
+                    .await;
+            }
+
+            // If we've learned potential peer addresses from a successful inbound or outbound
             // connection or handshake, add those addresses to our address book.
             //
             // # Security
@@ -941,21 +989,11 @@ where
             // New alternate peer address and peer responded updates are rate-limited because:
             // - opening connections is rate-limited
             // - we only send these messages once per handshake
+            let remote_canonical_addr = connection_info.remote.address_from.addr();
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
                 let alt_addr = MetaAddr::new_alternate(alt_addr, connection_info.clone());
-                // awaiting a local task won't hang
                 let _ = address_book_updater.send(alt_addr).await;
-            }
-
-            // The handshake succeeded: update the peer status from AttemptPending to Responded,
-            // and send initial connection info.
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                // the collector doesn't depend on network activity,
-                // so this await should not hang
-                let _ = address_book_updater
-                    .send(MetaAddr::new_connected(book_addr, connection_info.clone()))
-                    .await;
             }
 
             // Reconfigure the codec to use the negotiated version.
@@ -964,6 +1002,10 @@ where
             // Since we don't know that here, another way might be to release the tcp
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
             let bare_codec = peer_conn.codec_mut();
+            let negotiated_version = connection_info
+                .negotiated_version
+                .expect("successful connections have negotiated versions");
+
             bare_codec.reconfigure_version(negotiated_version);
 
             debug!("constructing client, spawning server");
