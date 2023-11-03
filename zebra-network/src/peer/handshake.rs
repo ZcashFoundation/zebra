@@ -562,7 +562,8 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 ///
-/// Returns the [`VersionMessage`] sent by the remote peer.
+/// Returns the [`VersionMessage`] sent by the remote peer,
+/// and the [`Version`] negotiated with the remote peer.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -573,7 +574,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<VersionMessage, HandshakeError>
+) -> Result<(VersionMessage, Version), HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -729,6 +730,7 @@ where
     // Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
+
     if remote.version < min_version {
         info!(
             remote_ip = ?their_addr,
@@ -757,37 +759,37 @@ where
         );
 
         // Disconnect if peer is using an obsolete version.
-        Err(HandshakeError::ObsoleteVersion(remote.version))?;
-    } else {
-        let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
-
-        debug!(
-            remote_ip = ?their_addr,
-            ?remote.version,
-            ?negotiated_version,
-            ?min_version,
-            ?remote.user_agent,
-            "negotiated network protocol version with peer",
-        );
-
-        // the value is the number of connected handshakes, by peer IP and protocol version
-        metrics::counter!(
-            "zcash.net.peers.connected",
-            1,
-            "remote_ip" => their_addr.to_string(),
-            "remote_version" => remote.version.to_string(),
-            "negotiated_version" => negotiated_version.to_string(),
-            "min_version" => min_version.to_string(),
-            "user_agent" => remote.user_agent.clone(),
-        );
-
-        // the value is the remote version of the most recent connected handshake from each peer
-        metrics::gauge!(
-            "zcash.net.peers.version.connected",
-            remote.version.0 as f64,
-            "remote_ip" => their_addr.to_string(),
-        );
+        return Err(HandshakeError::ObsoleteVersion(remote.version));
     }
+
+    let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+
+    debug!(
+        remote_ip = ?their_addr,
+        ?remote.version,
+        ?negotiated_version,
+        ?min_version,
+        ?remote.user_agent,
+        "negotiated network protocol version with peer",
+    );
+
+    // the value is the number of connected handshakes, by peer IP and protocol version
+    metrics::counter!(
+        "zcash.net.peers.connected",
+        1,
+        "remote_ip" => their_addr.to_string(),
+        "remote_version" => remote.version.to_string(),
+        "negotiated_version" => negotiated_version.to_string(),
+        "min_version" => min_version.to_string(),
+        "user_agent" => remote.user_agent.clone(),
+    );
+
+    // the value is the remote version of the most recent connected handshake from each peer
+    metrics::gauge!(
+        "zcash.net.peers.version.connected",
+        remote.version.0 as f64,
+        "remote_ip" => their_addr.to_string(),
+    );
 
     peer_conn.send(Message::Verack).await?;
 
@@ -813,7 +815,7 @@ where
         }
     }
 
-    Ok(remote)
+    Ok((remote, negotiated_version))
 }
 
 /// A handshake request.
@@ -895,7 +897,7 @@ where
                     .finish(),
             );
 
-            let remote = negotiate_version(
+            let (remote, negotiated_version) = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -938,10 +940,6 @@ where
                     .send(MetaAddr::new_responded(book_addr, &remote_services))
                     .await;
             }
-
-            // Set the connection's version to the minimum of the received version or our own.
-            let negotiated_version =
-                std::cmp::min(remote.version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
             // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
             let connection_info = Arc::new(ConnectionInfo {
