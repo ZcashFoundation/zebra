@@ -21,8 +21,7 @@ use crate::{
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
-    protocol::types::PeerServices,
-    AddressBook, BoxError, Request, Response,
+    AddressBook, BoxError, ConnectionInfo, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};
@@ -100,14 +99,16 @@ proptest! {
     #[test]
     fn new_outbound_peer_connections_are_rate_limited(
         peers in hash_map(MetaAddrChange::ready_outbound_strategy_ip(), MetaAddrChange::ready_outbound_strategy_port(), TEST_ADDRESSES),
+        connections in vec(any::<Arc<ConnectionInfo>>(), TEST_ADDRESSES),
+
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
-        let peers = peers.into_iter().map(|(ip, port)| {
-            MetaAddr::new_alternate(canonical_peer_addr(SocketAddr::new(ip, port)), &PeerServices::NODE_NETWORK)
+        let peers = peers.into_iter().zip(connections.into_iter()).map(|((ip, port), connection_info)| {
+            MetaAddr::new_alternate(canonical_peer_addr(SocketAddr::new(ip, port)), connection_info)
         }).collect::<Vec<_>>();
 
         let peer_service = tower::service_fn(|_| async {

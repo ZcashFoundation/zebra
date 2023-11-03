@@ -40,6 +40,6 @@ fn connection_info_types_are_public() {
     let _connection_info = Arc::new(ConnectionInfo {
         connected_addr,
         remote,
-        negotiated_version,
+        negotiated_version: Some(negotiated_version),
     });
 }

@@ -128,9 +128,7 @@ fn address_book_peer_order() {
 fn reconnection_peers_skips_recently_updated_ip() {
     // tests that reconnection_peers() skips addresses where there's a connection at that IP with a recent:
     // - `last_response`
-    test_reconnection_peers_skips_recently_updated_ip(true, |addr| {
-        MetaAddr::new_responded(addr, &PeerServices::NODE_NETWORK)
-    });
+    test_reconnection_peers_skips_recently_updated_ip(true, MetaAddr::new_responded);
 
     // tests that reconnection_peers() *does not* skip addresses where there's a connection at that IP with a recent:
     // - `last_attempt`
@@ -150,7 +148,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
     let addr1 = "127.0.0.1:1".parse().unwrap();
     let addr2 = "127.0.0.1:2".parse().unwrap();
 
-    let meta_addr1 = make_meta_addr_change(addr1).into_new_meta_addr(
+    let meta_addr1 = make_meta_addr_change(addr1).to_new_meta_addr(
         Instant::now(),
         Utc::now().try_into().expect("will succeed until 2038"),
     );

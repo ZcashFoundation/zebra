@@ -225,7 +225,7 @@ proptest! {
             );
 
             let expected_result = new_addr;
-            let book_result = address_book.update(change);
+            let book_result = address_book.update(change.clone());
             let book_contents: Vec<MetaAddr> = address_book.peers().collect();
 
             // Ignore the same addresses that the address book ignores

@@ -9,6 +9,7 @@ where
     C: ChainTip + Clone + Send + 'static,
 {
     /// Returns a count of how many connection nonces are stored in this [`Handshake`]
+    #[allow(dead_code)]
     pub async fn nonce_count(&self) -> usize {
         self.nonces.lock().await.len()
     }

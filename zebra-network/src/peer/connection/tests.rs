@@ -73,7 +73,7 @@ fn new_test_connection<A>() -> (
     let connection_info = ConnectionInfo {
         connected_addr: ConnectedAddr::Isolated,
         remote,
-        negotiated_version: fake_version,
+        negotiated_version: Some(fake_version),
     };
 
     let connection = Connection::new(
