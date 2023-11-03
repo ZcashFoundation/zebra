@@ -1097,7 +1097,8 @@ async fn report_failed(
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     addr: MetaAddr,
 ) {
-    let addr = MetaAddr::new_errored(addr.addr, addr.services);
+    // The connection info is the same as what's already in the address book.
+    let addr = MetaAddr::new_errored(addr.addr, None);
 
     // Ignore send errors on Zebra shutdown.
     let _ = address_book_updater.send(addr).await;

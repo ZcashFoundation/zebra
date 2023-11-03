@@ -391,8 +391,7 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::UpdateFailed`] for a peer that has just had
-    /// an error.
+    /// Returns a [`MetaAddrChange::UpdateFailed`] for a peer that has just had an error.
     pub fn new_errored(
         addr: PeerSocketAddr,
         services: impl Into<Option<PeerServices>>,
@@ -404,13 +403,10 @@ impl MetaAddr {
     }
 
     /// Create a new `MetaAddr` for a peer that has just shut down.
-    pub fn new_shutdown(
-        addr: PeerSocketAddr,
-        services: impl Into<Option<PeerServices>>,
-    ) -> MetaAddrChange {
+    pub fn new_shutdown(addr: PeerSocketAddr) -> MetaAddrChange {
         // TODO: if the peer shut down in the Responded state, preserve that
         // state. All other states should be treated as (timeout) errors.
-        MetaAddr::new_errored(addr, services.into())
+        MetaAddr::new_errored(addr, None)
     }
 
     /// Return the address for this `MetaAddr`.

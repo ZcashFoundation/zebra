@@ -1075,7 +1075,6 @@ where
             let heartbeat_task = tokio::spawn(
                 send_periodic_heartbeats_with_shutdown_handle(
                     connected_addr,
-                    remote_services,
                     shutdown_rx,
                     server_tx.clone(),
                     address_book_updater.clone(),
@@ -1213,7 +1212,6 @@ pub(crate) async fn register_inventory_status(
 /// Returning from this function terminates the connection's heartbeat task.
 async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
@@ -1222,7 +1220,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 
     let heartbeat_run_loop = send_periodic_heartbeats_run_loop(
         connected_addr,
-        remote_services,
         server_tx,
         heartbeat_ts_collector.clone(),
     );
@@ -1246,7 +1243,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientCancelledHeartbeatTask,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1256,7 +1252,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientDropped,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1275,7 +1270,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 /// See `send_periodic_heartbeats_with_shutdown_handle` for details.
 async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
@@ -1294,13 +1288,7 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(
-            heartbeat,
-            &heartbeat_ts_collector,
-            &connected_addr,
-            &remote_services,
-        )
-        .await?;
+        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
         // # Security
         //
@@ -1312,7 +1300,7 @@ async fn send_periodic_heartbeats_run_loop(
             // the collector doesn't depend on network activity,
             // so this await should not hang
             let _ = heartbeat_ts_collector
-                .send(MetaAddr::new_responded(book_addr, &remote_services))
+                .send(MetaAddr::new_responded(book_addr))
                 .await;
         }
     }
@@ -1375,29 +1363,16 @@ async fn heartbeat_timeout<F, T>(
     fut: F,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, BoxError>
 where
     F: Future<Output = Result<T, BoxError>>,
 {
     let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
-            handle_heartbeat_error(
-                inner_result,
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
         }
         Err(elapsed) => {
-            handle_heartbeat_error(
-                Err(elapsed),
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(Err(elapsed), address_book_updater, connected_addr).await?
         }
     };
 
@@ -1409,7 +1384,6 @@ async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, E>
 where
     E: std::fmt::Debug,
@@ -1427,7 +1401,7 @@ where
             // - after the first error or shutdown, the peer is disconnected
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = address_book_updater
-                    .send(MetaAddr::new_errored(book_addr, *remote_services))
+                    .send(MetaAddr::new_errored(book_addr, None))
                     .await;
             }
             Err(err)
@@ -1440,13 +1414,12 @@ async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(book_addr, *remote_services))
+            .send(MetaAddr::new_shutdown(book_addr))
             .await;
     }
 
