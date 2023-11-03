@@ -1,12 +1,12 @@
 //! Randomised test data generation for MetaAddr.
 
-use std::{net::IpAddr, time::Instant};
+use std::{net::IpAddr, sync::Arc, time::Instant};
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
-use crate::protocol::external::arbitrary::canonical_peer_addr_strategy;
+use crate::{protocol::external::arbitrary::canonical_peer_addr_strategy, ConnectionInfo};
 
 use super::{MetaAddr, MetaAddrChange, PeerServices, PeerSocketAddr};
 
@@ -53,15 +53,15 @@ impl MetaAddr {
     pub fn alternate_strategy() -> BoxedStrategy<Self> {
         (
             canonical_peer_addr_strategy(),
-            any::<PeerServices>(),
+            any::<Arc<ConnectionInfo>>(),
             any::<Instant>(),
             any::<DateTime32>(),
         )
             .prop_map(
-                |(socket_addr, untrusted_services, instant_now, local_now)| {
+                |(socket_addr, untrusted_connection_info, instant_now, local_now)| {
                     // instant_now is not actually used for this variant,
                     // so we could just provide a default value
-                    MetaAddr::new_alternate(socket_addr, &untrusted_services)
+                    MetaAddr::new_alternate(socket_addr, untrusted_connection_info)
                         .to_new_meta_addr(instant_now, local_now)
                 },
             )
@@ -122,15 +122,17 @@ impl MetaAddrChange {
             canonical_peer_addr_strategy(),
             any::<Instant>(),
             any::<DateTime32>(),
+            any::<ConnectionInfo>(),
         )
             .prop_filter_map(
                 "failed MetaAddr::is_valid_for_outbound",
-                |(addr, instant_now, local_now)| {
+                |(addr, instant_now, local_now, mut untrusted_connection_info)| {
                     // Alternate nodes use the current time, so they're always ready
                     //
                     // TODO: create a "Zebra supported services" constant
+                    untrusted_connection_info.remote.services = PeerServices::NODE_NETWORK;
+                    let change = MetaAddr::new_alternate(addr, Arc::new(untrusted_connection_info));
 
-                    let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
                     if change
                         .to_new_meta_addr(instant_now, local_now)
                         .last_known_info_is_valid_for_outbound(Mainnet)

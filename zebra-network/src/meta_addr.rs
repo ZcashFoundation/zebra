@@ -260,7 +260,7 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
-        untrusted_services: PeerServices,
+        untrusted_connection_info: Arc<ConnectionInfo>,
     },
 
     /// Creates new local listener `MetaAddr`.
@@ -407,11 +407,11 @@ impl MetaAddr {
     /// received via a `Version` message.
     pub fn new_alternate(
         addr: PeerSocketAddr,
-        untrusted_services: &PeerServices,
+        untrusted_connection_info: Arc<ConnectionInfo>,
     ) -> MetaAddrChange {
         NewAlternate {
             addr: canonical_peer_addr(*addr),
-            untrusted_services: *untrusted_services,
+            untrusted_connection_info,
         }
     }
 
@@ -762,10 +762,11 @@ impl MetaAddrChange {
             // TODO: split untrusted and direct services (#2324)
             NewGossiped {
                 untrusted_services, ..
-            }
-            | NewAlternate {
-                untrusted_services, ..
             } => Some(*untrusted_services),
+            NewAlternate {
+                untrusted_connection_info,
+                ..
+            } => Some(untrusted_connection_info.remote.services),
             // TODO: create a "services implemented by Zebra" constant (#2324)
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,

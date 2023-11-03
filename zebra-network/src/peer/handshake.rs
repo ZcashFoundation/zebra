@@ -943,7 +943,7 @@ where
             // - we only send these messages once per handshake
             let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
             for alt_addr in alternate_addrs {
-                let alt_addr = MetaAddr::new_alternate(alt_addr, &remote_services);
+                let alt_addr = MetaAddr::new_alternate(alt_addr, connection_info.clone());
                 // awaiting a local task won't hang
                 let _ = address_book_updater.send(alt_addr).await;
             }
