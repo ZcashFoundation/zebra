@@ -269,7 +269,7 @@ fn long_delayed_change_is_not_applied() {
         - chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
             .expect("constant is valid");
 
-    let change = MetaAddr::new_errored(address, PeerServices::NODE_NETWORK);
+    let change = MetaAddr::new_errored(address, None);
     let outcome = change.apply_to_meta_addr(peer, instant_early, chrono_early);
 
     assert_eq!(

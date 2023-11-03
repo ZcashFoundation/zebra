@@ -135,7 +135,7 @@ fn reconnection_peers_skips_recently_updated_ip() {
     test_reconnection_peers_skips_recently_updated_ip(false, MetaAddr::new_reconnect);
     // - `last_failure`
     test_reconnection_peers_skips_recently_updated_ip(false, |addr| {
-        MetaAddr::new_errored(addr, PeerServices::NODE_NETWORK)
+        MetaAddr::new_errored(addr, None)
     });
 }
 

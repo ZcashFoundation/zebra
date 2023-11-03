@@ -308,7 +308,7 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
-        services: Option<PeerServices>,
+        connection_info: Option<Arc<ConnectionInfo>>,
     },
 }
 
@@ -425,11 +425,11 @@ impl MetaAddr {
     /// Returns a [`MetaAddrChange::UpdateFailed`] for a peer that has just had an error.
     pub fn new_errored(
         addr: PeerSocketAddr,
-        services: impl Into<Option<PeerServices>>,
+        connection_info: impl Into<Option<Arc<ConnectionInfo>>>,
     ) -> MetaAddrChange {
         UpdateFailed {
             addr: canonical_peer_addr(*addr),
-            services: services.into(),
+            connection_info: connection_info.into(),
         }
     }
 
@@ -770,7 +770,9 @@ impl MetaAddrChange {
                 connection_info, ..
             } => Some(connection_info.remote.services),
             UpdateResponded { .. } => None,
-            UpdateFailed { services, .. } => *services,
+            UpdateFailed {
+                connection_info, ..
+            } => connection_info.as_ref().map(|info| info.remote.services),
         }
     }
 
