@@ -128,7 +128,7 @@ pub async fn test_responses<State, ReadState>(
         )
         .into(),
     )
-    .into_new_meta_addr(Instant::now(), DateTime32::now())]);
+    .to_new_meta_addr(Instant::now(), DateTime32::now())]);
 
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(

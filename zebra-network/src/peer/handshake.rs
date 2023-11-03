@@ -48,6 +48,9 @@ use crate::{
     BoxError, Config, PeerSocketAddr, VersionMessage,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -122,6 +125,7 @@ where
 
 /// The metadata for a peer connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct ConnectionInfo {
     /// The connected peer address, if known.
     /// This address might not be valid for outbound connections.
@@ -145,6 +149,7 @@ pub struct ConnectionInfo {
 /// Typically, we can rely on outbound addresses, but inbound addresses don't
 /// give us enough information to reconnect to that peer.
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum ConnectedAddr {
     /// The address we used to make a direct outbound connection.
     ///
@@ -932,22 +937,22 @@ where
                 let _ = address_book_updater.send(alt_addr).await;
             }
 
-            // The handshake succeeded: update the peer status from AttemptPending to Responded,
-            // and send initial connection info.
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                // the collector doesn't depend on network activity,
-                // so this await should not hang
-                let _ = address_book_updater
-                    .send(MetaAddr::new_connected(book_addr, &remote_services))
-                    .await;
-            }
-
             // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
             let connection_info = Arc::new(ConnectionInfo {
                 connected_addr,
                 remote,
                 negotiated_version,
             });
+
+            // The handshake succeeded: update the peer status from AttemptPending to Responded,
+            // and send initial connection info.
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // the collector doesn't depend on network activity,
+                // so this await should not hang
+                let _ = address_book_updater
+                    .send(MetaAddr::new_connected(book_addr, connection_info.clone()))
+                    .await;
+            }
 
             // Reconfigure the codec to use the negotiated version.
             //

@@ -976,7 +976,7 @@ async fn rpc_getpeerinfo() {
         )
         .into(),
     )
-    .into_new_meta_addr(
+    .to_new_meta_addr(
         std::time::Instant::now(),
         zebra_chain::serialization::DateTime32::now(),
     );

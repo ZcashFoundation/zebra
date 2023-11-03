@@ -258,7 +258,7 @@ impl AddressBook {
         let now: DateTime32 = now.try_into().expect("will succeed until 2038");
 
         MetaAddr::new_local_listener_change(self.local_listener)
-            .local_listener_into_new_meta_addr(now)
+            .local_listener_to_new_meta_addr(now)
     }
 
     /// Get the local listener [`SocketAddr`].

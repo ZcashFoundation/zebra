@@ -2,6 +2,7 @@
 
 use std::{
     cmp::{max, Ord, Ordering},
+    sync::Arc,
     time::Instant,
 };
 
@@ -13,6 +14,7 @@ use crate::{
     constants,
     peer::{address_is_valid_for_outbound_connections, PeerPreference},
     protocol::{external::canonical_peer_addr, types::PeerServices},
+    ConnectionInfo,
 };
 
 use MetaAddrChange::*;
@@ -223,7 +225,7 @@ pub struct MetaAddr {
 }
 
 /// A change to an existing `MetaAddr`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MetaAddrChange {
     // TODO:
@@ -287,7 +289,7 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
-        services: PeerServices,
+        connection_info: Arc<ConnectionInfo>,
     },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
@@ -360,16 +362,19 @@ impl MetaAddr {
     /// # Security
     ///
     /// This address must be the remote address from an outbound connection,
-    /// and the services must be the services from that peer's handshake.
+    /// and the [`ConnectionInfo`] must contain the services from that peer's handshake.
     ///
     /// Otherwise:
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_connected(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_connected(
+        addr: PeerSocketAddr,
+        connection_info: Arc<ConnectionInfo>,
+    ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
-            services: *services,
+            connection_info,
         }
     }
 
@@ -764,7 +769,9 @@ impl MetaAddrChange {
             // TODO: create a "services implemented by Zebra" constant (#2324)
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
-            UpdateConnected { services, .. } => Some(*services),
+            UpdateConnected {
+                connection_info, ..
+            } => Some(connection_info.remote.services),
             UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
         }
@@ -871,7 +878,7 @@ impl MetaAddrChange {
     }
 
     /// Returns the corresponding `MetaAddr` for this change.
-    pub fn into_new_meta_addr(self, instant_now: Instant, local_now: DateTime32) -> MetaAddr {
+    pub fn to_new_meta_addr(&self, instant_now: Instant, local_now: DateTime32) -> MetaAddr {
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
@@ -891,7 +898,7 @@ impl MetaAddrChange {
     /// # Panics
     ///
     /// If this change is not a [`MetaAddrChange::NewLocal`].
-    pub fn local_listener_into_new_meta_addr(self, local_now: DateTime32) -> MetaAddr {
+    pub fn local_listener_to_new_meta_addr(&self, local_now: DateTime32) -> MetaAddr {
         assert!(matches!(self, MetaAddrChange::NewLocal { .. }));
 
         MetaAddr {
@@ -920,7 +927,7 @@ impl MetaAddrChange {
 
         let Some(previous) = previous.into() else {
             // no previous: create a new entry
-            return Some(self.into_new_meta_addr(instant_now, local_now));
+            return Some(self.to_new_meta_addr(instant_now, local_now));
         };
 
         assert_eq!(previous.addr, self.addr(), "unexpected addr mismatch");

@@ -62,7 +62,7 @@ impl MetaAddr {
                     // instant_now is not actually used for this variant,
                     // so we could just provide a default value
                     MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                        .into_new_meta_addr(instant_now, local_now)
+                        .to_new_meta_addr(instant_now, local_now)
                 },
             )
             .boxed()
@@ -132,7 +132,7 @@ impl MetaAddrChange {
 
                     let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
                     if change
-                        .into_new_meta_addr(instant_now, local_now)
+                        .to_new_meta_addr(instant_now, local_now)
                         .last_known_info_is_valid_for_outbound(Mainnet)
                     {
                         Some(addr.port())

@@ -1099,8 +1099,9 @@ async fn report_failed(address_book: Arc<std::sync::Mutex<AddressBook>>, addr: M
     //
     // Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
     let span = Span::current();
+    let addr2 = addr.clone();
     let updated_addr = tokio::task::spawn_blocking(move || {
-        span.in_scope(|| address_book.lock().unwrap().update(addr))
+        span.in_scope(|| address_book.lock().unwrap().update(addr2))
     })
     .wait_for_panics()
     .await;
