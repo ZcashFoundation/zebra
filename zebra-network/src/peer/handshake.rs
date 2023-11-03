@@ -141,7 +141,9 @@ pub struct ConnectionInfo {
     ///
     /// Derived from `remote.version` and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
-    pub negotiated_version: Version,
+    ///
+    /// If this is `None`, then the remote version was rejected by this Zebra instance.
+    pub negotiated_version: Option<Version>,
 }
 
 /// The peer address that we are handshaking with.
@@ -567,8 +569,8 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 ///
-/// Returns the [`VersionMessage`] sent by the remote peer,
-/// and the [`Version`] negotiated with the remote peer.
+/// Returns the [`ConnectionInfo`] of the remote peer, with the negotiated version.
+/// This version is always present for successful connections.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -579,7 +581,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<(VersionMessage, Version), HandshakeError>
+) -> Result<Arc<ConnectionInfo>, HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -820,7 +822,14 @@ where
         }
     }
 
-    Ok((remote, negotiated_version))
+    // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+    let connection_info = Arc::new(ConnectionInfo {
+        connected_addr: *connected_addr,
+        remote,
+        negotiated_version: Some(negotiated_version),
+    });
+
+    Ok(connection_info)
 }
 
 /// A handshake request.
@@ -902,7 +911,7 @@ where
                     .finish(),
             );
 
-            let (remote, negotiated_version) = negotiate_version(
+            let connection_info = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -914,8 +923,10 @@ where
             )
             .await?;
 
-            let remote_canonical_addr = remote.address_from.addr();
-            let remote_services = remote.services;
+            let remote_canonical_addr = connection_info.remote.address_from.addr();
+            let negotiated_version = connection_info
+                .negotiated_version
+                .expect("successful connections have negotiated versions");
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -936,13 +947,6 @@ where
                 // awaiting a local task won't hang
                 let _ = address_book_updater.send(alt_addr).await;
             }
-
-            // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
-            let connection_info = Arc::new(ConnectionInfo {
-                connected_addr,
-                remote,
-                negotiated_version,
-            });
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
             // and send initial connection info.
@@ -1043,8 +1047,10 @@ where
                                 // - the number of connections is limited
                                 // - after the first error, the peer is disconnected
                                 if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                                    // The connection info was sent to the address book when we
+                                    // successfully opened the connection, so it isn't needed here.
                                     let _ = inbound_ts_collector
-                                        .send(MetaAddr::new_errored(book_addr, remote_services))
+                                        .send(MetaAddr::new_errored(book_addr, None))
                                         .await;
                                 }
                             }
@@ -1080,7 +1086,6 @@ where
             let heartbeat_task = tokio::spawn(
                 send_periodic_heartbeats_with_shutdown_handle(
                     connected_addr,
-                    remote_services,
                     shutdown_rx,
                     server_tx.clone(),
                     address_book_updater.clone(),
@@ -1218,7 +1223,6 @@ pub(crate) async fn register_inventory_status(
 /// Returning from this function terminates the connection's heartbeat task.
 async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
@@ -1227,7 +1231,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 
     let heartbeat_run_loop = send_periodic_heartbeats_run_loop(
         connected_addr,
-        remote_services,
         server_tx,
         heartbeat_ts_collector.clone(),
     );
@@ -1251,7 +1254,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientCancelledHeartbeatTask,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1261,7 +1263,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientDropped,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1280,7 +1281,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 /// See `send_periodic_heartbeats_with_shutdown_handle` for details.
 async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
@@ -1299,13 +1299,7 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(
-            heartbeat,
-            &heartbeat_ts_collector,
-            &connected_addr,
-            &remote_services,
-        )
-        .await?;
+        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
         // # Security
         //
@@ -1380,29 +1374,16 @@ async fn heartbeat_timeout<F, T>(
     fut: F,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, BoxError>
 where
     F: Future<Output = Result<T, BoxError>>,
 {
     let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
-            handle_heartbeat_error(
-                inner_result,
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
         }
         Err(elapsed) => {
-            handle_heartbeat_error(
-                Err(elapsed),
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(Err(elapsed), address_book_updater, connected_addr).await?
         }
     };
 
@@ -1414,7 +1395,6 @@ async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, E>
 where
     E: std::fmt::Debug,
@@ -1431,8 +1411,10 @@ where
             // - the number of connections is limited
             // - after the first error or shutdown, the peer is disconnected
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // The connection info was sent to the address book when we successfully opened the
+                // connection, so it isn't needed here.
                 let _ = address_book_updater
-                    .send(MetaAddr::new_errored(book_addr, *remote_services))
+                    .send(MetaAddr::new_errored(book_addr, None))
                     .await;
             }
             Err(err)
@@ -1445,13 +1427,14 @@ async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
+        // The connection info was sent to the address book when we successfully opened the
+        // connection, so it isn't needed here.
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(book_addr, *remote_services))
+            .send(MetaAddr::new_shutdown(book_addr, None))
             .await;
     }
 
