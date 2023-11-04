@@ -130,7 +130,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 impl Config {
     /// Returns the path for the finalized state database
     pub fn db_path(&self, network: Network) -> PathBuf {
-        let net_dir = network.lowercase_name();
+        let net_dir = network.cache_name();
 
         if self.ephemeral {
             gen_temp_path(&format!(

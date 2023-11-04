@@ -6,11 +6,8 @@ use thiserror::Error;
 
 use crate::{
     block::{Height, HeightDiff},
-    parameters::NetworkUpgrade::Canopy,
+    parameters::NetworkUpgrade::{self, Canopy},
 };
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
 
 #[cfg(test)]
 mod tests;
@@ -52,22 +49,70 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 pub enum Network {
     /// The production mainnet.
     #[default]
     Mainnet,
 
     /// The oldest public test network.
-    Testnet,
+    Testnet(TestnetParameters),
+}
+
+/// Configures testnet chain parameters to use instead of default values.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
+pub struct TestnetParameters(Option<ChainParameters>);
+
+/// Configures chain parameters to use instead of default values.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
+pub struct ChainParameters {
+    network_id: Option<NetworkId>,
+    default_port: Option<u16>,
+    cache_name: Option<&'static str>,
+    genesis_hash: Option<&'static str>,
+    activation_heights: Option<&'static [(Height, NetworkUpgrade)]>,
+}
+
+/// The network id to expect in AddrV2 messages.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct NetworkId {
+    ipv4: u8,
+    ipv6: u8,
+}
+
+impl TestnetParameters {
+    /// Accepts a closure that takes `ChainParameters` and returns an `Option`, and
+    /// a `default` to return if there are no chain parameters or if the
+    /// provided closure returns `None`.
+    ///
+    /// Returns value from the provided closure if it is `Some`, or `None`.
+    pub fn get_or<T, F>(self, f: F, default: T) -> T
+    where
+        F: FnOnce(ChainParameters) -> Option<T>,
+    {
+        self.0.and_then(f).unwrap_or(default)
+    }
+}
+
+impl std::ops::Deref for TestnetParameters {
+    type Target = Option<ChainParameters>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Option<ChainParameters>> for TestnetParameters {
+    fn from(value: Option<ChainParameters>) -> Self {
+        Self(value)
+    }
 }
 
 impl From<Network> for &'static str {
     fn from(network: Network) -> &'static str {
         match network {
             Network::Mainnet => "Mainnet",
-            Network::Testnet => "Testnet",
+            Network::Testnet(_) => "Testnet",
         }
     }
 }
@@ -85,11 +130,26 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Creates a new `Testnet` with no parameters.
+    pub fn new_testnet() -> Self {
+        Self::new_testnet_with_parameters(None)
+    }
+
+    /// Creates a new `Testnet` with the provided parameters.
+    pub fn new_testnet_with_parameters(parameters: impl Into<TestnetParameters>) -> Self {
+        Self::Testnet(parameters.into())
+    }
+
+    /// Creates a new `Mainnet`.
+    pub fn new_mainnet() -> Self {
+        Self::Mainnet
+    }
+
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
             Network::Mainnet => 8233,
-            Network::Testnet => 18233,
+            Network::Testnet(params) => params.get_or(|p| p.default_port, 18233),
         }
     }
 
@@ -116,7 +176,8 @@ impl Network {
     pub fn bip70_network_name(&self) -> String {
         match self {
             Network::Mainnet => "main".to_string(),
-            Network::Testnet => "test".to_string(),
+            // TODO: add network name field?
+            Network::Testnet { .. } => "test".to_string(),
         }
     }
 
@@ -125,9 +186,37 @@ impl Network {
         self.to_string().to_ascii_lowercase()
     }
 
+    /// Return the network cache name.
+    pub fn cache_name(&self) -> String {
+        self.with_testnet_parameters(|p| p.cache_name)
+            .map_or_else(|| self.lowercase_name(), |s| s.to_string())
+    }
+
+    /// Returns `true` if this network is `Mainnet`.
+    pub fn is_mainnet(&self) -> bool {
+        *self == Network::Mainnet
+    }
+
     /// Returns `true` if this network is a testing network.
-    pub fn is_a_test_network(&self) -> bool {
-        *self != Network::Mainnet
+    pub fn is_testnet(&self) -> bool {
+        matches!(*self, Network::Testnet(_))
+    }
+
+    /// Returns testnet parameters, if any.
+    pub fn testnet_parameters(&self) -> Option<ChainParameters> {
+        if let Network::Testnet(testnet_parameters) = *self {
+            *testnet_parameters
+        } else {
+            None
+        }
+    }
+
+    /// Returns testnet parameter if it is some.
+    pub fn with_testnet_parameters<T, F>(&self, f: F) -> Option<T>
+    where
+        F: FnOnce(ChainParameters) -> Option<T>,
+    {
+        self.testnet_parameters().and_then(f)
     }
 }
 
@@ -137,7 +226,7 @@ impl FromStr for Network {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         match string.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
-            "testnet" => Ok(Network::Testnet),
+            "testnet" => Ok(Network::new_testnet()),
             _ => Err(InvalidNetworkError(string.to_owned())),
         }
     }

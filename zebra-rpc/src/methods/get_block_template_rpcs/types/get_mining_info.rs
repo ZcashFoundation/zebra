@@ -25,7 +25,7 @@ impl Response {
             networksolps,
             networkhashps: networksolps,
             chain: network.bip70_network_name(),
-            testnet: network.is_a_test_network(),
+            testnet: network.is_testnet(),
         }
     }
 }

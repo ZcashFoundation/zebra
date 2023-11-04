@@ -26,9 +26,9 @@ use zebra_test::vectors::{
 #[test]
 fn push_and_prune() -> Result<()> {
     push_and_prune_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    push_and_prune_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+    push_and_prune_for_network_upgrade(Network::Testnet(None.into()), NetworkUpgrade::Heartwood)?;
     push_and_prune_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
-    push_and_prune_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
+    push_and_prune_for_network_upgrade(Network::Testnet(None.into()), NetworkUpgrade::Canopy)?;
     Ok(())
 }
 
@@ -38,7 +38,7 @@ fn push_and_prune_for_network_upgrade(
 ) -> Result<()> {
     let (blocks, sapling_roots) = match network {
         Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
+        Network::Testnet(_) => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
     };
     let height = network_upgrade.activation_height(network).unwrap().0;
 
@@ -115,14 +115,14 @@ fn upgrade() -> Result<()> {
     // The history tree only exists Hearwood-onward, and the only upgrade for which
     // we have vectors since then is Canopy. Therefore, only test the Heartwood->Canopy upgrade.
     upgrade_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
-    upgrade_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
+    upgrade_for_network_upgrade(Network::Testnet(None.into()), NetworkUpgrade::Canopy)?;
     Ok(())
 }
 
 fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = match network {
         Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
+        Network::Testnet(_) => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
     };
     let height = network_upgrade.activation_height(network).unwrap().0;
 

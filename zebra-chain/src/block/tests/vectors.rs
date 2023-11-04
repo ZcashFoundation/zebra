@@ -202,7 +202,7 @@ fn block_test_vectors_height_mainnet() {
 fn block_test_vectors_height_testnet() {
     let _init_guard = zebra_test::init();
 
-    block_test_vectors_height(Testnet);
+    block_test_vectors_height(Testnet(None.into()));
 }
 
 /// Test that the block test vector indexes match the heights in the block data,
@@ -213,7 +213,7 @@ fn block_test_vectors_height(network: Network) {
             zebra_test::vectors::MAINNET_BLOCKS.iter(),
             zebra_test::vectors::MAINNET_FINAL_SAPLING_ROOTS.clone(),
         ),
-        Testnet => (
+        Testnet(_) => (
             zebra_test::vectors::TESTNET_BLOCKS.iter(),
             zebra_test::vectors::TESTNET_FINAL_SAPLING_ROOTS.clone(),
         ),
@@ -254,7 +254,7 @@ fn block_commitment_mainnet() {
 fn block_commitment_testnet() {
     let _init_guard = zebra_test::init();
 
-    block_commitment(Testnet);
+    block_commitment(Testnet(None.into()));
 }
 
 /// Check that the block commitment field parses without errors.
@@ -267,7 +267,7 @@ fn block_commitment(network: Network) {
             zebra_test::vectors::MAINNET_BLOCKS.iter(),
             zebra_test::vectors::MAINNET_FINAL_SAPLING_ROOTS.clone(),
         ),
-        Testnet => (
+        Testnet(_) => (
             zebra_test::vectors::TESTNET_BLOCKS.iter(),
             zebra_test::vectors::TESTNET_FINAL_SAPLING_ROOTS.clone(),
         ),
