@@ -997,7 +997,7 @@ pub fn test_transactions(
 ) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
     let blocks = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+        Network::Testnet(_) => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
     transactions_from_blocks(blocks)

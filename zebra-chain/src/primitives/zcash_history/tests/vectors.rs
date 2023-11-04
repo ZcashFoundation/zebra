@@ -15,16 +15,16 @@ use zebra_test::vectors::{
 #[test]
 fn tree() -> Result<()> {
     tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+    tree_for_network_upgrade(Network::new_testnet(), NetworkUpgrade::Heartwood)?;
     tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
+    tree_for_network_upgrade(Network::new_testnet(), NetworkUpgrade::Canopy)?;
     Ok(())
 }
 
 fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = match network {
         Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
+        Network::Testnet(_) => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
     };
     let height = network_upgrade.activation_height(network).unwrap().0;
 

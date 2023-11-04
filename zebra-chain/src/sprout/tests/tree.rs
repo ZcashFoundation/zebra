@@ -82,7 +82,7 @@ fn incremental_roots() {
 #[test]
 fn incremental_roots_with_blocks() -> Result<()> {
     incremental_roots_with_blocks_for_network(Network::Mainnet)?;
-    incremental_roots_with_blocks_for_network(Network::Testnet)?;
+    incremental_roots_with_blocks_for_network(Network::new_testnet())?;
 
     Ok(())
 }
@@ -101,7 +101,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
             &*vectors::MAINNET_FINAL_SPROUT_ROOTS,
             MAINNET_FIRST_JOINSPLIT_HEIGHT,
         ),
-        Network::Testnet => (
+        Network::Testnet(_) => (
             &*vectors::TESTNET_BLOCKS,
             &*vectors::TESTNET_FINAL_SPROUT_ROOTS,
             TESTNET_FIRST_JOINSPLIT_HEIGHT,
