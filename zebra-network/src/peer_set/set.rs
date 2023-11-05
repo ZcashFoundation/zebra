@@ -1018,23 +1018,24 @@ where
         // - an unready peer becomes ready, or
         // - a new peer arrives.
 
-        // Check for new peers, and register a task wake when the next new peers arrive. New peers
+        // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
-        let _ = self.poll_discover(cx)?;
+        let _poll_pending: Poll<()> = self.poll_discover(cx)?;
 
         // These tasks don't provide new peers or newly ready peers.
-        let _ = self.poll_background_errors(cx)?;
-        let _ = self.inventory_registry.poll_inventory(cx)?;
+        let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
+        let _poll_pending: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
         // Check for newly ready peers, including newly added peers (which are added as unready).
-        // So it needs to run after `poll_discover()`.
+        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
+        // peers.
         //
         // Each connected peer should become ready within a few minutes, or timeout, close the
         // connection, and release its connection slot.
         //
         // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
-        let _ = self.poll_unready(cx)?;
+        let _poll_pending_or_ready: Poll<()> = self.poll_unready(cx)?;
 
         // Cleanup and metrics.
 
