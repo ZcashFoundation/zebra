@@ -254,7 +254,7 @@ where
     C: ChainTip,
 {
     fn drop(&mut self) {
-        // We don't want to wake the current task, we just want to drop everything we can.
+        // We don't have access to the current task (if any), so we just drop everything we can.
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -425,18 +425,22 @@ where
     /// Move newly ready services to the ready list if they are for peers with supported protocol
     /// versions, otherwise they are dropped. Also drop failed services.
     ///
-    /// Never returns an error. If there are no unready peers, returns `Ok`, and preserves the
-    /// original waker. Otherwise, returns `Poll::Pending`, and registers a wakeup for the next
-    /// peer that becomes ready.
+    /// Never returns an error. If there are unready peers, returns `Poll::Pending`, and registers
+    /// a wakeup when the next peer becomes ready. If there are no unready peers, returns `Ok`, and
+    /// doesn't register any wakeups. (Since wakeups come from peers, there needs to be at least one
+    /// peer to register a wakeup.)
     fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        if self.unready_services.is_empty() {
-            // Don't replace the previous waker, because we have no peers to wake the task.
-            return Poll::Ready(Ok(()));
-        }
-
-        let original_waker = cx.waker();
-
-        // Return Pending if we've finished processing the unready service changes,
+        // # Correctness
+        //
+        // `poll_next()` must always be called, because `self.unready_services` could have been
+        // empty before the call to `self.poll_ready()`.
+        //
+        // > When new futures are added, `poll_next` must be called in order to begin receiving
+        // > wake-ups for new futures.
+        //
+        // <https://docs.rs/futures/latest/futures/stream/futures_unordered/struct.FuturesUnordered.html>
+        //
+        // Returns Pending if we've finished processing the unready service changes,
         // but there are still some unready services.
         while let Some(ready_peer) =
             futures::ready!(Pin::new(&mut self.unready_services).poll_next(cx))
@@ -483,9 +487,10 @@ where
             }
         }
 
-        // There are no unready peers, so the unready_peers waker will never wake pending tasks.
-        *cx = Context::from_waker(original_waker);
-
+        // Return Ok if we've finished processing the unready service changes, and there are no
+        // unready services left. This means the stream is terminated. But when we add more unready
+        // peers and call `poll_next()`, its termination status will be reset, and it will receive
+        // wakeups again.
         Poll::Ready(Ok(()))
     }
 
@@ -1008,38 +1013,35 @@ where
         //
         // # Correctness
         //
-        // If we poll these futures in series, then only the last polled future will wake
-        // the task. This can cause hangs when there are no new peers, no newly ready peers,
-        // or no peers in the peer set at all.
-        //
-        // As a temporary fix, we try to pick the most likely waker, and skip wakers that will
-        // never wake.
+        // All of the futures that receive a context from this method can wake the peer set buffer
+        // task. If there are no ready peers, and no new peers, network requests will pause until:
+        // - an unready peer becomes ready, or
+        // - a new peer arrives.
 
-        // We can tolerate not being woken for these tasks, because we only return `Pending`
-        // when we have no ready peers. Delays in background error checking are acceptable,
-        // and we can't do anything useful with inventory until we have peers. (The oldest
-        // inventory will get automatically dropped.)
+        // Check for new peers, and register a task wake when the next new peers arrive. New peers
+        // can be infrequent if our connection slots are full, or we're connected to all
+        // available/useful peers.
+        let _ = self.poll_discover(cx)?;
+
+        // These tasks don't provide new peers or newly ready peers.
         let _ = self.poll_background_errors(cx)?;
         let _ = self.inventory_registry.poll_inventory(cx)?;
 
-        // We must be woken if there are new peers, but new peers can be infrequent if our
-        // connection slots are full, or we're connected to all available/useful peers.
+        // Check for newly ready peers, including newly added peers (which are added as unready).
+        // So it needs to run after `poll_discover()`.
         //
-        // TODO: wake waiting tasks if there are new peers or unready peers become ready (#7858)
-        let _ = self.poll_discover(cx)?;
-        // This method preserves the original waker if it has no unready peers and will never wake.
-        // Otherwise, each connected peer should become ready or timeout within a few minutes.
+        // Each connected peer should become ready within a few minutes, or timeout, close the
+        // connection, and release its connection slot.
         //
         // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
         let _ = self.poll_unready(cx)?;
 
-        // Correctness: the waker in the context is waiting on peers. If it is replaced later in
-        // the function, the network could hang. We drop the reference here so it can't be used.
-        #[allow(dropping_references)]
-        std::mem::drop(cx);
+        // Cleanup and metrics.
 
-        // Cleanup and metrics
+        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
         self.disconnect_from_outdated_peers();
+
+        // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
         self.update_metrics();
 
@@ -1064,11 +1066,9 @@ where
             // - if there are unready peers, `poll_unready` schedules this
             //   task for wakeup when peer services become ready.
             //
-            // To avoid peers blocking on a full background error channel:
-            // - if no background tasks have exited since the last poll,
-            //   `poll_background_errors` schedules this task for wakeup when
-            //   the next task exits.
-
+            // To avoid peers blocking on a full peer status/error channel:
+            // - `poll_background_errors` schedules this task for wakeup when
+            //   the peer status update task exits.
             Poll::Pending
         } else {
             Poll::Ready(Ok(()))

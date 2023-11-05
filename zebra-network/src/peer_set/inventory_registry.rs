@@ -287,14 +287,14 @@ impl InventoryRegistry {
     /// Drains the inv_stream channel and registers all advertised inventory.
     ///
     /// Returns an error if the inventory channel is closed. Otherwise returns `Poll::Pending`, and
-    /// registers a wakeup the next time there is new inventory.
-    ///
-    /// TODO: also register a wakeup for the next timer tick.
-    /// (Currently the timer never wakes the task.)
+    /// registers a wakeup the next time there is new inventory, and the next time the inventory
+    /// should rotate.
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         // # Correctness
         //
         // Registers the current task for wakeup when the timer next becomes ready.
+        // (But doesn't return, because we also want to register the task for wakeup when more
+        // inventory arrives.)
         //
         // # Security
         //
