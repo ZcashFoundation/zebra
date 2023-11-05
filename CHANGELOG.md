@@ -18,8 +18,6 @@ macOS on a best-effort basis.
 We have changed our documentation website URL, and we are considering deprecating some Docker image
 tags in release 1.5.0 and later.
 
-TODO: rest of intro
-
 ### Deprecation Warnings
 
 This release has the following deprecation warnings:
