@@ -170,7 +170,7 @@ fn recently_responded_peer_is_gossipable() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -191,7 +191,7 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -222,7 +222,7 @@ fn responded_long_ago_peer_is_not_gossipable() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -253,7 +253,7 @@ fn long_delayed_change_is_not_applied() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -297,7 +297,7 @@ fn later_revert_change_is_applied() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -340,7 +340,7 @@ fn concurrent_state_revert_change_is_not_applied() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -400,7 +400,7 @@ fn concurrent_state_progress_change_is_applied() {
         .into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
