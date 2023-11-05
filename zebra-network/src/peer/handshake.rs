@@ -556,14 +556,14 @@ where
     }
 }
 
-/// Negotiate the Zcash network protocol version with the remote peer
-/// at `connected_addr`, using the connection `peer_conn`.
+/// Negotiate the Zcash network protocol version with the remote peer at `connected_addr`, using
+/// the connection `peer_conn`.
 ///
-/// We split `Handshake` into its components before calling this function,
-/// to avoid infectious `Sync` bounds on the returned future.
+/// We split `Handshake` into its components before calling this function, to avoid infectious
+/// `Sync` bounds on the returned future.
 ///
-/// Returns the [`VersionMessage`] sent by the remote peer,
-/// and the [`Version`] negotiated with the remote peer.
+/// Returns the [`VersionMessage`] sent by the remote peer, and the [`Version`] negotiated with the
+/// remote peer, inside a [`ConnectionInfo`] struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -574,7 +574,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<(VersionMessage, Version), HandshakeError>
+) -> Result<Arc<ConnectionInfo>, HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -763,12 +763,19 @@ where
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
 
+    // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+    let connection_info = Arc::new(ConnectionInfo {
+        connected_addr: *connected_addr,
+        remote,
+        negotiated_version,
+    });
+
     debug!(
         remote_ip = ?their_addr,
-        ?remote.version,
+        ?connection_info.remote.version,
         ?negotiated_version,
         ?min_version,
-        ?remote.user_agent,
+        ?connection_info.remote.user_agent,
         "negotiated network protocol version with peer",
     );
 
@@ -777,16 +784,16 @@ where
         "zcash.net.peers.connected",
         1,
         "remote_ip" => their_addr.to_string(),
-        "remote_version" => remote.version.to_string(),
+        "remote_version" => connection_info.remote.version.to_string(),
         "negotiated_version" => negotiated_version.to_string(),
         "min_version" => min_version.to_string(),
-        "user_agent" => remote.user_agent.clone(),
+        "user_agent" => connection_info.remote.user_agent.clone(),
     );
 
     // the value is the remote version of the most recent connected handshake from each peer
     metrics::gauge!(
         "zcash.net.peers.version.connected",
-        remote.version.0 as f64,
+        connection_info.remote.version.0 as f64,
         "remote_ip" => their_addr.to_string(),
     );
 
@@ -814,7 +821,7 @@ where
         }
     }
 
-    Ok((remote, negotiated_version))
+    Ok(connection_info)
 }
 
 /// A handshake request.
@@ -896,7 +903,7 @@ where
                     .finish(),
             );
 
-            let (remote, negotiated_version) = negotiate_version(
+            let connection_info = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -908,8 +915,8 @@ where
             )
             .await?;
 
-            let remote_canonical_addr = remote.address_from.addr();
-            let remote_services = remote.services;
+            let remote_canonical_addr = connection_info.remote.address_from.addr();
+            let remote_services = connection_info.remote.services;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -941,20 +948,13 @@ where
                     .await;
             }
 
-            // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
-            let connection_info = Arc::new(ConnectionInfo {
-                connected_addr,
-                remote,
-                negotiated_version,
-            });
-
             // Reconfigure the codec to use the negotiated version.
             //
             // TODO: The tokio documentation says not to do this while any frames are still being processed.
             // Since we don't know that here, another way might be to release the tcp
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
             let bare_codec = peer_conn.codec_mut();
-            bare_codec.reconfigure_version(negotiated_version);
+            bare_codec.reconfigure_version(connection_info.negotiated_version);
 
             debug!("constructing client, spawning server");
 
