@@ -13,7 +13,6 @@ use crate::BoxError;
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
-    str::FromStr,
 };
 
 use zebra_chain::block;
@@ -55,41 +54,14 @@ const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CheckpointList(BTreeMap<block::Height, block::Hash>);
 
-impl FromStr for CheckpointList {
-    type Err = BoxError;
-
-    /// Parse a string into a CheckpointList.
-    ///
-    /// Each line has one checkpoint, consisting of a `block::Height` and
-    /// `block::Hash`, separated by a single space.
-    ///
-    /// Assumes that the provided genesis checkpoint is correct.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut checkpoint_list: Vec<(block::Height, block::Hash)> = Vec::new();
-
-        for checkpoint in s.lines() {
-            let fields = checkpoint.split(' ').collect::<Vec<_>>();
-            if let [height, hash] = fields[..] {
-                checkpoint_list.push((height.parse()?, hash.parse()?));
-            } else {
-                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()))?;
-            };
-        }
-
-        CheckpointList::from_list(checkpoint_list)
-    }
-}
-
 impl CheckpointList {
     /// Returns the hard-coded checkpoint list for `network`.
     pub fn new(network: Network) -> Self {
         // parse calls CheckpointList::from_list
         let checkpoint_list: CheckpointList = match network {
-            Network::Mainnet => MAINNET_CHECKPOINTS
-                .parse()
+            Network::Mainnet => Self::from_str(MAINNET_CHECKPOINTS, network)
                 .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet => TESTNET_CHECKPOINTS
-                .parse()
+            Network::Testnet(_) => Self::from_str(TESTNET_CHECKPOINTS, network)
                 .expect("Hard-coded Testnet checkpoint list parses and validates"),
         };
 
@@ -102,6 +74,27 @@ impl CheckpointList {
         }
     }
 
+    /// Parse a string into a CheckpointList.
+    ///
+    /// Each line has one checkpoint, consisting of a `block::Height` and
+    /// `block::Hash`, separated by a single space.
+    ///
+    /// Assumes that the provided genesis checkpoint is correct.
+    fn from_str(s: &str, network: Network) -> Result<Self, BoxError> {
+        let mut checkpoint_list: Vec<(block::Height, block::Hash)> = Vec::new();
+
+        for checkpoint in s.lines() {
+            let fields = checkpoint.split(' ').collect::<Vec<_>>();
+            if let [height, hash] = fields[..] {
+                checkpoint_list.push((height.parse()?, hash.parse()?));
+            } else {
+                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()))?;
+            };
+        }
+
+        CheckpointList::from_list(checkpoint_list, network)
+    }
+
     /// Create a new checkpoint list for `network` from `checkpoint_list`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
@@ -111,6 +104,7 @@ impl CheckpointList {
     /// (All other checkpoints are optional.)
     pub(crate) fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
+        network: Network,
     ) -> Result<Self, BoxError> {
         // BTreeMap silently ignores duplicates, so we count the checkpoints
         // before adding them to the map
@@ -122,11 +116,9 @@ impl CheckpointList {
 
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
-            Some((block::Height(0), hash))
-                if (hash == &genesis_hash(Network::Mainnet)
-                    || hash == &genesis_hash(Network::Testnet)) => {}
+            Some((block::Height(0), hash)) if hash == &genesis_hash(network) => {}
             Some((block::Height(0), _)) => {
-                Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
+                Err("the genesis checkpoint does not match the network genesis hash")?
             }
             Some(_) => Err("checkpoints must start at the genesis block height 0")?,
             None => Err("there must be at least one checkpoint, for the genesis block")?,
