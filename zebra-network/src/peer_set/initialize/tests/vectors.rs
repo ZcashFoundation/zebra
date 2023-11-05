@@ -82,7 +82,7 @@ async fn local_listener_unspecified_port_unspecified_addr_v4() {
     // these tests might fail on machines with no configured IPv4 addresses
     // (localhost should be enough)
     local_listener_port_with("0.0.0.0:0".parse().unwrap(), Mainnet).await;
-    local_listener_port_with("0.0.0.0:0".parse().unwrap(), Testnet).await;
+    local_listener_port_with("0.0.0.0:0".parse().unwrap(), Testnet(None.into())).await;
 }
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
@@ -103,7 +103,7 @@ async fn local_listener_unspecified_port_unspecified_addr_v6() {
 
     // these tests might fail on machines with no configured IPv6 addresses
     local_listener_port_with("[::]:0".parse().unwrap(), Mainnet).await;
-    local_listener_port_with("[::]:0".parse().unwrap(), Testnet).await;
+    local_listener_port_with("[::]:0".parse().unwrap(), Testnet(None.into())).await;
 }
 
 /// Test that zebra-network discovers dynamic localhost listener ports,
@@ -118,7 +118,7 @@ async fn local_listener_unspecified_port_localhost_addr_v4() {
 
     // these tests might fail on machines with unusual IPv4 localhost configs
     local_listener_port_with("127.0.0.1:0".parse().unwrap(), Mainnet).await;
-    local_listener_port_with("127.0.0.1:0".parse().unwrap(), Testnet).await;
+    local_listener_port_with("127.0.0.1:0".parse().unwrap(), Testnet(None.into())).await;
 }
 
 /// Test that zebra-network discovers dynamic localhost listener ports,
@@ -137,7 +137,7 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
 
     // these tests might fail on machines with no configured IPv6 addresses
     local_listener_port_with("[::1]:0".parse().unwrap(), Mainnet).await;
-    local_listener_port_with("[::1]:0".parse().unwrap(), Testnet).await;
+    local_listener_port_with("[::1]:0".parse().unwrap(), Testnet(None.into())).await;
 }
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
@@ -152,7 +152,11 @@ async fn local_listener_fixed_port_localhost_addr_v4() {
     }
 
     local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Mainnet).await;
-    local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), Testnet).await;
+    local_listener_port_with(
+        SocketAddr::new(localhost_v4, random_known_port()),
+        Testnet(None.into()),
+    )
+    .await;
 }
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
@@ -171,7 +175,11 @@ async fn local_listener_fixed_port_localhost_addr_v6() {
     }
 
     local_listener_port_with(SocketAddr::new(localhost_v6, random_known_port()), Mainnet).await;
-    local_listener_port_with(SocketAddr::new(localhost_v6, random_known_port()), Testnet).await;
+    local_listener_port_with(
+        SocketAddr::new(localhost_v6, random_known_port()),
+        Testnet(None.into()),
+    )
+    .await;
 }
 
 /// Test zebra-network with a peer limit of zero peers on mainnet.
@@ -208,8 +216,14 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
-        init_with_peer_limit(0, unreachable_inbound_service, Testnet, None, None).await;
+    let address_book = init_with_peer_limit(
+        0,
+        unreachable_inbound_service,
+        Testnet(None.into()),
+        None,
+        None,
+    )
+    .await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
         0,
@@ -248,7 +262,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Testnet, None, None).await;
+    let _ = init_with_peer_limit(1, nil_inbound_service, Testnet(None.into()), None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -286,7 +300,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Testnet, None, None).await;
+    let _ = init_with_peer_limit(2, nil_inbound_service, Testnet(None.into()), None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;

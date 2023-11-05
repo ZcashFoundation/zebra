@@ -31,7 +31,7 @@ fn checkpoint_list_genesis() -> Result<(), BoxError> {
     // Make a checkpoint list containing the genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list)?;
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet)?;
 
     Ok(())
 }
@@ -60,7 +60,7 @@ fn checkpoint_list_multiple() -> Result<(), BoxError> {
     // Make a checkpoint list containing all the blocks
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list)?;
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet)?;
 
     Ok(())
 }
@@ -70,7 +70,8 @@ fn checkpoint_list_multiple() -> Result<(), BoxError> {
 fn checkpoint_list_empty_fail() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
-    let _ = CheckpointList::from_list(Vec::new()).expect_err("empty checkpoint lists should fail");
+    let _ = CheckpointList::from_list(Vec::new(), Mainnet)
+        .expect_err("empty checkpoint lists should fail");
 
     Ok(())
 }
@@ -92,7 +93,7 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), BoxError> {
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list)
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet)
         .expect_err("a checkpoint list with no genesis block should fail");
 
     Ok(())
@@ -108,7 +109,7 @@ fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list)
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet)
         .expect_err("a checkpoint list with a null block hash should fail");
 
     Ok(())
@@ -127,7 +128,7 @@ fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list).expect_err(
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet).expect_err(
         "a checkpoint list with an invalid block height (block::Height::MAX + 1) should fail",
     );
 
@@ -136,7 +137,7 @@ fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
     // Make a checkpoint list containing the non-genesis block
     let checkpoint_list: BTreeMap<block::Height, block::Hash> =
         checkpoint_data.iter().cloned().collect();
-    let _ = CheckpointList::from_list(checkpoint_list)
+    let _ = CheckpointList::from_list(checkpoint_list, Mainnet)
         .expect_err("a checkpoint list with an invalid block height (u32::MAX) should fail");
 
     Ok(())
@@ -163,7 +164,7 @@ fn checkpoint_list_duplicate_blocks_fail() -> Result<(), BoxError> {
     }
 
     // Make a checkpoint list containing some duplicate blocks
-    let _ = CheckpointList::from_list(checkpoint_data)
+    let _ = CheckpointList::from_list(checkpoint_data, Mainnet)
         .expect_err("checkpoint lists with duplicate blocks should fail");
 
     Ok(())
@@ -190,7 +191,7 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), BoxError> {
     checkpoint_data.push((block::Height(1), block::Hash([0xbb; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
-    let _ = CheckpointList::from_list(checkpoint_data)
+    let _ = CheckpointList::from_list(checkpoint_data, Mainnet)
         .expect_err("checkpoint lists with duplicate heights should fail");
 
     Ok(())
@@ -217,7 +218,7 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
     checkpoint_data.push((block::Height(2), block::Hash([0xcc; 32])));
 
     // Make a checkpoint list containing some duplicate blocks
-    let _ = CheckpointList::from_list(checkpoint_data)
+    let _ = CheckpointList::from_list(checkpoint_data, Mainnet)
         .expect_err("checkpoint lists with duplicate hashes should fail");
 
     Ok(())
@@ -228,15 +229,13 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
 fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
-    let _: CheckpointList = MAINNET_CHECKPOINTS
-        .parse()
+    let _: CheckpointList = CheckpointList::from_str(MAINNET_CHECKPOINTS, Mainnet)
         .expect("hard-coded Mainnet checkpoint list should parse");
-    let _: CheckpointList = TESTNET_CHECKPOINTS
-        .parse()
+    let _: CheckpointList = CheckpointList::from_str(TESTNET_CHECKPOINTS, Network::new_testnet())
         .expect("hard-coded Testnet checkpoint list should parse");
 
     let _ = CheckpointList::new(Mainnet);
-    let _ = CheckpointList::new(Testnet);
+    let _ = CheckpointList::new(Network::new_testnet());
 
     Ok(())
 }
@@ -248,7 +247,7 @@ fn checkpoint_list_hard_coded_mandatory_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_mandatory_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_mandatory(Testnet)
+    checkpoint_list_hard_coded_mandatory(Testnet(None.into()))
 }
 
 /// Check that the hard-coded lists cover the mandatory checkpoint
@@ -274,7 +273,7 @@ fn checkpoint_list_hard_coded_max_gap_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_max_gap(Testnet)
+    checkpoint_list_hard_coded_max_gap(Testnet(None.into()))
 }
 
 /// Check that the hard-coded checkpoints are within [`MAX_CHECKPOINT_HEIGHT_GAP`],

@@ -52,7 +52,7 @@ fn test_raw_rocksdb_column_families() {
     let _init_guard = zebra_test::init();
 
     test_raw_rocksdb_column_families_with_network(Mainnet);
-    test_raw_rocksdb_column_families_with_network(Testnet);
+    test_raw_rocksdb_column_families_with_network(Testnet(None.into()));
 }
 
 /// Snapshot raw column families for `network`.
@@ -91,7 +91,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
     // - genesis, block 1, and block 2
     let blocks = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+        Testnet(_) => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
     };
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.

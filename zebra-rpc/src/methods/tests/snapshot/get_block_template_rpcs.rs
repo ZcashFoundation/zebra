@@ -412,7 +412,7 @@ pub async fn test_responses<State, ReadState>(
     // `validateaddress`
     let founder_address = match network {
         Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
-        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+        Network::Testnet(_) => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
     };
 
     let validate_address = get_block_template_rpc
@@ -430,7 +430,7 @@ pub async fn test_responses<State, ReadState>(
     // `z_validateaddress`
     let founder_address = match network {
         Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
-        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+        Network::Testnet(_) => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
     };
 
     let z_validate_address = get_block_template_rpc

@@ -35,9 +35,9 @@ async fn test_rpc_response_data() {
 
     tokio::join!(
         test_rpc_response_data_for_network(Mainnet),
-        test_rpc_response_data_for_network(Testnet),
+        test_rpc_response_data_for_network(Testnet(None.into())),
         test_mocked_rpc_response_data_for_network(Mainnet),
-        test_mocked_rpc_response_data_for_network(Testnet),
+        test_mocked_rpc_response_data_for_network(Testnet(None.into())),
     );
 }
 
@@ -45,7 +45,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Create a continuous chain of mainnet and testnet blocks from genesis
     let block_data = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+        Testnet(_) => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
     };
 
     let blocks: Vec<Arc<Block>> = block_data

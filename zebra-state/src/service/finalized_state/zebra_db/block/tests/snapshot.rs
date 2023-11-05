@@ -155,7 +155,7 @@ fn test_block_and_transaction_data() {
     let _init_guard = zebra_test::init();
 
     test_block_and_transaction_data_with_network(Mainnet);
-    test_block_and_transaction_data_with_network(Testnet);
+    test_block_and_transaction_data_with_network(Testnet(None.into()));
 }
 
 /// Snapshot finalized block and transaction data for `network`.
@@ -183,7 +183,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     // - genesis, block 1, and block 2
     let blocks = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+        Testnet(_) => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
     };
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.

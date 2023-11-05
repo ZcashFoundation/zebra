@@ -18,7 +18,7 @@ pub fn fake_history_tree(network: Network) -> Arc<HistoryTree> {
             &vectors::BLOCK_MAINNET_1046400_BYTES[..],
             *vectors::SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
         ),
-        Network::Testnet => (
+        Network::Testnet(_) => (
             &vectors::BLOCK_TESTNET_1116000_BYTES[..],
             *vectors::SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
         ),

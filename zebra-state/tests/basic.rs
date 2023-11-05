@@ -63,7 +63,7 @@ async fn check_transcripts_mainnet() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn check_transcripts_testnet() -> Result<(), Report> {
-    check_transcripts(Network::Testnet).await
+    check_transcripts(Network::new_testnet()).await
 }
 
 #[spandoc::spandoc]
@@ -75,7 +75,7 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
 
     for transcript_data in match network {
         Network::Mainnet => mainnet_transcript,
-        Network::Testnet => testnet_transcript,
+        Network::Testnet(_) => testnet_transcript,
     } {
         // We're not verifying UTXOs here.
         let (service, _, _, _) = zebra_state::init(Config::ephemeral(), network, Height::MAX, 0);

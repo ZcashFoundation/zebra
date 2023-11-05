@@ -41,7 +41,7 @@ fn test_block_db_round_trip() {
         .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
 
     test_block_db_round_trip_with(Mainnet, mainnet_test_cases);
-    test_block_db_round_trip_with(Testnet, testnet_test_cases);
+    test_block_db_round_trip_with(Testnet(None.into()), testnet_test_cases);
 
     // It doesn't matter if these blocks are mainnet or testnet,
     // because there is no validation at this level of the database.
