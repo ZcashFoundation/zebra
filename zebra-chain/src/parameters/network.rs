@@ -49,14 +49,14 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum Network {
     /// The production mainnet.
     #[default]
     Mainnet,
 
     /// The oldest public test network.
-    Testnet(TestnetParameters),
+    Testnet(#[serde(skip)] TestnetParameters),
 }
 
 /// Configures testnet chain parameters to use instead of default values.
