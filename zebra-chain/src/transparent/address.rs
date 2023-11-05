@@ -158,7 +158,7 @@ impl ZcashDeserialize for Address {
                 script_hash: hash_bytes,
             }),
             magics::p2sh::TESTNET => Ok(Address::PayToScriptHash {
-                network: Network::Testnet,
+                network: Network::new_testnet(),
                 script_hash: hash_bytes,
             }),
             magics::p2pkh::MAINNET => Ok(Address::PayToPublicKeyHash {
@@ -166,7 +166,7 @@ impl ZcashDeserialize for Address {
                 pub_key_hash: hash_bytes,
             }),
             magics::p2pkh::TESTNET => Ok(Address::PayToPublicKeyHash {
-                network: Network::Testnet,
+                network: Network::new_testnet(),
                 pub_key_hash: hash_bytes,
             }),
             _ => Err(SerializationError::Parse("bad t-addr version/type")),
@@ -314,7 +314,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = pub_key.to_address(Network::Testnet);
+        let t_addr = pub_key.to_address(Network::new_testnet());
 
         assert_eq!(format!("{t_addr}"), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
     }
@@ -336,7 +336,7 @@ mod tests {
 
         let script = Script::new(&[0; 20]);
 
-        let t_addr = script.to_address(Network::Testnet);
+        let t_addr = script.to_address(Network::new_testnet());
 
         assert_eq!(format!("{t_addr}"), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }

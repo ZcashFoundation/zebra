@@ -60,7 +60,7 @@ pub fn height_for_first_halving(network: Network) -> Height {
         Network::Mainnet => Canopy
             .activation_height(network)
             .expect("canopy activation height should be available"),
-        Network::Testnet => FIRST_HALVING_TESTNET,
+        Network::Testnet(_) => FIRST_HALVING_TESTNET,
     }
 }
 
@@ -95,7 +95,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 fn funding_stream_address_index(height: Height, network: Network) -> usize {
     let num_addresses = match network {
         Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
-        Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
+        Network::Testnet(_) => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
     };
 
     let index = 1u32

@@ -34,7 +34,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
                         output,
                     )
                 }
-                Network::Testnet => {
+                Network::Testnet(_) => {
                     zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
                         &zcash_primitives::consensus::TEST_NETWORK,
                         alt_height,

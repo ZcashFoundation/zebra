@@ -394,7 +394,7 @@ impl ExpandedDifficulty {
             /* 2^243 - 1 */
             Network::Mainnet => (U256::one() << 243) - 1,
             /* 2^251 - 1 */
-            Network::Testnet => (U256::one() << 251) - 1,
+            Network::Testnet(_) => (U256::one() << 251) - 1,
         };
 
         // `zcashd` converts the PoWLimit into a compact representation before

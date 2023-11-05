@@ -7,6 +7,8 @@ use zcash_primitives::sapling;
 
 use crate::{parameters::Network, transparent, BoxError};
 
+// TODO: fix lint.
+#[allow(clippy::large_enum_variant)]
 /// Zcash address variants
 pub enum Address {
     /// Transparent address
@@ -47,7 +49,7 @@ impl TryFrom<zcash_address::Network> for Network {
     fn try_from(network: zcash_address::Network) -> Result<Self, Self::Error> {
         match network {
             zcash_address::Network::Main => Ok(Network::Mainnet),
-            zcash_address::Network::Test => Ok(Network::Testnet),
+            zcash_address::Network::Test => Ok(Network::new_testnet()),
             zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
         }
     }
@@ -57,7 +59,7 @@ impl From<Network> for zcash_address::Network {
     fn from(network: Network) -> Self {
         match network {
             Network::Mainnet => zcash_address::Network::Main,
-            Network::Testnet => zcash_address::Network::Test,
+            Network::Testnet(_) => zcash_address::Network::Test,
         }
     }
 }

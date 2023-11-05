@@ -124,7 +124,7 @@ mod test {
         let _init_guard = zebra_test::init();
 
         halving_for_network(Network::Mainnet)?;
-        halving_for_network(Network::Testnet)?;
+        halving_for_network(Network::new_testnet())?;
 
         Ok(())
     }
@@ -134,7 +134,7 @@ mod test {
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
             // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
-            Network::Testnet => Height(1_116_000),
+            Network::Testnet(_) => Height(1_116_000),
         };
 
         assert_eq!(
@@ -254,7 +254,7 @@ mod test {
         let _init_guard = zebra_test::init();
 
         block_subsidy_for_network(Network::Mainnet)?;
-        block_subsidy_for_network(Network::Testnet)?;
+        block_subsidy_for_network(Network::new_testnet())?;
 
         Ok(())
     }
@@ -264,7 +264,7 @@ mod test {
         let first_halving_height = match network {
             Network::Mainnet => Canopy.activation_height(network).unwrap(),
             // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
-            Network::Testnet => Height(1_116_000),
+            Network::Testnet(_) => Height(1_116_000),
         };
 
         // After slow-start mining and before Blossom the block subsidy is 12.5 ZEC

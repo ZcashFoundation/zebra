@@ -29,7 +29,7 @@ impl From<Network> for Magic {
     fn from(network: Network) -> Self {
         match network {
             Network::Mainnet => magics::MAINNET,
-            Network::Testnet => magics::TESTNET,
+            Network::Testnet(_) => magics::TESTNET,
         }
     }
 }
@@ -101,16 +101,16 @@ impl Version {
         //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
-            (Testnet, Overwinter) => 170_003,
+            (Testnet(_), Overwinter) => 170_003,
             (Mainnet, Overwinter) => 170_005,
             (_, Sapling) => 170_007,
-            (Testnet, Blossom) => 170_008,
+            (Testnet(_), Blossom) => 170_008,
             (Mainnet, Blossom) => 170_009,
-            (Testnet, Heartwood) => 170_010,
+            (Testnet(_), Heartwood) => 170_010,
             (Mainnet, Heartwood) => 170_011,
-            (Testnet, Canopy) => 170_012,
+            (Testnet(_), Canopy) => 170_012,
             (Mainnet, Canopy) => 170_013,
-            (Testnet, Nu5) => 170_050,
+            (Testnet(_), Nu5) => 170_050,
             (Mainnet, Nu5) => 170_100,
         })
     }
@@ -199,7 +199,7 @@ mod test {
 
     #[test]
     fn version_extremes_testnet() {
-        version_extremes(Testnet)
+        version_extremes(Testnet(None.into()))
     }
 
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
@@ -227,7 +227,7 @@ mod test {
 
     #[test]
     fn version_consistent_testnet() {
-        version_consistent(Testnet)
+        version_consistent(Testnet(None.into()))
     }
 
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions

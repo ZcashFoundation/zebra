@@ -237,7 +237,8 @@ where
         state_service: S,
     ) -> Result<Self, VerifyCheckpointError> {
         Ok(Self::from_checkpoint_list(
-            CheckpointList::from_list(list).map_err(VerifyCheckpointError::CheckpointList)?,
+            CheckpointList::from_list(list, network)
+                .map_err(VerifyCheckpointError::CheckpointList)?,
             network,
             initial_tip,
             state_service,

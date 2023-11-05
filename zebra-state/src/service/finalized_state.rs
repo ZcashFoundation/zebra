@@ -428,7 +428,7 @@ impl FinalizedState {
 
             let mut blocks_size_to_dump = match self.network {
                 Network::Mainnet => MAINNET_AWAY_FROM_TIP_BULK_SIZE,
-                Network::Testnet => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
+                Network::Testnet(_) => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
             };
 
             // If we are close to the tip, index one block per bulk call.
