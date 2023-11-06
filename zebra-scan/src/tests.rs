@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use zcash_client_backend::{
+    encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
         self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
         CompactTx,
@@ -16,7 +17,7 @@ use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    constants::SPENDING_KEY_GENERATOR,
+    constants::{mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SPENDING_KEY_GENERATOR},
     memo::MemoBytes,
     sapling::{
         note_encryption::{sapling_note_encryption, SaplingDomain},
@@ -162,6 +163,98 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
     assert_eq!(res.transactions()[0].txid, cb.vtx[1].txid());
     // The block hash of the response should be the same as the one provided.
     assert_eq!(res.block_hash(), cb.hash());
+
+    Ok(())
+}
+
+/// Scan a populated state for the ZECpages viewing key.
+/// This test is very similar to `scanning_from_populated_zebra_state` but with the ZECpages key.
+/// There are no zechub transactions in the test data so we should get empty related transactions.
+#[tokio::test]
+async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
+    /// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
+    const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+
+    // Parse the key from ZECpages
+    let efvk = decode_extended_full_viewing_key(
+        HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+        ZECPAGES_VIEWING_KEY,
+    )
+    .unwrap();
+
+    let account = AccountId::from(1);
+    let nf = Nullifier([7; 32]);
+
+    // Build a vector of viewing keys `vks` to scan for.
+    let fvk = efvk.fvk;
+    let ivk = fvk.vk.ivk();
+    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
+
+    let network = zebra_chain::parameters::Network::default();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service.
+    let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), network).await;
+
+    let db = read_only_state_service.db();
+
+    // use the tip as starting height
+    let mut height = latest_chain_tip.best_tip_height().unwrap();
+
+    let mut transactions_found = 0;
+    let mut transactions_scanned = 0;
+    let mut blocks_scanned = 0;
+    while let Some(block) = db.block(height.into()) {
+        // We fake the sapling tree size to 1 because we are not in Sapling heights.
+        let sapling_tree_size = 1;
+        let orchard_tree_size = db
+            .orchard_tree_by_hash_or_height(height.into())
+            .expect("should exist")
+            .count();
+
+        let chain_metadata = ChainMetadata {
+            sapling_commitment_tree_size: sapling_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+            orchard_commitment_tree_size: orchard_tree_size
+                .try_into()
+                .expect("position should fit in u32"),
+        };
+
+        let compact_block = block_to_compact(block, chain_metadata);
+
+        let res = scan_block(
+            &zcash_primitives::consensus::MainNetwork,
+            compact_block.clone(),
+            &vks[..],
+            &[(account, nf)],
+            None,
+        )
+        .unwrap();
+
+        transactions_found += res.transactions().len();
+        transactions_scanned += compact_block.vtx.len();
+        blocks_scanned += 1;
+
+        // scan backwards
+        if height.is_min() {
+            break;
+        }
+        height = height.previous()?;
+    }
+
+    // make sure all blocks and transactions were scanned
+    assert_eq!(blocks_scanned, 11);
+    assert_eq!(transactions_scanned, 11);
+
+    // no relevant transactions should be found
+    assert_eq!(transactions_found, 0);
 
     Ok(())
 }
