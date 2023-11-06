@@ -883,7 +883,7 @@ impl DbFormatChangeThreadHandle {
     ///
     /// This method should be called regularly, so that panics are detected as soon as possible.
     pub fn check_for_panics(&mut self) {
-        self.update_task.check_for_panics();
+        self.update_task.panic_if_task_has_panicked();
     }
 
     /// Wait for the spawned thread to finish. If it exited with a panic, resume that panic.
