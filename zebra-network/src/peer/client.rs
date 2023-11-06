@@ -605,18 +605,27 @@ impl Service<Request> for Client {
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
 
-        let mut result = self
-            .check_heartbeat(cx)
-            .and_then(|()| self.check_connection(cx));
+        // Check all the tasks
+        let heartbeat_result = self.check_heartbeat(cx);
+        let connection_result = self.check_connection(cx);
+        let sender_result = self.poll_request(cx);
 
-        if result.is_ok() {
-            result = ready!(self.poll_request(cx));
-        }
+        // Requests should only wait if there is no space in the channel.
+        let is_pending = sender_result.is_pending();
 
+        // Combine the results, include the result inside the poll.
+        let result = heartbeat_result.and(connection_result).and_then(|_| {
+            let _pending: Poll<()> = sender_result?;
+            Ok(())
+        });
+
+        // Shut down the client and connection if there is an error.
         if let Err(error) = result {
             self.shutdown();
 
             Poll::Ready(Err(error))
+        } else if is_pending {
+            Poll::Pending
         } else {
             Poll::Ready(Ok(()))
         }
