@@ -18,6 +18,8 @@ use futures::{
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
+use zebra_chain::diagnostic::task::CheckForPanics;
+
 use crate::{
     peer::{
         error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
@@ -421,6 +423,13 @@ impl MissingInventoryCollector {
 
 impl Client {
     /// Check if this connection's heartbeat task has exited.
+    ///
+    /// Returns an error if the heartbeat task exited. Otherwise, schedules the client task for
+    /// wakeup when the heartbeat task finishes, or the channel closes, and returns `Pending`.
+    ///
+    /// # Panics
+    ///
+    /// If the heartbeat task panicked.
     #[allow(clippy::unwrap_in_result)]
     fn check_heartbeat(&mut self, cx: &mut Context<'_>) -> Result<(), SharedPeerError> {
         let is_canceled = self
@@ -430,17 +439,17 @@ impl Client {
             .poll_canceled(cx)
             .is_ready();
 
-        if is_canceled {
-            return self.set_task_exited_error(
-                "heartbeat",
-                PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
-            );
-        }
-
         match self.heartbeat_task.poll_unpin(cx) {
             Poll::Pending => {
-                // Heartbeat task is still running.
-                Ok(())
+                if is_canceled {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                } else {
+                    // Heartbeat task is still running.
+                    Ok(())
+                }
             }
             Poll::Ready(Ok(Ok(_))) => {
                 // Heartbeat task stopped unexpectedly, without panic or error.
@@ -459,6 +468,9 @@ impl Client {
                 )
             }
             Poll::Ready(Err(error)) => {
+                // Heartbeat task stopped with panic.
+                let error = error.panic_if_task_has_panicked();
+
                 // Heartbeat task was cancelled.
                 if error.is_cancelled() {
                     self.set_task_exited_error(
@@ -466,11 +478,7 @@ impl Client {
                         PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
                     )
                 }
-                // Heartbeat task stopped with panic.
-                else if error.is_panic() {
-                    panic!("heartbeat task has panicked: {error}");
-                }
-                // Heartbeat task stopped with error.
+                // Heartbeat task stopped with another kind of task error.
                 else {
                     self.set_task_exited_error(
                         "heartbeat",
@@ -493,8 +501,24 @@ impl Client {
                 self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
             Poll::Ready(Err(error)) => {
-                // Connection task stopped unexpectedly with a panic.
-                panic!("connection task has panicked: {error}");
+                // Heartbeat task was cancelled.
+                if error.is_cancelled() {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                }
+                // Heartbeat task stopped with panic.
+                else if error.is_panic() {
+                    panic!("heartbeat task has panicked: {error}");
+                }
+                // Heartbeat task stopped with error.
+                else {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited(error.to_string()),
+                    )
+                }
             }
         }
     }
