@@ -191,16 +191,25 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
 
     let network = zebra_chain::parameters::Network::default();
-    let state_config = Default::default();
 
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service.
     let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
-        zebra_state::spawn_init(state_config, network, zebra_chain::block::Height::MAX, 3000)
-            .await?;
+        zebra_state::populated_state(blocks.clone(), network).await;
+
     let db = read_only_state_service.db();
 
     // use the tip as starting height
     let mut height = latest_chain_tip.best_tip_height().unwrap();
 
+    let mut transactions_found = 0;
+    let mut transactions_scanned = 0;
+    let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
         let sapling_tree_size = db
             .sapling_tree_by_hash_or_height(height.into())
@@ -239,7 +248,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
         let compact_block = block_to_compact(block, chain_metadata);
 
-        scan_block(
+        let res = scan_block(
             &zcash_primitives::consensus::MainNetwork,
             compact_block.clone(),
             &vks[..],
@@ -248,12 +257,23 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
         )
         .expect("should scan block successfully");
 
+        transactions_found += res.transactions().len();
+        transactions_scanned += compact_block.vtx.len();
+        blocks_scanned += 1;
+
         // scan backwards
         if height.is_min() {
             break;
         }
         height = height.previous()?;
     }
+
+    // make sure all blocks and transactions were scanned
+    assert_eq!(blocks_scanned, 11);
+    assert_eq!(transactions_scanned, 11);
+
+    // no relevant transactions should be found
+    assert_eq!(transactions_found, 0);
 
     Ok(())
 }
