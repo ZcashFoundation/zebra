@@ -12,7 +12,7 @@ use tower::{service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    orchard::AuthorizedAction,
+    orchard::{tx_version::TxVersion, AuthorizedAction},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
@@ -2830,10 +2830,13 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
 
 /// Given an Orchard action as a base, fill fields related to note encryption
 /// from the given test vector and returned the modified action.
-fn fill_action_with_note_encryption_test_vector(
-    action: &zebra_chain::orchard::Action,
+fn fill_action_with_note_encryption_test_vector<V: TxVersion>(
+    action: &zebra_chain::orchard::Action<V>,
     v: &zebra_test::vectors::TestVector,
-) -> zebra_chain::orchard::Action {
+) -> zebra_chain::orchard::Action<V>
+where
+    V::EncryptedNote: From<[u8; 580]>,
+{
     let mut action = action.clone();
     action.cv = v.cv_net.try_into().expect("test vector must be valid");
     action.cm_x = pallas::Base::from_repr(v.cmx).unwrap();

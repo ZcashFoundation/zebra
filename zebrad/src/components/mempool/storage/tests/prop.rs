@@ -9,13 +9,16 @@ use zebra_chain::{
     amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
-    orchard,
+    orchard::{
+        self,
+        tx_version::{self, TxVersion},
+    },
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
     sprout,
     transaction::{self, JoinSplitData, Transaction, UnminedTxId, VerifiedUnminedTx},
-    transparent, LedgerState,
+    transparent, tx_v5_and_v6, LedgerState,
 };
 
 use crate::components::mempool::{
@@ -567,7 +570,7 @@ impl SpendConflictTestInput {
                 }
 
                 // No JoinSplits
-                Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+                Transaction::V1 { .. } | tx_v5_and_v6!({ .. }) => {}
             }
         }
     }
@@ -631,10 +634,10 @@ impl SpendConflictTestInput {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
-                Transaction::V5 {
+                tx_v5_and_v6!({
                     sapling_shielded_data,
                     ..
-                } => {
+                }) => {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
@@ -704,10 +707,12 @@ impl SpendConflictTestInput {
 
         for transaction in [first, second] {
             match transaction {
-                Transaction::V5 {
+                tx_v5_and_v6! {
+                    {
                     orchard_shielded_data,
                     ..
-                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+                } => { Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts) }
+                }
 
                 // No Spends
                 Transaction::V1 { .. }
@@ -722,8 +727,8 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData>,
+    fn remove_orchard_actions_with_conflicts<V: TxVersion>(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData<V>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data.take() {
@@ -757,7 +762,7 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict>),
+    Orchard(Box<OrchardSpendConflict<tx_version::V5>>),
 }
 
 /// A conflict caused by spending the same UTXO.
@@ -782,8 +787,11 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
+struct OrchardSpendConflict<V: TxVersion + 'static>
+where
+    V::EncryptedNote: Arbitrary,
+{
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData<V>>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -920,7 +928,10 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     }
 }
 
-impl OrchardSpendConflict {
+impl<V: TxVersion + 'static> OrchardSpendConflict<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     /// Apply a Orchard spend conflict.
     ///
     /// Ensures that a transaction's `orchard_shielded_data` has a nullifier used to represent a
@@ -929,7 +940,7 @@ impl OrchardSpendConflict {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData>) {
+    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<V>>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;
