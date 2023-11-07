@@ -78,17 +78,17 @@ impl From<Option<NetworkParameters>> for TestnetParameters {
 }
 
 impl TestnetParameters {
-    /// Returns `network_id` in chain parameters, if any.
+    /// Returns `network_id` in network parameters, if any.
     pub fn network_id(self) -> Option<NetworkId> {
         self.0.and_then(NetworkParameters::network_id)
     }
 
-    /// Returns `default_port` in chain parameters, if any.
+    /// Returns `default_port` in network parameters, if any.
     pub fn default_port(self) -> Option<u16> {
         self.0.and_then(NetworkParameters::default_port)
     }
 
-    /// Returns `cache_name` in chain parameters, if any.
+    /// Returns `cache_name` in network parameters, if any.
     pub fn cache_name(self) -> Option<&'static str> {
         self.0.and_then(NetworkParameters::cache_name)
     }
@@ -98,13 +98,13 @@ impl TestnetParameters {
         self.0.and_then(NetworkParameters::genesis_hash)
     }
 
-    /// Returns `activation_heights` in chain parameters, if any.
+    /// Returns `activation_heights` in network parameters, if any.
     pub fn activation_heights(self) -> Option<&'static [(Height, NetworkUpgrade)]> {
         self.0.and_then(NetworkParameters::activation_heights)
     }
 }
 
-/// Configures chain parameters to use instead of default values.
+/// Configures network parameters to use instead of default values.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 pub struct NetworkParameters {
     network_id: Option<NetworkId>,
