@@ -27,13 +27,13 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::SemanticallyVerifiedBlockWithTrees,
+    request::{FinalizedBlock, Treestate},
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, SemanticallyVerifiedBlock,
+    BoxError,
 };
 
 // Doc-only items
@@ -436,9 +436,9 @@ impl DiskWriteBatch {
     pub fn prepare_shielded_transaction_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
+        finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
-        let SemanticallyVerifiedBlock { block, .. } = finalized;
+        let FinalizedBlock { block, .. } = finalized;
 
         // Index each transaction's shielded data
         for transaction in &block.transactions {
@@ -491,11 +491,18 @@ impl DiskWriteBatch {
     pub fn prepare_trees_batch(
         &mut self,
         zebra_db: &ZebraDb,
-        finalized: &SemanticallyVerifiedBlockWithTrees,
+        finalized: &FinalizedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
-        let height = finalized.verified.height;
-        let trees = finalized.treestate.note_commitment_trees.clone();
+        let FinalizedBlock {
+            height,
+            treestate:
+                Treestate {
+                    note_commitment_trees,
+                    history_tree,
+                },
+            ..
+        } = finalized;
 
         let prev_sprout_tree = prev_note_commitment_trees.as_ref().map_or_else(
             || zebra_db.sprout_tree_for_tip(),
@@ -511,29 +518,29 @@ impl DiskWriteBatch {
         );
 
         // Update the Sprout tree and store its anchor only if it has changed
-        if height.is_min() || prev_sprout_tree != trees.sprout {
-            self.update_sprout_tree(zebra_db, &trees.sprout)
+        if height.is_min() || prev_sprout_tree != note_commitment_trees.sprout {
+            self.update_sprout_tree(zebra_db, &note_commitment_trees.sprout)
         }
 
         // Store the Sapling tree, anchor, and any new subtrees only if they have changed
-        if height.is_min() || prev_sapling_tree != trees.sapling {
-            self.create_sapling_tree(zebra_db, &height, &trees.sapling);
+        if height.is_min() || prev_sapling_tree != note_commitment_trees.sapling {
+            self.create_sapling_tree(zebra_db, height, &note_commitment_trees.sapling);
 
-            if let Some(subtree) = trees.sapling_subtree {
+            if let Some(subtree) = note_commitment_trees.sapling_subtree {
                 self.insert_sapling_subtree(zebra_db, &subtree);
             }
         }
 
         // Store the Orchard tree, anchor, and any new subtrees only if they have changed
-        if height.is_min() || prev_orchard_tree != trees.orchard {
-            self.create_orchard_tree(zebra_db, &height, &trees.orchard);
+        if height.is_min() || prev_orchard_tree != note_commitment_trees.orchard {
+            self.create_orchard_tree(zebra_db, height, &note_commitment_trees.orchard);
 
-            if let Some(subtree) = trees.orchard_subtree {
+            if let Some(subtree) = note_commitment_trees.orchard_subtree {
                 self.insert_orchard_subtree(zebra_db, &subtree);
             }
         }
 
-        self.update_history_tree(zebra_db, &finalized.treestate.history_tree);
+        self.update_history_tree(zebra_db, history_tree);
 
         Ok(())
     }

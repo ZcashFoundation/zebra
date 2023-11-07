@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// An argument wrapper struct for note commitment trees.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NoteCommitmentTrees {
     /// The sprout note commitment tree.
     pub sprout: Arc<sprout::tree::NoteCommitmentTree>,

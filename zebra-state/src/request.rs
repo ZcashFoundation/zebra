@@ -224,6 +224,7 @@ pub struct ContextuallyVerifiedBlock {
 }
 
 /// Wraps note commitment trees and the history tree together.
+#[derive(Default)]
 pub struct Treestate {
     /// Note commitment trees.
     pub note_commitment_trees: NoteCommitmentTrees,
@@ -253,20 +254,6 @@ impl Treestate {
     }
 }
 
-/// Contains a block ready to be committed together with its associated
-/// treestate.
-///
-/// Zebra's non-finalized state passes this `struct` over to the finalized state
-/// when committing a block. The associated treestate is passed so that the
-/// finalized state does not have to retrieve the previous treestate from the
-/// database and recompute a new one.
-pub struct SemanticallyVerifiedBlockWithTrees {
-    /// A block ready to be committed.
-    pub verified: SemanticallyVerifiedBlock,
-    /// The tresstate associated with the block.
-    pub treestate: Treestate,
-}
-
 /// Contains a block ready to be committed.
 ///
 /// Zebra's state service passes this `enum` over to the finalized state
@@ -279,6 +266,54 @@ pub enum FinalizableBlock {
         contextually_verified: ContextuallyVerifiedBlock,
         treestate: Treestate,
     },
+}
+
+/// Contains a block with all its associated data that the finalized state can commit to its
+/// database.
+///
+/// Note that it's the constructor's responsibility to ensure that all data is valid and verified.
+pub struct FinalizedBlock {
+    /// The block to commit to the state.
+    pub(super) block: Arc<Block>,
+    /// The hash of the block.
+    pub(super) hash: block::Hash,
+    /// The height of the block.
+    pub(super) height: block::Height,
+    /// New transparent outputs created in this block, indexed by
+    /// [`OutPoint`](transparent::OutPoint).
+    pub(super) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    /// A precomputed list of the hashes of the transactions in this block, in the same order as
+    /// `block.transactions`.
+    pub(super) transaction_hashes: Arc<[transaction::Hash]>,
+    /// The tresstate associated with the block.
+    pub(super) treestate: Treestate,
+}
+
+impl FinalizedBlock {
+    /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
+    pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
+        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+    }
+
+    /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
+    pub fn from_contextually_verified(
+        block: ContextuallyVerifiedBlock,
+        treestate: Treestate,
+    ) -> Self {
+        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+    }
+
+    /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
+    fn from_semantically_verified(block: SemanticallyVerifiedBlock, treestate: Treestate) -> Self {
+        Self {
+            block: block.block,
+            hash: block.hash,
+            height: block.height,
+            new_outputs: block.new_outputs,
+            transaction_hashes: block.transaction_hashes,
+            treestate,
+        }
+    }
 }
 
 impl FinalizableBlock {
