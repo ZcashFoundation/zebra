@@ -218,7 +218,8 @@ impl Network {
 
     /// Return the network cache name.
     pub fn cache_name(&self) -> String {
-        self.with_testnet_parameters(NetworkParameters::cache_name)
+        self.testnet_parameters()
+            .cache_name()
             .map_or_else(|| self.lowercase_name(), ToString::to_string)
     }
 
@@ -233,14 +234,11 @@ impl Network {
     }
 
     /// Returns testnet parameters, if any.
-    pub fn with_testnet_parameters<T, F>(&self, f: F) -> Option<T>
-    where
-        F: FnOnce(NetworkParameters) -> Option<T>,
-    {
+    pub fn testnet_parameters(&self) -> TestnetParameters {
         if let Network::Testnet(testnet_parameters) = *self {
-            testnet_parameters.0.and_then(f)
+            testnet_parameters
         } else {
-            None
+            None.into()
         }
     }
 }
