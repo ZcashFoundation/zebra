@@ -273,7 +273,7 @@ impl NetworkUpgrade {
             Mainnet => mainnet_heights,
 
             // TODO: use params if available
-            Testnet(_) => testnet_heights,
+            Testnet(params) => params.activation_heights().unwrap_or(testnet_heights),
         }
         .iter()
         .cloned()
