@@ -441,6 +441,8 @@ impl Client {
 
         let result = match self.heartbeat_task.poll_unpin(cx) {
             Poll::Pending => {
+                // The heartbeat task returns `Pending` while it continues to run.
+                // But if it has dropped its receiver, it is shutting down, and we should also shut down.
                 if is_canceled {
                     self.set_task_exited_error(
                         "heartbeat",

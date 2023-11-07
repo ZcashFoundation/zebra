@@ -18,9 +18,11 @@ where
 {
     type Output = T;
 
-    /// Panics if the thread panicked.
-    /// If `panic_on_unexpected_termination` is true, and Zebra is not shutting down, also panics
-    /// if the thread exits.
+    /// # Panics
+    ///
+    /// - if the thread panicked.
+    /// - if the thread is cancelled, `panic_on_unexpected_termination` is true, and
+    ///   Zebra is not shutting down.
     ///
     /// Threads can't be cancelled except by using a panic, so there are no thread errors here.
     /// `panic_on_unexpected_termination` is
