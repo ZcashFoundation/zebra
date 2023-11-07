@@ -211,15 +211,11 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        let sapling_tree_size = db
-            .sapling_tree_by_hash_or_height(height.into())
-            .expect("should exist")
-            .count();
-
-        let previous_sapling_tree_size = if height.is_min() {
-            0
+        // TODO: fix this issue in zcash_client_backend
+        let sapling_tree_size = if height.is_min() {
+            1
         } else {
-            db.sapling_tree_by_hash_or_height(block.header.previous_block_hash.into())
+            db.sapling_tree_by_hash_or_height(height.into())
                 .expect("should exist")
                 .count()
         };
@@ -238,13 +234,19 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
                 .expect("position should fit in u32"),
         };
 
-        let block_metadata = BlockMetadata::from_parts(
-            height.previous()?.0.into(),
-            BlockHash(block.header.previous_block_hash.0),
-            previous_sapling_tree_size
-                .try_into()
-                .expect("should fit in u32"),
-        );
+        let block_metadata = if height.is_min() {
+            None
+        } else {
+            Some(BlockMetadata::from_parts(
+                height.previous()?.0.into(),
+                BlockHash(block.header.previous_block_hash.0),
+                db.sapling_tree_by_hash_or_height(block.header.previous_block_hash.into())
+                    .expect("should exist")
+                    .count()
+                    .try_into()
+                    .expect("should fit in u32"),
+            ))
+        };
 
         let compact_block = block_to_compact(block, chain_metadata);
 
@@ -253,7 +255,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
             compact_block.clone(),
             &vks[..],
             &[],
-            Some(&block_metadata),
+            block_metadata.as_ref(),
         )
         .expect("should scan block successfully");
 
