@@ -79,7 +79,7 @@ impl From<Option<NetworkParameters>> for TestnetParameters {
 
 impl TestnetParameters {
     /// Returns `network_id` in network parameters, if any.
-    pub fn network_id(self) -> Option<NetworkId> {
+    pub fn network_id(self) -> Option<[u8; 4]> {
         self.0.and_then(NetworkParameters::network_id)
     }
 
@@ -107,7 +107,7 @@ impl TestnetParameters {
 /// Configures network parameters to use instead of default values.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 pub struct NetworkParameters {
-    network_id: Option<NetworkId>,
+    network_id: Option<[u8; 4]>,
     default_port: Option<u16>,
     cache_name: Option<&'static str>,
     genesis_hash: Option<&'static str>,
@@ -115,7 +115,7 @@ pub struct NetworkParameters {
 }
 
 impl NetworkParameters {
-    fn network_id(self) -> Option<NetworkId> {
+    fn network_id(self) -> Option<[u8; 4]> {
         self.network_id
     }
     fn default_port(self) -> Option<u16> {

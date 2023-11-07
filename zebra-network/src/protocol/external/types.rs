@@ -29,7 +29,7 @@ impl From<Network> for Magic {
     fn from(network: Network) -> Self {
         match network {
             Network::Mainnet => magics::MAINNET,
-            Network::Testnet(_) => magics::TESTNET,
+            Network::Testnet(params) => params.network_id().map_or(magics::TESTNET, Magic),
         }
     }
 }
