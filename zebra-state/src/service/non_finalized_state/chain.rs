@@ -15,7 +15,7 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
     history_tree::HistoryTree,
-    orchard::{self, tx_version::TxVersion},
+    orchard::{self, TxVersion},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,

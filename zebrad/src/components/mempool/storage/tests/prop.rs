@@ -9,16 +9,13 @@ use zebra_chain::{
     amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
-    orchard::{
-        self,
-        tx_version::{self, TxVersion},
-    },
+    orchard::{self, TxV5, TxVersion},
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
     sprout,
     transaction::{self, JoinSplitData, Transaction, UnminedTxId, VerifiedUnminedTx},
-    transparent, tx_v5_and_v6, LedgerState,
+    transparent, LedgerState,
 };
 
 use crate::components::mempool::{
@@ -570,7 +567,10 @@ impl SpendConflictTestInput {
                 }
 
                 // No JoinSplits
-                Transaction::V1 { .. } | tx_v5_and_v6!({ .. }) => {}
+                Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 { .. } => {}
             }
         }
     }
@@ -634,10 +634,18 @@ impl SpendConflictTestInput {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
-                tx_v5_and_v6!({
+                Transaction::V5 {
                     sapling_shielded_data,
                     ..
-                }) => {
+                } => {
+                    Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
+                }
+
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    ..
+                } => {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
@@ -707,12 +715,16 @@ impl SpendConflictTestInput {
 
         for transaction in [first, second] {
             match transaction {
-                tx_v5_and_v6! {
-                    {
+                Transaction::V5 {
                     orchard_shielded_data,
                     ..
-                } => { Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts) }
-                }
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
+                    orchard_shielded_data,
+                    ..
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
                 // No Spends
                 Transaction::V1 { .. }
@@ -762,7 +774,7 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict<tx_version::V5>>),
+    Orchard(Box<OrchardSpendConflict<TxV5>>),
 }
 
 /// A conflict caused by spending the same UTXO.

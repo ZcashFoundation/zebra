@@ -16,7 +16,7 @@ categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
 
-default = ["tx-v6"]
+#default = ["tx-v6"]
 
 # Production features that activate extra functionality
 

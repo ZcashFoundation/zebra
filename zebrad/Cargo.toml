@@ -135,6 +135,9 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
 
+# Support for transaction version 6
+tx-v6 = ["zebra-chain/tx-v6", "zebra-consensus/tx-v6", "zebra-state/tx-v6"]
+
 # TODO: replace with environmental variables that skip the tests when not set (part of #2995)
 test_sync_to_mandatory_checkpoint_mainnet = []
 test_sync_to_mandatory_checkpoint_testnet = []

@@ -17,7 +17,7 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{tx_version, ShieldedData},
+    orchard::{ShieldedData, TxV5},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
@@ -40,7 +40,7 @@ fn generate_test_vectors() {
     let anchor_bytes = [0; 32];
     let note_value = 10;
 
-    let shielded_data: Vec<ShieldedData<tx_version::V5>> = (1..=4)
+    let shielded_data: Vec<ShieldedData<TxV5>> = (1..=4)
         .map(|num_recipients| {
             let mut builder = Builder::new(
                 Flags::from_parts(enable_spends, enable_outputs),
@@ -92,7 +92,9 @@ fn generate_test_vectors() {
                 binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature())
                     .try_into()
                     .unwrap(),
-                burn: None,
+
+                #[cfg(feature = "tx-v6")]
+                burn: Default::default(),
             }
         })
         .collect();
@@ -107,7 +109,7 @@ fn generate_test_vectors() {
 
 async fn verify_orchard_halo2_proofs<V>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<tx_version::V5>>,
+    shielded_data: Vec<ShieldedData<TxV5>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -140,7 +142,7 @@ async fn verify_generated_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<tx_version::V5>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<TxV5>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
@@ -169,7 +171,7 @@ async fn verify_generated_halo2_proofs() {
 
 async fn verify_invalid_orchard_halo2_proofs<V>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<tx_version::V5>>,
+    shielded_data: Vec<ShieldedData<TxV5>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -207,7 +209,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<tx_version::V5>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<TxV5>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()

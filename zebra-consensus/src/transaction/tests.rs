@@ -12,7 +12,7 @@ use tower::{service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    orchard::{tx_version::TxVersion, AuthorizedAction},
+    orchard::{AuthorizedAction, TxVersion},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,

@@ -16,8 +16,6 @@ categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 [features]
 
-default = ["tx-v6"]
-
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [
