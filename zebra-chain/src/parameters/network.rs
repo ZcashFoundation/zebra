@@ -59,7 +59,7 @@ pub enum Network {
     Testnet(#[serde(skip)] TestnetParameters),
 }
 
-/// Configures testnet chain parameters to use instead of default values.
+/// Configures testnet network parameters to use instead of default values.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 pub struct TestnetParameters(Option<NetworkParameters>);
 
@@ -93,7 +93,7 @@ impl TestnetParameters {
         self.0.and_then(NetworkParameters::cache_name)
     }
 
-    /// Returns `genesis_hash` in chain parameters, if any.
+    /// Returns `genesis_hash` in network parameters, if any.
     pub fn genesis_hash(self) -> Option<&'static str> {
         self.0.and_then(NetworkParameters::genesis_hash)
     }
