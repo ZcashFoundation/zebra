@@ -4019,6 +4019,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shardtree"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c19f96dde3a8693874f7e7c53d95616569b4009379a903789efbd448f4ea9cc7"
+dependencies = [
+ "bitflags 2.4.1",
+ "either",
+ "incrementalmerkletree",
+ "tracing",
+]
+
+[[package]]
 name = "shlex"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5414,6 +5426,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_client_backend"
+version = "0.10.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc33f71747a93d509f7e1c047961e359a271bdf4869cc07f7f65ee1ba7df8c2"
+dependencies = [
+ "base64 0.21.5",
+ "bech32",
+ "bls12_381",
+ "bs58",
+ "crossbeam-channel",
+ "group",
+ "hex",
+ "incrementalmerkletree",
+ "memuse",
+ "nom",
+ "orchard",
+ "percent-encoding",
+ "prost",
+ "rayon",
+ "secrecy",
+ "shardtree",
+ "subtle",
+ "time",
+ "tonic-build",
+ "tracing",
+ "which",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_note_encryption",
+ "zcash_primitives",
+]
+
+[[package]]
 name = "zcash_encoding"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5729,6 +5774,25 @@ dependencies = [
  "zebra-network",
  "zebra-node-services",
  "zebra-script",
+ "zebra-state",
+ "zebra-test",
+]
+
+[[package]]
+name = "zebra-scan"
+version = "0.1.0-alpha.0"
+dependencies = [
+ "bls12_381",
+ "color-eyre",
+ "ff",
+ "group",
+ "jubjub",
+ "rand 0.8.5",
+ "tokio",
+ "zcash_client_backend",
+ "zcash_note_encryption",
+ "zcash_primitives",
+ "zebra-chain",
  "zebra-state",
  "zebra-test",
 ]
