@@ -107,10 +107,20 @@ impl TestnetParameters {
 /// Configures network parameters to use instead of default values.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 pub struct NetworkParameters {
+    /// Used as the network magic, Zebra will reject messages and connections from peers
+    /// with a different network magic.
     network_id: Option<[u8; 4]>,
+
+    /// Default port for the network
     default_port: Option<u16>,
+
+    /// Network portion of zebra-state cache path
     cache_name: Option<&'static str>,
+
+    /// Genesis hash for this testnet
     genesis_hash: Option<&'static str>,
+
+    /// Activation heights for this testnet
     activation_heights: Option<&'static [(Height, NetworkUpgrade)]>,
 }
 
