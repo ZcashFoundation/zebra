@@ -224,6 +224,8 @@ pub struct ContextuallyVerifiedBlock {
 }
 
 /// Wraps note commitment trees and the history tree together.
+///
+/// The default instance represents the treestate that corresponds to the genesis block.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Treestate {
     /// Note commitment trees.
