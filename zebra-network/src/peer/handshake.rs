@@ -556,13 +556,14 @@ where
     }
 }
 
-/// Negotiate the Zcash network protocol version with the remote peer
-/// at `connected_addr`, using the connection `peer_conn`.
+/// Negotiate the Zcash network protocol version with the remote peer at `connected_addr`, using
+/// the connection `peer_conn`.
 ///
-/// We split `Handshake` into its components before calling this function,
-/// to avoid infectious `Sync` bounds on the returned future.
+/// We split `Handshake` into its components before calling this function, to avoid infectious
+/// `Sync` bounds on the returned future.
 ///
-/// Returns the [`VersionMessage`] sent by the remote peer.
+/// Returns the [`VersionMessage`] sent by the remote peer, and the [`Version`] negotiated with the
+/// remote peer, inside a [`ConnectionInfo`] struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -573,7 +574,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<VersionMessage, HandshakeError>
+) -> Result<Arc<ConnectionInfo>, HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -729,6 +730,7 @@ where
     // Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
+
     if remote.version < min_version {
         debug!(
             remote_ip = ?their_addr,
@@ -756,37 +758,44 @@ where
         );
 
         // Disconnect if peer is using an obsolete version.
-        Err(HandshakeError::ObsoleteVersion(remote.version))?;
-    } else {
-        let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
-
-        debug!(
-            remote_ip = ?their_addr,
-            ?remote.version,
-            ?negotiated_version,
-            ?min_version,
-            ?remote.user_agent,
-            "negotiated network protocol version with peer",
-        );
-
-        // the value is the number of connected handshakes, by peer IP and protocol version
-        metrics::counter!(
-            "zcash.net.peers.connected",
-            1,
-            "remote_ip" => their_addr.to_string(),
-            "remote_version" => remote.version.to_string(),
-            "negotiated_version" => negotiated_version.to_string(),
-            "min_version" => min_version.to_string(),
-            "user_agent" => remote.user_agent.clone(),
-        );
-
-        // the value is the remote version of the most recent connected handshake from each peer
-        metrics::gauge!(
-            "zcash.net.peers.version.connected",
-            remote.version.0 as f64,
-            "remote_ip" => their_addr.to_string(),
-        );
+        return Err(HandshakeError::ObsoleteVersion(remote.version));
     }
+
+    let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+
+    // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+    let connection_info = Arc::new(ConnectionInfo {
+        connected_addr: *connected_addr,
+        remote,
+        negotiated_version,
+    });
+
+    debug!(
+        remote_ip = ?their_addr,
+        ?connection_info.remote.version,
+        ?negotiated_version,
+        ?min_version,
+        ?connection_info.remote.user_agent,
+        "negotiated network protocol version with peer",
+    );
+
+    // the value is the number of connected handshakes, by peer IP and protocol version
+    metrics::counter!(
+        "zcash.net.peers.connected",
+        1,
+        "remote_ip" => their_addr.to_string(),
+        "remote_version" => connection_info.remote.version.to_string(),
+        "negotiated_version" => negotiated_version.to_string(),
+        "min_version" => min_version.to_string(),
+        "user_agent" => connection_info.remote.user_agent.clone(),
+    );
+
+    // the value is the remote version of the most recent connected handshake from each peer
+    metrics::gauge!(
+        "zcash.net.peers.version.connected",
+        connection_info.remote.version.0 as f64,
+        "remote_ip" => their_addr.to_string(),
+    );
 
     peer_conn.send(Message::Verack).await?;
 
@@ -812,7 +821,7 @@ where
         }
     }
 
-    Ok(remote)
+    Ok(connection_info)
 }
 
 /// A handshake request.
@@ -894,7 +903,7 @@ where
                     .finish(),
             );
 
-            let remote = negotiate_version(
+            let connection_info = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -906,8 +915,8 @@ where
             )
             .await?;
 
-            let remote_canonical_addr = remote.address_from.addr();
-            let remote_services = remote.services;
+            let remote_canonical_addr = connection_info.remote.address_from.addr();
+            let remote_services = connection_info.remote.services;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -929,25 +938,15 @@ where
                 let _ = address_book_updater.send(alt_addr).await;
             }
 
-            // The handshake succeeded: update the peer status from AttemptPending to Responded
+            // The handshake succeeded: update the peer status from AttemptPending to Responded,
+            // and send initial connection info.
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
-                    .send(MetaAddr::new_responded(book_addr, &remote_services))
+                    .send(MetaAddr::new_connected(book_addr, &remote_services))
                     .await;
             }
-
-            // Set the connection's version to the minimum of the received version or our own.
-            let negotiated_version =
-                std::cmp::min(remote.version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
-
-            // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
-            let connection_info = Arc::new(ConnectionInfo {
-                connected_addr,
-                remote,
-                negotiated_version,
-            });
 
             // Reconfigure the codec to use the negotiated version.
             //
@@ -955,7 +954,7 @@ where
             // Since we don't know that here, another way might be to release the tcp
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
             let bare_codec = peer_conn.codec_mut();
-            bare_codec.reconfigure_version(negotiated_version);
+            bare_codec.reconfigure_version(connection_info.negotiated_version);
 
             debug!("constructing client, spawning server");
 
@@ -1075,7 +1074,6 @@ where
             let heartbeat_task = tokio::spawn(
                 send_periodic_heartbeats_with_shutdown_handle(
                     connected_addr,
-                    remote_services,
                     shutdown_rx,
                     server_tx.clone(),
                     address_book_updater.clone(),
@@ -1213,7 +1211,6 @@ pub(crate) async fn register_inventory_status(
 /// Returning from this function terminates the connection's heartbeat task.
 async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
@@ -1222,7 +1219,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 
     let heartbeat_run_loop = send_periodic_heartbeats_run_loop(
         connected_addr,
-        remote_services,
         server_tx,
         heartbeat_ts_collector.clone(),
     );
@@ -1246,7 +1242,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientCancelledHeartbeatTask,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1256,7 +1251,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientDropped,
                 &heartbeat_ts_collector,
                 &connected_addr,
-                &remote_services,
             )
             .await
         }
@@ -1275,7 +1269,6 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 /// See `send_periodic_heartbeats_with_shutdown_handle` for details.
 async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
-    remote_services: PeerServices,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError> {
@@ -1294,13 +1287,7 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(
-            heartbeat,
-            &heartbeat_ts_collector,
-            &connected_addr,
-            &remote_services,
-        )
-        .await?;
+        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
         // # Security
         //
@@ -1312,7 +1299,7 @@ async fn send_periodic_heartbeats_run_loop(
             // the collector doesn't depend on network activity,
             // so this await should not hang
             let _ = heartbeat_ts_collector
-                .send(MetaAddr::new_responded(book_addr, &remote_services))
+                .send(MetaAddr::new_responded(book_addr))
                 .await;
         }
     }
@@ -1375,29 +1362,16 @@ async fn heartbeat_timeout<F, T>(
     fut: F,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, BoxError>
 where
     F: Future<Output = Result<T, BoxError>>,
 {
     let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
-            handle_heartbeat_error(
-                inner_result,
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
         }
         Err(elapsed) => {
-            handle_heartbeat_error(
-                Err(elapsed),
-                address_book_updater,
-                connected_addr,
-                remote_services,
-            )
-            .await?
+            handle_heartbeat_error(Err(elapsed), address_book_updater, connected_addr).await?
         }
     };
 
@@ -1409,7 +1383,6 @@ async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<T, E>
 where
     E: std::fmt::Debug,
@@ -1427,7 +1400,7 @@ where
             // - after the first error or shutdown, the peer is disconnected
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 let _ = address_book_updater
-                    .send(MetaAddr::new_errored(book_addr, *remote_services))
+                    .send(MetaAddr::new_errored(book_addr, None))
                     .await;
             }
             Err(err)
@@ -1440,13 +1413,12 @@ async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-    remote_services: &PeerServices,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
 
     if let Some(book_addr) = connected_addr.get_address_book_addr() {
         let _ = address_book_updater
-            .send(MetaAddr::new_shutdown(book_addr, *remote_services))
+            .send(MetaAddr::new_shutdown(book_addr))
             .await;
     }
 

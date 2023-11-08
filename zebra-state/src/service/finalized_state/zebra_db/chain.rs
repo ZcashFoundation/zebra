@@ -19,12 +19,13 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, SemanticallyVerifiedBlock,
+    BoxError,
 };
 
 impl ZebraDb {
@@ -128,13 +129,13 @@ impl DiskWriteBatch {
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
+        finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let SemanticallyVerifiedBlock { block, .. } = finalized;
+        let FinalizedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);

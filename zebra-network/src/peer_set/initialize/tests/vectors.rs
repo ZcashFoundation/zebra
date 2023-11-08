@@ -24,7 +24,6 @@ use futures::{channel::mpsc, FutureExt, StreamExt};
 use indexmap::IndexSet;
 use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
 use tower::{service_fn, Layer, Service, ServiceExt};
-use tracing::Span;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 use zebra_test::net::random_known_port;
@@ -1517,13 +1516,8 @@ where
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
 
-    // Manually initialize an address book without a timestamp tracker.
-    let mut address_book = AddressBook::new(
-        config.listen_addr,
-        config.network,
-        config.max_connections_per_ip,
-        Span::current(),
-    );
+    let (address_book, address_book_updater, _address_metrics, _address_book_updater_guard) =
+        AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -1540,7 +1534,10 @@ where
             .new_gossiped_change()
             .expect("created MetaAddr contains enough information to represent a gossiped address");
 
-        address_book.update(addr);
+        address_book
+            .lock()
+            .expect("panic in previous thread while accessing the address book")
+            .update(addr);
     }
 
     // Create a fake peer set.
@@ -1554,8 +1551,6 @@ where
 
         Ok(rsp)
     });
-
-    let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
     // Make the channels large enough to hold all the peers.
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_peers);
@@ -1581,6 +1576,7 @@ where
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
+        address_book_updater,
     );
     let crawl_task_handle = tokio::spawn(crawl_fut);
 

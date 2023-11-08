@@ -7,7 +7,7 @@ changing the config.
 
 The configuration format is the TOML encoding of the internal config
 structure, and documentation for all of the config options can be found
-[here](https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html).
+[here](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html).
 
 - `zebrad start` starts a full node.
 

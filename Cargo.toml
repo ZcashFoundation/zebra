@@ -18,6 +18,13 @@ members = [
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
 resolver = "2"
 
+# `cargo release` settings
+
+[workspace.metadata.release]
+
+# We always do releases from the main branch
+allow-branch = ["main"]
+
 # Compilation settings
 
 [profile.dev]

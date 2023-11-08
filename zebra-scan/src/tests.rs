@@ -72,21 +72,23 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
     let mut transactions_found = 0;
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
+    // TODO: Accessing the state database directly is ok in the tests, but not in production code.
+    // Use `Request::Block` if the code is copied to production.
     while let Some(block) = db.block(height.into()) {
         // We fake the sapling tree size to 1 because we are not in Sapling heights.
         let sapling_tree_size = 1;
         let orchard_tree_size = db
             .orchard_tree_by_hash_or_height(height.into())
-            .expect("should exist")
+            .expect("each state block must have a sapling tree")
             .count();
 
         let chain_metadata = ChainMetadata {
             sapling_commitment_tree_size: sapling_tree_size
                 .try_into()
-                .expect("position should fit in u32"),
+                .expect("sapling position is limited to u32::MAX"),
             orchard_commitment_tree_size: orchard_tree_size
                 .try_into()
-                .expect("position should fit in u32"),
+                .expect("orchard position is limited to u32::MAX"),
         };
 
         let compact_block = block_to_compact(block, chain_metadata);

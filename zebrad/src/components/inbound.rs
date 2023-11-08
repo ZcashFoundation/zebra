@@ -9,7 +9,7 @@ use std::{
     collections::HashSet,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, TryLockError},
     task::{Context, Poll},
     time::Duration,
 };
@@ -278,7 +278,11 @@ impl Service<zn::Request> for Inbound {
                     }
                 }
                 Err(TryRecvError::Empty) => {
-                    // There's no setup data yet, so keep waiting for it
+                    // There's no setup data yet, so keep waiting for it.
+                    //
+                    // We could use Future::poll() to get a waker and return Poll::Pending here.
+                    // But we want to drop excess requests during startup instead. Otherwise,
+                    // the inbound service gets overloaded, and starts disconnecting peers.
                     result = Ok(());
                     Setup::Pending {
                         full_verify_concurrency_limit,
@@ -307,6 +311,11 @@ impl Service<zn::Request> for Inbound {
                 mempool,
                 state,
             } => {
+                // # Correctness
+                //
+                // Clear the stream but ignore the final Pending return value.
+                // If we returned Pending here, and there were no waiting block downloads,
+                // then inbound requests would wait for the next block download, and hang forever.
                 while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
 
                 result = Ok(());
@@ -366,20 +375,35 @@ impl Service<zn::Request> for Inbound {
                 //
                 // # Correctness
                 //
-                // Briefly hold the address book threaded mutex while
-                // cloning the address book. Then sanitize in the future,
-                // after releasing the lock.
-                let peers = address_book.lock().unwrap().clone();
+                // If the address book is busy, try again inside the future. If it can't be locked
+                // twice, ignore the request.
+                let address_book = address_book.clone();
+
+                let get_peers = move || match address_book.try_lock() {
+                    Ok(address_book) => Some(address_book.clone()),
+                    Err(TryLockError::WouldBlock) => None,
+                    Err(TryLockError::Poisoned(_)) => panic!("previous thread panicked while holding the address book lock"),
+                };
+
+                let peers = get_peers();
 
                 async move {
-                    // Correctness: get the current time after acquiring the address book lock.
+                    // Correctness: get the current time inside the future.
                     //
-                    // This time is used to filter outdated peers, so it doesn't really matter
+                    // This time is used to filter outdated peers, so it doesn't matter much
                     // if we get it when the future is created, or when it starts running.
                     let now = Utc::now();
 
+                    // If we didn't get the peers when the future was created, wait for other tasks
+                    // to run, then try again when the future first runs.
+                    if peers.is_none() {
+                        tokio::task::yield_now().await;
+                    }
+                    let peers = peers.or_else(get_peers);
+                    let is_busy = peers.is_none();
+
                     // Send a sanitized response
-                    let mut peers = peers.sanitized(now);
+                    let mut peers = peers.map_or_else(Vec::new, |peers| peers.sanitized(now));
 
                     // Truncate the list
                     let address_limit = div_ceil(peers.len(), ADDR_RESPONSE_LIMIT_DENOMINATOR);
@@ -387,8 +411,20 @@ impl Service<zn::Request> for Inbound {
                     peers.truncate(address_limit);
 
                     if peers.is_empty() {
-                        // We don't know if the peer response will be empty until we've sanitized them.
-                        debug!("ignoring `Peers` request from remote peer because our address book is empty");
+                        // Sometimes we don't know if the peer response will be empty until we've
+                        // sanitized them.
+                        if is_busy {
+                            info!(
+                                "ignoring `Peers` request from remote peer because our address \
+                                 book is busy"
+                            );
+                        } else {
+                            debug!(
+                                "ignoring `Peers` request from remote peer because our address \
+                                 book has no available peers"
+                            );
+                        }
+
                         Ok(zn::Response::Nil)
                     } else {
                         Ok(zn::Response::Peers(peers))

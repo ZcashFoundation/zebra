@@ -80,7 +80,8 @@ skip-tree = [
 
     # ECC crates
 
-    # (no duplicate dependencies)
+    # wait for hdwallet to upgrade
+    { name = "ring", version = "=0.16.20" },
 
     # zebra-utils dependencies
 
