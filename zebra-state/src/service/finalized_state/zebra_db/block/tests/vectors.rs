@@ -26,6 +26,7 @@ use zebra_chain::{
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
+    request::{FinalizedBlock, Treestate},
     service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb},
     CheckpointVerifiedBlock, Config,
 };
@@ -108,7 +109,7 @@ fn test_block_db_round_trip_with(
 
         // Now, use the database
         let original_block = Arc::new(original_block);
-        let finalized = if original_block.coinbase_height().is_some() {
+        let checkpoint_verified = if original_block.coinbase_height().is_some() {
             original_block.clone().into()
         } else {
             // Fake a zero height
@@ -118,6 +119,10 @@ fn test_block_db_round_trip_with(
                 Height(0),
             )
         };
+
+        let dummy_treestate = Treestate::default();
+        let finalized =
+            FinalizedBlock::from_checkpoint_verified(checkpoint_verified, dummy_treestate);
 
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();

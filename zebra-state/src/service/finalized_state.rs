@@ -23,7 +23,7 @@ use std::{
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
 
 use crate::{
-    request::{FinalizableBlock, SemanticallyVerifiedBlockWithTrees, Treestate},
+    request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
@@ -305,17 +305,15 @@ impl FinalizedState {
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
                 history_tree_mut.push(self.network(), block.clone(), sapling_root, orchard_root)?;
+                let treestate = Treestate {
+                    note_commitment_trees,
+                    history_tree,
+                };
 
                 (
                     checkpoint_verified.height,
                     checkpoint_verified.hash,
-                    SemanticallyVerifiedBlockWithTrees {
-                        verified: checkpoint_verified.0,
-                        treestate: Treestate {
-                            note_commitment_trees,
-                            history_tree,
-                        },
-                    },
+                    FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
                     Some(prev_note_commitment_trees),
                 )
             }
@@ -325,10 +323,7 @@ impl FinalizedState {
             } => (
                 contextually_verified.height,
                 contextually_verified.hash,
-                SemanticallyVerifiedBlockWithTrees {
-                    verified: contextually_verified.into(),
-                    treestate,
-                },
+                FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
                 prev_note_commitment_trees,
             ),
         };
@@ -339,7 +334,7 @@ impl FinalizedState {
         // Assert that callers (including unit tests) get the chain order correct
         if self.db.is_empty() {
             assert_eq!(
-                committed_tip_hash, finalized.verified.block.header.previous_block_hash,
+                committed_tip_hash, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {source}",
             );
             assert_eq!(
@@ -355,13 +350,13 @@ impl FinalizedState {
             );
 
             assert_eq!(
-                committed_tip_hash, finalized.verified.block.header.previous_block_hash,
+                committed_tip_hash, finalized.block.header.previous_block_hash,
                 "committed block must be a child of the finalized tip, source: {source}",
             );
         }
 
         #[cfg(feature = "elasticsearch")]
-        let finalized_block = finalized.verified.block.clone();
+        let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
         let result =
@@ -371,7 +366,7 @@ impl FinalizedState {
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
             #[cfg(feature = "elasticsearch")]
-            self.elasticsearch(&finalized_block);
+            self.elasticsearch(&finalized_inner_block);
 
             // TODO: move the stop height check to the syncer (#3442)
             if self.is_at_stop_height(height) {

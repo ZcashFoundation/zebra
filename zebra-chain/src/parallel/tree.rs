@@ -11,7 +11,9 @@ use crate::{
 };
 
 /// An argument wrapper struct for note commitment trees.
-#[derive(Clone, Debug)]
+///
+/// The default instance represents the trees and subtrees that correspond to the genesis block.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NoteCommitmentTrees {
     /// The sprout note commitment tree.
     pub sprout: Arc<sprout::tree::NoteCommitmentTree>,
