@@ -75,9 +75,6 @@ skip-tree = [
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
 
-    # wait for jsonrpc-http-server to upgrade
-    { name = "redox_syscall", version = "=0.2.16" },
-
     # ECC crates
 
     # wait for hdwallet to upgrade
