@@ -190,7 +190,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let ivk = fvk.vk.ivk();
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
 
-    let network = zebra_chain::parameters::Network::default();
+    let network = zebra_chain::parameters::Network::Mainnet;
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -211,27 +211,28 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        // TODO: fix this issue in zcash_client_backend
+        // zcash_client_backend doesn't support scanning the genesis block, but that's ok, because
+        // Sapling activates at height 419,200. So we'll never scan these blocks in production code.
         let sapling_tree_size = if height.is_min() {
             1
         } else {
             db.sapling_tree_by_hash_or_height(height.into())
-                .expect("should exist")
+                .expect("each state block must have a sapling tree")
                 .count()
         };
 
         let orchard_tree_size = db
             .orchard_tree_by_hash_or_height(height.into())
-            .expect("should exist")
+            .expect("each state block must have a orchard tree")
             .count();
 
         let chain_metadata = ChainMetadata {
             sapling_commitment_tree_size: sapling_tree_size
                 .try_into()
-                .expect("position should fit in u32"),
+                .expect("sapling position is limited to u32::MAX"),
             orchard_commitment_tree_size: orchard_tree_size
                 .try_into()
-                .expect("position should fit in u32"),
+                .expect("orchard position is limited to u32::MAX"),
         };
 
         let block_metadata = if height.is_min() {
@@ -241,10 +242,10 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
                 height.previous()?.0.into(),
                 BlockHash(block.header.previous_block_hash.0),
                 db.sapling_tree_by_hash_or_height(block.header.previous_block_hash.into())
-                    .expect("should exist")
+                    .expect("each state block must have a sapling tree")
                     .count()
                     .try_into()
-                    .expect("should fit in u32"),
+                    .expect("sapling position is limited to u32::MAX"),
             ))
         };
 
@@ -257,7 +258,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
             &[],
             block_metadata.as_ref(),
         )
-        .expect("should scan block successfully");
+        .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
