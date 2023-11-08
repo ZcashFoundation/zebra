@@ -70,6 +70,8 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
     let mut transactions_found = 0;
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
+    // TODO: Accessing the state database directly is ok in the tests, but not in production code.
+    // Use `Request::Block` if the code is copied to production.
     while let Some(block) = db.block(height.into()) {
         // We fake the sapling tree size to 1 because we are not in Sapling heights.
         let sapling_tree_size = 1;
