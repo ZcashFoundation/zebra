@@ -1,0 +1,39 @@
+[package]
+name = "zebra-scan"
+version = "0.1.0-alpha.0"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "Shielded transaction scanner for the Zcash blockchain"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
+edition = "2021"
+
+readme = "../README.md"
+homepage = "https://zfnd.org/zebra/"
+# crates.io is limited to 5 keywords and categories
+keywords = ["zebra", "zcash"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["cryptography::cryptocurrencies"]
+
+[features]
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+[dependencies]
+
+[dev-dependencies]
+
+zcash_client_backend = "0.10.0-rc.1"
+zcash_primitives = "0.13.0-rc.1"
+zcash_note_encryption = "0.4.0"
+
+color-eyre = { version = "0.6.2" }
+rand = "0.8.5"
+bls12_381 = "0.8.0"
+jubjub = "0.10.0"
+ff = "0.13.0"
+group = "0.13.0"
+tokio = { version = "1.33.0", features = ["test-util"] }
+
+zebra-state = { path = "../zebra-state" }
+zebra-chain = { path = "../zebra-chain" }
+zebra-test = { path = "../zebra-test" }
