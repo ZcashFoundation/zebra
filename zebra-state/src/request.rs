@@ -224,7 +224,7 @@ pub struct ContextuallyVerifiedBlock {
 }
 
 /// Wraps note commitment trees and the history tree together.
-#[derive(Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Treestate {
     /// Note commitment trees.
     pub note_commitment_trees: NoteCommitmentTrees,
