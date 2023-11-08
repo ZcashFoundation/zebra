@@ -2505,7 +2505,7 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 #[ignore]
 #[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
-    common::checkpoints::run(Testnet).await
+    common::checkpoints::run(Testnet(None.into())).await
 }
 
 /// Check that new states are created with the current state format version,

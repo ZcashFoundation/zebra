@@ -82,7 +82,7 @@ pub async fn run(network: Network) -> Result<()> {
     // Wait for the upgrade if needed.
     // Currently we only write an image for testnet, which is quick.
     // (Mainnet would need to wait at the end of this function, if the upgrade is long.)
-    if network == Testnet {
+    if network.is_testnet() {
         let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
         // Before we write a cached state image, wait for a database upgrade.
