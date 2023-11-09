@@ -35,9 +35,9 @@ async fn test_rpc_response_data() {
 
     tokio::join!(
         test_rpc_response_data_for_network(Mainnet),
-        test_rpc_response_data_for_network(Testnet(None.into())),
+        test_rpc_response_data_for_network(Network::new_testnet()),
         test_mocked_rpc_response_data_for_network(Mainnet),
-        test_mocked_rpc_response_data_for_network(Testnet(None.into())),
+        test_mocked_rpc_response_data_for_network(Network::new_testnet()),
     );
 }
 

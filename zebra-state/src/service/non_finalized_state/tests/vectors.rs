@@ -135,7 +135,7 @@ fn best_chain_wins() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     best_chain_wins_for_network(Network::Mainnet)?;
-    best_chain_wins_for_network(Network::Testnet(None.into()))?;
+    best_chain_wins_for_network(Network::new_testnet())?;
 
     Ok(())
 }
@@ -180,7 +180,7 @@ fn finalize_pops_from_best_chain() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     finalize_pops_from_best_chain_for_network(Network::Mainnet)?;
-    finalize_pops_from_best_chain_for_network(Network::Testnet(None.into()))?;
+    finalize_pops_from_best_chain_for_network(Network::new_testnet())?;
 
     Ok(())
 }
@@ -391,7 +391,7 @@ fn equal_length_goes_to_more_work() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     equal_length_goes_to_more_work_for_network(Network::Mainnet)?;
-    equal_length_goes_to_more_work_for_network(Network::Testnet(None.into()))?;
+    equal_length_goes_to_more_work_for_network(Network::new_testnet())?;
 
     Ok(())
 }
@@ -437,10 +437,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 #[test]
 fn history_tree_is_updated() -> Result<()> {
     history_tree_is_updated_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    history_tree_is_updated_for_network_upgrade(
-        Network::Testnet(None.into()),
-        NetworkUpgrade::Heartwood,
-    )?;
+    history_tree_is_updated_for_network_upgrade(Network::new_testnet(), NetworkUpgrade::Heartwood)?;
     // TODO: we can't test other upgrades until we have a method for creating a FinalizedState
     // with a HistoryTree.
     Ok(())

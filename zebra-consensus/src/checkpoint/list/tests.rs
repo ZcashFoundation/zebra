@@ -247,7 +247,7 @@ fn checkpoint_list_hard_coded_mandatory_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_mandatory_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_mandatory(Testnet(None.into()))
+    checkpoint_list_hard_coded_mandatory(Network::new_testnet())
 }
 
 /// Check that the hard-coded lists cover the mandatory checkpoint
@@ -273,7 +273,7 @@ fn checkpoint_list_hard_coded_max_gap_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_max_gap(Testnet(None.into()))
+    checkpoint_list_hard_coded_max_gap(Network::new_testnet())
 }
 
 /// Check that the hard-coded checkpoints are within [`MAX_CHECKPOINT_HEIGHT_GAP`],

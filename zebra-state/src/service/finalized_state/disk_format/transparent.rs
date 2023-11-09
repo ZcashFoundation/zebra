@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
-    parameters::Network::*,
+    parameters::Network::{self, *},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::{self, Address::*},
 };
@@ -531,7 +531,7 @@ impl FromDisk for transparent::Address {
         let network = if address_variant < 2 {
             Mainnet
         } else {
-            Testnet(None.into())
+            Network::new_testnet()
         };
 
         if address_variant % 2 == 0 {

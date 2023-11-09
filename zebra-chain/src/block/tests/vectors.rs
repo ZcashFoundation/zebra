@@ -202,7 +202,7 @@ fn block_test_vectors_height_mainnet() {
 fn block_test_vectors_height_testnet() {
     let _init_guard = zebra_test::init();
 
-    block_test_vectors_height(Testnet(None.into()));
+    block_test_vectors_height(Network::new_testnet());
 }
 
 /// Test that the block test vector indexes match the heights in the block data,
@@ -254,7 +254,7 @@ fn block_commitment_mainnet() {
 fn block_commitment_testnet() {
     let _init_guard = zebra_test::init();
 
-    block_commitment(Testnet(None.into()));
+    block_commitment(Network::new_testnet());
 }
 
 /// Check that the block commitment field parses without errors.

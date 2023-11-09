@@ -27,7 +27,7 @@ async fn connect_isolated_sends_anonymised_version_message_tcp() {
     }
 
     connect_isolated_sends_anonymised_version_message_tcp_net(Mainnet).await;
-    connect_isolated_sends_anonymised_version_message_tcp_net(Testnet(None.into())).await;
+    connect_isolated_sends_anonymised_version_message_tcp_net(Network::new_testnet()).await;
 }
 
 async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Network) {
@@ -82,7 +82,7 @@ async fn connect_isolated_sends_anonymised_version_message_mem() {
     let _init_guard = zebra_test::init();
 
     connect_isolated_sends_anonymised_version_message_mem_net(Mainnet).await;
-    connect_isolated_sends_anonymised_version_message_mem_net(Testnet(None.into())).await;
+    connect_isolated_sends_anonymised_version_message_mem_net(Network::new_testnet()).await;
 }
 
 async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Network) {
