@@ -80,27 +80,27 @@ impl From<Option<NetworkParameters>> for TestnetParameters {
 impl TestnetParameters {
     /// Returns `network_id` in network parameters, if any.
     pub fn network_id(self) -> Option<[u8; 4]> {
-        self.0.and_then(NetworkParameters::network_id)
+        self.0?.network_id()
     }
 
     /// Returns `default_port` in network parameters, if any.
     pub fn default_port(self) -> Option<u16> {
-        self.0.and_then(NetworkParameters::default_port)
+        self.0?.default_port()
     }
 
     /// Returns `cache_name` in network parameters, if any.
     pub fn cache_name(self) -> Option<&'static str> {
-        self.0.and_then(NetworkParameters::cache_name)
+        self.0?.cache_name()
     }
 
     /// Returns `genesis_hash` in network parameters, if any.
     pub fn genesis_hash(self) -> Option<&'static str> {
-        self.0.and_then(NetworkParameters::genesis_hash)
+        self.0?.genesis_hash()
     }
 
     /// Returns `activation_heights` in network parameters, if any.
     pub fn activation_heights(self) -> Option<&'static [(Height, NetworkUpgrade)]> {
-        self.0.and_then(NetworkParameters::activation_heights)
+        self.0?.activation_heights()
     }
 }
 
