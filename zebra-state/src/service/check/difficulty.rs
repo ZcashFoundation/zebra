@@ -184,7 +184,7 @@ impl AdjustedDifficulty {
             self.relevant_times[0],
         ) {
             assert!(
-                self.network.is_testnet(),
+                self.network.is_a_test_network(),
                 "invalid network: the minimum difficulty rule only applies on testnet"
             );
             ExpandedDifficulty::target_difficulty_limit(self.network).to_compact()

@@ -239,7 +239,7 @@ impl Network {
     }
 
     /// Returns `true` if this network is a testing network.
-    pub fn is_testnet(&self) -> bool {
+    pub fn is_a_test_network(&self) -> bool {
         matches!(*self, Network::Testnet(_))
     }
 
