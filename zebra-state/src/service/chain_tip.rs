@@ -20,7 +20,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver,
+    request::ContextuallyVerifiedBlock,
+    service::{non_finalized_state::NonFinalizedState, watch_receiver::WatchReceiver},
     CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
 };
 
@@ -147,6 +148,7 @@ impl ChainTipSender {
     #[instrument(skip(initial_tip), fields(new_height, new_hash))]
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
+        non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
         network: Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
         let initial_tip = initial_tip.into();
@@ -160,7 +162,7 @@ impl ChainTipSender {
         };
 
         let current = LatestChainTip::new(receiver);
-        let change = ChainTipChange::new(current.clone(), network);
+        let change = ChainTipChange::new(current.clone(), non_finalized_state_receiver, network);
 
         sender.update(initial_tip);
 
@@ -424,6 +426,9 @@ pub struct ChainTipChange {
     /// The receiver for the current chain tip's data.
     latest_chain_tip: LatestChainTip,
 
+    /// The receiver for the latest non finalized state.
+    non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+
     /// The most recent [`block::Hash`] provided by this instance.
     ///
     /// ## Note
@@ -584,9 +589,14 @@ impl ChainTipChange {
     }
 
     /// Create a new [`ChainTipChange`] from a [`LatestChainTip`] receiver and [`Network`].
-    fn new(latest_chain_tip: LatestChainTip, network: Network) -> Self {
+    fn new(
+        latest_chain_tip: LatestChainTip,
+        non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+        network: Network,
+    ) -> Self {
         Self {
             latest_chain_tip,
+            non_finalized_state_receiver,
             last_change_hash: None,
             network,
         }
@@ -634,6 +644,8 @@ impl Clone for ChainTipChange {
     fn clone(&self) -> Self {
         Self {
             latest_chain_tip: self.latest_chain_tip.clone(),
+
+            non_finalized_state_receiver: self.non_finalized_state_receiver.clone(),
 
             // clear the previous change hash, so the first action is a reset
             last_change_hash: None,

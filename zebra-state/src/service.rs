@@ -347,13 +347,14 @@ impl StateService {
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
 
-        let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
-            ChainTipSender::new(initial_tip, network);
-
         let non_finalized_state = NonFinalizedState::new(network);
 
         let (non_finalized_state_sender, non_finalized_state_receiver) =
             watch::channel(NonFinalizedState::new(finalized_state.network()));
+
+        let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
+        let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
+            ChainTipSender::new(initial_tip, non_finalized_state_receiver.clone(), network);
 
         // Security: The number of blocks in these channels is limited by
         //           the syncer and inbound lookahead limits.
@@ -829,12 +830,12 @@ impl ReadStateService {
     pub(crate) fn new(
         finalized_state: &FinalizedState,
         block_write_task: Arc<std::thread::JoinHandle<()>>,
-        non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
+        non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
-            non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
+            non_finalized_state_receiver,
             block_write_task: Some(block_write_task),
         };
 
