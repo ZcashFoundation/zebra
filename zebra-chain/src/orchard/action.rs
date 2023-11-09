@@ -11,7 +11,7 @@ use super::{
     commitment::{self, ValueCommitment},
     keys,
     note::{self, Nullifier},
-    tx_version::TxVersion,
+    TxVersion,
 };
 
 /// An Action description, as described in the [Zcash specification §7.3][actiondesc].

@@ -41,7 +41,7 @@ pub use unmined::{
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block,
-    orchard::{self, tx_version},
+    orchard::{self, TxV5},
     parameters::NetworkUpgrade,
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling, sprout,
@@ -53,16 +53,19 @@ use crate::{
 };
 
 #[cfg(feature = "tx-v6")]
+use crate::orchard::TxV6;
+
+#[cfg(feature = "tx-v6")]
 macro_rules! tx_v5_and_v6 {
-    ($body:tt) => {
-        Transaction::V5 $body | Transaction::V6 $body
+    ($destruct:tt) => {
+        Transaction::V5 $destruct | Transaction::V6 $destruct
     };
 }
 
 #[cfg(not(feature = "tx-v6"))]
 macro_rules! tx_v5_and_v6 {
-    ($body:tt) => {
-        Transaction::V5 $body
+    ($destruct:tt) => {
+        Transaction::V5 $destruct
     };
 }
 
@@ -155,7 +158,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData<tx_version::V5>>,
+        orchard_shielded_data: Option<orchard::ShieldedData<TxV5>>,
     },
     /// A `version = 6` transaction , which supports all V5 features and also ZSA features (burn and issuance).
     #[cfg(feature = "tx-v6")]
@@ -176,7 +179,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The ZSA orchard shielded data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData<tx_version::V6>>,
+        orchard_shielded_data: Option<orchard::ShieldedData<TxV6>>,
         /// The ZSA issuance data for this transaction, if any.
         orchard_zsa_issue_data: Option<orchard::issuance::IssueData>,
     },

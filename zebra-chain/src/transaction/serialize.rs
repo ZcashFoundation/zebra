@@ -11,6 +11,7 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
+    orchard::TxVersion,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
     serialization::{
@@ -319,7 +320,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     }
 }
 
-impl<V: tx_version::TxVersion> ZcashSerialize for Option<orchard::ShieldedData<V>> {
+impl<V: TxVersion> ZcashSerialize for Option<orchard::ShieldedData<V>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
@@ -339,7 +340,7 @@ impl<V: tx_version::TxVersion> ZcashSerialize for Option<orchard::ShieldedData<V
     }
 }
 
-impl<V: tx_version::TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
+impl<V: TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Split the AuthorizedAction
         let (actions, sigs): (Vec<orchard::Action<V>>, Vec<Signature<SpendAuth>>) = self
@@ -372,16 +373,7 @@ impl<V: tx_version::TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
 
         // TODO: FIXME: add a proper comment
         #[cfg(feature = "tx-v6")]
-        if V::HAS_BURN {
-            match &self.burn {
-                None => {
-                    zcash_serialize_empty_list(writer)?;
-                }
-                Some(burn) => {
-                    burn.zcash_serialize(&mut writer)?;
-                }
-            }
-        }
+        self.burn.zcash_serialize(&mut writer)?;
 
         Ok(())
     }
@@ -389,7 +381,7 @@ impl<V: tx_version::TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-impl<V: tx_version::TxVersion> ZcashDeserialize for Option<orchard::ShieldedData<V>> {
+impl<V: TxVersion> ZcashDeserialize for Option<orchard::ShieldedData<V>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         let actions: Vec<orchard::Action<V>> = (&mut reader).zcash_deserialize_into()?;
@@ -450,12 +442,7 @@ impl<V: tx_version::TxVersion> ZcashDeserialize for Option<orchard::ShieldedData
 
         // TODO: FIXME: add a proper comment
         #[cfg(feature = "tx-v6")]
-        let burn = if V::HAS_BURN {
-            let burn: Vec<orchard::BurnItem> = (&mut reader).zcash_deserialize_into()?;
-            (!burn.is_empty()).then_some(burn)
-        } else {
-            None
-        };
+        let burn = (&mut reader).zcash_deserialize_into()?;
 
         Ok(Some(orchard::ShieldedData::<V> {
             flags,
@@ -1131,5 +1118,21 @@ impl FromHex for SerializedTransaction {
         let bytes = <Vec<u8>>::from_hex(hex)?;
 
         Ok(bytes.into())
+    }
+}
+
+// TODO: FIXME: this impl may affect other parts of the code - needs to be double checked. Consider moving it to another module.
+// This is needed to handle BurnType in ShieldeData V5
+impl ZcashSerialize for () {
+    fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
+        Ok(())
+    }
+}
+
+// TODO: FIXME: this impl may affect other parts of the code - needs to be double checked. Consider moving it to another module.
+// This is needed to handle BurnType in ShieldeData V5
+impl ZcashDeserialize for () {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        Ok(())
     }
 }

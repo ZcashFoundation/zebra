@@ -13,19 +13,12 @@ use reddsa::{self, orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
-    orchard::{
-        tree,
-        tx_version::{self, TxVersion},
-        Action, Nullifier, ValueCommitment,
-    },
+    orchard::{tree, Action, Nullifier, TxVersion, ValueCommitment},
     primitives::Halo2Proof,
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
 };
-
-#[cfg(feature = "tx-v6")]
-use crate::orchard::burn::BurnItem;
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -52,7 +45,8 @@ pub struct ShieldedData<V: TxVersion> {
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
     /// TODO: FIXME: Add ref to spec
-    pub burn: Option<Vec<BurnItem>>,
+    // FIXME: add asserts to ensure burn is None for V5
+    pub burn: V::BurnType,
 }
 
 impl<V: TxVersion> fmt::Display for ShieldedData<V> {
@@ -249,12 +243,12 @@ impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
         // Each signature must have a corresponding action.
         #[cfg(not(feature = "tx-v6"))]
-        let result = Action::<tx_version::V5>::max_allocation();
+        let result = Action::<super::TxV5>::max_allocation();
 
         // TODO: FIXME: Check this: V6 is used as it provides the max size of the action.
         // So it's used even for V5 - is this correct?
         #[cfg(feature = "tx-v6")]
-        let result = Action::<tx_version::V6>::max_allocation();
+        let result = Action::<super::TxV6>::max_allocation();
 
         result
     }

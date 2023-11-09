@@ -10,7 +10,7 @@ use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, Verific
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use super::{
-    keys::*, note, tree, tx_version::TxVersion, Action, AuthorizedAction, Flags, NoteCommitment,
+    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, TxVersion,
     ValueCommitment,
 };
 

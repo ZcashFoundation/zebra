@@ -3,9 +3,15 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 use super::note;
+
+#[cfg(feature = "tx-v6")]
+use crate::orchard::burn::BurnItem;
 
 /// The size of the encrypted note for the Orchard ShieldedData of `V5` transactions.
 pub const ENCRYPTED_NOTE_SIZE_V5: usize = 580;
@@ -19,9 +25,6 @@ pub trait TxVersion: Clone + Debug {
     /// The size of the encrypted note for this protocol version.
     const ENCRYPTED_NOTE_SIZE: usize;
 
-    /// Indicates whether the transaction contains a burn field in the Orchard ShieldedData.
-    const HAS_BURN: bool;
-
     /// A type representing an encrypted note for this protocol version.
     type EncryptedNote: Clone
         + Debug
@@ -31,26 +34,32 @@ pub trait TxVersion: Clone + Debug {
         + Serialize
         + ZcashDeserialize
         + ZcashSerialize;
+
+    /// A type representing a burn field for this protocol version.
+    type BurnType: Debug + Default + ZcashDeserialize + ZcashSerialize;
 }
 
 /// A structure representing a tag for the transaction version `V5` with Orchard protocol support.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct V5;
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct TxV5;
 
 /// A structure representing a tag for the transaction version `V6` with Orchard protocol support.
 #[cfg(feature = "tx-v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct V6;
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct TxV6;
 
-impl TxVersion for V5 {
+impl TxVersion for TxV5 {
     const ENCRYPTED_NOTE_SIZE: usize = ENCRYPTED_NOTE_SIZE_V5;
-    const HAS_BURN: bool = false;
     type EncryptedNote = note::EncryptedNote<ENCRYPTED_NOTE_SIZE_V5>;
+    // TODO: FIXME: consider using a custom union type instead.
+    type BurnType = ();
 }
 
 #[cfg(feature = "tx-v6")]
-impl TxVersion for V6 {
+impl TxVersion for TxV6 {
     const ENCRYPTED_NOTE_SIZE: usize = ENCRYPTED_NOTE_SIZE_V6;
-    const HAS_BURN: bool = true;
     type EncryptedNote = note::EncryptedNote<ENCRYPTED_NOTE_SIZE_V6>;
+    type BurnType = Vec<BurnItem>;
 }
