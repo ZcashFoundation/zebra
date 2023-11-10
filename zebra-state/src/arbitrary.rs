@@ -63,6 +63,7 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            block: block.clone(),
             time: block.header.time,
             transactions: block.transactions.clone(),
             transaction_hashes,

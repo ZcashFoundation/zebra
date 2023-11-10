@@ -6,7 +6,7 @@ use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use chrono::Duration;
-use tokio::time;
+use tokio::{sync::watch, time};
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
@@ -20,7 +20,7 @@ use zebra_consensus::{error::TransactionError, transaction as tx};
 use zebra_network as zn;
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
-use zs::CheckpointVerifiedBlock;
+use zs::{CheckpointVerifiedBlock, NonFinalizedState, WatchReceiver};
 
 use crate::components::{
     mempool::{config::Config, Mempool},
@@ -267,9 +267,13 @@ fn setup(
     let state_service = MockService::build().for_prop_tests();
     let tx_verifier = MockService::build().for_prop_tests();
 
+    let (_sender, non_finalized_state_receiver) =
+        watch::channel(NonFinalizedState::new(Network::Mainnet));
+    let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
+
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(None, network);
+        ChainTipSender::new(None, non_finalized_state_receiver, network);
 
     let (mempool, _transaction_receiver) = Mempool::new(
         &Config {
@@ -332,6 +336,7 @@ impl FakeChainTip {
                 ChainTipBlock {
                     hash: chain_tip_block.hash,
                     height,
+                    block: chain_tip_block.block.clone(),
                     time: previous.time + mock_block_time_delta,
                     transactions: chain_tip_block.transactions.clone(),
                     transaction_hashes: chain_tip_block.transaction_hashes.clone(),

@@ -9,7 +9,10 @@ use std::{
 };
 
 use futures::future;
-use tokio::time::{timeout, Duration};
+use tokio::{
+    sync::watch,
+    time::{timeout, Duration},
+};
 
 use zebra_chain::{
     block::Height,
@@ -18,7 +21,7 @@ use zebra_chain::{
 use zebra_network::constants::{
     DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
 };
-use zebra_state::ChainTipSender;
+use zebra_state::{ChainTipSender, NonFinalizedState, WatchReceiver};
 
 use crate::{
     components::sync::{
@@ -154,8 +157,13 @@ fn request_genesis_is_rate_limited() {
         }
     });
 
+    let (_sender, non_finalized_state_receiver) =
+        watch::channel(NonFinalizedState::new(Network::Mainnet));
+    let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
+
     // create an empty latest chain tip
-    let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, Network::Mainnet);
+    let (_sender, latest_chain_tip, _change) =
+        ChainTipSender::new(None, non_finalized_state_receiver, Network::Mainnet);
 
     // create a verifier service that will always panic as it will never be called
     let verifier_service =

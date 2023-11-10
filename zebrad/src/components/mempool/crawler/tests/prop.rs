@@ -6,14 +6,14 @@ use proptest::{
     collection::{hash_set, vec},
     prelude::*,
 };
-use tokio::time;
+use tokio::{sync::watch, time};
 
 use zebra_chain::{
     chain_sync_status::ChainSyncStatus, parameters::Network, transaction::UnminedTxId,
 };
 use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
-use zebra_state::ChainTipSender;
+use zebra_state::{ChainTipSender, NonFinalizedState, WatchReceiver};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
 use crate::{
@@ -234,10 +234,13 @@ fn setup_crawler() -> (
     let peer_set = MockService::build().for_prop_tests();
     let mempool = MockService::build().for_prop_tests();
     let (sync_status, recent_sync_lengths) = SyncStatus::new();
+    let (_sender, non_finalized_state_receiver) =
+        watch::channel(NonFinalizedState::new(Network::Mainnet));
+    let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
 
     // the network should be irrelevant here
     let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(None, Network::Mainnet);
+        ChainTipSender::new(None, non_finalized_state_receiver, Network::Mainnet);
 
     Crawler::spawn(
         &Config::default(),

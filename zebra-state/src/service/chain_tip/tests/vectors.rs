@@ -2,17 +2,24 @@ use std::iter;
 
 use futures::FutureExt;
 
+use tokio::sync::watch;
 use zebra_chain::{
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network::*,
 };
 
+use crate::{service::non_finalized_state::NonFinalizedState, WatchReceiver};
+
 use super::super::ChainTipSender;
 
 #[test]
 fn current_best_tip_is_initially_empty() {
+    let (_sender, non_finalized_state_receiver) = watch::channel(NonFinalizedState::new(Mainnet));
+    let non_finalized_state_receiver: WatchReceiver<NonFinalizedState> =
+        WatchReceiver::new(non_finalized_state_receiver);
+
     let (_chain_tip_sender, latest_chain_tip, _chain_tip_change) =
-        ChainTipSender::new(None, Mainnet);
+        ChainTipSender::new(None, non_finalized_state_receiver, Mainnet);
 
     assert_eq!(latest_chain_tip.best_tip_height(), None);
     assert_eq!(latest_chain_tip.best_tip_hash(), None);
@@ -36,8 +43,11 @@ fn empty_latest_chain_tip_is_empty() {
 
 #[test]
 fn chain_tip_change_is_initially_not_ready() {
+    let (_sender, non_finalized_state_receiver) = watch::channel(NonFinalizedState::new(Mainnet));
+    let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
+
     let (_chain_tip_sender, _latest_chain_tip, mut chain_tip_change) =
-        ChainTipSender::new(None, Mainnet);
+        ChainTipSender::new(None, non_finalized_state_receiver, Mainnet);
 
     // TODO: use `tokio::task::unconstrained` to avoid spurious waits from tokio's cooperative multitasking
     //       (needs a recent tokio version)

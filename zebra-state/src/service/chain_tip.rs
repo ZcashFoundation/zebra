@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use tracing::{field, instrument};
 
 use zebra_chain::{
-    block,
+    block::{self, Block, Height},
     chain_tip::{BestTipChanged, ChainTip},
     parameters::{Network, NetworkUpgrade},
     transaction::{self, Transaction},
@@ -52,6 +52,10 @@ pub struct ChainTipBlock {
 
     /// The height of the best chain tip block.
     pub height: block::Height,
+
+    /// The best chain tip block.
+    // TODO: remove redundant fields
+    pub block: Arc<block::Block>,
 
     /// The network block time of the best chain tip block.
     #[cfg_attr(
@@ -100,6 +104,7 @@ impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            block: block.clone(),
             time: block.header.time,
             transactions: block.transactions.clone(),
             transaction_hashes,
@@ -121,6 +126,7 @@ impl From<CheckpointVerifiedBlock> for ChainTipBlock {
         Self {
             hash,
             height,
+            block: block.clone(),
             time: block.header.time,
             transactions: block.transactions.clone(),
             transaction_hashes,
@@ -512,6 +518,54 @@ impl ChainTipChange {
         self.last_change_hash = Some(block.hash);
 
         Ok(action)
+    }
+
+    /// Returns the new best chain tip when there is a [`TipAction::Grow`], or any
+    /// blocks in the new best chain that it hasn't returned already if there's a reset.
+    pub async fn wait_for_blocks(&mut self) -> Result<Vec<Arc<Block>>, watch::error::RecvError> {
+        // Get the previous last_change_hash before `wait_for_tip_change()` updates it.
+        let last_change_hash = self.last_change_hash;
+        let tip_action = self.wait_for_tip_change().await?;
+        let non_finalized_state = self.non_finalized_state_receiver.cloned_watch_data();
+
+        let blocks = match (non_finalized_state.best_chain(), tip_action) {
+            (_, Grow { block }) => vec![block.block],
+
+            (Some(best_chain), Reset { .. }) => {
+                let best_chain_blocks_after = |last_change_height: Height| {
+                    best_chain
+                        .blocks
+                        .iter()
+                        // Excludes block at provided `last_change_height`
+                        .skip_while(|(&h, _)| h <= last_change_height)
+                        .map(|(_, cv_b)| cv_b.block.clone())
+                        .collect()
+                };
+
+                // Returns all blocks in the new best chain if there is no last_change_hash
+                let Some(mut prev_hash) = last_change_hash else {
+                    return Ok(best_chain_blocks_after(Height(0)));
+                };
+
+                loop {
+                    if let Some(prev_hash_height) = best_chain.height_by_hash(prev_hash) {
+                        break best_chain_blocks_after(prev_hash_height);
+                    };
+
+                    if let Some(prev_block_hash) =
+                        non_finalized_state.any_prev_block_hash_for_hash(prev_hash)
+                    {
+                        prev_hash = prev_block_hash;
+                    } else {
+                        break best_chain_blocks_after(Height(0));
+                    }
+                }
+            }
+
+            (None, Reset { .. }) => vec![],
+        };
+
+        Ok(blocks)
     }
 
     /// Returns:

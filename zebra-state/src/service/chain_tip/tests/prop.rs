@@ -6,6 +6,7 @@ use futures::FutureExt;
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
+use tokio::sync::watch;
 use zebra_chain::{
     block::Block,
     chain_tip::ChainTip,
@@ -13,7 +14,13 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use crate::service::chain_tip::{ChainTipBlock, ChainTipSender, TipAction};
+use crate::{
+    service::{
+        chain_tip::{ChainTipBlock, ChainTipSender, TipAction},
+        non_finalized_state::NonFinalizedState,
+    },
+    WatchReceiver,
+};
 
 use TipChangeCheck::*;
 
@@ -38,7 +45,9 @@ proptest! {
         tip_updates in any::<SummaryDebug<Vec<(BlockUpdate, BlockConnection, TipChangeCheck)>>>(),
         network in any::<Network>(),
     ) {
-        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, network);
+        let (_sender, non_finalized_state_receiver) = watch::channel(NonFinalizedState::new(network));
+        let non_finalized_state_receiver = WatchReceiver::new(non_finalized_state_receiver);
+        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, non_finalized_state_receiver, network);
 
         let mut latest_finalized_tip = None;
         let mut latest_non_finalized_tip = None;

@@ -67,7 +67,9 @@ pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
     finalized_state::{DiskWriteBatch, MAX_ON_DISK_HEIGHT},
-    init_test, init_test_services, ReadStateService,
+    init_test, init_test_services,
+    non_finalized_state::NonFinalizedState,
+    ReadStateService,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

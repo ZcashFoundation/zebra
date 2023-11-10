@@ -30,8 +30,9 @@
 //! # let peer_set_service = MockService::build().for_unit_tests();
 //! # let mempool_service = MockService::build().for_unit_tests();
 //! # let (sync_status, _) = SyncStatus::new();
-//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, Network::Mainnet);
-//!
+//! # let (_sender, non_finalized_state_receiver) = tokio::sync::watch::channel(zebra_state::NonFinalizedState::new(Network::Mainnet));
+//! # let non_finalized_state_receiver = zebra_state::WatchReceiver::new(non_finalized_state_receiver);
+//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, non_finalized_state_receiver, Network::Mainnet);
 //! let crawler_task = mempool::Crawler::spawn(
 //!     &mempool::Config::default(),
 //!     peer_set_service,
