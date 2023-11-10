@@ -36,7 +36,7 @@ pub trait TxVersion: Clone + Debug {
         + ZcashSerialize;
 
     /// A type representing a burn field for this protocol version.
-    type BurnType: Debug + Default + ZcashDeserialize + ZcashSerialize;
+    type BurnType: Clone + Debug + Default + ZcashDeserialize + ZcashSerialize;
 }
 
 /// A structure representing a tag for the transaction version `V5` with Orchard protocol support.
