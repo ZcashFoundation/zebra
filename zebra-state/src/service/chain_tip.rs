@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use tracing::{field, instrument};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block},
     chain_tip::{BestTipChanged, ChainTip},
     parameters::{Network, NetworkUpgrade},
     transaction::{self, Transaction},
@@ -484,6 +484,9 @@ pub enum TipAction {
         ///
         /// Mainly useful for logging and debugging.
         hash: block::Hash,
+
+        /// The best chain tip block.
+        block: Arc<block::Block>,
     },
 }
 
@@ -521,41 +524,73 @@ impl ChainTipChange {
         Ok(action)
     }
 
-    /// Returns the new best chain tip when there is a [`TipAction::Grow`], or any
-    /// blocks in the new best chain that it hasn't returned already if there's a reset.
-    pub async fn wait_for_blocks(&mut self) -> Result<Vec<Arc<Block>>, watch::error::RecvError> {
+    /// Returns a channel that passes any new blocks that are added the the best chain tip that it
+    /// hasn't already sent.
+    pub fn spawn_wait_for_blocks(mut self) -> tokio::sync::mpsc::UnboundedReceiver<Arc<Block>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            // # Correctness
+            //
+            // This task should see any `ChainTipBlocks` sent by the block write task through
+            // `ChainSender` because  `wait_for_blocks()` should be able to process blocks faster
+            // than they can be verified.
+            while let Ok(blocks) = tokio::select! {
+                blocks = self.wait_for_blocks() => blocks,
+                _ = tx.closed() => { return; }
+            } {
+                for block in blocks {
+                    if tx.send(block).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        rx
+    }
+
+    /// Returns the new best chain tip when its previous block hash matches the last_change_hash,
+    /// or any blocks in the new best chain that it hasn't returned already otherwise.
+    ///
+    /// # Panics
+    ///
+    /// This method is meant to be used with `spawn_wait_for_blocks` and could panic when called
+    /// after the `ChangeTipChange` instance misses a tip block change.
+    async fn wait_for_blocks(&mut self) -> Result<Vec<Arc<Block>>, watch::error::RecvError> {
         // Get the previous last_change_hash before `wait_for_tip_change()` updates it.
         let last_change_hash = self.last_change_hash;
-        let tip_action = self.wait_for_tip_change().await?;
+        let block = self.tip_block_change().await?;
 
-        if let TipAction::Grow { block } = tip_action {
+        assert!(
+            Some(block.hash) != self.last_change_hash,
+            "ChainTipSender and ChainTipChange ignore unchanged tips"
+        );
+
+        self.last_change_hash = Some(block.hash);
+
+        // Return initial tip block
+        let Some(last_change_hash) = last_change_hash else {
+            return Ok(vec![block.block]);
+        };
+
+        // Return block if previous block hash matches last tip block hash
+        // TODO: Add a new variant for NetworkActivation upgrades?
+        if block.previous_block_hash() == last_change_hash {
             return Ok(vec![block.block]);
         }
 
+        // There's a new best chain
+
         let non_finalized_state = self.non_finalized_state_receiver.cloned_watch_data();
+        let best_chain = non_finalized_state
+            .best_chain()
+            .expect("there must be blocks in the non-finalized state at this point");
 
-        let Some(best_chain) = non_finalized_state.best_chain() else {
-            return Ok(vec![]);
-        };
-
-        let best_chain_blocks_after = |last_change_height: Height| {
-            best_chain
-                .blocks
-                .iter()
-                // Excludes block at provided `last_change_height`
-                .skip_while(|(&h, _)| h <= last_change_height)
-                .map(|(_, cv_b)| cv_b.block.clone())
-                .collect()
-        };
-
-        // Returns all blocks in the new best chain if there is no last_change_hash
-        let Some(mut prev_hash) = last_change_hash else {
-            return Ok(best_chain_blocks_after(Height(0)));
-        };
-
-        let blocks = loop {
+        let mut prev_hash = last_change_hash;
+        let common_ancestor_height = loop {
             if let Some(prev_hash_height) = best_chain.height_by_hash(prev_hash) {
-                break best_chain_blocks_after(prev_hash_height);
+                break Some(prev_hash_height);
             };
 
             if let Some(prev_block_hash) =
@@ -563,11 +598,18 @@ impl ChainTipChange {
             {
                 prev_hash = prev_block_hash;
             } else {
-                break best_chain_blocks_after(Height(0));
+                break None;
             }
         };
 
-        Ok(blocks)
+        let unseen_blocks = best_chain
+            .blocks
+            .iter()
+            .skip_while(|(&h, _)| Some(h) <= common_ancestor_height)
+            .map(|(_, cv_b)| cv_b.block.clone())
+            .collect();
+
+        Ok(unseen_blocks)
     }
 
     /// Returns:
@@ -740,7 +782,7 @@ impl TipAction {
     pub fn best_tip_hash_and_height(&self) -> (block::Hash, block::Height) {
         match self {
             Grow { block } => (block.hash, block.height),
-            Reset { hash, height } => (*hash, *height),
+            Reset { hash, height, .. } => (*hash, *height),
         }
     }
 
@@ -754,6 +796,7 @@ impl TipAction {
         Reset {
             height: block.height,
             hash: block.hash,
+            block: block.block,
         }
     }
 
@@ -766,6 +809,7 @@ impl TipAction {
             Grow { block } => Reset {
                 height: block.height,
                 hash: block.hash,
+                block: block.block,
             },
             reset @ Reset { .. } => reset,
         }
