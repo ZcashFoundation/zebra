@@ -140,7 +140,7 @@ proptest! {
                 if Some(chain_tip.hash) == old_last_change_hash {
                     // some updates don't do anything, so there's no new action
                     None
-                } else if Some(chain_tip.previous_block_hash) != old_last_change_hash
+                } else if Some(chain_tip.previous_block_hash()) != old_last_change_hash
                     || NetworkUpgrade::is_activation_height(network, chain_tip.height)
                 {
                     Some(TipAction::reset_with(block.0.into()))

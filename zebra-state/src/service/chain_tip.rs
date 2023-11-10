@@ -54,7 +54,6 @@ pub struct ChainTipBlock {
     pub height: block::Height,
 
     /// The best chain tip block.
-    // TODO: remove redundant fields
     pub block: Arc<block::Block>,
 
     /// The network block time of the best chain tip block.
@@ -64,21 +63,27 @@ pub struct ChainTipBlock {
     )]
     pub time: DateTime<Utc>,
 
-    /// The block transactions.
-    pub transactions: Vec<Arc<Transaction>>,
-
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+}
 
-    /// The hash of the previous block in the best chain.
+impl ChainTipBlock {
+    /// Returns the hash of the previous block in the best chain.
     /// This block is immediately behind the best chain tip.
     ///
     /// ## Note
     ///
     /// If the best chain fork has changed, or some blocks have been skipped,
     /// this hash will be different to the last returned `ChainTipBlock.hash`.
-    pub previous_block_hash: block::Hash,
+    pub fn previous_block_hash(&self) -> block::Hash {
+        self.block.header.previous_block_hash
+    }
+
+    /// The block transactions.
+    pub fn transactions(&self) -> &Vec<Arc<Transaction>> {
+        &self.block.transactions
+    }
 }
 
 impl fmt::Display for ChainTipBlock {
@@ -86,7 +91,7 @@ impl fmt::Display for ChainTipBlock {
         f.debug_struct("ChainTipBlock")
             .field("height", &self.height)
             .field("hash", &self.hash)
-            .field("transactions", &self.transactions.len())
+            .field("transactions", &self.transactions().len())
             .finish()
     }
 }
@@ -106,9 +111,7 @@ impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
             height,
             block: block.clone(),
             time: block.header.time,
-            transactions: block.transactions.clone(),
             transaction_hashes,
-            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -128,9 +131,7 @@ impl From<CheckpointVerifiedBlock> for ChainTipBlock {
             height,
             block: block.clone(),
             time: block.header.time,
-            transactions: block.transactions.clone(),
             transaction_hashes,
-            previous_block_hash: block.header.previous_block_hash,
         }
     }
 }
@@ -351,7 +352,7 @@ impl LatestChainTip {
             );
             span.record(
                 "previous_hash",
-                tracing::field::debug(chain_tip_block.map(|block| block.previous_block_hash)),
+                tracing::field::debug(chain_tip_block.map(|block| block.previous_block_hash())),
             );
             span.record(
                 "transaction_count",
@@ -634,7 +635,7 @@ impl ChainTipChange {
         // Skipped blocks can include network upgrade activation blocks.
         // Fork changes can activate or deactivate a network upgrade.
         // So we must perform the same actions for network upgrades and skipped blocks.
-        if Some(block.previous_block_hash) != self.last_change_hash
+        if Some(block.previous_block_hash()) != self.last_change_hash
             || NetworkUpgrade::is_activation_height(self.network, block.height)
         {
             TipAction::reset_with(block)

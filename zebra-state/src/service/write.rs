@@ -349,7 +349,7 @@ fn log_if_mined_by_zebra(
     };
 
     // This code is rate-limited, so we can do expensive transformations here.
-    let coinbase_data = tip_block.transactions[0].inputs()[0]
+    let coinbase_data = tip_block.transactions()[0].inputs()[0]
         .extra_coinbase_data()
         .expect("valid blocks must start with a coinbase input")
         .clone();
