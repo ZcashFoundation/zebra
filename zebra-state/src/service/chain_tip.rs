@@ -81,7 +81,7 @@ impl ChainTipBlock {
     }
 
     /// The block transactions.
-    pub fn transactions(&self) -> &Vec<Arc<Transaction>> {
+    pub fn transactions(&self) -> &[Arc<Transaction>] {
         &self.block.transactions
     }
 }
@@ -532,9 +532,9 @@ impl ChainTipChange {
         tokio::spawn(async move {
             // # Correctness
             //
-            // This task should see any `ChainTipBlocks` sent by the block write task through
-            // `ChainSender` because  `wait_for_blocks()` should be able to process blocks faster
-            // than they can be verified.
+            // This task should see any `ChainTipBlock`s sent by the block write task
+            // through `ChainTipSender` because  `wait_for_blocks()` should be able to
+            // process blocks faster than they can be verified.
             while let Ok(blocks) = tokio::select! {
                 blocks = self.wait_for_blocks() => blocks,
                 _ = tx.closed() => { return; }
@@ -582,24 +582,22 @@ impl ChainTipChange {
 
         // There's a new best chain
 
-        let non_finalized_state = self.non_finalized_state_receiver.cloned_watch_data();
-        let best_chain = non_finalized_state
+        let non_finalized = self.non_finalized_state_receiver.cloned_watch_data();
+        let best_chain = non_finalized
             .best_chain()
             .expect("there must be blocks in the non-finalized state at this point");
 
-        let mut prev_hash = last_change_hash;
+        let mut ancestor_hash = last_change_hash;
         let common_ancestor_height = loop {
-            if let Some(prev_hash_height) = best_chain.height_by_hash(prev_hash) {
+            if let Some(prev_hash_height) = best_chain.height_by_hash(ancestor_hash) {
                 break Some(prev_hash_height);
             };
 
-            if let Some(prev_block_hash) =
-                non_finalized_state.any_prev_block_hash_for_hash(prev_hash)
-            {
-                prev_hash = prev_block_hash;
-            } else {
+            let Some(prev_hash) = non_finalized.any_prev_block_hash_for_hash(ancestor_hash) else {
                 break None;
-            }
+            };
+
+            ancestor_hash = prev_hash;
         };
 
         let unseen_blocks = best_chain

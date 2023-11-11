@@ -301,7 +301,7 @@ impl Storage {
     pub fn reject_and_remove_same_effects(
         &mut self,
         mined_ids: &HashSet<transaction::Hash>,
-        transactions: &[Arc<Transaction>],
+        transactions: Vec<Arc<Transaction>>,
     ) -> usize {
         let num_removed_mined = self
             .verified
