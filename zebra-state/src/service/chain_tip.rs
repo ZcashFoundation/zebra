@@ -524,10 +524,19 @@ impl ChainTipChange {
         Ok(action)
     }
 
-    /// Returns a channel that passes any new blocks that are added the the best chain tip that it
-    /// hasn't already sent.
-    pub fn spawn_wait_for_blocks(mut self) -> tokio::sync::mpsc::UnboundedReceiver<Arc<Block>> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    /// Spawns a task that listens for any new blocks on the best chain tip, sending
+    /// them to a mpsc channel.
+    ///
+    /// Returns the channel receiver for any new blocks on the best chain tip.
+    ///
+    /// # Note
+    ///
+    /// Task will exit if:
+    /// - messages are not being read from the channel and the channel buffer is filled
+    /// - there is a watch channel error from `LatestChainTip`
+    /// - the mpsc receiver is dropped
+    pub fn spawn_wait_for_blocks(mut self) -> tokio::sync::mpsc::Receiver<Arc<Block>> {
+        let (tx, rx) = tokio::sync::mpsc::channel(256);
 
         tokio::spawn(async move {
             // # Correctness
@@ -540,7 +549,8 @@ impl ChainTipChange {
                 _ = tx.closed() => { return; }
             } {
                 for block in blocks {
-                    if tx.send(block).is_err() {
+                    if tx.try_send(block).is_err() {
+                        // return early if the buffer is already full
                         return;
                     }
                 }
