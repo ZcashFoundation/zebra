@@ -16,8 +16,6 @@ categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
 
-#default = ["tx-v6"]
-
 # Production features that activate extra functionality
 
 # Consensus-critical conversion from JSON to Zcash types
