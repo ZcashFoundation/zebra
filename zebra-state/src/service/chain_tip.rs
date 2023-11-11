@@ -569,7 +569,7 @@ impl ChainTipChange {
 
         self.last_change_hash = Some(block.hash);
 
-        // Return initial tip block
+        // Return initial tip or genesis block
         let Some(last_change_hash) = last_change_hash else {
             return Ok(vec![block.block]);
         };
