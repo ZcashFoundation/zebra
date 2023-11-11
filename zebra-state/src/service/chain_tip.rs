@@ -9,7 +9,7 @@ use std::{fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
-use tokio::sync::watch;
+use tokio::sync::{mpsc::error::TrySendError, watch};
 use tracing::{field, instrument};
 
 use zebra_chain::{
@@ -529,14 +529,22 @@ impl ChainTipChange {
     ///
     /// Returns the channel receiver for any new blocks on the best chain tip.
     ///
-    /// # Note
+    /// ## Note
     ///
     /// Task will exit if:
-    /// - messages are not being read from the channel and the channel buffer is filled
     /// - there is a watch channel error from `LatestChainTip`
     /// - the mpsc receiver is dropped
+    ///
+    /// # Panics
+    ///
+    /// The spawned task will panic if messages are not read from the returned channel
+    /// receiver and the channel buffer is full when the task tries to send a block.
+    ///
+    /// The caller is responsible for closing the channel if and when it stops reading
+    /// blocks from the channel, either explicitly or by dropping the receiver, to exit
+    /// the task before it fills the buffer and panics
     pub fn spawn_wait_for_blocks(mut self) -> tokio::sync::mpsc::Receiver<Arc<Block>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(256);
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
 
         tokio::spawn(async move {
             // # Correctness
@@ -549,9 +557,12 @@ impl ChainTipChange {
                 _ = tx.closed() => { return; }
             } {
                 for block in blocks {
-                    if tx.try_send(block).is_err() {
-                        // return early if the buffer is already full
-                        return;
+                    match tx.try_send(block) {
+                        Ok(_) => continue,
+                        // return early to exit task if channel is closed
+                        Err(TrySendError::Closed(_)) => return,
+                        // panic if channel buffer is full
+                        Err(TrySendError::Full(_)) => panic!("spawn_wait_for_blocks channel full, receiver should be dropped/closed or polled"),
                     }
                 }
             }
