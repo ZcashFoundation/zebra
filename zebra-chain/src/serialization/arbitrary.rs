@@ -42,7 +42,7 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     (
         // TODO: should we be subtracting 1 from the maximum timestamp?
         DateTime::<Utc>::MIN_UTC.timestamp()..=DateTime::<Utc>::MAX_UTC.timestamp(),
-        0..2_000_000_000_u32,
+        0..1_000_000_000_u32,
     )
         .prop_map(|(secs, nsecs)| {
             Utc.timestamp_opt(secs, nsecs)
