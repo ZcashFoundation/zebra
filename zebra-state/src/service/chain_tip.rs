@@ -601,7 +601,7 @@ impl ChainTipChange {
             return Ok(vec![block.block]);
         }
 
-        // There's a new best chain
+        // There's a new best chain or this instance of `ChangeTipChange` missed a tip block change.
 
         let non_finalized = self.non_finalized_state_receiver.cloned_watch_data();
         let best_chain = non_finalized
