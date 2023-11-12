@@ -533,7 +533,7 @@ impl ChainTipChange {
     ///
     /// Task will exit if:
     /// - there is a watch channel error from `LatestChainTip`
-    /// - the mpsc receiver is dropped
+    /// - the mpsc receiver is dropped or the channel is closed
     ///
     /// # Panics
     ///
@@ -603,23 +603,24 @@ impl ChainTipChange {
 
         // There's a new best chain or this instance of `ChangeTipChange` missed a tip block change.
 
-        let non_finalized = self.non_finalized_state_receiver.cloned_watch_data();
-        let best_chain = non_finalized
+        let non_finalized_state = self.non_finalized_state_receiver.cloned_watch_data();
+        let best_chain = non_finalized_state
             .best_chain()
             .expect("there must be blocks in the non-finalized state at this point");
 
-        let mut ancestor_hash = last_change_hash;
+        let mut candidate_ancestor_hash = last_change_hash;
         let common_ancestor_height = loop {
-            if let Some(prev_hash_height) = best_chain.height_by_hash(ancestor_hash) {
-                break Some(prev_hash_height);
+            if let Some(ancestor_height) = best_chain.height_by_hash(candidate_ancestor_hash) {
+                break Some(ancestor_height);
             };
 
-            let Some(prev_hash) = non_finalized.side_chain_prev_block_hash_for_hash(ancestor_hash)
+            let Some(prev_hash) =
+                non_finalized_state.side_chain_prev_block_hash_for_hash(candidate_ancestor_hash)
             else {
                 break None;
             };
 
-            ancestor_hash = prev_hash;
+            candidate_ancestor_hash = prev_hash;
         };
 
         let unseen_blocks = best_chain
