@@ -614,7 +614,8 @@ impl ChainTipChange {
                 break Some(prev_hash_height);
             };
 
-            let Some(prev_hash) = non_finalized.any_prev_block_hash_for_hash(ancestor_hash) else {
+            let Some(prev_hash) = non_finalized.side_chain_prev_block_hash_for_hash(ancestor_hash)
+            else {
                 break None;
             };
 

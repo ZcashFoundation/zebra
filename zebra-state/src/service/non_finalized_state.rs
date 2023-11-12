@@ -147,8 +147,6 @@ impl NonFinalizedState {
     }
 
     /// Returns an iterator over the non-finalized chains, with the best chain first.
-    //
-    // TODO: replace chain_set.iter().rev() with this method
     pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
         self.chain_set.iter().rev()
     }
@@ -463,11 +461,10 @@ impl NonFinalizedState {
             .find_map(|chain| chain.created_utxo(outpoint))
     }
 
-    /// Returns the `block` with the given hash in any chain.
-    #[allow(dead_code)]
-    pub fn any_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
+    /// Returns the `block` with the given hash in any side chain.
+    pub fn side_chain_block_by_hash(&self, hash: block::Hash) -> Option<Arc<Block>> {
         // This performs efficiently because the number of chains is limited to 10.
-        for chain in self.chain_set.iter().rev() {
+        for chain in self.side_chains() {
             if let Some(prepared) = chain
                 .height_by_hash
                 .get(&hash)
@@ -480,11 +477,10 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the previous block hash for the given block hash in any chain.
-    #[allow(dead_code)]
-    pub fn any_prev_block_hash_for_hash(&self, hash: block::Hash) -> Option<block::Hash> {
+    /// Returns the previous block hash for the given block hash in any side chain.
+    pub fn side_chain_prev_block_hash_for_hash(&self, hash: block::Hash) -> Option<block::Hash> {
         // This performs efficiently because the blocks are in memory.
-        self.any_block_by_hash(hash)
+        self.side_chain_block_by_hash(hash)
             .map(|block| block.header.previous_block_hash)
     }
 
@@ -526,7 +522,7 @@ impl NonFinalizedState {
     /// Returns the height of `hash` in any chain.
     #[allow(dead_code)]
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
-        for chain in self.chain_set.iter().rev() {
+        for chain in self.chain_iter() {
             if let Some(height) = chain.height_by_hash.get(&hash) {
                 return Some(*height);
             }
@@ -571,6 +567,11 @@ impl NonFinalizedState {
     /// Return the non-finalized portion of the current best chain.
     pub fn best_chain(&self) -> Option<&Arc<Chain>> {
         self.chain_iter().next()
+    }
+
+    /// Return the non-finalized portion of any side chains.
+    pub fn side_chains(&self) -> impl Iterator<Item = &Arc<Chain>> {
+        self.chain_iter().skip(1)
     }
 
     /// Return the number of chains.
