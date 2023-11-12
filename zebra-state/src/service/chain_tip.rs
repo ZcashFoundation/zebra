@@ -572,7 +572,7 @@ impl ChainTipChange {
     }
 
     /// Returns the new best chain tip when its previous block hash matches the last_change_hash,
-    /// or any blocks in the new best chain that it hasn't returned already otherwise.
+    /// otherwise returns any blocks in the new best chain that it hasn't returned already.
     ///
     /// # Panics
     ///
