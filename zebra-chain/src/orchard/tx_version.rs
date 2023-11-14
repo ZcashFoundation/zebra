@@ -52,7 +52,7 @@ pub struct TxV6;
 
 /// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
 /// Useful for unifying ShieldedData serialization and deserialization implementations across various transaction versions.
-#[derive(Clone, Debug, Default)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NoBurn;
 
 impl ZcashSerialize for NoBurn {
