@@ -1,6 +1,6 @@
 //! Timing tests for the mempool crawler.
 
-use std::convert::TryInto;
+
 
 use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
 use zebra_network::constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT};

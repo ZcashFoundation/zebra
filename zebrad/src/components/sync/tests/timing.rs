@@ -1,7 +1,6 @@
 //! Check the relationship between various sync timeouts and delays.
 
 use std::{
-    convert::TryInto,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
