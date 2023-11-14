@@ -32,7 +32,7 @@ pub trait CheckForPanics: Sized {
     /// If `self` contains a panic payload.
     #[track_caller]
     fn panic_if_task_has_panicked(self) -> Self::Output {
-        self.check_for_panics_with(true)
+        self.check_for_panics_with(false)
     }
 
     /// Check if `self` contains a panic payload, then panic. Also panics if
