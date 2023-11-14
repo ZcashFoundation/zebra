@@ -1,7 +1,8 @@
 //! Fixed test vectors for the peer set.
 
-use std::{cmp::max, iter};
+use std::{cmp::max, iter, time::Duration};
 
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
@@ -9,7 +10,6 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use super::{PeerSetBuilder, PeerVersions};
 use crate::{
     constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientRequest, MinimumPeerVersion},
@@ -17,6 +17,8 @@ use crate::{
     protocol::external::{types::Version, InventoryHash},
     Request, SharedPeerError,
 };
+
+use super::{PeerSetBuilder, PeerVersions};
 
 #[test]
 fn peer_set_ready_single_connection() {
@@ -171,12 +173,7 @@ fn peer_set_ready_multiple_connections() {
 
         // Peer set hangs when no more connections are present
         let peer_ready = peer_set.ready();
-        peer_ready
-            .await
-            .expect("peer set is always ready until peers are cleared");
-
-        // TODO: re-enable this check when waiting is fixed?
-        //assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
+        assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
     });
 }
 
