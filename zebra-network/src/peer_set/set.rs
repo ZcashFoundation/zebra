@@ -327,6 +327,8 @@ where
 
     /// Check background task handles to make sure they're still running.
     ///
+    /// Never returns `Ok`.
+    ///
     /// If any background task exits, shuts down all other background tasks,
     /// and returns an error. Otherwise, returns `Pending`, and registers a wakeup for
     /// receiving the background tasks, or the background tasks exiting.

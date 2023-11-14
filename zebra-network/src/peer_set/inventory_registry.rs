@@ -281,7 +281,7 @@ impl InventoryRegistry {
         Update::new(self)
     }
 
-    /// Drive periodic inventory tasks
+    /// Drive periodic inventory tasks.
     ///
     /// Rotates the inventory HashMaps on every timer tick.
     /// Drains the inv_stream channel and registers all advertised inventory.
@@ -330,6 +330,8 @@ impl InventoryRegistry {
             match channel_result {
                 Ok(change) => self.register(change),
                 Err(BroadcastStreamRecvError::Lagged(count)) => {
+                    // This isn't a fatal inventory error, it's expected behaviour when Zebra is
+                    // under load from peers.
                     metrics::counter!("pool.inventory.dropped", 1);
                     metrics::counter!("pool.inventory.dropped.messages", count);
 

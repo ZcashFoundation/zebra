@@ -19,8 +19,11 @@ pub struct Update<'a> {
 impl Unpin for Update<'_> {}
 
 impl<'a> Update<'a> {
-    #[allow(dead_code)]
-    pub(super) fn new(registry: &'a mut InventoryRegistry) -> Self {
+    /// Returns a new future that returns when the next inventory update or rotation has been
+    /// completed by `registry`.
+    ///
+    /// See [`InventoryRegistry::poll_inventory()`] for details.
+    pub fn new(registry: &'a mut InventoryRegistry) -> Self {
         Self { registry }
     }
 }
@@ -28,7 +31,7 @@ impl<'a> Update<'a> {
 impl Future for Update<'_> {
     type Output = Result<(), BoxError>;
 
-    /// A future that returns when the next inventory update has been completed.
+    /// A future that returns when the next inventory update or rotation has been completed.
     ///
     /// See [`InventoryRegistry::poll_inventory()`] for details.
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
