@@ -1120,19 +1120,3 @@ impl FromHex for SerializedTransaction {
         Ok(bytes.into())
     }
 }
-
-// TODO: FIXME: this impl may affect other parts of the code - needs to be double checked. Consider moving it to another module.
-// This is needed to handle BurnType in ShieldeData V5
-impl ZcashSerialize for () {
-    fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
-        Ok(())
-    }
-}
-
-// TODO: FIXME: this impl may affect other parts of the code - needs to be double checked. Consider moving it to another module.
-// This is needed to handle BurnType in ShieldeData V5
-impl ZcashDeserialize for () {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
-        Ok(())
-    }
-}

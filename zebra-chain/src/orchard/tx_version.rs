@@ -1,12 +1,12 @@
 //! This module defines traits and structures for supporting the Orchard Shielded Protocol for `V5` and `V6` versions of the transaction.
-use std::fmt::Debug;
+use std::{fmt::Debug, io};
 
 use serde::{de::DeserializeOwned, Serialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 use super::note;
 
@@ -50,11 +50,27 @@ pub struct TxV5;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct TxV6;
 
+/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
+/// Useful for unifying ShieldedData serialization and deserialization implementations across various transaction versions.
+#[derive(Clone, Debug, Default)]
+pub struct NoBurn;
+
+impl ZcashSerialize for NoBurn {
+    fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NoBurn {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        Ok(Self {})
+    }
+}
+
 impl TxVersion for TxV5 {
     const ENCRYPTED_NOTE_SIZE: usize = ENCRYPTED_NOTE_SIZE_V5;
     type EncryptedNote = note::EncryptedNote<ENCRYPTED_NOTE_SIZE_V5>;
-    // TODO: FIXME: consider using a custom union type instead.
-    type BurnType = ();
+    type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
