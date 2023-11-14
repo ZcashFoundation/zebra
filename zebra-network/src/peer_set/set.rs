@@ -427,11 +427,17 @@ where
     /// Move newly ready services to the ready list if they are for peers with supported protocol
     /// versions, otherwise they are dropped. Also drop failed services.
     ///
-    /// Never returns an error. If there are unready peers, returns `Poll::Pending`, and registers
-    /// a wakeup when the next peer becomes ready. If there are no unready peers, returns `Ok`, and
-    /// doesn't register any wakeups. (Since wakeups come from peers, there needs to be at least one
-    /// peer to register a wakeup.)
-    fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+    /// Never returns an error.
+    ///
+    /// Returns `Ok(Some(())` if at least one peer became ready, `Poll::Pending` if there are
+    /// unready peers, but none became ready, and `Ok(None)` if the unready peers were empty.
+    ///
+    /// If there are any remaining unready peers, registers a wakeup for the next time one becomes
+    /// ready. If there are no unready peers, doesn't register any wakeups. (Since wakeups come
+    /// from peers, there needs to be at least one peer to register a wakeup.)
+    fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<()>, BoxError>> {
+        let mut result = Poll::Pending;
+
         // # Correctness
         //
         // `poll_next()` must always be called, because `self.unready_services` could have been
@@ -444,12 +450,29 @@ where
         //
         // Returns Pending if we've finished processing the unready service changes,
         // but there are still some unready services.
-        while let Some(ready_peer) =
-            futures::ready!(Pin::new(&mut self.unready_services).poll_next(cx))
-        {
+        loop {
+            // No ready peers left, but there are some unready peers pending.
+            let Poll::Ready(ready_peer) = Pin::new(&mut self.unready_services).poll_next(cx) else {
+                break;
+            };
+
             match ready_peer {
+                // No unready peers in the list.
+                None => {
+                    // If we've finished processing the unready service changes, and there are no
+                    // unready services left, it doesn't make sense to return Pending, because
+                    // their stream is terminated. But when we add more unready peers and call
+                    // `poll_next()`, its termination status will be reset, and it will receive
+                    // wakeups again.
+                    if result.is_pending() {
+                        result = Poll::Ready(Ok(None));
+                    }
+
+                    break;
+                }
+
                 // Unready -> Ready
-                Ok((key, svc)) => {
+                Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
@@ -457,10 +480,13 @@ where
                     if svc.remote_version() >= self.minimum_peer_version.current() {
                         self.ready_services.insert(key, svc);
                     }
+
+                    // Return Ok if at least one peer became ready.
+                    result = Poll::Ready(Ok(Some(())));
                 }
 
                 // Unready -> Canceled
-                Err((key, UnreadyError::Canceled)) => {
+                Some(Err((key, UnreadyError::Canceled))) => {
                     // A service be canceled because we've connected to the same service twice.
                     // In that case, there is a cancel handle for the peer address,
                     // but it belongs to the service for the newer connection.
@@ -470,7 +496,7 @@ where
                         "service was canceled, dropping service"
                     );
                 }
-                Err((key, UnreadyError::CancelHandleDropped(_))) => {
+                Some(Err((key, UnreadyError::CancelHandleDropped(_)))) => {
                     // Similarly, services with dropped cancel handes can have duplicates.
                     trace!(
                         ?key,
@@ -480,7 +506,7 @@ where
                 }
 
                 // Unready -> Errored
-                Err((key, UnreadyError::Inner(error))) => {
+                Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
 
                     let cancel = self.cancel_handles.remove(&key);
@@ -489,11 +515,7 @@ where
             }
         }
 
-        // Return Ok if we've finished processing the unready service changes, and there are no
-        // unready services left. This means the stream is terminated. But when we add more unready
-        // peers and call `poll_next()`, its termination status will be reset, and it will receive
-        // wakeups again.
-        Poll::Ready(Ok(()))
+        result
     }
 
     /// Returns the number of peer connections Zebra already has with
@@ -522,17 +544,26 @@ where
     /// Drops removed services, after cancelling any pending requests.
     ///
     /// If the peer connector channel is closed, returns an error.
-    /// Otherwise, returns `Poll::Pending`, and registers a wakeup for new peers.
+    ///
+    /// Otherwise, returns `Ok` if it discovered at least one peer, or `Poll::Pending` if it didn't
+    /// discover any peers. Always registers a wakeup for new peers, even when it returns `Ok`.
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        // Return pending if there are no peers in the list.
+        let mut result = Poll::Pending;
+
         loop {
-            // Return Pending if we've finished processing the entire list,
-            // but there could be new peers later.
-            let discovered = futures::ready!(Pin::new(&mut self.discover).poll_discover(cx));
+            // If we've emptied the list, finish looping, otherwise process the new peer.
+            let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
+                break;
+            };
 
             // If the change channel has a permanent error, return that error.
             let change = discovered
                 .ok_or("discovery stream closed")?
                 .map_err(Into::into)?;
+
+            // Otherwise we have successfully processed a peer.
+            result = Poll::Ready(Ok(()));
 
             // Process each change.
             match change {
@@ -568,6 +599,8 @@ where
                 }
             }
         }
+
+        result
     }
 
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
@@ -1023,11 +1056,11 @@ where
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
-        let _poll_pending: Poll<()> = self.poll_discover(cx)?;
+        let _poll_pending_or_ready: Poll<()> = self.poll_discover(cx)?;
 
         // These tasks don't provide new peers or newly ready peers.
         let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
-        let _poll_pending: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
+        let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
         // Check for newly ready peers, including newly added peers (which are added as unready).
         // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
@@ -1037,7 +1070,7 @@ where
         // connection, and release its connection slot.
         //
         // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
-        let _poll_pending_or_ready: Poll<()> = self.poll_unready(cx)?;
+        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
 
         // Cleanup and metrics.
 

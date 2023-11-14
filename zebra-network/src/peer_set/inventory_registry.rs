@@ -275,7 +275,7 @@ impl InventoryRegistry {
         self.current.iter().chain(self.prev.iter())
     }
 
-    /// Returns a future that polls once for new registry updates.
+    /// Returns a future that waits for new registry updates.
     #[allow(dead_code)]
     pub fn update(&mut self) -> Update {
         Update::new(self)
@@ -286,10 +286,14 @@ impl InventoryRegistry {
     /// Rotates the inventory HashMaps on every timer tick.
     /// Drains the inv_stream channel and registers all advertised inventory.
     ///
-    /// Returns an error if the inventory channel is closed. Otherwise returns `Poll::Pending`, and
-    /// registers a wakeup the next time there is new inventory, and the next time the inventory
-    /// should rotate.
+    /// Returns an error if the inventory channel is closed.
+    ///
+    /// Otherwise, returns `Ok` if it performed at least one update or rotation, or `Poll::Pending`
+    /// if there was no inventory change. Always registers a wakeup for the next inventory update
+    /// or rotation, even when it returns `Ok`.
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        let mut result = Poll::Pending;
+
         // # Correctness
         //
         // Registers the current task for wakeup when the timer next becomes ready.
@@ -306,6 +310,7 @@ impl InventoryRegistry {
         // two interval ticks are delayed.
         if Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
+            result = Poll::Ready(Ok(()));
         }
 
         // This module uses a broadcast channel instead of an mpsc channel, even
@@ -326,25 +331,36 @@ impl InventoryRegistry {
         // failure of the peer set.
 
         // Returns Pending if all messages are processed, but the channel could get more.
-        while let Some(channel_result) = futures::ready!(self.inv_stream.next().poll_unpin(cx)) {
+        loop {
+            let channel_result = self.inv_stream.next().poll_unpin(cx);
+
             match channel_result {
-                Ok(change) => self.register(change),
-                Err(BroadcastStreamRecvError::Lagged(count)) => {
+                Poll::Ready(Some(Ok(change))) => {
+                    self.register(change);
+                    result = Poll::Ready(Ok(()));
+                }
+                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(count)))) => {
                     // This isn't a fatal inventory error, it's expected behaviour when Zebra is
                     // under load from peers.
                     metrics::counter!("pool.inventory.dropped", 1);
                     metrics::counter!("pool.inventory.dropped.messages", count);
 
-                    // If this message happens a lot, we should improve inventory registry performance,
-                    // or poll the registry or peer set in a separate task.
+                    // If this message happens a lot, we should improve inventory registry
+                    // performance, or poll the registry or peer set in a separate task.
                     info!(count, "dropped lagged inventory advertisements");
+                }
+                Poll::Ready(None) => {
+                    // If the channel is empty and returns None, all senders, including the one in
+                    // the handshaker, have been dropped, which really is a permanent failure.
+                    result = Poll::Ready(Err(broadcast::error::RecvError::Closed.into()));
+                }
+                Poll::Pending => {
+                    break;
                 }
             }
         }
 
-        // If the channel is empty and returns None, all senders, including the one in the
-        // handshaker, have been dropped, which really is a permanent failure.
-        Poll::Ready(Err(broadcast::error::RecvError::Closed.into()))
+        result
     }
 
     /// Record the given inventory `change` for the peer `addr`.
