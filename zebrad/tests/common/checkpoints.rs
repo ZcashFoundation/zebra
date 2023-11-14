@@ -396,8 +396,7 @@ pub fn wait_for_zebra_checkpoints_generation<
     test_type: TestType,
     show_zebrad_logs: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let last_checkpoint_gap = HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY)
-        .expect("constant fits in HeightDiff")
+    let last_checkpoint_gap = HeightDiff::from(MIN_TRANSPARENT_COINBASE_MATURITY)
         + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
     let expected_final_checkpoint_height =
         (zebra_tip_height - last_checkpoint_gap).expect("network tip is high enough");
