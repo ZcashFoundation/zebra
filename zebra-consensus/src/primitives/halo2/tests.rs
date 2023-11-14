@@ -75,7 +75,7 @@ fn generate_test_vectors() {
                         let action = zebra_chain::orchard::Action {
                             cv: a.cv_net().to_bytes().try_into().unwrap(),
                             nullifier: a.nullifier().to_bytes().try_into().unwrap(),
-                            rk: <[u8; 32]>::from(a.rk()).try_into().unwrap(),
+                            rk: <[u8; 32]>::from(a.rk()).into(),
                             cm_x: pallas::Base::from_repr(a.cmx().into()).unwrap(),
                             ephemeral_key: a.encrypted_note().epk_bytes.try_into().unwrap(),
                             enc_ciphertext: a.encrypted_note().enc_ciphertext.into(),
@@ -89,9 +89,7 @@ fn generate_test_vectors() {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature())
-                    .try_into()
-                    .unwrap(),
+                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
             }
         })
         .collect();
