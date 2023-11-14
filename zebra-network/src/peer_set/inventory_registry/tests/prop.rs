@@ -1,7 +1,11 @@
 //! Randomised property tests for the inventory registry.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    task::{Context, Poll},
+};
 
+use futures::task::noop_waker;
 use proptest::prelude::*;
 
 use crate::{
@@ -81,10 +85,12 @@ async fn inv_registry_inbound_wrapper_with(
         forwarded_msg.expect("unexpected forwarded error result"),
     );
 
-    inv_registry
-        .update()
-        .await
-        .expect("unexpected dropped registry sender channel");
+    // We don't actually care if the registry takes any action here.
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let _poll_pending_or_ok: Poll<()> = inv_registry
+        .poll_inventory(&mut cx)
+        .map(|result| result.expect("unexpected error polling inventory"));
 
     let test_peer = test_peer
         .get_transient_addr()
