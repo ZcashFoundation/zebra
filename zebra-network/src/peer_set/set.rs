@@ -475,7 +475,7 @@ where
                 Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
 
-                    self.push_ready(key, svc);
+                    self.push_ready(true, key, svc);
 
                     // Return Ok if at least one peer became ready.
                     result = Poll::Ready(Ok(Some(())));
@@ -544,7 +544,7 @@ where
 
             match peer_readiness {
                 // Still ready, add it back to the list.
-                Ok(()) => self.push_ready(key, svc),
+                Ok(()) => self.push_ready(false, key, svc),
 
                 // Ready -> Errored
                 Err(error) => {
@@ -688,11 +688,16 @@ where
     }
 
     /// Adds a ready service to the ready list if it's for a peer with a supported version.
+    /// If `was_unready` is true, also removes the peer's cancel handle.
     ///
     /// If the service is for a connection to an outdated peer, the service is dropped.
-    fn push_ready(&mut self, key: D::Key, svc: D::Service) {
+    fn push_ready(&mut self, was_unready: bool, key: D::Key, svc: D::Service) {
         let cancel = self.cancel_handles.remove(&key);
-        assert!(cancel.is_some(), "missing cancel handle");
+        assert_eq!(
+            cancel.is_some(),
+            was_unready,
+            "missing or unexpected cancel handle"
+        );
 
         if svc.remote_version() >= self.minimum_peer_version.current() {
             self.ready_services.insert(key, svc);
