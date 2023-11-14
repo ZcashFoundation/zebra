@@ -92,8 +92,7 @@ impl TransactionIndex {
     /// Returns this index as a `usize`
     pub fn as_usize(&self) -> usize {
         self.0
-            .try_into()
-            .expect("the maximum valid index fits in usize")
+            .into()
     }
 
     /// Creates a transaction index from a `u64`.
@@ -109,8 +108,7 @@ impl TransactionIndex {
     #[allow(dead_code)]
     pub fn as_u64(&self) -> u64 {
         self.0
-            .try_into()
-            .expect("the maximum valid index fits in u64")
+            .into()
     }
 }
 

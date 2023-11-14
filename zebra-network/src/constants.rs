@@ -525,8 +525,7 @@ mod tests {
             INVENTORY_ROTATION_INTERVAL
                 < Duration::from_secs(
                     POST_BLOSSOM_POW_TARGET_SPACING
-                        .try_into()
-                        .expect("non-negative"),
+                        .into(),
                 ),
             "we should expire inventory every time 1-2 new blocks get generated"
         );

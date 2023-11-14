@@ -81,8 +81,7 @@ fn ensure_timeouts_consistent() {
     assert!(
         SYNC_RESTART_DELAY.as_secs()
             < POST_BLOSSOM_POW_TARGET_SPACING
-                .try_into()
-                .expect("not negative"),
+                .into(),
         "a syncer tip crawl should complete before most new blocks"
     );
 

@@ -85,7 +85,7 @@ impl Arbitrary for Output {
                 cv: ExtendedPoint::generator().try_into().unwrap(),
                 cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
                 ephemeral_key: keys::EphemeralPublicKey(
-                    ExtendedPoint::generator().try_into().unwrap(),
+                    ExtendedPoint::generator().into(),
                 ),
                 enc_ciphertext,
                 out_ciphertext,

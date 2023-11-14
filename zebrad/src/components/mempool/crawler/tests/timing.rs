@@ -12,8 +12,7 @@ fn ensure_timing_consistent() {
     assert!(
         RATE_LIMIT_DELAY.as_secs()
             < POST_BLOSSOM_POW_TARGET_SPACING
-                .try_into()
-                .expect("not negative"),
+                .into(),
         "a mempool crawl should complete before most new blocks"
     );
 
