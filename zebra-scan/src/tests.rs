@@ -39,7 +39,7 @@ use zebra_chain::{
     block::Block,
     chain_tip::ChainTip,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::Transaction,
+    transaction::{Hash, Transaction},
 };
 
 /// Prove that Zebra blocks can be scanned using the `zcash_client_backend::scanning::scan_block` function:
@@ -279,6 +279,70 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
     // no relevant transactions should be found
     assert_eq!(transactions_found, 0);
+
+    Ok(())
+}
+
+/// In this test we generate a viewing key and manually add it to the database. Also we send results to the Storage database.
+/// The purpose of this test is to check if our database and our scanning code are compatible.
+#[tokio::test]
+#[allow(deprecated)]
+async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
+    // Generate a key
+    let account = AccountId::from(12);
+    let extsk = ExtendedSpendingKey::master(&[]);
+    // TODO: find out how to do it with `to_diversifiable_full_viewing_key` as `to_extended_full_viewing_key` is deprecated.
+    let extfvk = extsk.to_extended_full_viewing_key();
+    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
+    let key_to_be_stored =
+        zcash_client_backend::encoding::encode_extended_full_viewing_key("zxviews", &extfvk);
+
+    // Create a database
+    let mut s = crate::storage::Storage::new();
+
+    // Insert the generated key to the database
+    s.add_key(key_to_be_stored.clone(), None);
+
+    // Check key was added
+    assert_eq!(s.get_keys().len(), 1);
+    assert_eq!(s.get_keys()[0], key_to_be_stored.clone());
+
+    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
+    let nf = Nullifier([7; 32]);
+
+    // Add key to fake block
+    let cb = fake_compact_block(
+        1u32.into(),
+        BlockHash([0; 32]),
+        nf,
+        &dfvk,
+        1,
+        false,
+        Some(0),
+    );
+
+    // Scan with our key
+    let res = scan_block(
+        &zcash_primitives::consensus::MainNetwork,
+        cb.clone(),
+        &vks[..],
+        &[(account, nf)],
+        None,
+    )
+    .unwrap();
+
+    // Get transaction hash
+    let found_transaction = res.transactions()[0].txid.as_ref();
+    let found_transaction_hash = Hash::from_bytes_in_display_order(found_transaction);
+
+    // Add result to database
+    s.add_result(key_to_be_stored.clone(), found_transaction_hash);
+
+    // Check the result was added
+    assert_eq!(
+        s.get_results(key_to_be_stored.as_str()).unwrap()[0],
+        found_transaction_hash
+    );
 
     Ok(())
 }
