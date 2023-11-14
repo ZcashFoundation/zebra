@@ -91,8 +91,7 @@ impl TransactionIndex {
 
     /// Returns this index as a `usize`
     pub fn as_usize(&self) -> usize {
-        self.0
-            .into()
+        self.0.into()
     }
 
     /// Creates a transaction index from a `u64`.
@@ -107,8 +106,7 @@ impl TransactionIndex {
     /// Returns this index as a `u64`
     #[allow(dead_code)]
     pub fn as_u64(&self) -> u64 {
-        self.0
-            .into()
+        self.0.into()
     }
 }
 

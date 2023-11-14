@@ -89,8 +89,7 @@ fn generate_test_vectors() {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature())
-                    .into(),
+                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
             }
         })
         .collect();

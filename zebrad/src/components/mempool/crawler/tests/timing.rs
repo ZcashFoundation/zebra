@@ -1,7 +1,5 @@
 //! Timing tests for the mempool crawler.
 
-
-
 use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
 use zebra_network::constants::{DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT};
 
@@ -10,9 +8,7 @@ use crate::components::mempool::crawler::RATE_LIMIT_DELAY;
 #[test]
 fn ensure_timing_consistent() {
     assert!(
-        RATE_LIMIT_DELAY.as_secs()
-            < POST_BLOSSOM_POW_TARGET_SPACING
-                .into(),
+        RATE_LIMIT_DELAY.as_secs() < POST_BLOSSOM_POW_TARGET_SPACING.into(),
         "a mempool crawl should complete before most new blocks"
     );
 
