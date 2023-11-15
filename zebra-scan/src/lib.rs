@@ -5,6 +5,7 @@
 #![doc(html_root_url = "https://docs.rs/zebra_scan")]
 
 pub mod config;
+mod storage;
 
 #[cfg(test)]
 mod tests;
