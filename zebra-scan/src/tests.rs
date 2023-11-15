@@ -305,7 +305,7 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     // Check key was added
     assert_eq!(s.get_sapling_keys().len(), 1);
-    assert_eq!(s.get_sapling_keys()[0], key_to_be_stored.clone());
+    assert_eq!(s.get_sapling_keys().get(&key_to_be_stored), Some(&None));
 
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
@@ -340,7 +340,7 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     // Check the result was added
     assert_eq!(
-        s.get_sapling_results(key_to_be_stored.as_str()).unwrap()[0],
+        s.get_sapling_results(key_to_be_stored.as_str())[0],
         found_transaction_hash
     );
 

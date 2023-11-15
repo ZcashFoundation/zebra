@@ -43,12 +43,12 @@ impl Storage {
     }
 
     /// Get the results of a sapling key.
-    pub fn get_sapling_results(&self, key: &str) -> Option<&Vec<Hash>> {
-        self.sapling_results.get(key)
+    pub fn get_sapling_results(&self, key: &str) -> Vec<Hash> {
+        self.sapling_results.get(key).cloned().unwrap_or_default()
     }
 
-    /// Get all sapling keys.
-    pub fn get_sapling_keys(&self) -> Vec<SaplingScanningKey> {
-        self.sapling_keys.keys().cloned().collect()
+    /// Get all keys and their birthdays.
+    pub fn get_sapling_keys(&self) -> HashMap<String, Option<Height>> {
+        self.sapling_keys.clone()
     }
 }
