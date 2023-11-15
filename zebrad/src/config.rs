@@ -46,5 +46,5 @@ pub struct ZebradConfig {
 
     #[cfg(feature = "zebra-scan")]
     /// Scanner configuration
-    pub scan: zebra_scan::config::Config,
+    pub shielded_scan: zebra_scan::config::Config,
 }
