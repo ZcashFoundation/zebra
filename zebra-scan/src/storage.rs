@@ -4,14 +4,18 @@ use std::collections::HashMap;
 
 use zebra_chain::{block::Height, transaction::Hash};
 
+/// The type used in Zebra to store Sapling scanning keys.
+/// It can represent a full viewing key or an individual viewing key.
+pub type SaplingScanningKey = String;
+
 /// Store key info and results of the scan.
 #[allow(dead_code)]
 pub struct Storage {
     /// The key and an optional birthday for it.
-    keys: HashMap<String, Option<Height>>,
+    keys: HashMap<SaplingScanningKey, Option<Height>>,
 
     /// The key and the related transaction id.
-    results: HashMap<String, Vec<Hash>>,
+    results: HashMap<SaplingScanningKey, Vec<Hash>>,
 }
 
 #[allow(dead_code)]
@@ -25,12 +29,12 @@ impl Storage {
     }
 
     /// Add a key to the storage.
-    pub fn add_key(&mut self, key: String, birthday: Option<Height>) {
+    pub fn add_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
         self.keys.insert(key, birthday);
     }
 
     /// Add a result to the storage.
-    pub fn add_result(&mut self, key: String, txid: Hash) {
+    pub fn add_result(&mut self, key: SaplingScanningKey, txid: Hash) {
         if let Some(results) = self.results.get_mut(&key) {
             results.push(txid);
         } else {
@@ -44,7 +48,7 @@ impl Storage {
     }
 
     /// Get all keys.
-    pub fn get_keys(&self) -> Vec<String> {
+    pub fn get_keys(&self) -> Vec<SaplingScanningKey> {
         self.keys.keys().cloned().collect()
     }
 }
