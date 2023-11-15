@@ -20,6 +20,9 @@ categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
 
+indexmap = { version = "2.0.1", features = ["serde"] }
+serde = { version = "1.0.192", features = ["serde_derive"] }
+
 [dev-dependencies]
 
 zcash_client_backend = "0.10.0-rc.1"
