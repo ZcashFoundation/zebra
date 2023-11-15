@@ -301,11 +301,11 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let mut s = crate::storage::Storage::new();
 
     // Insert the generated key to the database
-    s.add_key(key_to_be_stored.clone(), None);
+    s.add_sapling_key(key_to_be_stored.clone(), None);
 
     // Check key was added
-    assert_eq!(s.get_keys().len(), 1);
-    assert_eq!(s.get_keys()[0], key_to_be_stored.clone());
+    assert_eq!(s.get_sapling_keys().len(), 1);
+    assert_eq!(s.get_sapling_keys()[0], key_to_be_stored.clone());
 
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
@@ -336,11 +336,11 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let found_transaction_hash = Hash::from_bytes_in_display_order(found_transaction);
 
     // Add result to database
-    s.add_result(key_to_be_stored.clone(), found_transaction_hash);
+    s.add_sapling_result(key_to_be_stored.clone(), found_transaction_hash);
 
     // Check the result was added
     assert_eq!(
-        s.get_results(key_to_be_stored.as_str()).unwrap()[0],
+        s.get_sapling_results(key_to_be_stored.as_str()).unwrap()[0],
         found_transaction_hash
     );
 

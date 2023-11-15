@@ -11,11 +11,11 @@ pub type SaplingScanningKey = String;
 /// Store key info and results of the scan.
 #[allow(dead_code)]
 pub struct Storage {
-    /// The key and an optional birthday for it.
-    keys: HashMap<SaplingScanningKey, Option<Height>>,
+    /// The sapling key and an optional birthday for it.
+    sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
 
-    /// The key and the related transaction id.
-    results: HashMap<SaplingScanningKey, Vec<Hash>>,
+    /// The sapling key and the related transaction id.
+    sapling_results: HashMap<SaplingScanningKey, Vec<Hash>>,
 }
 
 #[allow(dead_code)]
@@ -23,32 +23,32 @@ impl Storage {
     /// Create a new storage.
     pub fn new() -> Self {
         Self {
-            keys: HashMap::new(),
-            results: HashMap::new(),
+            sapling_keys: HashMap::new(),
+            sapling_results: HashMap::new(),
         }
     }
 
-    /// Add a key to the storage.
-    pub fn add_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
-        self.keys.insert(key, birthday);
+    /// Add a sapling key to the storage.
+    pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
+        self.sapling_keys.insert(key, birthday);
     }
 
-    /// Add a result to the storage.
-    pub fn add_result(&mut self, key: SaplingScanningKey, txid: Hash) {
-        if let Some(results) = self.results.get_mut(&key) {
+    /// Add a sapling result to the storage.
+    pub fn add_sapling_result(&mut self, key: SaplingScanningKey, txid: Hash) {
+        if let Some(results) = self.sapling_results.get_mut(&key) {
             results.push(txid);
         } else {
-            self.results.insert(key, vec![txid]);
+            self.sapling_results.insert(key, vec![txid]);
         }
     }
 
-    /// Get the results of a key.
-    pub fn get_results(&self, key: &str) -> Option<&Vec<Hash>> {
-        self.results.get(key)
+    /// Get the results of a sapling key.
+    pub fn get_sapling_results(&self, key: &str) -> Option<&Vec<Hash>> {
+        self.sapling_results.get(key)
     }
 
-    /// Get all keys.
-    pub fn get_keys(&self) -> Vec<SaplingScanningKey> {
-        self.keys.keys().cloned().collect()
+    /// Get all sapling keys.
+    pub fn get_sapling_keys(&self) -> Vec<SaplingScanningKey> {
+        self.sapling_keys.keys().cloned().collect()
     }
 }
