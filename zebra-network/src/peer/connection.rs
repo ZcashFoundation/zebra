@@ -251,6 +251,7 @@ impl Handler {
                     )))
                 }
             }
+
             // `zcashd` returns requested blocks in a single batch of messages.
             // Other blocks or non-blocks messages can come before or after the batch.
             // `zcashd` silently skips missing blocks, rather than sending a final `notfound` message.
@@ -365,6 +366,10 @@ impl Handler {
                     block_hashes(&items[..]).collect(),
                 )))
             }
+            (Handler::FindHeaders, Message::Headers(headers)) => {
+                Handler::Finished(Ok(Response::BlockHeaders(headers)))
+            }
+
             (Handler::MempoolTransactionIds, Message::Inv(items))
                 if items.iter().all(|item| item.unmined_tx_id().is_some()) =>
             {
@@ -372,9 +377,7 @@ impl Handler {
                     transaction_ids(&items).collect(),
                 )))
             }
-            (Handler::FindHeaders, Message::Headers(headers)) => {
-                Handler::Finished(Ok(Response::BlockHeaders(headers)))
-            }
+
             // By default, messages are not responses.
             (state, msg) => {
                 trace!(?msg, "did not interpret message as response");
