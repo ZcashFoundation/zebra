@@ -522,11 +522,11 @@ where
     /// task.)
     ///
     /// Returns `Poll::Ready` if there are some ready peers, and `Poll::Pending` if there are no
-    /// ready peers. Never registers any task wakeups.
+    /// ready peers. Registers a wakeup if any peer has failed due to a disconnection, hang, or protocol error.
     ///
     /// # Panics
     ///
-    /// If any peers somehow became unready. This indicates a bug in the peer set, where requests
+    /// If any peers somehow became unready without being sent a request. This indicates a bug in the peer set, where requests
     /// are sent to peers without putting them in `unready_peers`.
     fn poll_ready_peer_errors(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let mut previous = HashMap::new();
