@@ -413,7 +413,7 @@ impl Handler {
         ignored_msg
     }
 
-    /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns a limited number of
+    /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns `response_size`
     /// addresses from that cache.
     ///
     /// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
@@ -453,7 +453,8 @@ impl Handler {
         // It's ok to just partially shuffle the cache, because it doesn't actually matter which
         // peers we drop. Having excess peers is rare, because most peers only send one large
         // unsolicited peer message when they first connect.
-        *cached_addrs = remaining[0..MAX_ADDRS_IN_MESSAGE].to_vec();
+        *cached_addrs = remaining.to_vec();
+        cached_addrs.truncate(MAX_ADDRS_IN_MESSAGE);
 
         response.to_vec()
     }
