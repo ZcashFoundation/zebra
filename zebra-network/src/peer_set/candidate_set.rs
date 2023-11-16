@@ -77,8 +77,8 @@ mod tests;
 /// ││        ▼                                                      ││
 /// ││        Λ                                                      ││
 /// ││       ╱ ╲              filter by                              ││
-/// ││      ▕   ▏        is_ready_for_connection_attempt             ││
-/// ││       ╲ ╱    to remove recent `Responded`,                    ││
+/// ││      ▕   ▏   is_ready_for_connection_attempt                  ││
+/// ││       ╲ ╱     to remove recent `Responded`,                   ││
 /// ││        V  `AttemptPending`, and `Failed` peers                ││
 /// ││        │                                                      ││
 /// ││        │    try outbound connection,                          ││
@@ -105,7 +105,8 @@ mod tests;
 /// │         │
 /// │         ▼
 /// │┌───────────────────────────────────────┐
-/// ││ every time we receive a peer message: │
+/// ││ when connection succeeds, and every   │
+/// ││  time we receive a peer heartbeat:    │
 /// └│  * update state to `Responded`        │
 ///  │  * update last_response to now()      │
 ///  └───────────────────────────────────────┘
@@ -120,11 +121,6 @@ mod tests;
 // TODO:
 //   * show all possible transitions between Attempt/Responded/Failed,
 //     except Failed -> Responded is invalid, must go through Attempt
-//   * for now, seed peers go straight to handshaking and responded,
-//     but we'll fix that once we add the Seed state
-// When we add the Seed state:
-//   * show that seed peers that transition to other never attempted
-//     states are already in the address book
 pub(crate) struct CandidateSet<S>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Send,
@@ -447,10 +443,8 @@ fn validate_addrs(
     // TODO:
     // We should eventually implement these checks in this function:
     // - Zebra should ignore peers that are older than 3 weeks (part of #1865)
-    //   - Zebra should count back 3 weeks from the newest peer timestamp sent
-    //     by the other peer, to compensate for clock skew
-    // - Zebra should limit the number of addresses it uses from a single Addrs
-    //   response (#1869)
+    // - Zebra should count back 3 weeks from the newest peer timestamp sent
+    //   by the other peer, to compensate for clock skew
 
     let mut addrs: Vec<_> = addrs.into_iter().collect();
 

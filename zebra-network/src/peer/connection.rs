@@ -161,6 +161,8 @@ impl Handler {
             }
 
             (Handler::Peers, Message::Addr(new_addrs)) => {
+                // Security: This method performs security-sensitive operations, see its comments
+                // for details.
                 let response_addrs =
                     Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
 
@@ -1001,15 +1003,9 @@ where
 
             // Take some cached addresses from the peer connection. This address cache helps
             // work-around a `zcashd` addr response rate-limit.
-            //
-            // # Security
-            //
-            // We limit how many peer addresses we take from each peer, so that our address book
-            // and outbound connections aren't controlled by a single peer (#1869).
-            //
-            // Remaining peers are left in the cache, so that we can use them if the peer doesn't
-            // respond to our getaddr requests.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
+                // Security: This method performs security-sensitive operations, see its comments
+                // for details.
                 let response_addrs = Handler::update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
 
                 debug!(
