@@ -14,7 +14,7 @@ use futures::{
     prelude::*,
     stream::Stream,
 };
-use rand::{thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -429,21 +429,31 @@ impl Handler {
         //
         // Add the new addresses to the end of the cache.
         cached_addrs.extend(new_addrs);
-        let mut iter = cached_addrs.iter().cloned();
 
         // # Security
         //
         // We limit how many peer addresses we take from each peer, so that our address book
-        // and outbound connections aren't controlled by a single peer (#1869).
+        // and outbound connections aren't controlled by a single peer (#1869). We randomly select
+        // peers, so the remote peer can't control which addresses we choose by changing the order
+        // in the messages they send.
         let response_size = response_size.into().unwrap_or_default();
-        let response = (&mut iter).take(response_size).collect();
+
+        let mut temp_cache = Vec::new();
+        std::mem::swap(cached_addrs, &mut temp_cache);
+
+        // The response is fully shuffled, remaining is partially shuffled.
+        let (response, remaining) = temp_cache.partial_shuffle(&mut thread_rng(), response_size);
 
         // # Security
         //
         // The cache size is limited to avoid memory denial of service.
-        *cached_addrs = iter.take(MAX_ADDRS_IN_MESSAGE).collect();
+        //
+        // It's ok to just partially shuffle the cache, because it doesn't actually matter which
+        // peers we drop. Having excess peers is rare, because most peers only send one large
+        // unsolicited peer message when they first connect.
+        *cached_addrs = remaining[0..MAX_ADDRS_IN_MESSAGE].to_vec();
 
-        response
+        response.to_vec()
     }
 }
 
