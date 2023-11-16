@@ -309,7 +309,7 @@ pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 ///
 /// This limit makes sure that Zebra does not reveal its entire address book
 /// in a single `Peers` response.
-pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 3;
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
 
 /// The maximum number of addresses Zebra will keep in its address book.
 ///
