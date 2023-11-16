@@ -27,8 +27,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        OVERLOAD_PROTECTION_INTERVAL,
+        self, MAX_ADDRS_IN_MESSAGE, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -137,7 +137,14 @@ impl Handler {
     /// interpretable as a response, we return ownership to the caller.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
-    fn process_message(&mut self, msg: Message) -> Option<Message> {
+    ///
+    /// `addr` responses are limited to avoid peer set takeover. Any excess
+    /// addresses are stored in `cached_addrs`.
+    fn process_message(
+        &mut self,
+        msg: Message,
+        cached_addrs: &mut Vec<MetaAddr>,
+    ) -> Option<Message> {
         let mut ignored_msg = None;
         // TODO: can this be avoided?
         let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
@@ -152,7 +159,31 @@ impl Handler {
                     Handler::Ping(req_nonce)
                 }
             }
-            (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
+
+            (Handler::Peers, Message::Addr(mut addrs)) => {
+                // # Security
+                //
+                // We limit how many peer addresses we take from each peer, so that our address book
+                // and outbound connections aren't controlled by a single peer (#1869).
+                //
+                // Remaining peers are added to the cache, so that we can use them if the peer
+                // doesn't respond to our getaddr requests. The cache is limited to avoid memory
+                // denial of service.
+                if addrs.len() > PEER_ADDR_RESPONSE_LIMIT {
+                    let mut excess_new_addrs = addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
+                    cached_addrs.append(&mut excess_new_addrs);
+
+                    // Keep recently sent addresses and discard older ones, if needed.
+                    if let Some(excess_old_addrs) =
+                        cached_addrs.len().checked_sub(MAX_ADDRS_IN_MESSAGE)
+                    {
+                        *cached_addrs = cached_addrs.split_off(excess_old_addrs);
+                    }
+                }
+
+                Handler::Finished(Ok(Response::Peers(addrs)))
+            }
+
             // `zcashd` returns requested transactions in a single batch of messages.
             // Other transaction or non-transaction messages can come before or after the batch.
             // After the transaction batch, `zcashd` sends `notfound` if any transactions are missing:
@@ -783,7 +814,7 @@ where
                             let request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg)),
+                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs)),
                                 _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
@@ -932,16 +963,30 @@ where
                 self.client_rx
             ),
 
-            // Consume the cached addresses from the peer,
-            // to work-around a `zcashd` response rate-limit.
+            // Take some cached addresses from the peer connection. This address cache helps
+            // work-around a `zcashd` addr response rate-limit.
+            //
+            // # Security
+            //
+            // We limit how many peer addresses we take from each peer, so that our address book
+            // and outbound connections aren't controlled by a single peer (#1869).
+            //
+            // Remaining peers are left in the cache, so that we can use them if the peer doesn't
+            // respond to our getaddr requests.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
-                let cached_addrs = std::mem::take(&mut self.cached_addrs);
+                let mut response_addrs = std::mem::take(&mut self.cached_addrs);
+                let remaining_addrs = response_addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
+
                 debug!(
-                    addrs = cached_addrs.len(),
-                    "responding to Peers request using cached addresses",
+                    response_addrs = response_addrs.len(),
+                    remaining_addrs = remaining_addrs.len(),
+                    PEER_ADDR_RESPONSE_LIMIT,
+                    "responding to Peers request using some cached addresses",
                 );
 
-                Ok(Handler::Finished(Ok(Response::Peers(cached_addrs))))
+                self.cached_addrs = remaining_addrs;
+
+                Ok(Handler::Finished(Ok(Response::Peers(response_addrs))))
             }
             (AwaitingRequest, Peers) => self
                 .peer_tx
