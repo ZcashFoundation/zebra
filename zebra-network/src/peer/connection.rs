@@ -160,28 +160,20 @@ impl Handler {
                 }
             }
 
-            (Handler::Peers, Message::Addr(mut addrs)) => {
-                // # Security
-                //
-                // We limit how many peer addresses we take from each peer, so that our address book
-                // and outbound connections aren't controlled by a single peer (#1869).
-                //
-                // Remaining peers are added to the cache, so that we can use them if the peer
-                // doesn't respond to our getaddr requests. The cache is limited to avoid memory
-                // denial of service.
-                if addrs.len() > PEER_ADDR_RESPONSE_LIMIT {
-                    let mut excess_new_addrs = addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
-                    cached_addrs.append(&mut excess_new_addrs);
+            (Handler::Peers, Message::Addr(new_addrs)) => {
+                let new_addrs_len = new_addrs.len();
 
-                    // Keep recently sent addresses and discard older ones, if needed.
-                    if let Some(excess_old_addrs) =
-                        cached_addrs.len().checked_sub(MAX_ADDRS_IN_MESSAGE)
-                    {
-                        *cached_addrs = cached_addrs.split_off(excess_old_addrs);
-                    }
-                }
+                let response_addrs = Handler::take_partial_addrs(cached_addrs, new_addrs);
 
-                Handler::Finished(Ok(Response::Peers(addrs)))
+                debug!(
+                    new_addrs = new_addrs_len,
+                    response_addrs = response_addrs.len(),
+                    remaining_addrs = cached_addrs.len(),
+                    PEER_ADDR_RESPONSE_LIMIT,
+                    "responding to Peers request using new and cached addresses",
+                );
+
+                Handler::Finished(Ok(Response::Peers(response_addrs)))
             }
 
             // `zcashd` returns requested transactions in a single batch of messages.
@@ -418,6 +410,35 @@ impl Handler {
         };
 
         ignored_msg
+    }
+
+    /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns a limited number of
+    /// addresses from that cache. `new_addrs` or `cached_addrs` can be empty.
+    fn take_partial_addrs(
+        cached_addrs: &mut Vec<MetaAddr>,
+        new_addrs: impl IntoIterator<Item = MetaAddr>,
+    ) -> Vec<MetaAddr> {
+        // # Peer Set Reliability
+        //
+        // Newly received peers are added to the cache, so that we can use them if the connection
+        // doesn't respond to our getaddr requests.
+        //
+        // Add the new addresses to the end of the cache.
+        cached_addrs.extend(new_addrs);
+        let mut iter = cached_addrs.iter().cloned();
+
+        // # Security
+        //
+        // We limit how many peer addresses we take from each peer, so that our address book
+        // and outbound connections aren't controlled by a single peer (#1869).
+        let response = (&mut iter).take(PEER_ADDR_RESPONSE_LIMIT).collect();
+
+        // # Security
+        //
+        // The cache is limited to avoid memory denial of service.
+        *cached_addrs = iter.take(MAX_ADDRS_IN_MESSAGE).collect();
+
+        response
     }
 }
 
@@ -974,10 +995,8 @@ where
             // Remaining peers are left in the cache, so that we can use them if the peer doesn't
             // respond to our getaddr requests.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
-                let mut response_addrs = std::mem::take(&mut self.cached_addrs);
-                if response_addrs.len() > PEER_ADDR_RESPONSE_LIMIT {
-                    self.cached_addrs = response_addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
-                }
+                let response_addrs = Handler::take_partial_addrs(&mut self.cached_addrs, None);
+
 
                 debug!(
                     response_addrs = response_addrs.len(),
