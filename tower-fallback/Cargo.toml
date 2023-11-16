@@ -22,6 +22,6 @@ futures-core = "0.3.28"
 tracing = "0.1.39"
 
 [dev-dependencies]
-tokio = { version = "1.33.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.34.0", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }
