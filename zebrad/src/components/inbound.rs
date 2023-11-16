@@ -73,6 +73,10 @@ pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
 /// many peers instead of just a few peers.)
 pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
 
+/// The maximum duration that a `CachedPeerAddrs` is considered fresh before the inbound service
+/// should get new peer addresses from the address book to send as a `GetAddr` response.
+const INBOUND_CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
@@ -106,8 +110,6 @@ pub struct InboundSetupData {
     /// Allows efficient access to the best tip of the blockchain.
     pub latest_chain_tip: zs::LatestChainTip,
 }
-
-const INBOUND_CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// Caches and refreshes a partial list of peer addresses to be returned as a `GetAddr` response.
 pub struct CachedPeerAddrs {
