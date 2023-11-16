@@ -18,7 +18,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
-    constants,
+    constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     types::MetaAddr,
@@ -264,6 +264,18 @@ impl AddressBook {
     /// Get the local listener [`SocketAddr`].
     pub fn local_listener_socket_addr(&self) -> SocketAddr {
         self.local_listener
+    }
+
+    /// Get the active addresses in `self` in random order with sanitized timestamps,
+    /// including our local listener address.
+    pub fn sanitized_window(&self) -> Vec<MetaAddr> {
+        let now = Utc::now();
+        let mut peers = self.sanitized(now);
+        let address_limit = peers.len().div_ceil(ADDR_RESPONSE_LIMIT_DENOMINATOR);
+        let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
+        peers.truncate(address_limit);
+
+        peers
     }
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
