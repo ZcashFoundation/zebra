@@ -161,12 +161,11 @@ impl Handler {
             }
 
             (Handler::Peers, Message::Addr(new_addrs)) => {
-                let new_addrs_len = new_addrs.len();
-
-                let response_addrs = Handler::take_partial_addrs(cached_addrs, new_addrs);
+                let response_addrs =
+                    Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
 
                 debug!(
-                    new_addrs = new_addrs_len,
+                    new_addrs = new_addrs.len(),
                     response_addrs = response_addrs.len(),
                     remaining_addrs = cached_addrs.len(),
                     PEER_ADDR_RESPONSE_LIMIT,
@@ -413,10 +412,15 @@ impl Handler {
     }
 
     /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns a limited number of
-    /// addresses from that cache. `new_addrs` or `cached_addrs` can be empty.
-    fn take_partial_addrs(
+    /// addresses from that cache.
+    ///
+    /// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
+    /// there are no new addresses. `response_size` can be zero or `None` if there is no response
+    /// needed.
+    fn update_addr_cache<'new>(
         cached_addrs: &mut Vec<MetaAddr>,
-        new_addrs: impl IntoIterator<Item = MetaAddr>,
+        new_addrs: impl IntoIterator<Item = &'new MetaAddr>,
+        response_size: impl Into<Option<usize>>,
     ) -> Vec<MetaAddr> {
         // # Peer Set Reliability
         //
@@ -431,11 +435,12 @@ impl Handler {
         //
         // We limit how many peer addresses we take from each peer, so that our address book
         // and outbound connections aren't controlled by a single peer (#1869).
-        let response = (&mut iter).take(PEER_ADDR_RESPONSE_LIMIT).collect();
+        let response_size = response_size.into().unwrap_or_default();
+        let response = (&mut iter).take(response_size).collect();
 
         // # Security
         //
-        // The cache is limited to avoid memory denial of service.
+        // The cache size is limited to avoid memory denial of service.
         *cached_addrs = iter.take(MAX_ADDRS_IN_MESSAGE).collect();
 
         response
@@ -995,8 +1000,7 @@ where
             // Remaining peers are left in the cache, so that we can use them if the peer doesn't
             // respond to our getaddr requests.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
-                let response_addrs = Handler::take_partial_addrs(&mut self.cached_addrs, None);
-
+                let response_addrs = Handler::update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
 
                 debug!(
                     response_addrs = response_addrs.len(),
@@ -1212,28 +1216,32 @@ where
                 // Ignored, but consumed because it is technically a protocol error.
                 Consumed
             }
-            // Zebra crawls the network proactively, to prevent
-            // peers from inserting data into our address book.
-            Message::Addr(ref addrs) => {
-                // Workaround `zcashd`'s `getaddr` response rate-limit
-                if addrs.len() > 1 {
-                    // Always refresh the cache with multi-addr messages.
-                    debug!(%msg, "caching unsolicited multi-addr message");
-                    self.cached_addrs = addrs.clone();
-                    Consumed
-                } else if addrs.len() == 1 && self.cached_addrs.len() <= 1 {
-                    // Only refresh a cached single addr message with another single addr.
-                    // (`zcashd` regularly advertises its own address.)
-                    debug!(%msg, "caching unsolicited single addr message");
-                    self.cached_addrs = addrs.clone();
-                    Consumed
-                } else {
-                    debug!(
-                        %msg,
-                        "ignoring unsolicited single addr message: already cached a multi-addr message"
-                    );
-                    Consumed
-                }
+
+            // # Security
+            //
+            // Zebra crawls the network proactively, and that's the only way peers get into our
+            // address book. This prevents peers from filling our address book with malicious peer
+            // addresses.
+            Message::Addr(ref new_addrs) => {
+                // # Peer Set Reliability
+                //
+                // We keep a list of the unused peer addresses sent by each connection, to work
+                // around `zcashd`'s `getaddr` response rate-limit.
+                let no_response =
+                    Handler::update_addr_cache(&mut self.cached_addrs, new_addrs, None);
+                assert_eq!(
+                    no_response,
+                    Vec::new(),
+                    "peers unexpectedly taken from cache"
+                );
+
+                debug!(
+                    new_addrs = new_addrs.len(),
+                    cached_addrs = self.cached_addrs.len(),
+                    "adding unsolicited addresses to cached addresses",
+                );
+
+                Consumed
             }
             Message::Tx(ref transaction) => Request::PushTransaction(transaction.clone()).into(),
             Message::Inv(ref items) => match &items[..] {
