@@ -975,16 +975,16 @@ where
             // respond to our getaddr requests.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
                 let mut response_addrs = std::mem::take(&mut self.cached_addrs);
-                let remaining_addrs = response_addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
+                if response_addrs.len() > PEER_ADDR_RESPONSE_LIMIT {
+                    self.cached_addrs = response_addrs.split_off(PEER_ADDR_RESPONSE_LIMIT);
+                }
 
                 debug!(
                     response_addrs = response_addrs.len(),
-                    remaining_addrs = remaining_addrs.len(),
+                    remaining_addrs = self.cached_addrs.len(),
                     PEER_ADDR_RESPONSE_LIMIT,
                     "responding to Peers request using some cached addresses",
                 );
-
-                self.cached_addrs = remaining_addrs;
 
                 Ok(Handler::Finished(Ok(Response::Peers(response_addrs))))
             }
