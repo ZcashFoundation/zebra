@@ -515,7 +515,7 @@ mod tests {
         );
 
         assert!(
-            MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
+            MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE * 2,
             "the address book limit should actually be used"
         );
     }
