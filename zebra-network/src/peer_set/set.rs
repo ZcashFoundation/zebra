@@ -97,7 +97,6 @@ use std::{
     collections::{HashMap, HashSet},
     convert,
     fmt::Debug,
-    future::Future,
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
@@ -107,14 +106,15 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::{FutureExt, TryFutureExt},
+    future::{Future, FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
+    task::noop_waker,
 };
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
-    sync::{broadcast, oneshot::error::TryRecvError, watch},
+    sync::{broadcast, watch},
     task::JoinHandle,
 };
 use tower::{
@@ -191,17 +191,6 @@ where
 
     // Request Routing
     //
-    /// A preselected ready service.
-    ///
-    /// # Correctness
-    ///
-    /// If this is `Some(addr)`, `addr` must be a key for a peer in `ready_services`.
-    /// If that peer is removed from `ready_services`, we must set the preselected peer to `None`.
-    ///
-    /// This is handled by [`PeerSet::take_ready_service`] and
-    /// [`PeerSet::disconnect_from_outdated_peers`].
-    preselected_p2c_peer: Option<D::Key>,
-
     /// Stores gossiped inventory hashes from connected peers.
     ///
     /// Used to route inventory requests to peers that are likely to have it.
@@ -265,7 +254,11 @@ where
     C: ChainTip,
 {
     fn drop(&mut self) {
-        self.shut_down_tasks_and_channels()
+        // We don't have access to the current task (if any), so we just drop everything we can.
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        self.shut_down_tasks_and_channels(&mut cx);
     }
 }
 
@@ -310,7 +303,6 @@ where
             // Ready peers
             ready_services: HashMap::new(),
             // Request Routing
-            preselected_p2c_peer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
 
             // Busy peers
@@ -335,52 +327,51 @@ where
 
     /// Check background task handles to make sure they're still running.
     ///
+    /// Never returns `Ok`.
+    ///
     /// If any background task exits, shuts down all other background tasks,
-    /// and returns an error.
-    fn poll_background_errors(&mut self, cx: &mut Context) -> Result<(), BoxError> {
-        if let Some(result) = self.receive_tasks_if_needed() {
-            return result;
-        }
+    /// and returns an error. Otherwise, returns `Pending`, and registers a wakeup for
+    /// receiving the background tasks, or the background tasks exiting.
+    fn poll_background_errors(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        futures::ready!(self.receive_tasks_if_needed(cx))?;
 
-        match Pin::new(&mut self.guards).poll_next(cx) {
-            // All background tasks are still running.
-            Poll::Pending => Ok(()),
-
-            Poll::Ready(Some(res)) => {
+        // Return Pending if all background tasks are still running.
+        match futures::ready!(Pin::new(&mut self.guards).poll_next(cx)) {
+            Some(res) => {
                 info!(
                     background_tasks = %self.guards.len(),
                     "a peer set background task exited, shutting down other peer set tasks"
                 );
 
-                self.shut_down_tasks_and_channels();
+                self.shut_down_tasks_and_channels(cx);
 
-                // Flatten the join result and inner result,
-                // then turn Ok() task exits into errors.
+                // Flatten the join result and inner result, and return any errors.
                 res.map_err(Into::into)
                     // TODO: replace with Result::flatten when it stabilises (#70142)
-                    .and_then(convert::identity)
-                    .and(Err("a peer set background task exited".into()))
+                    .and_then(convert::identity)?;
+
+                // Turn Ok() task exits into errors.
+                Poll::Ready(Err("a peer set background task exited".into()))
             }
 
-            Poll::Ready(None) => {
-                self.shut_down_tasks_and_channels();
-                Err("all peer set background tasks have exited".into())
+            None => {
+                self.shut_down_tasks_and_channels(cx);
+                Poll::Ready(Err("all peer set background tasks have exited".into()))
             }
         }
     }
 
-    /// Receive background tasks, if they've been sent on the channel,
-    /// but not consumed yet.
+    /// Receive background tasks, if they've been sent on the channel, but not consumed yet.
     ///
-    /// Returns a result representing the current task state,
-    /// or `None` if the background tasks should be polled to check their state.
-    fn receive_tasks_if_needed(&mut self) -> Option<Result<(), BoxError>> {
+    /// Returns a result representing the current task state, or `Poll::Pending` if the background
+    /// tasks should be polled again to check their state.
+    fn receive_tasks_if_needed(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         if self.guards.is_empty() {
-            match self.handle_rx.try_recv() {
-                // The tasks haven't been sent yet.
-                Err(TryRecvError::Empty) => Some(Ok(())),
+            // Return Pending if the tasks have not been sent yet.
+            let handles = futures::ready!(Pin::new(&mut self.handle_rx).poll(cx));
 
-                // The tasks have been sent, but not consumed.
+            match handles {
+                // The tasks have been sent, but not consumed yet.
                 Ok(handles) => {
                     // Currently, the peer set treats an empty background task set as an error.
                     //
@@ -393,21 +384,16 @@ where
 
                     self.guards.extend(handles);
 
-                    None
+                    Poll::Ready(Ok(()))
                 }
 
-                // The tasks have been sent and consumed, but then they exited.
-                //
-                // Correctness: the peer set must receive at least one task.
-                //
-                // TODO: refactor `handle_rx` and `guards` into an enum
-                //       for the background task state: Waiting/Running/Shutdown.
-                Err(TryRecvError::Closed) => {
-                    Some(Err("all peer set background tasks have exited".into()))
-                }
+                // The sender was dropped without sending the tasks.
+                Err(_) => Poll::Ready(Err(
+                    "sender did not send peer background tasks before it was dropped".into(),
+                )),
             }
         } else {
-            None
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -415,9 +401,8 @@ where
     /// - services by dropping the service lists
     /// - background tasks via their join handles or cancel handles
     /// - channels by closing the channel
-    fn shut_down_tasks_and_channels(&mut self) {
+    fn shut_down_tasks_and_channels(&mut self, cx: &mut Context<'_>) {
         // Drop services and cancel their background tasks.
-        self.preselected_p2c_peer = None;
         self.ready_services = HashMap::new();
 
         for (_peer_key, handle) in self.cancel_handles.drain() {
@@ -429,9 +414,9 @@ where
         // so we don't add more peers to a shut down peer set.
         self.demand_signal.close_channel();
 
-        // Shut down background tasks.
+        // Shut down background tasks, ignoring pending polls.
         self.handle_rx.close();
-        self.receive_tasks_if_needed();
+        let _ = self.receive_tasks_if_needed(cx);
         for guard in self.guards.iter() {
             guard.abort();
         }
@@ -441,25 +426,63 @@ where
     ///
     /// Move newly ready services to the ready list if they are for peers with supported protocol
     /// versions, otherwise they are dropped. Also drop failed services.
-    fn poll_unready(&mut self, cx: &mut Context<'_>) {
+    ///
+    /// Never returns an error.
+    ///
+    /// Returns `Ok(Some(())` if at least one peer became ready, `Poll::Pending` if there are
+    /// unready peers, but none became ready, and `Ok(None)` if the unready peers were empty.
+    ///
+    /// If there are any remaining unready peers, registers a wakeup for the next time one becomes
+    /// ready. If there are no unready peers, doesn't register any wakeups. (Since wakeups come
+    /// from peers, there needs to be at least one peer to register a wakeup.)
+    fn poll_unready(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<()>, BoxError>> {
+        let mut result = Poll::Pending;
+
+        // # Correctness
+        //
+        // `poll_next()` must always be called, because `self.unready_services` could have been
+        // empty before the call to `self.poll_ready()`.
+        //
+        // > When new futures are added, `poll_next` must be called in order to begin receiving
+        // > wake-ups for new futures.
+        //
+        // <https://docs.rs/futures/latest/futures/stream/futures_unordered/struct.FuturesUnordered.html>
+        //
+        // Returns Pending if we've finished processing the unready service changes,
+        // but there are still some unready services.
         loop {
-            match Pin::new(&mut self.unready_services).poll_next(cx) {
-                // No unready service changes, or empty unready services
-                Poll::Pending | Poll::Ready(None) => return,
+            // No ready peers left, but there are some unready peers pending.
+            let Poll::Ready(ready_peer) = Pin::new(&mut self.unready_services).poll_next(cx) else {
+                break;
+            };
+
+            match ready_peer {
+                // No unready peers in the list.
+                None => {
+                    // If we've finished processing the unready service changes, and there are no
+                    // unready services left, it doesn't make sense to return Pending, because
+                    // their stream is terminated. But when we add more unready peers and call
+                    // `poll_next()`, its termination status will be reset, and it will receive
+                    // wakeups again.
+                    if result.is_pending() {
+                        result = Poll::Ready(Ok(None));
+                    }
+
+                    break;
+                }
 
                 // Unready -> Ready
-                Poll::Ready(Some(Ok((key, svc)))) => {
+                Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
-                    let cancel = self.cancel_handles.remove(&key);
-                    assert!(cancel.is_some(), "missing cancel handle");
 
-                    if svc.remote_version() >= self.minimum_peer_version.current() {
-                        self.ready_services.insert(key, svc);
-                    }
+                    self.push_ready(true, key, svc);
+
+                    // Return Ok if at least one peer became ready.
+                    result = Poll::Ready(Ok(Some(())));
                 }
 
                 // Unready -> Canceled
-                Poll::Ready(Some(Err((key, UnreadyError::Canceled)))) => {
+                Some(Err((key, UnreadyError::Canceled))) => {
                     // A service be canceled because we've connected to the same service twice.
                     // In that case, there is a cancel handle for the peer address,
                     // but it belongs to the service for the newer connection.
@@ -469,7 +492,7 @@ where
                         "service was canceled, dropping service"
                     );
                 }
-                Poll::Ready(Some(Err((key, UnreadyError::CancelHandleDropped(_))))) => {
+                Some(Err((key, UnreadyError::CancelHandleDropped(_)))) => {
                     // Similarly, services with dropped cancel handes can have duplicates.
                     trace!(
                         ?key,
@@ -479,13 +502,64 @@ where
                 }
 
                 // Unready -> Errored
-                Poll::Ready(Some(Err((key, UnreadyError::Inner(error))))) => {
+                Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
 
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
                 }
             }
+        }
+
+        result
+    }
+
+    /// Checks previously ready peer services for errors.
+    ///
+    /// The only way these peer `Client`s can become unready is when we send them a request,
+    /// because the peer set has exclusive access to send requests to each peer. (If an inbound
+    /// request is in progress, it will be handled, then our request will be sent by the connection
+    /// task.)
+    ///
+    /// Returns `Poll::Ready` if there are some ready peers, and `Poll::Pending` if there are no
+    /// ready peers. Registers a wakeup if any peer has failed due to a disconnection, hang, or protocol error.
+    ///
+    /// # Panics
+    ///
+    /// If any peers somehow became unready without being sent a request. This indicates a bug in the peer set, where requests
+    /// are sent to peers without putting them in `unready_peers`.
+    fn poll_ready_peer_errors(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let mut previous = HashMap::new();
+        std::mem::swap(&mut previous, &mut self.ready_services);
+
+        // TODO: consider only checking some peers each poll (for performance reasons),
+        //       but make sure we eventually check all of them.
+        for (key, mut svc) in previous.drain() {
+            let Poll::Ready(peer_readiness) = Pin::new(&mut svc).poll_ready(cx) else {
+                unreachable!(
+                    "unexpected unready peer: peers must be put into the unready_peers list \
+                     after sending them a request"
+                );
+            };
+
+            match peer_readiness {
+                // Still ready, add it back to the list.
+                Ok(()) => self.push_ready(false, key, svc),
+
+                // Ready -> Errored
+                Err(error) => {
+                    debug!(%error, "service failed while ready, dropping service");
+
+                    // Ready services can just be dropped, they don't need any cleanup.
+                    std::mem::drop(svc);
+                }
+            }
+        }
+
+        if self.ready_services.is_empty() {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
         }
     }
 
@@ -509,17 +583,35 @@ where
         self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
     }
 
-    /// Checks for newly inserted or removed services.
+    /// Processes the entire list of newly inserted or removed services.
     ///
     /// Puts inserted services in the unready list.
     /// Drops removed services, after cancelling any pending requests.
+    ///
+    /// If the peer connector channel is closed, returns an error.
+    ///
+    /// Otherwise, returns `Ok` if it discovered at least one peer, or `Poll::Pending` if it didn't
+    /// discover any peers. Always registers a wakeup for new peers, even when it returns `Ok`.
     fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        use futures::ready;
+        // Return pending if there are no peers in the list.
+        let mut result = Poll::Pending;
+
         loop {
-            match ready!(Pin::new(&mut self.discover).poll_discover(cx))
+            // If we've emptied the list, finish looping, otherwise process the new peer.
+            let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
+                break;
+            };
+
+            // If the change channel has a permanent error, return that error.
+            let change = discovered
                 .ok_or("discovery stream closed")?
-                .map_err(Into::into)?
-            {
+                .map_err(Into::into)?;
+
+            // Otherwise we have successfully processed a peer.
+            result = Poll::Ready(Ok(()));
+
+            // Process each change.
+            match change {
                 Change::Remove(key) => {
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
@@ -552,32 +644,22 @@ where
                 }
             }
         }
+
+        result
     }
 
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            self.ready_services.retain(|address, peer| {
-                if peer.remote_version() >= minimum_version {
-                    true
-                } else {
-                    if self.preselected_p2c_peer == Some(*address) {
-                        self.preselected_p2c_peer = None;
-                    }
-
-                    false
-                }
-            });
+            // It is ok to drop ready services, they don't need anything cancelled.
+            self.ready_services
+                .retain(|_address, peer| peer.remote_version() >= minimum_version);
         }
     }
 
-    /// Takes a ready service by key, invalidating `preselected_p2c_peer` if needed.
+    /// Takes a ready service by key.
     fn take_ready_service(&mut self, key: &D::Key) -> Option<D::Service> {
         if let Some(svc) = self.ready_services.remove(key) {
-            if Some(*key) == self.preselected_p2c_peer {
-                self.preselected_p2c_peer = None;
-            }
-
             assert!(
                 !self.cancel_handles.contains_key(key),
                 "cancel handles are only used for unready service work"
@@ -602,6 +684,25 @@ where
             // The service future returns a `Canceled` error,
             // making `poll_unready` drop the service.
             let _ = handle.send(CancelClientWork);
+        }
+    }
+
+    /// Adds a ready service to the ready list if it's for a peer with a supported version.
+    /// If `was_unready` is true, also removes the peer's cancel handle.
+    ///
+    /// If the service is for a connection to an outdated peer, the service is dropped.
+    fn push_ready(&mut self, was_unready: bool, key: D::Key, svc: D::Service) {
+        let cancel = self.cancel_handles.remove(&key);
+        assert_eq!(
+            cancel.is_some(),
+            was_unready,
+            "missing or unexpected cancel handle"
+        );
+
+        if svc.remote_version() >= self.minimum_peer_version.current() {
+            self.ready_services.insert(key, svc);
+        } else {
+            std::mem::drop(svc);
         }
     }
 
@@ -631,7 +732,7 @@ where
     }
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
-    fn preselect_p2c_peer(&self) -> Option<D::Key> {
+    fn select_ready_p2c_peer(&self) -> Option<D::Key> {
         self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
     }
 
@@ -647,8 +748,7 @@ where
                     .expect("just checked there is one service"),
             ),
             len => {
-                // If there are only 2 peers, randomise their order.
-                // Otherwise, choose 2 random peers in a random order.
+                // Choose 2 random peers, then return the least loaded of those 2 peers.
                 let (a, b) = {
                     let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
                     let a = idxs.index(0);
@@ -708,19 +808,32 @@ where
 
     /// Routes a request using P2C load-balancing.
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        let preselected_key = self
-            .preselected_p2c_peer
-            .expect("ready peer service must have a preselected peer");
+        if let Some(p2c_key) = self.select_ready_p2c_peer() {
+            tracing::trace!(?p2c_key, "routing based on p2c");
 
-        tracing::trace!(?preselected_key, "routing based on p2c");
+            let mut svc = self
+                .take_ready_service(&p2c_key)
+                .expect("selected peer must be ready");
 
-        let mut svc = self
-            .take_ready_service(&preselected_key)
-            .expect("ready peer set must have preselected a ready peer");
+            let fut = svc.call(req);
+            self.push_unready(p2c_key, svc);
 
-        let fut = svc.call(req);
-        self.push_unready(preselected_key, svc);
-        fut.map_err(Into::into).boxed()
+            return fut.map_err(Into::into).boxed();
+        }
+
+        async move {
+            // Let other tasks run, so a retry request might get different ready peers.
+            tokio::task::yield_now().await;
+
+            // # Security
+            //
+            // Avoid routing requests to peers that are missing inventory.
+            // If we kept trying doomed requests, peers that are missing our requested inventory
+            // could take up a large amount of our bandwidth and retry limits.
+            Err(SharedPeerError::from(PeerError::NoReadyPeers))
+        }
+        .map_err(Into::into)
+        .boxed()
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
@@ -995,78 +1108,71 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.poll_background_errors(cx)?;
+        // Update service and peer statuses.
+        //
+        // # Correctness
+        //
+        // All of the futures that receive a context from this method can wake the peer set buffer
+        // task. If there are no ready peers, and no new peers, network requests will pause until:
+        // - an unready peer becomes ready, or
+        // - a new peer arrives.
 
-        // Update peer statuses
-        let _ = self.poll_discover(cx)?;
+        // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
+        // can be infrequent if our connection slots are full, or we're connected to all
+        // available/useful peers.
+        let _poll_pending_or_ready: Poll<()> = self.poll_discover(cx)?;
+
+        // These tasks don't provide new peers or newly ready peers.
+        let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
+        let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
+
+        // Check for newly ready peers, including newly added peers (which are added as unready).
+        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
+        // peers.
+        //
+        // Each connected peer should become ready within a few minutes, or timeout, close the
+        // connection, and release its connection slot.
+        //
+        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
+        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
+
+        // Cleanup and metrics.
+
+        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
         self.disconnect_from_outdated_peers();
-        self.inventory_registry.poll_inventory(cx)?;
-        self.poll_unready(cx);
 
+        // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
         self.update_metrics();
 
-        loop {
-            // Re-check that the pre-selected service is ready, in case
-            // something has happened since (e.g., it failed, peer closed
-            // connection, ...)
-            if let Some(key) = self.preselected_p2c_peer {
-                trace!(preselected_key = ?key);
-                let mut service = self
-                    .take_ready_service(&key)
-                    .expect("preselected peer must be in the ready list");
-                match service.poll_ready(cx) {
-                    Poll::Ready(Ok(())) => {
-                        trace!("preselected service is still ready, keeping it selected");
-                        self.preselected_p2c_peer = Some(key);
-                        self.ready_services.insert(key, service);
-                        return Poll::Ready(Ok(()));
-                    }
-                    Poll::Pending => {
-                        trace!("preselected service is no longer ready, moving to unready list");
-                        self.push_unready(key, service);
-                    }
-                    Poll::Ready(Err(error)) => {
-                        trace!(%error, "preselected service failed, dropping it");
-                        std::mem::drop(service);
-                    }
-                }
-            }
+        // Check for failures in ready peers, removing newly errored or disconnected peers.
+        // So it needs to run after `poll_unready()`.
+        let ready_peers: Poll<()> = self.poll_ready_peer_errors(cx);
 
-            trace!("preselected service was not ready, preselecting another ready service");
-            self.preselected_p2c_peer = self.preselect_p2c_peer();
-            self.update_metrics();
+        if ready_peers.is_pending() {
+            // # Correctness
+            //
+            // If the channel is full, drop the demand signal rather than waiting. If we waited
+            // here, the crawler could deadlock sending a request to fetch more peers, because it
+            // also empties the channel.
+            trace!("no ready services, sending demand signal");
+            let _ = self.demand_signal.try_send(MorePeers);
 
-            if self.preselected_p2c_peer.is_none() {
-                // CORRECTNESS
-                //
-                // If the channel is full, drop the demand signal rather than waiting.
-                // If we waited here, the crawler could deadlock sending a request to
-                // fetch more peers, because it also empties the channel.
-                trace!("no ready services, sending demand signal");
-                let _ = self.demand_signal.try_send(MorePeers);
-
-                // CORRECTNESS
-                //
-                // The current task must be scheduled for wakeup every time we
-                // return `Poll::Pending`.
-                //
-                // As long as there are unready or new peers, this task will run,
-                // because:
-                // - `poll_discover` schedules this task for wakeup when new
-                //   peers arrive.
-                // - if there are unready peers, `poll_unready` schedules this
-                //   task for wakeup when peer services become ready.
-                // - if the preselected peer is not ready, `service.poll_ready`
-                //   schedules this task for wakeup when that service becomes
-                //   ready.
-                //
-                // To avoid peers blocking on a full background error channel:
-                // - if no background tasks have exited since the last poll,
-                //   `poll_background_errors` schedules this task for wakeup when
-                //   the next task exits.
-                return Poll::Pending;
-            }
+            // # Correctness
+            //
+            // The current task must be scheduled for wakeup every time we return `Poll::Pending`.
+            //
+            // As long as there are unready or new peers, this task will run, because:
+            // - `poll_discover` schedules this task for wakeup when new peers arrive.
+            // - if there are unready peers, `poll_unready` or `poll_ready_peers` schedule this
+            //   task for wakeup when peer services become ready.
+            //
+            // To avoid peers blocking on a full peer status/error channel:
+            // - `poll_background_errors` schedules this task for wakeup when the peer status
+            //   update task exits.
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(()))
         }
     }
 
