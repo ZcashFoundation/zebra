@@ -2,17 +2,9 @@
 name: Docker Unit Tests
 
 # Run on PRs from external repositories, let them pass, and then Mergify will check them.
+# GitHub doesn't support filtering workflows by source branch names, so we have to do it for each job.
 on:
   pull_request:
-    # IMPORTANT
-    #
-    # These patterns are the inverse of the ones in the non-patch file.
-    branches:
-      # Patch only external repositories
-      - '**/**'
-      # But don't patch mergify and dependabot
-      - '!mergify/**'
-      - '!dependabot/**'
 
 # IMPORTANT
 #
@@ -20,42 +12,51 @@ on:
 jobs:
   build:
     name: Build CI Docker / Build images
+    # If this is a PR, check that the PR source is from a local branch.
+    # (github.ref is always a local branch, so this check always passes for non-PRs.)
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-all:
     name: Test all
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-fake-activation-heights:
     name: Test with fake activation heights
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-empty-sync:
     name: Test checkpoint sync from empty state
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-configuration-file:
     name: Test CI default Docker config file / Test default-conf in Docker
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-zebra-conf-path:
     name: Test CI custom Docker config file / Test custom-conf in Docker
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
