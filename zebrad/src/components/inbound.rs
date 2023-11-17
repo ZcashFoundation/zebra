@@ -379,7 +379,7 @@ impl Service<zn::Request> for Inbound {
             }
             // Clean up completed download tasks, ignoring their results
             Setup::Initialized {
-                mut cached_peer_addr_response,
+                cached_peer_addr_response,
                 mut block_downloads,
                 mempool,
                 state,
@@ -390,7 +390,6 @@ impl Service<zn::Request> for Inbound {
                 // If we returned Pending here, and there were no waiting block downloads,
                 // then inbound requests would wait for the next block download, and hang forever.
                 while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
-                cached_peer_addr_response.try_refresh();
 
                 result = Ok(());
 
@@ -451,6 +450,7 @@ impl Service<zn::Request> for Inbound {
                 //
                 // If the address book is busy, try again inside the future. If it can't be locked
                 // twice, ignore the request.
+                cached_peer_addr_response.try_refresh();
                 let response = cached_peer_addr_response.value();
 
                 async move {
