@@ -137,14 +137,7 @@ impl Handler {
     /// interpretable as a response, we return ownership to the caller.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
-    ///
-    /// `addr` responses are limited to avoid peer set takeover. Any excess
-    /// addresses are stored in `cached_addrs`.
-    fn process_message(
-        &mut self,
-        msg: Message,
-        cached_addrs: &mut Vec<MetaAddr>,
-    ) -> Option<Message> {
+    fn process_message(&mut self, msg: Message) -> Option<Message> {
         let mut ignored_msg = None;
         // TODO: can this be avoided?
         let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
@@ -161,20 +154,13 @@ impl Handler {
             }
 
             (Handler::Peers, Message::Addr(new_addrs)) => {
-                // Security: This method performs security-sensitive operations, see its comments
-                // for details.
-                let response_addrs =
-                    Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
-
                 debug!(
                     new_addrs = new_addrs.len(),
-                    response_addrs = response_addrs.len(),
-                    remaining_addrs = cached_addrs.len(),
                     PEER_ADDR_RESPONSE_LIMIT,
                     "responding to Peers request using new and cached addresses",
                 );
 
-                Handler::Finished(Ok(Response::Peers(response_addrs)))
+                Handler::Finished(Ok(Response::Peers(new_addrs)))
             }
 
             // `zcashd` returns requested transactions in a single batch of messages.
@@ -843,6 +829,25 @@ where
                         Either::Right((Some(Ok(peer_msg)), _cancel)) => {
                             self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
 
+                            // `addr` responses are limited to avoid peer set takeover. Any excess
+                            // addresses are stored in `cached_addrs`.
+                            let mut with_cached_addrs = |handler: &Handler, msg| {
+                                if let (Handler::Peers, Message::Addr(new_addrs)) = (handler, &msg)
+                                {
+                                    // Security: This method performs security-sensitive operations, see its comments
+                                    // for details.
+                                    let response_addrs = Handler::update_addr_cache(
+                                        &mut self.cached_addrs,
+                                        new_addrs,
+                                        PEER_ADDR_RESPONSE_LIMIT,
+                                    );
+
+                                    Message::Addr(response_addrs)
+                                } else {
+                                    msg
+                                }
+                            };
+
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -853,7 +858,7 @@ where
                             let request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs)),
+                                } => span.in_scope(|| handler.process_message(with_cached_addrs(handler, peer_msg))),
                                 _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
