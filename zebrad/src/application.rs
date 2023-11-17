@@ -1,4 +1,7 @@
 //! Zebrad Abscissa Application
+//!
+//! This is the code that starts `zebrad`, and launches its tasks and services.
+//! See [the crate docs](crate) and [the start docs](crate::commands::start) for more details.
 
 use std::{env, fmt::Write as _, io::Write as _, process, sync::Arc};
 
