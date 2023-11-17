@@ -145,7 +145,7 @@ impl CachedPeerAddrs {
         // try getting a lock on the address book if it's time to refresh the cached addresses
         match self.address_book.try_lock() {
             Ok(address_book) => {
-                self.cached_addrs = address_book.sanitized_window();
+                self.cached_addrs = address_book.fresh_get_addr_response();
                 self.refresh_time = now + INBOUND_CACHED_ADDRS_REFRESH_INTERVAL;
             }
 

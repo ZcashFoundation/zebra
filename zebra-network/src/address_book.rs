@@ -270,7 +270,7 @@ impl AddressBook {
     /// including our local listener address.
     ///
     /// Limited to a the number of peer addresses Zebra should give out per `GetAddr` request.
-    pub fn sanitized_window(&self) -> Vec<MetaAddr> {
+    pub fn fresh_get_addr_response(&self) -> Vec<MetaAddr> {
         let now = Utc::now();
         let mut peers = self.sanitized(now);
         let address_limit = peers.len().div_ceil(ADDR_RESPONSE_LIMIT_DENOMINATOR);
