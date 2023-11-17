@@ -124,28 +124,21 @@ pub struct CachedPeerAddrs {
 }
 
 impl CachedPeerAddrs {
-    /// Creates a new [`CachedPeerAddrs`].
+    /// Creates a new empty [`CachedPeerAddrs`].
     fn new(address_book: Arc<Mutex<AddressBook>>) -> Self {
-        let cached_addrs = address_book
-            .lock()
-            .expect("previous thread panicked while holding the address book lock")
-            .sanitized_window();
-
-        let refresh_time = Instant::now() + INBOUND_CACHED_ADDRS_REFRESH_INTERVAL;
-
         Self {
             address_book,
-            cached_addrs,
-            refresh_time,
+            cached_addrs: Vec::new(),
+            refresh_time: Instant::now(),
         }
     }
 
-    /// Refreshes the `cached_addrs` if the time has past `refresh_time`
+    /// Refreshes the `cached_addrs` if the time has past `refresh_time` or the cache is empty
     fn try_refresh(&mut self) {
         let now = Instant::now();
 
-        // return early if the cached addresses are still fresh
-        if now < self.refresh_time {
+        // return early if there are some cached addresses, and they are still fresh
+        if now < self.refresh_time && !self.cached_addrs.is_empty() {
             return;
         }
 
@@ -457,7 +450,7 @@ impl Service<zn::Request> for Inbound {
                     if peers.is_empty() {
                         debug!(
                             "ignoring `Peers` request from remote peer because our address \
-                                book has no available peers"
+                             book has no available peers"
                         );
 
                         Ok(zn::Response::Nil)
