@@ -1,0 +1,61 @@
+# Workflow patches for skipping Google Cloud CI on PRs from external repositories.
+name: Docker Unit Tests
+
+# Run on PRs from external repositories, let them pass, and then Mergify will check them.
+on:
+  pull_request:
+    # IMPORTANT
+    #
+    # These patterns are the inverse of the ones in the non-patch file.
+    branches:
+      # Patch only external repositories
+      - '**/**'
+      # But don't patch mergify and dependabot
+      - '!mergify/**'
+      - '!dependabot/**'
+
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch.yml` and `.yml` files.
+jobs:
+  build:
+    name: Build CI Docker / Build images
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-all:
+    name: Test all
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-fake-activation-heights:
+    name: Test with fake activation heights
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-lightwalletd-integration:
+    name: Test integration with lightwalletd
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-configuration-file:
+    name: Test CI default Docker config file / Test default-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-zebra-conf-path:
+    name: Test CI custom Docker config file / Test custom-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
