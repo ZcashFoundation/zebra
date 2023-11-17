@@ -1,3 +1,4 @@
+# Google Cloud CI that runs when Rust code and dependencies are modified in a PR from the ZcashFoundation/zebra repository.
 name: Docker Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
@@ -21,7 +22,7 @@ on:
         default: false
 
   pull_request:
-    # Skip branches from external repositories, let them pass, and then Mergify will check them
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
     branches:
       # Include all branches
       - '**'
@@ -30,6 +31,7 @@ on:
       # But include mergify and dependabot
       - 'mergify/**'
       - 'dependabot/**'
+    # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -53,6 +55,7 @@ on:
   push:
     branches:
       - main
+    # Skip main branch merges where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -84,6 +87,9 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
 jobs:
   # Build the docker image used by the tests.
   #
