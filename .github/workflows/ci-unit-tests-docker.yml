@@ -21,6 +21,15 @@ on:
         default: false
 
   pull_request:
+    # Skip branches from external repositories, let them pass, and then Mergify will check them
+    branches:
+      # Include all branches
+      - '**'
+      # Exclude external repositories
+      - '!**/**'
+      # But include mergify and dependabot
+      - 'mergify/**'
+      - 'dependabot/**'
     paths:
       # code and tests
       - '**/*.rs'
