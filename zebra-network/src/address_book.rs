@@ -268,12 +268,13 @@ impl AddressBook {
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
     /// including our local listener address.
+    ///
+    /// Limited to a the number of peer addresses Zebra should give out per `GetAddr` request.
     pub fn sanitized_window(&self) -> Vec<MetaAddr> {
         let now = Utc::now();
         let mut peers = self.sanitized(now);
         let address_limit = peers.len().div_ceil(ADDR_RESPONSE_LIMIT_DENOMINATOR);
-        let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
-        peers.truncate(address_limit);
+        peers.truncate(MAX_ADDRS_IN_MESSAGE.min(address_limit));
 
         peers
     }
