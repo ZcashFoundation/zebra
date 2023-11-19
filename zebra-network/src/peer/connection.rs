@@ -14,7 +14,7 @@ use futures::{
     prelude::*,
     stream::Stream,
 };
-use rand::{thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -27,8 +27,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        OVERLOAD_PROTECTION_INTERVAL,
+        self, MAX_ADDRS_IN_MESSAGE, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -137,7 +137,14 @@ impl Handler {
     /// interpretable as a response, we return ownership to the caller.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
-    fn process_message(&mut self, msg: Message) -> Option<Message> {
+    ///
+    /// `addr` responses are limited to avoid peer set takeover. Any excess
+    /// addresses are stored in `cached_addrs`.
+    fn process_message(
+        &mut self,
+        msg: Message,
+        cached_addrs: &mut Vec<MetaAddr>,
+    ) -> Option<Message> {
         let mut ignored_msg = None;
         // TODO: can this be avoided?
         let tmp_state = std::mem::replace(self, Handler::Finished(Ok(Response::Nil)));
@@ -152,7 +159,24 @@ impl Handler {
                     Handler::Ping(req_nonce)
                 }
             }
-            (Handler::Peers, Message::Addr(addrs)) => Handler::Finished(Ok(Response::Peers(addrs))),
+
+            (Handler::Peers, Message::Addr(new_addrs)) => {
+                // Security: This method performs security-sensitive operations, see its comments
+                // for details.
+                let response_addrs =
+                    Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
+
+                debug!(
+                    new_addrs = new_addrs.len(),
+                    response_addrs = response_addrs.len(),
+                    remaining_addrs = cached_addrs.len(),
+                    PEER_ADDR_RESPONSE_LIMIT,
+                    "responding to Peers request using new and cached addresses",
+                );
+
+                Handler::Finished(Ok(Response::Peers(response_addrs)))
+            }
+
             // `zcashd` returns requested transactions in a single batch of messages.
             // Other transaction or non-transaction messages can come before or after the batch.
             // After the transaction batch, `zcashd` sends `notfound` if any transactions are missing:
@@ -251,6 +275,7 @@ impl Handler {
                     )))
                 }
             }
+
             // `zcashd` returns requested blocks in a single batch of messages.
             // Other blocks or non-blocks messages can come before or after the batch.
             // `zcashd` silently skips missing blocks, rather than sending a final `notfound` message.
@@ -365,6 +390,10 @@ impl Handler {
                     block_hashes(&items[..]).collect(),
                 )))
             }
+            (Handler::FindHeaders, Message::Headers(headers)) => {
+                Handler::Finished(Ok(Response::BlockHeaders(headers)))
+            }
+
             (Handler::MempoolTransactionIds, Message::Inv(items))
                 if items.iter().all(|item| item.unmined_tx_id().is_some()) =>
             {
@@ -372,9 +401,7 @@ impl Handler {
                     transaction_ids(&items).collect(),
                 )))
             }
-            (Handler::FindHeaders, Message::Headers(headers)) => {
-                Handler::Finished(Ok(Response::BlockHeaders(headers)))
-            }
+
             // By default, messages are not responses.
             (state, msg) => {
                 trace!(?msg, "did not interpret message as response");
@@ -384,6 +411,52 @@ impl Handler {
         };
 
         ignored_msg
+    }
+
+    /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns `response_size`
+    /// addresses from that cache.
+    ///
+    /// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
+    /// there are no new addresses. `response_size` can be zero or `None` if there is no response
+    /// needed.
+    fn update_addr_cache<'new>(
+        cached_addrs: &mut Vec<MetaAddr>,
+        new_addrs: impl IntoIterator<Item = &'new MetaAddr>,
+        response_size: impl Into<Option<usize>>,
+    ) -> Vec<MetaAddr> {
+        // # Peer Set Reliability
+        //
+        // Newly received peers are added to the cache, so that we can use them if the connection
+        // doesn't respond to our getaddr requests.
+        //
+        // Add the new addresses to the end of the cache.
+        cached_addrs.extend(new_addrs);
+
+        // # Security
+        //
+        // We limit how many peer addresses we take from each peer, so that our address book
+        // and outbound connections aren't controlled by a single peer (#1869). We randomly select
+        // peers, so the remote peer can't control which addresses we choose by changing the order
+        // in the messages they send.
+        let response_size = response_size.into().unwrap_or_default();
+
+        let mut temp_cache = Vec::new();
+        std::mem::swap(cached_addrs, &mut temp_cache);
+
+        // The response is fully shuffled, remaining is partially shuffled.
+        let (response, remaining) = temp_cache.partial_shuffle(&mut thread_rng(), response_size);
+
+        // # Security
+        //
+        // The cache size is limited to avoid memory denial of service.
+        //
+        // It's ok to just partially shuffle the cache, because it doesn't actually matter which
+        // peers we drop. Having excess peers is rare, because most peers only send one large
+        // unsolicited peer message when they first connect.
+        *cached_addrs = remaining.to_vec();
+        cached_addrs.truncate(MAX_ADDRS_IN_MESSAGE);
+
+        response.to_vec()
     }
 }
 
@@ -780,7 +853,7 @@ where
                             let request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg)),
+                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs)),
                                 _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
@@ -929,16 +1002,21 @@ where
                 self.client_rx
             ),
 
-            // Consume the cached addresses from the peer,
-            // to work-around a `zcashd` response rate-limit.
+            // Take some cached addresses from the peer connection. This address cache helps
+            // work-around a `zcashd` addr response rate-limit.
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
-                let cached_addrs = std::mem::take(&mut self.cached_addrs);
+                // Security: This method performs security-sensitive operations, see its comments
+                // for details.
+                let response_addrs = Handler::update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
+
                 debug!(
-                    addrs = cached_addrs.len(),
-                    "responding to Peers request using cached addresses",
+                    response_addrs = response_addrs.len(),
+                    remaining_addrs = self.cached_addrs.len(),
+                    PEER_ADDR_RESPONSE_LIMIT,
+                    "responding to Peers request using some cached addresses",
                 );
 
-                Ok(Handler::Finished(Ok(Response::Peers(cached_addrs))))
+                Ok(Handler::Finished(Ok(Response::Peers(response_addrs))))
             }
             (AwaitingRequest, Peers) => self
                 .peer_tx
@@ -1145,28 +1223,32 @@ where
                 // Ignored, but consumed because it is technically a protocol error.
                 Consumed
             }
-            // Zebra crawls the network proactively, to prevent
-            // peers from inserting data into our address book.
-            Message::Addr(ref addrs) => {
-                // Workaround `zcashd`'s `getaddr` response rate-limit
-                if addrs.len() > 1 {
-                    // Always refresh the cache with multi-addr messages.
-                    debug!(%msg, "caching unsolicited multi-addr message");
-                    self.cached_addrs = addrs.clone();
-                    Consumed
-                } else if addrs.len() == 1 && self.cached_addrs.len() <= 1 {
-                    // Only refresh a cached single addr message with another single addr.
-                    // (`zcashd` regularly advertises its own address.)
-                    debug!(%msg, "caching unsolicited single addr message");
-                    self.cached_addrs = addrs.clone();
-                    Consumed
-                } else {
-                    debug!(
-                        %msg,
-                        "ignoring unsolicited single addr message: already cached a multi-addr message"
-                    );
-                    Consumed
-                }
+
+            // # Security
+            //
+            // Zebra crawls the network proactively, and that's the only way peers get into our
+            // address book. This prevents peers from filling our address book with malicious peer
+            // addresses.
+            Message::Addr(ref new_addrs) => {
+                // # Peer Set Reliability
+                //
+                // We keep a list of the unused peer addresses sent by each connection, to work
+                // around `zcashd`'s `getaddr` response rate-limit.
+                let no_response =
+                    Handler::update_addr_cache(&mut self.cached_addrs, new_addrs, None);
+                assert_eq!(
+                    no_response,
+                    Vec::new(),
+                    "peers unexpectedly taken from cache"
+                );
+
+                debug!(
+                    new_addrs = new_addrs.len(),
+                    cached_addrs = self.cached_addrs.len(),
+                    "adding unsolicited addresses to cached addresses",
+                );
+
+                Consumed
             }
             Message::Tx(ref transaction) => Request::PushTransaction(transaction.clone()).into(),
             Message::Inv(ref items) => match &items[..] {

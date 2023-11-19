@@ -7,7 +7,7 @@ use futures::{
     sink::SinkMapErr,
     SinkExt, StreamExt,
 };
-use proptest::prelude::*;
+use proptest::{collection, prelude::*};
 use tracing::Span;
 
 use zebra_chain::{
@@ -18,7 +18,12 @@ use zebra_chain::{
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 
 use crate::{
-    peer::{connection::Connection, ClientRequest, ErrorSlot},
+    constants::{MAX_ADDRS_IN_MESSAGE, PEER_ADDR_RESPONSE_LIMIT},
+    meta_addr::MetaAddr,
+    peer::{
+        connection::{Connection, Handler},
+        ClientRequest, ErrorSlot,
+    },
     protocol::external::Message,
     protocol::internal::InventoryResponse,
     Request, Response, SharedPeerError,
@@ -128,6 +133,41 @@ proptest! {
 
             Ok(())
         })?;
+    }
+
+    /// This test makes sure that Zebra's per-connection peer cache is updated correctly.
+    #[test]
+    fn cache_is_updated_correctly(
+        mut cached_addrs in collection::vec(MetaAddr::gossiped_strategy(), 0..=MAX_ADDRS_IN_MESSAGE),
+        new_addrs in collection::vec(MetaAddr::gossiped_strategy(), 0..=MAX_ADDRS_IN_MESSAGE),
+        response_size in 0..=PEER_ADDR_RESPONSE_LIMIT,
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let old_cached_addrs = cached_addrs.clone();
+
+        let response = Handler::update_addr_cache(&mut cached_addrs, &new_addrs, response_size);
+
+        prop_assert!(cached_addrs.len() <= MAX_ADDRS_IN_MESSAGE, "cache has a limited size");
+        prop_assert!(response.len() <= response_size, "response has a limited size");
+
+        prop_assert!(response.len() <= old_cached_addrs.len() + new_addrs.len(), "no duplicate or made up addresses in response");
+        prop_assert!(cached_addrs.len() <= old_cached_addrs.len() + new_addrs.len(), "no duplicate or made up addresses in cache");
+
+        if old_cached_addrs.len() + new_addrs.len() >= response_size {
+            // If we deduplicate addresses, this check should fail and must be changed
+            prop_assert_eq!(response.len(), response_size, "response gets addresses before cache does");
+        } else {
+            prop_assert!(response.len() < response_size, "response gets all addresses if there is no excess");
+        }
+
+        if old_cached_addrs.len() + new_addrs.len() <= response_size {
+            prop_assert_eq!(cached_addrs.len(), 0, "cache is empty if there are no excess addresses");
+        } else {
+            // If we deduplicate addresses, this check should fail and must be changed
+            prop_assert_ne!(cached_addrs.len(), 0, "cache gets excess addresses");
+        }
+
     }
 }
 

@@ -84,6 +84,10 @@ pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
 pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
 
+/// The maximum number of peers we will add to the address book after each `getaddr` request.
+pub const PEER_ADDR_RESPONSE_LIMIT: usize =
+    DEFAULT_PEERSET_INITIAL_TARGET_SIZE * OUTBOUND_PEER_LIMIT_MULTIPLIER / 2;
+
 /// The buffer size for the peer set.
 ///
 /// This should be greater than 1 to avoid sender contention, but also reasonably
