@@ -281,7 +281,7 @@ impl AddressBook {
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
     /// including our local listener address.
-    pub fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+    pub(crate) fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
 
