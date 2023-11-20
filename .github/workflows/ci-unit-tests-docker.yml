@@ -22,15 +22,6 @@ on:
         default: false
 
   pull_request:
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them
-    branches:
-      # Include all branches
-      - '**'
-      # Exclude external repositories
-      - '!**/**'
-      # But include mergify and dependabot
-      - 'mergify/**'
-      - 'dependabot/**'
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
@@ -98,6 +89,8 @@ jobs:
   # testnet when running the image.
   build:
     name: Build CI Docker
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
