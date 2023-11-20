@@ -60,7 +60,11 @@ impl CachedPeerAddrResponse {
             .try_lock()
             .map(|book| book.fresh_get_addr_response())
         {
-            // update cached value and refresh_time if there _are_ peers in the address books.
+            // Update cached value and refresh_time, even if the address book is empty.
+            //
+            // Security: this avoids outdated gossiped peers. Outdated Zebra binaries will gradually lose all their peers,
+            // because those peers refuse to connect to outdated versions. So we don't want those outdated Zebra
+            // versions to keep gossiping old peer information either.
             Ok(peers) if !peers.is_empty() => {
                 self.refresh_time = now + INBOUND_CACHED_ADDRS_REFRESH_INTERVAL;
                 self.value = zn::Response::Peers(peers);
