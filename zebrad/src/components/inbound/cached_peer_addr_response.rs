@@ -9,6 +9,14 @@ use std::{
 
 use super::*;
 
+/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
+/// should get new peer addresses from the address book to send as a `GetAddr` response.
+const INBOUND_CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
+/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
+/// should get new peer addresses from the address book to send as a `GetAddr` response.
+const INBOUND_CACHED_ADDRS_MAX_FRESH_DURATION: Duration = Duration::from_secs(60);
+
 /// Caches and refreshes a partial list of peer addresses to be returned as a `GetAddr` response.
 pub struct CachedPeerAddrResponse {
     /// A shared list of peer addresses.
@@ -44,6 +52,8 @@ impl CachedPeerAddrResponse {
             return;
         }
 
+        let max_fresh_time = self.refresh_time + INBOUND_CACHED_ADDRS_MAX_FRESH_DURATION;
+
         // try getting a lock on the address book if it's time to refresh the cached addresses
         match self
             .address_book
@@ -56,6 +66,15 @@ impl CachedPeerAddrResponse {
                 self.value = zn::Response::Peers(peers);
             }
 
+            Ok(_) if now > max_fresh_time => {
+                self.value = zn::Response::Nil;
+            }
+
+            Err(TryLockError::WouldBlock) if now > max_fresh_time => {
+                warn!("getaddrs response hasn't been refreshed in some time");
+                self.value = zn::Response::Nil;
+            }
+
             Ok(_) => {
                 debug!(
                     "could not refresh cached response because our address \
@@ -63,13 +82,8 @@ impl CachedPeerAddrResponse {
                 );
             }
 
-            Err(TryLockError::WouldBlock) => {
-                let next_refresh_time = self.refresh_time + INBOUND_CACHED_ADDRS_REFRESH_INTERVAL;
+            Err(TryLockError::WouldBlock) => {}
 
-                if now > next_refresh_time {
-                    warn!("getaddrs response hasn't been refreshed in some time");
-                };
-            }
             Err(TryLockError::Poisoned(_)) => {
                 panic!("previous thread panicked while holding the address book lock")
             }
