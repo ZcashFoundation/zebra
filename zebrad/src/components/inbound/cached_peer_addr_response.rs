@@ -11,7 +11,7 @@ use super::*;
 
 /// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
 /// should get new peer addresses from the address book to send as a `GetAddr` response.
-pub const INBOUND_CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
+pub const CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
 /// should get new peer addresses from the address book to send as a `GetAddr` response.
@@ -66,7 +66,7 @@ impl CachedPeerAddrResponse {
             // because those peers refuse to connect to outdated versions. So we don't want those outdated Zebra
             // versions to keep gossiping old peer information either.
             Ok(peers) if !peers.is_empty() => {
-                self.refresh_time = now + INBOUND_CACHED_ADDRS_REFRESH_INTERVAL;
+                self.refresh_time = now + CACHED_ADDRS_REFRESH_INTERVAL;
                 self.value = zn::Response::Peers(peers);
             }
 

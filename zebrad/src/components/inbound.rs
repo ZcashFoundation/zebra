@@ -137,7 +137,7 @@ pub enum Setup {
         /// a shared list of peer addresses used to periodically refresh the partial list.
         ///
         /// Refreshed from the address book in `poll_ready` method
-        /// after [`INBOUND_CACHED_ADDRS_REFRESH_INTERVAL`](cached_peer_addr_response::INBOUND_CACHED_ADDRS_REFRESH_INTERVAL).
+        /// after [`CACHED_ADDRS_REFRESH_INTERVAL`](cached_peer_addr_response::CACHED_ADDRS_REFRESH_INTERVAL).
         cached_peer_addr_response: CachedPeerAddrResponse,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
