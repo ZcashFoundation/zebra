@@ -517,6 +517,7 @@ impl Block {
                         }
                     }
                     // update history tree for the next block
+                    #[allow(clippy::unnecessary_unwrap)]
                     if history_tree.is_none() {
                         history_tree = Some(
                             HistoryTree::from_block(
