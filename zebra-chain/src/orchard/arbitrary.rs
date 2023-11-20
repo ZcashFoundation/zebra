@@ -10,11 +10,11 @@ use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, Verific
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use super::{
-    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, TxVersion,
+    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, OrchardVariant,
     ValueCommitment,
 };
 
-impl<V: TxVersion + 'static> Arbitrary for Action<V>
+impl<V: OrchardVariant + 'static> Arbitrary for Action<V>
 where
     V::EncryptedNote: Arbitrary,
 {
@@ -58,7 +58,7 @@ impl Arbitrary for note::Nullifier {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<V: TxVersion + 'static> Arbitrary for AuthorizedAction<V>
+impl<V: OrchardVariant + 'static> Arbitrary for AuthorizedAction<V>
 where
     V::EncryptedNote: Arbitrary,
 {

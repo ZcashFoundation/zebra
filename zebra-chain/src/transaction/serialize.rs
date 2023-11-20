@@ -11,7 +11,7 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
-    orchard::TxVersion,
+    orchard::OrchardVariant,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
     serialization::{
@@ -320,7 +320,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
     }
 }
 
-impl<V: TxVersion> ZcashSerialize for Option<orchard::ShieldedData<V>> {
+impl<V: OrchardVariant> ZcashSerialize for Option<orchard::ShieldedData<V>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
@@ -340,7 +340,7 @@ impl<V: TxVersion> ZcashSerialize for Option<orchard::ShieldedData<V>> {
     }
 }
 
-impl<V: TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
+impl<V: OrchardVariant> ZcashSerialize for orchard::ShieldedData<V> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Split the AuthorizedAction
         let (actions, sigs): (Vec<orchard::Action<V>>, Vec<Signature<SpendAuth>>) = self
@@ -381,7 +381,7 @@ impl<V: TxVersion> ZcashSerialize for orchard::ShieldedData<V> {
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-impl<V: TxVersion> ZcashDeserialize for Option<orchard::ShieldedData<V>> {
+impl<V: OrchardVariant> ZcashDeserialize for Option<orchard::ShieldedData<V>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         let actions: Vec<orchard::Action<V>> = (&mut reader).zcash_deserialize_into()?;

@@ -9,7 +9,7 @@ use zebra_chain::{
     amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
-    orchard::{self, TxV5, TxVersion},
+    orchard::{self, OrchardVariant, TxV5},
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
@@ -739,7 +739,7 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts<V: TxVersion>(
+    fn remove_orchard_actions_with_conflicts<V: OrchardVariant>(
         maybe_shielded_data: &mut Option<orchard::ShieldedData<V>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
@@ -799,7 +799,7 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict<V: TxVersion + 'static>
+struct OrchardSpendConflict<V: OrchardVariant + 'static>
 where
     V::EncryptedNote: Arbitrary,
 {
@@ -940,7 +940,7 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     }
 }
 
-impl<V: TxVersion + 'static> OrchardSpendConflict<V>
+impl<V: OrchardVariant + 'static> OrchardSpendConflict<V>
 where
     V::EncryptedNote: Arbitrary,
 {

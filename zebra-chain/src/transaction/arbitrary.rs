@@ -18,7 +18,7 @@ use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one,
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
-    orchard::{self, TxV5, TxVersion},
+    orchard::{self, OrchardVariant, TxV5},
     parameters::{Network, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
@@ -705,7 +705,7 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<V: TxVersion + 'static> Arbitrary for orchard::ShieldedData<V>
+impl<V: OrchardVariant + 'static> Arbitrary for orchard::ShieldedData<V>
 where
     V::EncryptedNote: Arbitrary,
 {

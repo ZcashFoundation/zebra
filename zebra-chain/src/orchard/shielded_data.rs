@@ -13,7 +13,7 @@ use reddsa::{self, orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
-    orchard::{tree, Action, Nullifier, TxVersion, ValueCommitment},
+    orchard::{tree, Action, Nullifier, OrchardVariant, ValueCommitment},
     primitives::Halo2Proof,
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
@@ -22,7 +22,7 @@ use crate::{
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ShieldedData<V: TxVersion> {
+pub struct ShieldedData<V: OrchardVariant> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
@@ -45,11 +45,10 @@ pub struct ShieldedData<V: TxVersion> {
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
     /// TODO: FIXME: Add ref to spec
-    // FIXME: add asserts to ensure burn is None for V5
     pub burn: V::BurnType,
 }
 
-impl<V: TxVersion> fmt::Display for ShieldedData<V> {
+impl<V: OrchardVariant> fmt::Display for ShieldedData<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");
 
@@ -65,7 +64,7 @@ impl<V: TxVersion> fmt::Display for ShieldedData<V> {
     }
 }
 
-impl<V: TxVersion> ShieldedData<V> {
+impl<V: OrchardVariant> ShieldedData<V> {
     /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
     /// transaction, in the order they appear in it.
     pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
@@ -125,7 +124,7 @@ impl<V: TxVersion> ShieldedData<V> {
     }
 }
 
-impl<V: TxVersion> AtLeastOne<AuthorizedAction<V>> {
+impl<V: OrchardVariant> AtLeastOne<AuthorizedAction<V>> {
     /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
     pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
         self.iter()
@@ -137,14 +136,14 @@ impl<V: TxVersion> AtLeastOne<AuthorizedAction<V>> {
 ///
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct AuthorizedAction<V: TxVersion> {
+pub struct AuthorizedAction<V: OrchardVariant> {
     /// The action description of this Action.
     pub action: Action<V>,
     /// The spend signature.
     pub spend_auth_sig: Signature<SpendAuth>,
 }
 
-impl<V: TxVersion> AuthorizedAction<V> {
+impl<V: OrchardVariant> AuthorizedAction<V> {
     /// The size of a single Action
     ///
     /// Actions are 5 * 32 + ENCRYPTED_NOTE_SIZE + 80 bytes so the total size of each Action is 820 bytes.
@@ -207,7 +206,7 @@ pub struct ActionRef<'a> {
     pub cm_x: &'a pallas::Base,
 }
 
-impl<'a, V: TxVersion> From<&'a Action<V>> for ActionRef<'a> {
+impl<'a, V: OrchardVariant> From<&'a Action<V>> for ActionRef<'a> {
     fn from(action: &'a Action<V>) -> Self {
         Self {
             cv: &action.cv,
@@ -223,7 +222,7 @@ impl<'a, V: TxVersion> From<&'a Action<V>> for ActionRef<'a> {
 /// If a transaction contains more actions than can fit in maximally large block, it might be
 /// valid on the network and in the mempool, but it can never be mined into a block. So
 /// rejecting these large edge-case transactions can never break consensus.
-impl<V: TxVersion> TrustedPreallocate for Action<V> {
+impl<V: OrchardVariant> TrustedPreallocate for Action<V> {
     fn max_allocation() -> u64 {
         // # Consensus
         //

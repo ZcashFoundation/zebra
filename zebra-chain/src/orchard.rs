@@ -17,16 +17,7 @@ pub mod keys;
 pub mod shielded_data;
 pub mod tree;
 
-mod tx_version;
-
-#[cfg(feature = "tx-v6")]
-pub mod zsa;
-
-#[cfg(feature = "tx-v6")]
-pub mod burn;
-
-#[cfg(feature = "tx-v6")]
-pub mod issuance;
+mod orchard_variant;
 
 pub use action::Action;
 pub use address::Address;
@@ -35,13 +26,10 @@ pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{ActionRef, AuthorizedAction, Flags, ShieldedData};
 
-pub use tx_version::{TxV5, TxVersion};
+pub use orchard_variant::{OrchardVariant, TxV5};
 
 #[cfg(feature = "tx-v6")]
-pub use tx_version::TxV6;
+pub use orchard_variant::TxV6;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use tx_version::ENCRYPTED_NOTE_SIZE_V5;
-
-#[cfg(feature = "tx-v6")]
-pub use burn::BurnItem;
+pub use orchard_variant::ENCRYPTED_NOTE_SIZE_V5;

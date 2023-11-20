@@ -15,7 +15,7 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
     history_tree::HistoryTree,
-    orchard::{self, TxVersion},
+    orchard::{self, OrchardVariant},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
@@ -2057,7 +2057,7 @@ where
     }
 }
 
-impl<V: TxVersion> UpdateWith<Option<orchard::ShieldedData<V>>> for Chain {
+impl<V: OrchardVariant> UpdateWith<Option<orchard::ShieldedData<V>>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,

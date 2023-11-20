@@ -53,7 +53,7 @@ use crate::{
 };
 
 #[cfg(feature = "tx-v6")]
-use crate::orchard::TxV6;
+use crate::{orchard::TxV6, orchard_zsa};
 
 #[cfg(feature = "tx-v6")]
 macro_rules! tx_v5_and_v6 {
@@ -181,7 +181,7 @@ pub enum Transaction {
         /// The ZSA orchard shielded data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData<TxV6>>,
         /// The ZSA issuance data for this transaction, if any.
-        orchard_zsa_issue_data: Option<orchard::issuance::IssueData>,
+        orchard_zsa_issue_data: Option<orchard_zsa::issuance::IssueData>,
     },
 }
 

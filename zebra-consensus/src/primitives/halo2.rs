@@ -131,7 +131,9 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl<V: zebra_chain::orchard::TxVersion> From<&zebra_chain::orchard::ShieldedData<V>> for Item {
+impl<V: zebra_chain::orchard::OrchardVariant> From<&zebra_chain::orchard::ShieldedData<V>>
+    for Item
+{
     fn from(shielded_data: &zebra_chain::orchard::ShieldedData<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
