@@ -1,4 +1,5 @@
-# Google Cloud CI that runs when Rust code and dependencies are modified in a PR from the ZcashFoundation/zebra repository.
+# Google Cloud unit tests that run when Rust code or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
 name: Docker Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
@@ -46,7 +47,7 @@ on:
   push:
     branches:
       - main
-    # Skip main branch merges where Rust code and dependencies aren't modified.
+    # Skip main branch updates where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'

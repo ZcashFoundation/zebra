@@ -1,8 +1,9 @@
-# Workflow patches for skipping Google Cloud CI on PRs from external repositories.
+# Workflow patches for skipping Google Cloud unit test CI on PRs from external repositories.
 name: Docker Unit Tests
 
 # Run on PRs from external repositories, let them pass, and then Mergify will check them.
-# GitHub doesn't support filtering workflows by source branch names, so we have to do it for each job.
+# GitHub doesn't support filtering workflows by source branch names, so we have to do it for each
+# job.
 on:
   pull_request:
 
@@ -12,7 +13,7 @@ on:
 jobs:
   build:
     name: Build CI Docker / Build images
-    # Only run on PRs from external repositories. 
+    # Only run on PRs from external repositories.
     # (github.ref is always a local branch, so this check will skip non-PRs as well.)
     if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
@@ -21,7 +22,8 @@ jobs:
 
   test-all:
     name: Test all
-    # This dependency allows all these jobs to depend on a single condition, making it easier to change.
+    # This dependency allows all these jobs to depend on a single condition, making it easier to
+    # change.
     needs: build
     runs-on: ubuntu-latest
     steps:

@@ -1,3 +1,5 @@
+# Google Cloud integration tests that run when Rust code or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
 name: Integration Tests on GCP
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
@@ -47,6 +49,7 @@ on:
         default: false
 
   pull_request:
+    # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -68,6 +71,7 @@ on:
       - '.github/workflows/sub-find-cached-disks.yml'
 
   push:
+    # Skip main branch updates where Rust code and dependencies aren't modified.
     branches:
       - main
     paths:
@@ -91,6 +95,9 @@ on:
       - '.github/workflows/sub-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
 jobs:
   # to also run a job on Mergify head branches,
   # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
@@ -104,6 +111,8 @@ jobs:
   # The outputs for this job have the same names as the workflow outputs in sub-find-cached-disks.yml
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -114,6 +123,7 @@ jobs:
   # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: 'Testnet'
@@ -125,6 +135,7 @@ jobs:
   # testnet when running the image.
   build:
     name: Build CI Docker
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile

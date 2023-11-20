@@ -1,4 +1,4 @@
-# Workflow patches for skipping CI when Rust code and dependencies aren't modified in a PR.
+# Workflow patches for skipping unit test CI when Rust code or dependencies aren't modified in a PR.
 name: Docker Unit Tests
 
 # Run on PRs with unmodified code and dependency files.
