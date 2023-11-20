@@ -22,6 +22,8 @@ ExecStart=/usr/bin/zebrad start
 Restart=always
 PrivateTmp=true
 NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 Alias=zebrad
