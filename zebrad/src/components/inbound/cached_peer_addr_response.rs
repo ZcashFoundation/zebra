@@ -9,13 +9,11 @@ use std::{
 
 use super::*;
 
-/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
+/// The minumum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
 /// should get new peer addresses from the address book to send as a `GetAddr` response.
+///
+/// Cached responses are considered stale and should be cleared after twice this duration.
 pub const CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
-
-/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh after the normal refresh time
-/// before it should return `Response::Nil` until it can get new peer addresses from the address book.
-const INBOUND_CACHED_ADDRS_MAX_FRESH_DURATION: Duration = Duration::from_secs(60);
 
 /// Caches and refreshes a partial list of peer addresses to be returned as a `GetAddr` response.
 pub struct CachedPeerAddrResponse {
@@ -52,7 +50,7 @@ impl CachedPeerAddrResponse {
             return;
         }
 
-        let max_fresh_time = self.refresh_time + INBOUND_CACHED_ADDRS_MAX_FRESH_DURATION;
+        let cache_expiry = self.refresh_time + CACHED_ADDRS_REFRESH_INTERVAL;
 
         // try getting a lock on the address book if it's time to refresh the cached addresses
         match self
@@ -70,11 +68,11 @@ impl CachedPeerAddrResponse {
                 self.value = zn::Response::Peers(peers);
             }
 
-            Ok(_) if now > max_fresh_time => {
+            Ok(_) if now > cache_expiry => {
                 self.value = zn::Response::Nil;
             }
 
-            Err(TryLockError::WouldBlock) if now > max_fresh_time => {
+            Err(TryLockError::WouldBlock) if now > cache_expiry => {
                 warn!("getaddrs response hasn't been refreshed in some time");
                 self.value = zn::Response::Nil;
             }
