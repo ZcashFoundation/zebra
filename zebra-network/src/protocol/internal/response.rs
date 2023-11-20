@@ -144,6 +144,7 @@ impl Response {
     }
 
     /// Returns true if self is the [`Response::Nil`] variant.
+    #[allow(dead_code)]
     pub fn is_nil(&self) -> bool {
         matches!(self, Self::Nil)
     }

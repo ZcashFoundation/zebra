@@ -40,7 +40,7 @@ impl CachedPeerAddrResponse {
         let now = Instant::now();
 
         // return early if there are some cached addresses, and they are still fresh
-        if now < self.refresh_time && !self.value.is_nil() {
+        if now < self.refresh_time {
             return;
         }
 
