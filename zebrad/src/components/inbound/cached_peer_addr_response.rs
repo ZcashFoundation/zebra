@@ -60,7 +60,7 @@ impl CachedPeerAddrResponse {
             .try_lock()
             .map(|book| book.fresh_get_addr_response())
         {
-            // Update cached value and refresh_time, even if the address book is empty.
+            // Update cached value and refresh_time if there are some gossipable peers in the address book.
             //
             // Security: this avoids outdated gossiped peers. Outdated Zebra binaries will gradually lose all their peers,
             // because those peers refuse to connect to outdated versions. So we don't want those outdated Zebra
