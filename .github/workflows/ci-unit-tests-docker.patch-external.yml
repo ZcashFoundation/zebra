@@ -21,42 +21,43 @@ jobs:
 
   test-all:
     name: Test all
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    # This dependency allows all these jobs to depend on a single condition, making it easier to change.
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-fake-activation-heights:
     name: Test with fake activation heights
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-empty-sync:
     name: Test checkpoint sync from empty state
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-configuration-file:
     name: Test CI default Docker config file / Test default-conf in Docker
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-zebra-conf-path:
     name: Test CI custom Docker config file / Test custom-conf in Docker
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
