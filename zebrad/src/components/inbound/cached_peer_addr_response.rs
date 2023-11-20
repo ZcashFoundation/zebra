@@ -13,8 +13,8 @@ use super::*;
 /// should get new peer addresses from the address book to send as a `GetAddr` response.
 pub const CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
-/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
-/// should get new peer addresses from the address book to send as a `GetAddr` response.
+/// The maximum duration that a `CachedPeerAddrResponse` is considered fresh after the normal refresh time
+/// before it should return `Response::Nil` until it can get new peer addresses from the address book.
 const INBOUND_CACHED_ADDRS_MAX_FRESH_DURATION: Duration = Duration::from_secs(60);
 
 /// Caches and refreshes a partial list of peer addresses to be returned as a `GetAddr` response.
