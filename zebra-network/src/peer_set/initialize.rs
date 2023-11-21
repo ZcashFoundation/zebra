@@ -868,18 +868,18 @@ where
                     "opening an outbound peer connection"
                 );
 
+                // Try to get the next available peer for a handshake.
+                //
+                // candidates.next() has a short timeout, and briefly holds the address
+                // book lock, so it shouldn't hang.
+                //
+                // Hold the lock for as short a time as possible.
+                let candidate = { candidates.lock().await.next().await };
+
                 // Spawn each handshake or crawl into an independent task, so handshakes can make
                 // progress while crawls are running.
                 let handshake_or_crawl_handle = tokio::spawn(
                     async move {
-                        // Try to get the next available peer for a handshake.
-                        //
-                        // candidates.next() has a short timeout, and briefly holds the address
-                        // book lock, so it shouldn't hang.
-                        //
-                        // Hold the lock for as short a time as possible.
-                        let candidate = { candidates.lock().await.next().await };
-
                         if let Some(candidate) = candidate {
                             // we don't need to spawn here, because there's nothing running concurrently
                             dial(
