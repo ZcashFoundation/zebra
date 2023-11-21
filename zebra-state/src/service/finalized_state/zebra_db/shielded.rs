@@ -112,7 +112,10 @@ impl ZebraDb {
             // In Zebra 1.4.0 and later, we don't update the sprout tip tree unless it is changed.
             // And we write with a `()` key, not a height key.
             // So we need to look for the most recent update height if the `()` key has never been written.
-            sprout_tree = self.db.zs_last_key_value(&sprout_tree_cf).map(|(_height_key, tree_value)| tree_value);
+            sprout_tree = self
+                .db
+                .zs_last_key_value(&sprout_tree_cf)
+                .map(|(_key: Height, tree_value)| tree_value);
         }
 
         sprout_tree.expect("Sprout note commitment tree must exist if there is a finalized tip")
