@@ -309,7 +309,7 @@ pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 ///
 /// This limit makes sure that Zebra does not reveal its entire address book
 /// in a single `Peers` response.
-pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 3;
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
 
 /// The maximum number of addresses Zebra will keep in its address book.
 ///
@@ -499,8 +499,9 @@ mod tests {
     #[test]
     #[allow(clippy::assertions_on_constants)]
     fn ensure_address_limits_consistent() {
-        // Zebra 1.0.0-beta.2 address book metrics in December 2021.
-        const TYPICAL_MAINNET_ADDRESS_BOOK_SIZE: usize = 4_500;
+        // Estimated network address book size in November 2023, after the address book limit was increased.
+        // Zebra 1.0.0-beta.2 address book metrics in December 2021 showed 4500 peers.
+        const TYPICAL_MAINNET_ADDRESS_BOOK_SIZE: usize = 5_500;
 
         let _init_guard = zebra_test::init();
 
@@ -515,7 +516,7 @@ mod tests {
         );
 
         assert!(
-            MAX_ADDRS_IN_ADDRESS_BOOK < TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
+            MAX_ADDRS_IN_ADDRESS_BOOK <= TYPICAL_MAINNET_ADDRESS_BOOK_SIZE,
             "the address book limit should actually be used"
         );
     }
