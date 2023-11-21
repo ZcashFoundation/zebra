@@ -551,15 +551,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridgetree"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfcb6c5a091e80cb3d3b0c1a7f126af4631cd5065b1f9929b139f1be8f3fb62"
-dependencies = [
- "incrementalmerkletree 0.5.0",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
