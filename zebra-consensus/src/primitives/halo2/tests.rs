@@ -17,7 +17,7 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{ShieldedData, TxV5},
+    orchard::{Orchard, ShieldedData},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
@@ -40,7 +40,7 @@ fn generate_test_vectors() {
     let anchor_bytes = [0; 32];
     let note_value = 10;
 
-    let shielded_data: Vec<ShieldedData<TxV5>> = (1..=4)
+    let shielded_data: Vec<ShieldedData<Orchard>> = (1..=4)
         .map(|num_recipients| {
             let mut builder = Builder::new(
                 Flags::from_parts(enable_spends, enable_outputs),
@@ -109,7 +109,7 @@ fn generate_test_vectors() {
 
 async fn verify_orchard_halo2_proofs<V>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<TxV5>>,
+    shielded_data: Vec<ShieldedData<Orchard>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -142,7 +142,7 @@ async fn verify_generated_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<TxV5>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<Orchard>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
@@ -171,7 +171,7 @@ async fn verify_generated_halo2_proofs() {
 
 async fn verify_invalid_orchard_halo2_proofs<V>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<TxV5>>,
+    shielded_data: Vec<ShieldedData<Orchard>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -209,7 +209,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<TxV5>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<Orchard>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()

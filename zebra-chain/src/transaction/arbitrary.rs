@@ -18,7 +18,7 @@ use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one,
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
-    orchard::{self, OrchardVariant, TxV5},
+    orchard::{self, Orchard, OrchardVariant},
     parameters::{Network, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
@@ -149,7 +149,7 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData<TxV5>>()),
+            option::of(any::<orchard::ShieldedData<Orchard>>()),
         )
             .prop_map(
                 move |(
@@ -1052,7 +1052,7 @@ pub fn transactions_from_blocks<'a>(
 /// Panics if the transaction to be modified is not V5.
 pub fn insert_fake_orchard_shielded_data(
     transaction: &mut Transaction,
-) -> &mut orchard::ShieldedData<TxV5> {
+) -> &mut orchard::ShieldedData<Orchard> {
     // Create a dummy action
     let mut runner = TestRunner::default();
     let dummy_action = orchard::Action::arbitrary()

@@ -20,7 +20,7 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block,
-    orchard::{self, TxV5},
+    orchard::{self, Orchard},
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -722,7 +722,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData<TxV5>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Orchard>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -1017,7 +1017,7 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData<TxV5>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Orchard>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();

@@ -17,7 +17,7 @@ pub mod keys;
 pub mod shielded_data;
 pub mod tree;
 
-mod orchard_variant;
+mod variant;
 
 pub use action::Action;
 pub use address::Address;
@@ -26,10 +26,10 @@ pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{ActionRef, AuthorizedAction, Flags, ShieldedData};
 
-pub use orchard_variant::{OrchardVariant, TxV5};
+pub use variant::{Orchard, OrchardVariant};
 
 #[cfg(feature = "tx-v6")]
-pub use orchard_variant::TxV6;
+pub use variant::OrchardZSA;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use orchard_variant::ENCRYPTED_NOTE_SIZE_V5;
+pub use variant::ENCRYPTED_NOTE_SIZE_V5;

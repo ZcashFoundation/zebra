@@ -9,7 +9,7 @@ use zebra_chain::{
     amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
-    orchard::{self, OrchardVariant, TxV5},
+    orchard::{self, Orchard, OrchardVariant},
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
@@ -774,7 +774,7 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict<TxV5>>),
+    Orchard(Box<OrchardSpendConflict<Orchard>>),
 }
 
 /// A conflict caused by spending the same UTXO.
