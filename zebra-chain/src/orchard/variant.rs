@@ -1,4 +1,5 @@
-//! This module defines traits and structures for supporting the Orchard Shielded Protocol for `V5` and `V6` versions of the transaction.
+//! This module defines traits and structures for supporting the Orchard Shielded Protocol
+//! for `V5` and `V6` versions of the transaction.
 use std::{fmt::Debug, io};
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -40,7 +41,7 @@ pub trait OrchardVariant: Clone + Debug {
     type BurnType: Clone + Debug + Default + ZcashDeserialize + ZcashSerialize;
 }
 
-/// A structure representing a tag for Orchard protocol variant used in the transaction version `V5`.
+/// A structure representing a tag for Orchard protocol variant used for the transaction version `V5`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Orchard;
