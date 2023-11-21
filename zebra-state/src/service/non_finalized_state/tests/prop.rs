@@ -328,9 +328,9 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         let mut partial_chain = Chain::new(
             network,
             full_chain.non_finalized_tip_height(),
-            full_chain.sprout_note_commitment_tree(),
-            full_chain.sapling_note_commitment_tree(),
-            full_chain.orchard_note_commitment_tree(),
+            full_chain.sprout_note_commitment_tree_for_tip(),
+            full_chain.sapling_note_commitment_tree_for_tip(),
+            full_chain.orchard_note_commitment_tree_for_tip(),
             full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
@@ -406,9 +406,9 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
         let mut partial_chain = Chain::new(
             network,
             Height(finalized_count.try_into().unwrap()),
-            full_chain.sprout_note_commitment_tree(),
-            full_chain.sapling_note_commitment_tree(),
-            full_chain.orchard_note_commitment_tree(),
+            full_chain.sprout_note_commitment_tree_for_tip(),
+            full_chain.sapling_note_commitment_tree_for_tip(),
+            full_chain.orchard_note_commitment_tree_for_tip(),
             full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
@@ -623,6 +623,10 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.sprout_trees_by_height = chain2.sprout_trees_by_height.clone();
                 chain1.sapling_trees_by_height = chain2.sapling_trees_by_height.clone();
                 chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
+
+                // note commitment subtrees
+                chain1.sapling_subtrees = chain2.sapling_subtrees.clone();
+                chain1.orchard_subtrees = chain2.orchard_subtrees.clone();
 
                 // history trees
                 chain1.history_trees_by_height = chain2.history_trees_by_height.clone();

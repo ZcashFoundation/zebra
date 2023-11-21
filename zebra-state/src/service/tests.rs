@@ -143,20 +143,20 @@ async fn test_populated_state_responds_correctly(
             transcript.push((
                 Request::FindBlockHashes {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
-                    stop: next_hashes.get(0).cloned(),
+                    stop: next_hashes.first().cloned(),
                 },
                 Ok(Response::BlockHashes(
-                    next_hashes.get(0).iter().cloned().cloned().collect(),
+                    next_hashes.first().iter().cloned().cloned().collect(),
                 )),
             ));
 
             transcript.push((
                 Request::FindBlockHeaders {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
-                    stop: next_hashes.get(0).cloned(),
+                    stop: next_hashes.first().cloned(),
                 },
                 Ok(Response::BlockHeaders(
-                    next_headers.get(0).iter().cloned().cloned().collect(),
+                    next_headers.first().iter().cloned().cloned().collect(),
                 )),
             ));
 

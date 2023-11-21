@@ -6,7 +6,10 @@
 //! which implement the different components of a Zcash node
 //! (networking, chain structures, validation, rpc, etc).
 //!
-//! [Rendered docs from the `main` branch](https://doc.zebra.zfnd.org).
+//! [Rendered docs for the latest crate releases](https://docs.rs/releases/search?query=zebra).
+//!
+//! [Rendered docs from the `main` branch](https://doc-internal.zebra.zfnd.org).
+//!
 //! [Join us on the Zcash Foundation Engineering Discord](https://discord.gg/na6QZNd).
 //!
 //! ## About Zcash
@@ -57,13 +60,14 @@
 //!
 //! ### JSON-RPC
 //!
-//! * `getblocktemplate-rpcs`: Experimental mining pool RPC support (currently incomplete)
+//! * `getblocktemplate-rpcs`: Mining pool RPC support, enabled by default in production builds.
 //!
 //! ### Metrics
 //!
-//! * `prometheus`: export metrics to prometheus.
-//! * `progress-bar`: shows key metrics in the terminal using progress bars,
+//! * configuring a `tracing.progress_bar`: shows key metrics in the terminal using progress bars,
 //!   and automatically configures Zebra to send logs to a file.
+//!   (The `progress-bar` feature is activated by default.)
+//! * `prometheus`: export metrics to prometheus.
 //!
 //! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
 //! for more details.
@@ -93,10 +97,15 @@
 //!
 //! * `proptest-impl`: enable randomised test data generation.
 //! * `lightwalletd-grpc-tests`: enable Zebra JSON-RPC tests that query `lightwalletd` using gRPC.
+//!
+//! ### Experimental
+//!
+//! * `elasticsearch`: save block data into elasticsearch database. Read the [elasticsearch](https://zebra.zfnd.org/user/elasticsearch.html)
+//! section of the book for more details.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
-#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebrad")]
+#![doc(html_root_url = "https://docs.rs/zebrad")]
 // Tracing causes false positives on this lint:
 // https://github.com/tokio-rs/tracing/issues/553
 #![allow(clippy::cognitive_complexity)]

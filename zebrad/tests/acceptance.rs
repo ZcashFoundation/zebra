@@ -151,6 +151,7 @@ use color_eyre::{
     Help,
 };
 use semver::Version;
+use serde_json::Value;
 
 use zebra_chain::{
     block::{self, Height},
@@ -160,7 +161,12 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
 
-use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
+use zebra_test::{
+    args,
+    command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
+    prelude::*,
+};
 
 mod common;
 
@@ -184,6 +190,10 @@ use common::{
     test_type::TestType::{self, *},
 };
 
+use crate::common::cached_state::{
+    wait_for_state_version_message, wait_for_state_version_upgrade, DATABASE_FORMAT_UPGRADE_IS_LONG,
+};
+
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
 /// This should be larger than the amount of time between thread time slices on a busy test VM.
@@ -199,7 +209,7 @@ fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let child = testdir()?
-        .with_config(&mut default_test_config()?)?
+        .with_config(&mut default_test_config(Mainnet)?)?
         .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -261,7 +271,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
 
     let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
@@ -306,7 +316,7 @@ fn start_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
 
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
@@ -333,7 +343,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -358,7 +368,7 @@ fn start_args() -> Result<()> {
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let config = default_test_config()?;
+    let config = default_test_config(Mainnet)?;
 
     let start = Instant::now();
 
@@ -384,7 +394,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["-v", "start"])?;
@@ -449,7 +459,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let _init_guard = zebra_test::init();
 
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
@@ -539,7 +549,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
 
     let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
@@ -560,7 +570,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let testdir = &testdir;
 
     // unrecognized option `-f`
@@ -602,7 +612,7 @@ fn config_tests() -> Result<()> {
     // Check that Zebra's previous configurations still work
     stored_configs_work()?;
 
-    // Runs `zebrad` serially to avoid potential port conflicts
+    // We run the `zebrad` app test after the config tests, to avoid potential port conflicts
     app_no_args()?;
 
     Ok(())
@@ -614,7 +624,9 @@ fn app_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut persistent_test_config(Mainnet)?)?;
+
+    tracing::info!(?testdir, "running zebrad with no config (default settings)");
 
     let mut child = testdir.spawn_child(args![])?;
 
@@ -648,6 +660,8 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     // Add a config file name to tempdir path
     let generated_config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(?generated_config_path, "generating valid config");
+
     // Generate configuration in temp dir path
     let child =
         testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
@@ -660,6 +674,8 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
         &output,
         "generated config file not found"
     );
+
+    tracing::info!(?generated_config_path, "testing valid config parsing");
 
     // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(args![command])?;
@@ -699,6 +715,8 @@ fn last_config_is_stored() -> Result<()> {
     // Add a config file name to tempdir path
     let generated_config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(?generated_config_path, "generated current config");
+
     // Generate configuration in temp dir path
     let child =
         testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
@@ -710,6 +728,11 @@ fn last_config_is_stored() -> Result<()> {
         generated_config_path.exists(),
         &output,
         "generated config file not found"
+    );
+
+    tracing::info!(
+        ?generated_config_path,
+        "testing current config is in stored configs"
     );
 
     // Get the contents of the generated config file
@@ -812,6 +835,11 @@ fn invalid_generated_config() -> Result<()> {
     // Add a config file name to tempdir path.
     let config_path = testdir.path().join("zebrad.toml");
 
+    tracing::info!(
+        ?config_path,
+        "testing invalid config parsing: generating valid config"
+    );
+
     // Generate a valid config file in the temp dir.
     let child = testdir.spawn_child(args!["generate", "-o": config_path.to_str().unwrap()])?;
 
@@ -846,9 +874,13 @@ fn invalid_generated_config() -> Result<()> {
             secs = 3600
     ";
 
+    tracing::info!(?config_path, "writing invalid config");
+
     // Write the altered config file so that Zebra can pick it up.
     fs::write(config_path.to_str().unwrap(), config_file.as_bytes())
         .expect("Could not write the altered config file.");
+
+    tracing::info!(?config_path, "testing invalid config parsing");
 
     // Run Zebra in a temp dir so that it loads the config.
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -880,6 +912,8 @@ fn invalid_generated_config() -> Result<()> {
 fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
+    tracing::info!(?old_configs_dir, "testing older config parsing");
+
     for config_file in old_configs_dir
         .read_dir()
         .expect("read_dir call failed")
@@ -889,10 +923,10 @@ fn stored_configs_work() -> Result<()> {
         let config_file_name = config_file_path
             .file_name()
             .expect("config files must have a file name")
-            .to_string_lossy();
+            .to_str()
+            .expect("config file names are valid unicode");
 
-        if config_file_name.as_ref().starts_with('.') || config_file_name.as_ref().starts_with('#')
-        {
+        if config_file_name.starts_with('.') || config_file_name.starts_with('#') {
             // Skip editor files and other invalid config paths
             tracing::info!(
                 ?config_file_path,
@@ -904,10 +938,7 @@ fn stored_configs_work() -> Result<()> {
         // ignore files starting with getblocktemplate prefix
         // if we were not built with the getblocktemplate-rpcs feature.
         #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file_name
-            .as_ref()
-            .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
-        {
+        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
             tracing::info!(
                 ?config_file_path,
                 "skipping getblocktemplate-rpcs config file path"
@@ -918,12 +949,41 @@ fn stored_configs_work() -> Result<()> {
         let run_dir = testdir()?;
         let stored_config_path = config_file_full_path(config_file.path());
 
+        tracing::info!(
+            ?stored_config_path,
+            "testing old config can be parsed by current zebrad"
+        );
+
         // run zebra with stored config
         let mut child =
             run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-        // zebra was able to start with the stored config
-        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+        let success_regexes = [
+            // When logs are sent to the terminal, we see the config loading message and path.
+            format!(
+                "loaded zebrad config.*config_path.*=.*{}",
+                regex::escape(config_file_name)
+            ),
+            // If they are sent to a file, we see a log file message on stdout,
+            // and a logo, welcome message, and progress bar on stderr.
+            "Sending logs to".to_string(),
+            // TODO: add expect_stdout_or_stderr_line_matches() and check for this instead:
+            //"Thank you for running a mainnet zebrad".to_string(),
+        ];
+
+        tracing::info!(
+            ?stored_config_path,
+            ?success_regexes,
+            "waiting for zebrad to parse config and start logging"
+        );
+
+        let success_regexes = success_regexes
+            .iter()
+            .collect_regex_set()
+            .expect("regexes are valid");
+
+        // Zebra was able to start with the stored config.
+        child.expect_stdout_line_matches(success_regexes)?;
 
         // finish
         child.kill(false)?;
@@ -1107,8 +1167,6 @@ fn create_cached_database(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height,
-        // We don't need the ZK parameters, we're only using checkpoints
-        true,
         // Use checkpoints to increase sync performance while caching the database
         true,
         // Check that we're still using checkpoints when we finish the cached sync
@@ -1125,8 +1183,6 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
-        // We need the ZK parameters for full validation
-        false,
         // Test full validation by turning checkpoints off
         false,
         // Check that we're doing full validation when we finish the cached sync
@@ -1156,8 +1212,6 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             network,
             // Just keep going until we reach the chain tip
             block::Height::MAX,
-            // We need the ZK parameters for full validation
-            false,
             // Use the checkpoints to sync quickly, then do full validation until the chain tip
             true,
             // Finish when we reach the chain tip
@@ -1261,7 +1315,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1318,7 +1372,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1418,8 +1472,6 @@ async fn rpc_endpoint_parallel_threads() -> Result<()> {
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
 #[tracing::instrument]
 async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
-    use serde_json::Value;
-
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -1427,7 +1479,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(parallel_cpu_threads)?;
+    let mut config = random_known_rpc_port_config(parallel_cpu_threads, Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1486,7 +1538,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(true)?;
+    let mut config = random_known_rpc_port_config(true, Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1572,7 +1624,7 @@ fn non_blocking_logger() -> Result<()> {
 
         // Write a configuration that has RPC listen_addr set
         // [Note on port conflict](#Note on port conflict)
-        let mut config = random_known_rpc_port_config(false)?;
+        let mut config = random_known_rpc_port_config(false, Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
         let zebra_rpc_address = config.rpc.listen_addr.unwrap();
@@ -1780,6 +1832,9 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         return Ok(());
     };
 
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
     if test_type.needs_zebra_cached_state() {
         zebrad
             .expect_stdout_line_matches(r"loaded Zebra state cache .*tip.*=.*Height\([0-9]{7}\)")?;
@@ -1788,18 +1843,36 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         zebrad.expect_stdout_line_matches("loaded Zebra state cache .*tip.*=.*None")?;
     }
 
-    // Launch lightwalletd, if needed
-    let lightwalletd_and_port = if test_type.launches_lightwalletd() {
+    // Wait for the state to upgrade and the RPC port, if the upgrade is short.
+    //
+    // If incompletely upgraded states get written to the CI cache,
+    // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
+    if test_type.launches_lightwalletd() && !DATABASE_FORMAT_UPGRADE_IS_LONG {
         tracing::info!(
             ?test_type,
             ?zebra_rpc_address,
             "waiting for zebrad to open its RPC port..."
         );
-        zebrad.expect_stdout_line_matches(format!(
-            "Opened RPC endpoint at {}",
-            zebra_rpc_address.expect("lightwalletd test must have RPC port")
-        ))?;
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            [format!(
+                "Opened RPC endpoint at {}",
+                zebra_rpc_address.expect("lightwalletd test must have RPC port")
+            )],
+        )?;
+    } else {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            None,
+        )?;
+    }
 
+    // Launch lightwalletd, if needed
+    let lightwalletd_and_port = if test_type.launches_lightwalletd() {
         tracing::info!(
             ?zebra_rpc_address,
             "launching lightwalletd connected to zebrad",
@@ -1835,7 +1908,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
 
         if test_type.needs_lightwalletd_cached_state() {
             lightwalletd
-                .expect_stdout_line_matches("Done reading [0-9]{1,7} blocks from disk cache")?;
+                .expect_stdout_line_matches("Done reading [0-9]{7} blocks from disk cache")?;
         } else if !test_type.allow_lightwalletd_cached_state() {
             // Timeout the test if we're somehow accidentally using a cached state in our temp dir
             lightwalletd.expect_stdout_line_matches("Done reading 0 blocks from disk cache")?;
@@ -1875,6 +1948,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         None
     };
 
+    // Wait for zebrad and lightwalletd to sync, if needed.
     let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
         if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
             #[cfg(feature = "lightwalletd-grpc-tests")]
@@ -1886,7 +1960,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                     "waiting for zebrad and lightwalletd to sync...",
                 );
 
-                let (lightwalletd, zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+                let (lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
                     lightwalletd,
                     lightwalletd_rpc_port,
                     zebrad,
@@ -1896,6 +1970,18 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                     true,
                     use_internet_connection,
                 )?;
+
+                // Wait for the state to upgrade, if the upgrade is long.
+                // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false,
+                // or combine "wait for sync" with "wait for state version upgrade".
+                if DATABASE_FORMAT_UPGRADE_IS_LONG {
+                    wait_for_state_version_upgrade(
+                        &mut zebrad,
+                        &state_version_message,
+                        database_format_version_in_code(),
+                        None,
+                    )?;
+                }
 
                 (zebrad, Some(lightwalletd))
             }
@@ -1911,6 +1997,17 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
             // We're just syncing Zebra, so there's no lightwalletd to check
             tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
             zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+
+            // Wait for the state to upgrade, if the upgrade is long.
+            // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
+            if DATABASE_FORMAT_UPGRADE_IS_LONG {
+                wait_for_state_version_upgrade(
+                    &mut zebrad,
+                    &state_version_message,
+                    database_format_version_in_code(),
+                    None,
+                )?;
+            }
 
             (zebrad, None)
         }
@@ -1965,7 +2062,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -1994,7 +2091,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -2023,7 +2120,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -2057,7 +2154,7 @@ fn zebra_rpc_conflict() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     //
     // This is the required setting to detect port conflicts.
-    let mut config = random_known_rpc_port_config(false)?;
+    let mut config = random_known_rpc_port_config(false, Mainnet)?;
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
@@ -2084,7 +2181,7 @@ fn zebra_state_conflict() -> Result<()> {
 
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
-    let mut config = persistent_test_config()?;
+    let mut config = persistent_test_config(Mainnet)?;
     let dir_conflict = testdir()?.with_config(&mut config)?;
 
     // Windows problems with this match will be worked on at #1654
@@ -2249,7 +2346,7 @@ async fn delete_old_databases() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = default_test_config()?;
+    let mut config = default_test_config(Mainnet)?;
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 
@@ -2365,7 +2462,7 @@ async fn submit_block() -> Result<()> {
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(Mainnet)?)?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.
@@ -2524,10 +2621,9 @@ async fn state_format_test(
         let test_name = &format!("{base_test_name}/apply_fake_version/{fake_version}");
         tracing::info!(?network, "running {test_name} using zebra-state");
 
-        let mut config = UseAnyState
-            .zebrad_config(test_name, false, Some(dir.path()))
+        let config = UseAnyState
+            .zebrad_config(test_name, false, Some(dir.path()), network)
             .expect("already checked config")?;
-        config.network.network = network;
 
         zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
             .expect("can't write fake database version to disk");
@@ -2604,5 +2700,102 @@ async fn state_format_test(
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     }
+    Ok(())
+}
+
+/// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
+///
+/// This test name must have the same prefix as the `fully_synced_rpc_test`, so they can be run in the same test job.
+#[tokio::test]
+#[ignore]
+async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // We're only using cached Zebra state here, so this test type is the most similar
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
+    let network = Network::Mainnet;
+
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+        network,
+        "rpc_z_getsubtreesbyindex_sync_snapshots",
+        test_type,
+        true,
+    )? {
+        tracing::info!("running fully synced zebrad z_getsubtreesbyindex RPC test");
+
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
+    };
+
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
+    // It doesn't matter how long the state version upgrade takes,
+    // because the sync finished regex is repeated every minute.
+    wait_for_state_version_upgrade(
+        &mut zebrad,
+        &state_version_message,
+        database_format_version_in_code(),
+        None,
+    )?;
+
+    // Wait for zebrad to load the full cached blockchain.
+    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+
+    // Create an http client
+    let client =
+        RpcRequestClient::new(zebra_rpc_address.expect("already checked that address is valid"));
+
+    // Create test vector matrix
+    let zcashd_test_vectors = vec![
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_0_1".to_string(),
+            r#"["sapling", 0, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_0_11".to_string(),
+            r#"["sapling", 0, 11]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_17_1".to_string(),
+            r#"["sapling", 17, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_sapling_1090_6".to_string(),
+            r#"["sapling", 1090, 6]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_0_1".to_string(),
+            r#"["orchard", 0, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_338_1".to_string(),
+            r#"["orchard", 338, 1]"#.to_string(),
+        ),
+        (
+            "z_getsubtreesbyindex_mainnet_orchard_585_1".to_string(),
+            r#"["orchard", 585, 1]"#.to_string(),
+        ),
+    ];
+
+    for i in zcashd_test_vectors {
+        let res = client.call("z_getsubtreesbyindex", i.1).await?;
+        let body = res.bytes().await;
+        let parsed: Value = serde_json::from_slice(&body.expect("Response is valid json"))?;
+        insta::assert_json_snapshot!(i.0, parsed);
+    }
+
+    zebrad.kill(false)?;
+
+    let output = zebrad.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
     Ok(())
 }

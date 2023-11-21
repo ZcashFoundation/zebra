@@ -20,7 +20,7 @@ mod tests;
 use ValueBalanceError::*;
 
 /// An amount spread between different Zcash pools.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,

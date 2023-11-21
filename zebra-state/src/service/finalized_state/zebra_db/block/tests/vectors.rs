@@ -26,7 +26,7 @@ use zebra_chain::{
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
-    service::finalized_state::{disk_db::DiskWriteBatch, FinalizedState},
+    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb},
     CheckpointVerifiedBlock, Config,
 };
 
@@ -77,11 +77,11 @@ fn test_block_db_round_trip_with(
 ) {
     let _init_guard = zebra_test::init();
 
-    let state = FinalizedState::new(
+    let state = ZebraDb::new(
         &Config::ephemeral(),
         network,
-        #[cfg(feature = "elasticsearch")]
-        None,
+        // The raw database accesses in this test create invalid database formats.
+        true,
     );
 
     // Check that each block round-trips to the database

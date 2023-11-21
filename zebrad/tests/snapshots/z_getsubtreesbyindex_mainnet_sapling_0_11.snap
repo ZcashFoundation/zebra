@@ -1,0 +1,58 @@
+---
+source: zebrad/tests/acceptance.rs
+expression: parsed
+---
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "pool": "sapling",
+    "start_index": 0,
+    "subtrees": [
+      {
+        "root": "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13",
+        "end_height": 558822
+      },
+      {
+        "root": "03654c3eacbb9b93e122cf6d77b606eae29610f4f38a477985368197fd68e02d",
+        "end_height": 670209
+      },
+      {
+        "root": "e2bf698f5ac10b44da560d11a5e1d5c191a82a968a2be0a6948aa8748b545160",
+        "end_height": 780364
+      },
+      {
+        "root": "e71be1fd3963a2d700ed374d01fdd4a70d8dda8189a8f6602e5fe66c2c66a11d",
+        "end_height": 839994
+      },
+      {
+        "root": "f1c57245fff8dbc2d3efe5a0953eafdedeb06e18a3ad4f1e4042ee76623f8032",
+        "end_height": 916404
+      },
+      {
+        "root": "ea8a275c49b47f4658fa4947bbac027bb1981e3009f292916cb1f7a93ac82c08",
+        "end_height": 985993
+      },
+      {
+        "root": "891b1e6bfec42e97c79ec505c7ae1b584cf47d4ed8f6cdfcad815b02a5496f67",
+        "end_height": 1056197
+      },
+      {
+        "root": "163838d11a0525898f410397ae6ec627fa18b3184a021e088806947b3c5ca718",
+        "end_height": 1109360
+      },
+      {
+        "root": "089a1f9d50a037cc66aba4400b1703bcbb66f5f2993fd0dd3bb726e359409167",
+        "end_height": 1169471
+      },
+      {
+        "root": "0fc8a6ad74e65764d9bc2fcd13866b994731dfda821e6618a1a308bb1eccf51a",
+        "end_height": 1256932
+      },
+      {
+        "root": "cdd92a1e884cf1914dae8345423203832ec7bbf9d95ae50b82e4327b39d6d912",
+        "end_height": 1363036
+      }
+    ]
+  },
+  "id": 123
+}

@@ -1,7 +1,8 @@
 //! Convenience traits for converting to [`Regex`] and [`RegexSet`].
 
-use std::iter;
+use std::{collections::HashSet, iter};
 
+use itertools::Itertools;
 use regex::{Error, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 /// A trait for converting a value to a [`Regex`].
@@ -135,16 +136,35 @@ pub trait CollectRegexSet {
 impl<I> CollectRegexSet for I
 where
     I: IntoIterator,
-    I::Item: ToRegex,
+    I::Item: ToRegexSet,
 {
     fn collect_regex_set(self) -> Result<RegexSet, Error> {
-        let regexes: Result<Vec<Regex>, Error> =
-            self.into_iter().map(|item| item.to_regex()).collect();
+        let regexes: Result<Vec<RegexSet>, Error> = self
+            .into_iter()
+            .map(|item| item.to_regex_set())
+            .try_collect();
         let regexes = regexes?;
 
         // This conversion discards flags and limits from Regex and RegexBuilder.
-        let regexes = regexes.iter().map(|regex| regex.as_str());
+        let regexes = regexes.iter().flat_map(|regex_set| regex_set.patterns());
 
         RegexSet::new(regexes)
+    }
+}
+
+/// A trait for getting additional information from a [`RegexSet`].
+pub trait RegexSetExt {
+    /// Returns the regex patterns for the supplied `indexes`.
+    fn patterns_for_indexes(&self, indexes: &HashSet<usize>) -> Vec<String>;
+}
+
+impl RegexSetExt for RegexSet {
+    fn patterns_for_indexes(&self, indexes: &HashSet<usize>) -> Vec<String> {
+        self.patterns()
+            .iter()
+            .enumerate()
+            .filter(|(index, _regex)| indexes.contains(index))
+            .map(|(_index, regex)| regex.to_string())
+            .collect()
     }
 }

@@ -22,9 +22,6 @@
 //!    * verifies blocks using zebra-chain, then stores verified blocks in zebra-state
 //!    * verifies mempool and block transactions using zebra-chain and zebra-script,
 //!      and returns verified mempool transactions for mempool storage
-//!  * Groth16 Parameters Download Task
-//!    * downloads the Sprout and Sapling Groth16 circuit parameter files
-//!    * finishes when the download is complete and the download file hashes have been checked
 //!  * Inbound Service
 //!    * primary external interface for inbound peer requests to this node
 //!    * handles requests from peers for network data, chain data, and mempool transactions
@@ -163,7 +160,6 @@ impl StartCmd {
                 config.consensus.clone(),
                 config.network.network,
                 state.clone(),
-                config.consensus.debug_skip_parameter_preload,
             )
             .await;
 
@@ -217,6 +213,7 @@ impl StartCmd {
         }
 
         // Launch RPC server
+        info!("spawning RPC server");
         let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc.clone(),
             config.mining.clone(),
@@ -232,6 +229,7 @@ impl StartCmd {
         );
 
         // Start concurrent tasks which don't add load to other tasks
+        info!("spawning block gossip task");
         let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
@@ -241,16 +239,20 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        info!("spawning mempool queue checker task");
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
+        info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
             mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set.clone())
                 .in_current_span(),
         );
 
+        info!("spawning delete old databases task");
         let mut old_databases_task_handle =
             zebra_state::check_and_delete_old_databases(config.state.clone());
 
+        info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
                 config.network.network,
@@ -260,6 +262,7 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
             sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
         );
@@ -270,6 +273,7 @@ impl StartCmd {
         tokio::task::yield_now().await;
 
         // The crawler only activates immediately in tests that use mempool debug mode
+        info!("spawning mempool crawler task");
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
             &config.mempool,
             peer_set,
@@ -278,6 +282,7 @@ impl StartCmd {
             chain_tip_change,
         );
 
+        info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         info!("spawned initial Zebra tasks");
@@ -297,12 +302,8 @@ impl StartCmd {
 
         // startup tasks
         let BackgroundTaskHandles {
-            mut groth16_download_handle,
             mut state_checkpoint_verify_handle,
         } = consensus_task_handles;
-
-        let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
-        pin!(groth16_download_handle_fused);
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
@@ -365,19 +366,6 @@ impl StartCmd {
                     .expect("unexpected panic in the end of support task")
                     .map(|_| info!("end of support task exited")),
 
-
-                // Unlike other tasks, we expect the download task to finish while Zebra is running.
-                groth16_download_result = &mut groth16_download_handle_fused => {
-                    groth16_download_result
-                        .unwrap_or_else(|_| panic!(
-                            "unexpected panic in the Groth16 pre-download and check task. {}",
-                            zebra_consensus::groth16::Groth16Parameters::failure_hint())
-                        );
-
-                    exit_when_task_finishes = false;
-                    Ok(())
-                }
-
                 // We also expect the state checkpoint verify task to finish.
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
@@ -410,7 +398,7 @@ impl StartCmd {
             }
         };
 
-        info!("exiting Zebra because an ongoing task exited: stopping other tasks");
+        info!("exiting Zebra because an ongoing task exited: asking other tasks to stop");
 
         // ongoing tasks
         rpc_task_handle.abort();
@@ -424,7 +412,6 @@ impl StartCmd {
         end_of_support_task_handle.abort();
 
         // startup tasks
-        groth16_download_handle.abort();
         state_checkpoint_verify_handle.abort();
         old_databases_task_handle.abort();
 
@@ -433,8 +420,11 @@ impl StartCmd {
         //
         // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
         if let Some(rpc_server) = rpc_server {
+            info!("waiting for RPC server to shut down");
             rpc_server.shutdown_blocking();
         }
+
+        info!("exiting Zebra: all tasks have been asked to stop, waiting for remaining tasks to finish");
 
         exit_status
     }

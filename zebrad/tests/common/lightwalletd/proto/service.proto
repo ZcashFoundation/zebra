@@ -36,7 +36,7 @@ message TxFilter {
 // by GetMempoolStream(), the latest block height.
 message RawTransaction {
     bytes data = 1;     // exact data returned by Zcash 'getrawtransaction'
-    int64 height = 2;  // height that the transaction was mined (or -1)
+    uint64 height = 2;  // height that the transaction was mined (or -1)
 }
 
 // A SendResponse encodes an error code and a string. It is currently used
@@ -110,11 +110,28 @@ message Exclude {
 
 // The TreeState is derived from the Zcash z_gettreestate rpc.
 message TreeState {
-    string network = 1; // "main" or "test"
-    uint64 height = 2;
-    string hash = 3;    // block id
-    uint32 time = 4;    // Unix epoch time when the block was mined
-    string tree = 5;    // sapling commitment tree state
+    string network = 1;     // "main" or "test"
+    uint64 height = 2;      // block height
+    string hash = 3;        // block id
+    uint32 time = 4;        // Unix epoch time when the block was mined
+    string saplingTree = 5; // sapling commitment tree state
+    string orchardTree = 6; // orchard commitment tree state
+}
+
+enum ShieldedProtocol {
+    sapling = 0;
+    orchard = 1;
+}
+
+message GetSubtreeRootsArg {
+    uint32 startIndex = 1;                  // Index identifying where to start returning subtree roots
+    ShieldedProtocol shieldedProtocol = 2;  // Shielded protocol to return subtree roots for
+    uint32 maxEntries = 3;                  // Maximum number of entries to return, or 0 for all entries.
+}
+message SubtreeRoot {
+    bytes rootHash = 2;                     // The 32-byte Merkle root of the subtree.
+    bytes completingBlockHash = 3;          // The hash of the block that completed this subtree.
+    uint64 completingBlockHeight = 4;       // The height of the block that completed this subtree in the main chain.
 }
 
 // Results are sorted by height, which makes it easy to issue another
@@ -141,8 +158,12 @@ service CompactTxStreamer {
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
     // Return the compact block corresponding to the given block identifier
     rpc GetBlock(BlockID) returns (CompactBlock) {}
+    // Same as GetBlock except actions contain only nullifiers
+    rpc GetBlockNullifiers(BlockID) returns (CompactBlock) {}
     // Return a list of consecutive compact blocks
     rpc GetBlockRange(BlockRange) returns (stream CompactBlock) {}
+    // Same as GetBlockRange except actions contain only nullifiers
+    rpc GetBlockRangeNullifiers(BlockRange) returns (stream CompactBlock) {}
 
     // Return the requested full (not compact) transaction (as from zcashd)
     rpc GetTransaction(TxFilter) returns (RawTransaction) {}
@@ -174,6 +195,11 @@ service CompactTxStreamer {
     // values also (even though they can be obtained using GetBlock).
     // The block can be specified by either height or hash.
     rpc GetTreeState(BlockID) returns (TreeState) {}
+    rpc GetLatestTreeState(Empty) returns (TreeState) {}
+
+    // Returns a stream of information about roots of subtrees of the Sapling and Orchard
+    // note commitment trees.
+    rpc GetSubtreeRoots(GetSubtreeRootsArg) returns (stream SubtreeRoot) {}
 
     rpc GetAddressUtxos(GetAddressUtxosArg) returns (GetAddressUtxosReplyList) {}
     rpc GetAddressUtxosStream(GetAddressUtxosArg) returns (stream GetAddressUtxosReply) {}

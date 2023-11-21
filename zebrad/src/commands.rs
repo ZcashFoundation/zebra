@@ -1,7 +1,16 @@
 //! Zebrad Subcommands
 
+use std::path::PathBuf;
+
+use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
+
+use crate::config::ZebradConfig;
+
+pub use self::{entry_point::EntryPoint, start::StartCmd};
+
+use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
+
 mod copy_state;
-mod download;
 mod entry_point;
 mod generate;
 mod start;
@@ -10,18 +19,7 @@ mod tip_height;
 #[cfg(test)]
 mod tests;
 
-use self::ZebradCmd::*;
-use self::{
-    copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
-    tip_height::TipHeightCmd,
-};
-
-pub use self::{entry_point::EntryPoint, start::StartCmd};
-
-use crate::config::ZebradConfig;
-
-use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};
-use std::path::PathBuf;
+use ZebradCmd::*;
 
 /// Zebrad Configuration Filename
 pub const CONFIG_FILE: &str = "zebrad.toml";
@@ -32,10 +30,6 @@ pub enum ZebradCmd {
     /// The `copy-state` subcommand, used to debug cached chain state (expert users only)
     // TODO: hide this command from users in release builds (#3279)
     CopyState(CopyStateCmd),
-
-    // The `download` subcommand
-    /// Pre-download required Zcash Sprout and Sapling parameter files
-    Download(DownloadCmd),
 
     /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
@@ -60,7 +54,7 @@ impl ZebradCmd {
             CopyState(_) | Start(_) => true,
 
             // Utility commands that don't use server components
-            Download(_) | Generate(_) | TipHeight(_) => false,
+            Generate(_) | TipHeight(_) => false,
         }
     }
 
@@ -74,14 +68,14 @@ impl ZebradCmd {
             Start(_) => true,
 
             // Utility commands
-            CopyState(_) | Download(_) | Generate(_) | TipHeight(_) => false,
+            CopyState(_) | Generate(_) | TipHeight(_) => false,
         }
     }
 
     /// Returns true if this command should ignore errors when
     /// attempting to load a config file.
     pub(crate) fn should_ignore_load_config_error(&self) -> bool {
-        matches!(self, ZebradCmd::Generate(_) | ZebradCmd::Download(_))
+        matches!(self, ZebradCmd::Generate(_))
     }
 
     /// Returns the default log level for this command, based on the `verbose` command line flag.
@@ -96,7 +90,7 @@ impl ZebradCmd {
             Generate(_) | TipHeight(_) => true,
 
             // Commands that generate informative logging output by default.
-            CopyState(_) | Download(_) | Start(_) => false,
+            CopyState(_) | Start(_) => false,
         };
 
         if only_show_warnings && !verbose {
@@ -113,7 +107,6 @@ impl Runnable for ZebradCmd {
     fn run(&self) {
         match self {
             CopyState(cmd) => cmd.run(),
-            Download(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),

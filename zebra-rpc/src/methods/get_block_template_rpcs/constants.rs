@@ -54,7 +54,7 @@ pub const NOT_SYNCED_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-10);
 /// The default window size specifying how many blocks to check when estimating the chain's solution rate.
 ///
 /// Based on default value in zcashd.
-pub const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: usize = 120;
+pub const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: i32 = 120;
 
 /// The funding stream order in `zcashd` RPC responses.
 ///

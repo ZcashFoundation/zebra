@@ -434,6 +434,7 @@ impl Application for ZebradApp {
             // Override the default tracing filter based on the command-line verbosity.
             tracing_config.filter = tracing_config
                 .filter
+                .clone()
                 .or_else(|| Some(default_filter.to_owned()));
         } else {
             // Don't apply the configured filter for short-lived commands.

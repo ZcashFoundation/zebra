@@ -1,18 +1,64 @@
 # Zebra Cached State Database Implementation
 
+## Current Implementation
+
+### Verification Modes
+[verification]: #verification
+
+Zebra's state has two verification modes:
+- block hash checkpoints, and
+- full verification.
+
+This means that verification uses two different codepaths, and they must produce the same results.
+
+By default, Zebra uses as many checkpoints as it can, because they are more secure against rollbacks
+(and some other kinds of chain attacks). Then it uses full verification for the last few thousand
+blocks.
+
+When Zebra gets more checkpoints in each new release, it checks the previously verified cached
+state against those checkpoints. This checks that the two codepaths produce the same results.
+
 ## Upgrading the State Database
+[upgrades]: #upgrades
 
 For most state upgrades, we want to modify the database format of the existing database. If we
 change the major database version, every user needs to re-download and re-verify all the blocks,
 which can take days.
 
-### In-Place Upgrade Goals
+### Writing Blocks to the State
+[write-block]: #write-block
 
+Blocks can be written to the database via two different code paths, and both must produce the same results:
+
+- Upgrading a pre-existing database to the latest format
+- Writing newly-synced blocks in the latest format
+
+This code is high risk, because discovering bugs is tricky, and fixing bugs can require a full reset
+and re-write of an entire column family.
+
+Most Zebra instances will do an upgrade, because they already have a cached state, and upgrades are
+faster. But we run a full sync in CI every week, because new users use that codepath. (And it is
+their first experience of Zebra.)
+
+When Zebra starts up and shuts down (and periodically in CI tests), we run checks on the state
+format. This makes sure that the two codepaths produce the same state on disk.
+
+To reduce code and testing complexity:
+- when a previous Zebra version opens a newer state, the entire state is considered to have that lower version, and
+- when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
+
+### In-Place Upgrade Goals
+[upgrade-goals]: #upgrade-goals
+
+Here are the goals of in-place upgrades:
 - avoid a full download and rebuild of the state
-- the previous state format must be able to be loaded by the new state
+- Zebra must be able to upgrade the format from previous minor or patch versions of its disk format
+  (Major disk format versions are breaking changes. They create a new empty state and re-sync the whole chain.)
   - this is checked the first time CI runs on a PR with a new state version.
     After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
     again. If CI fails on the first run, any cached states with that version should be deleted.
+- the upgrade and full sync formats must be identical
+  - this is partially checked by the state validity checks for each upgrade (see above)
 - previous zebra versions should be able to load the new format
   - this is checked by other PRs running using the upgraded cached state, but only if a Rust PR
     runs after the new PR's CI finishes, but before it merges
@@ -30,27 +76,91 @@ This means that:
   - it can't give incorrect results, because that can affect verification or wallets
   - it can return an error
   - it can only return an `Option` if the caller handles it correctly
-- multiple upgrades must produce a valid state format
+- full syncs and upgrades must write the same format
+  - the same write method should be called from both the full sync and upgrade code,
+    this helps prevent data inconsistencies
+- repeated upgrades must produce a valid state format
   - if Zebra is restarted, the format upgrade will run multiple times
   - if an older Zebra version opens the state, data can be written in an older format
-- the format must be valid before and after each database transaction or API call, because an upgrade can be cancelled at any time
+- the format must be valid before and after each database transaction or API call, because an
+  upgrade can be cancelled at any time
   - multi-column family changes should made in database transactions
-  - if you are building new column family, disable state queries, then enable them once it's done
+  - if you are building new column family:
+    - disable state queries, then enable them once it's done, or
+    - do the upgrade in an order that produces correct results
+      (for example, some data is valid from genesis forward, and some from the tip backward)
   - if each database API call produces a valid format, transactions aren't needed
 
-If there is an upgrade failure, it can panic and tell the user to delete their cached state and re-launch Zebra.
+If there is an upgrade failure, panic and tell the user to delete their cached state and re-launch
+Zebra.
 
-### Implementation Steps
+#### Performance Constraints
+[performance]: #performance
 
-- [ ] update the [database format](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#current) in the Zebra docs
-- [ ] increment the state minor version
-- [ ] write the new format in the block write task
-- [ ] update older formats in the format upgrade task
-- [ ] test that the new format works when creating a new state, and updating an older state
+Some column family access patterns can lead to very poor performance.
 
-See the [upgrade design docs](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/state-db-upgrades.md#design) for more details.
+Known performance issues include:
+- using an iterator on a column family which also deletes keys
+- creating large numbers of iterators
+- holding an iterator for a long time
 
-These steps can be copied into tickets.
+See the performance notes and bug reports in:
+- https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound
+- https://tracker.ceph.com/issues/55324
+- https://jira.mariadb.org/browse/MDEV-19670
+
+But we need to use iterators for some operations, so our alternatives are (in preferred order):
+1. Minimise the number of keys we delete, and how often we delete them
+2. Avoid using iterators on column families where we delete keys
+3. If we must use iterators on those column families, set read bounds to minimise the amount of deleted data that is read
+
+Currently only UTXOs require key deletion, and only `utxo_loc_by_transparent_addr_loc` requires
+deletion and iterators.
+
+### Required Tests
+[testing]: #testing
+
+State upgrades are a high-risk change. They permanently modify the state format on production Zebra
+instances. Format issues are tricky to diagnose, and require extensive testing and a new release to
+fix. Deleting and rebuilding an entire column family can also be costly, taking minutes or hours the
+first time a cached state is upgraded to a new Zebra release.
+
+Some format bugs can't be fixed, and require an entire rebuild of the state. For example, deleting
+or corrupting transactions or block headers.
+
+So testing format upgrades is extremely important. Every state format upgrade should test:
+- new format serializations
+- new calculations or data processing
+- the upgrade produces a valid format
+- a full sync produces a valid format
+
+Together, the tests should cover every code path. For example, the subtrees needed mid-block,
+end-of-block, sapling, and orchard tests. They mainly used the validity checks for coverage.
+
+Each test should be followed by a restart, a sync of 200+ blocks, and another restart. This
+simulates typical user behaviour.
+
+And ideally:
+- An upgrade from the earliest supported Zebra version
+  (the CI sync-past-checkpoint tests do this on every PR)
+
+#### Manually Triggering a Format Upgrade
+[manual-upgrade]: #manual-upgrade
+
+Zebra stores the current state minor and patch versions in a `version` file in the database
+directory. This path varies based on the OS, major state version, network, and config.
+
+For example, the default mainnet state version on Linux is at:
+`~/.cache/zebra/state/v25/mainnet/version`
+
+To upgrade a cached Zebra state from `v25.0.0` to the latest disk format, delete the version file.
+To upgrade from a specific version `v25.x.y`, edit the file so it contains `x.y`.
+
+Editing the file and running Zebra will trigger a re-upgrade over an existing state.
+Re-upgrades can hide format bugs. For example, if the old code was correct, and the
+new code skips blocks, the validity checks won't find that bug.
+
+So it is better to test with a full sync, and an older cached state.
 
 ## Current State Database Format
 [current]: #current
@@ -87,7 +197,7 @@ We use the following rocksdb column families:
 | *Sprout*                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
-| `sprout_note_commitment_tree`      | `block::Height`        | `sprout::NoteCommitmentTree`  | Delete  |
+| `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
 | *Sapling*                          |                        |                               |         |
 | `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
@@ -99,11 +209,16 @@ We use the following rocksdb column families:
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Chain*                            |                        |                               |         |
-| `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
+| `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
-Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
-Other structures are encoded using `IntoDisk`/`FromDisk`.
+### Data Formats
+[rocksdb-data-format]: #rocksdb-data-format
+
+We use big-endian encoding for keys, to allow database index prefix searches.
+
+Most Zcash protocol structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
+Other structures are encoded using custom `IntoDisk`/`FromDisk` implementations.
 
 Block and Transaction Data:
 - `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
@@ -123,16 +238,21 @@ Block and Transaction Data:
 - `NoteCommitmentSubtreeIndex`: 16 bits, big-endian, unsigned
 - `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
 
-We use big-endian encoding for keys, to allow database index prefix searches.
-
 Amounts:
 - `Amount`: 64 bits, little-endian, signed
 - `ValueBalance`: `[Amount; 4]`
 
-Derived Formats:
+Derived Formats (legacy):
 - `*::NoteCommitmentTree`: `bincode` using `serde`
-- `NonEmptyHistoryTree`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
+  - stored note commitment trees always have cached roots
+- `NonEmptyHistoryTree`: `bincode` using `serde`, using our copy of an old `zcash_history` `serde`
+  implementation
 
+`bincode` is a risky format to use, because it depends on the exact order and type of struct fields.
+Do not use it for new column families.
+
+#### Address Format
+[rocksdb-address-format]: #rocksdb-address-format
 
 The following figure helps visualizing the address index, which is the most complicated part.
 Numbers in brackets are array sizes; bold arrows are compositions (i.e. `TransactionLocation` is the
@@ -177,6 +297,7 @@ Each column family handles updates differently, based on its specific consensus 
   - Each key-value entry is created once.
   - Keys can be deleted, but values are never updated.
   - Code called by ReadStateService must ignore deleted keys, or use a read lock.
+  - We avoid deleting keys, and avoid using iterators on `Delete` column families, for performance.
   - TODO: should we prevent re-inserts of keys that have been deleted?
 - Update:
   - Each key-value entry is created once.
@@ -330,8 +451,6 @@ So they should not be used for consensus-critical checks.
   the Merkle tree nodes as required to insert new items.
   For each block committed, the old tree is deleted and a new one is inserted
   by its new height.
-  **TODO:** store the sprout note commitment tree by `()`,
-  to avoid ReadStateService concurrent write issues.
 
 - The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
   state for every height, for the specific pool. Each tree is stored
@@ -345,7 +464,6 @@ So they should not be used for consensus-critical checks.
   state. There is always a single entry for it. The tree is stored as the set of "peaks"
   of the "Merkle mountain range" tree structure, which is what is required to
   insert new items.
-  **TODO:** store the history tree by `()`, to avoid ReadStateService concurrent write issues.
 
 - Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
   tree of a certain block. We only use the keys since we just need the set of anchors,

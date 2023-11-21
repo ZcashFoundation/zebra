@@ -16,7 +16,7 @@ use std::{
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::parameters::Network::{self, *};
 use zebra_network::CacheDir;
 use zebra_test::{
     args,
@@ -35,7 +35,7 @@ use crate::common::{
 ///
 /// Previously, this value was 3 seconds, which caused rare
 /// metrics or tracing test failures in Windows CI.
-pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
+pub const LAUNCH_DELAY: Duration = Duration::from_secs(20);
 
 /// After we launch `zebrad`, wait this long in extended tests.
 /// See [`LAUNCH_DELAY`] for details.
@@ -52,7 +52,7 @@ pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 ///
 /// We use a longer time to make sure the first node has launched before the second starts,
 /// even if CI is under load.
-pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
+pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(20);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
@@ -235,11 +235,9 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     }
 
     // Get the zebrad config
-    let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection, None)
+    let config = test_type
+        .zebrad_config(test_name, use_internet_connection, None, network)
         .expect("already checked config")?;
-
-    config.network.network = network;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
@@ -311,11 +309,14 @@ where
     }
 
     // Get the zebrad config
-    let mut config = test_type
-        .zebrad_config(test_name, use_internet_connection, replace_cache_dir)
+    let config = test_type
+        .zebrad_config(
+            test_name,
+            use_internet_connection,
+            replace_cache_dir,
+            network,
+        )
         .expect("already checked config")?;
-
-    config.network.network = network;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
@@ -350,8 +351,10 @@ pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
     }
 
     // Check if we have any necessary cached states for the zebrad config.
-    // The cache_dir value doesn't matter here.
-    test_type.zebrad_config(test_name, true, None).is_some()
+    // The cache_dir and network values don't matter here.
+    test_type
+        .zebrad_config(test_name, true, None, Mainnet)
+        .is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

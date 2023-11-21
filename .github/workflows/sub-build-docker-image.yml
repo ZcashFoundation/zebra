@@ -1,0 +1,190 @@
+name: Build docker image
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+      dockerfile_path:
+        required: true
+        type: string
+      dockerfile_target:
+        required: true
+        type: string
+      short_sha:
+        required: false
+        type: string
+      rust_backtrace:
+        required: false
+        type: string
+      rust_lib_backtrace:
+        required: false
+        type: string
+      # defaults to: vars.RUST_LOG
+      rust_log:
+        required: false
+        type: string
+      # defaults to: vars.RUST_PROD_FEATURES
+      features:
+        required: false
+        type: string
+      # defaults to: vars.RUST_TEST_FEATURES (and entrypoint.sh adds vars.RUST_PROD_FEATURES)
+      test_features:
+        required: false
+        type: string
+      latest_tag:
+        required: false
+        type: boolean
+        default: false
+      tag_suffix:
+        required: false
+        type: string
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
+
+    outputs:
+      image_digest:
+        description: 'The image digest to be used on a caller workflow'
+        value: ${{ jobs.build.outputs.image_digest }}
+
+
+env:
+  FEATURES: ${{ inputs.features || vars.RUST_PROD_FEATURES }}
+  TEST_FEATURES: ${{ inputs.test_features || vars.RUST_TEST_FEATURES }}
+  RUST_LOG: ${{ inputs.rust_log || vars.RUST_LOG }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+
+jobs:
+  build:
+    name: Build images
+    timeout-minutes: 210
+    runs-on: ubuntu-latest-xl
+    outputs:
+      image_digest: ${{ steps.docker_build.outputs.digest }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+      - uses: r7kamura/rust-problem-matchers@v1.4.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Automatic tag management and OCI Image Format Specification for labels
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.0.0
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
+            zfnd/${{ inputs.image_name }},enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+          # appends inputs.tag_suffix to image tags/names
+          flavor: |
+            suffix=${{ inputs.tag_suffix }}
+            latest=${{ inputs.latest_tag }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            # These DockerHub release tags support the following use cases:
+            # - `latest`: always use the latest Zebra release when you pull or update
+            # - `1`: use the latest Zebra release, but require manual intervention for the next network upgrade
+            # - `1.x`: update to bug fix releases, but don't add any new features or incompatibilities
+            # - `v1.x.y` or `1.x.y`: always use the exact version, don't automatically upgrade
+            # - `sha-zzzzzz`: always use the exact commit (the same as `1.x.y`, but also used in CI and production image tests)
+            #
+            # Stopping publishing some tags is a silently breaking change:
+            # - `1`: doesn't get expected new consensus-compatible releases or bug fixes
+            # - `1.x`: doesn't get expected bug fixes
+            #
+            # `semver` adds a "latest" tag if `inputs.latest_tag` is `true`.
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=tag
+            # DockerHub release and CI tags.
+            # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
+            type=sha
+            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs. 
+            # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
+            type=ref,event=pr
+            type=ref,event=branch
+            type=edge,enable={{is_default_branch}}
+            type=schedule
+
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
+          token_format: 'access_token'
+          # Some builds might take over an hour, and Google's default lifetime duration for
+          # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
+          # as some builds take over an hour.
+          access_token_lifetime: 10800s
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v3.0.0
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Login to DockerHub
+        # We only publish images to DockerHub if a release is not a pre-release
+        # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
+        if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
+        uses: docker/login-action@v3.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build and push image to Google Artifact Registry, and possibly DockerHub
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@v5.0.0
+        with:
+          target: ${{ inputs.dockerfile_target }}
+          context: .
+          file: ${{ inputs.dockerfile_path }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_LOG=${{ env.RUST_LOG }}
+            FEATURES=${{ env.FEATURES }}
+            TEST_FEATURES=${{ env.TEST_FEATURES }}
+          push: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
+          # To improve build speeds, for each branch we push an additional image to the registry,
+          # to be used as the caching layer, using the `max` caching mode.
+          #
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache.
+          # If there's no hit, we continue with a `main` branch cache, which helps us avoid
+          # rebuilding cargo-chef, most dependencies, and possibly some Zebra crates.
+          #
+          # The caches are tried in top-down order, the first available cache is used:
+          # https://github.com/moby/moby/pull/26839#issuecomment-277383550
+          cache-from: |
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:main-cache
+          cache-to: |
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ inputs.image_name }}${{ inputs.tag_suffix }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

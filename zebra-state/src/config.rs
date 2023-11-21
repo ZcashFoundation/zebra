@@ -4,6 +4,7 @@ use std::{
     fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
     io::ErrorKind,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use semver::Version;
@@ -83,11 +84,6 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
-    /// Commit blocks to the finalized state up to this height, then exit Zebra.
-    ///
-    /// Set to `None` by default: Zebra continues syncing indefinitely.
-    pub debug_stop_at_height: Option<u32>,
-
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -95,6 +91,21 @@ pub struct Config {
     /// deleted.
     pub delete_old_database: bool,
 
+    // Debug configs
+    //
+    /// Commit blocks to the finalized state up to this height, then exit Zebra.
+    ///
+    /// Set to `None` by default: Zebra continues syncing indefinitely.
+    pub debug_stop_at_height: Option<u32>,
+
+    /// While Zebra is running, check state validity this often.
+    ///
+    /// Set to `None` by default: Zebra only checks state format validity on startup and shutdown.
+    #[serde(with = "humantime_serde")]
+    pub debug_validity_check_interval: Option<Duration>,
+
+    // Elasticsearch configs
+    //
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database url.
     pub elasticsearch_url: String,
@@ -162,8 +173,9 @@ impl Default for Config {
         Self {
             cache_dir,
             ephemeral: false,
-            debug_stop_at_height: None,
             delete_old_database: true,
+            debug_stop_at_height: None,
+            debug_validity_check_interval: None,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_url: "https://localhost:9200".to_string(),
             #[cfg(feature = "elasticsearch")]
@@ -323,7 +335,18 @@ pub fn database_format_version_on_disk(
     network: Network,
 ) -> Result<Option<Version>, BoxError> {
     let version_path = config.version_file_path(network);
+    let db_path = config.db_path(network);
 
+    database_format_version_at_path(&version_path, &db_path)
+}
+
+/// Returns the full semantic version of the on-disk database at `version_path`.
+///
+/// See [`database_format_version_on_disk()`] for details.
+pub(crate) fn database_format_version_at_path(
+    version_path: &Path,
+    db_path: &Path,
+) -> Result<Option<Version>, BoxError> {
     let disk_version_file = match fs::read_to_string(version_path) {
         Ok(version) => Some(version),
         Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -346,8 +369,6 @@ pub fn database_format_version_on_disk(
         )));
     }
 
-    let db_path = config.db_path(network);
-
     // There's no version file on disk, so we need to guess the version
     // based on the database content
     match fs::metadata(db_path) {
@@ -364,44 +385,52 @@ pub fn database_format_version_on_disk(
     }
 }
 
-/// Writes `changed_version` to the on-disk database after the format is changed.
-/// (Or a new database is created.)
-///
-/// # Correctness
-///
-/// This should only be called:
-/// - after each format upgrade is complete,
-/// - when creating a new database, or
-/// - when an older Zebra version opens a newer database.
-///
-/// # Concurrency
-///
-/// This must only be called while RocksDB has an open database for `config`.
-/// Otherwise, multiple Zebra processes could write the version at the same time,
-/// corrupting the file.
-///
-/// # Panics
-///
-/// If the major versions do not match. (The format is incompatible.)
-pub fn write_database_format_version_to_disk(
-    changed_version: &Version,
-    config: &Config,
-    network: Network,
-) -> Result<(), BoxError> {
-    let version_path = config.version_file_path(network);
+// Hide this destructive method from the public API, except in tests.
+pub(crate) use hidden::write_database_format_version_to_disk;
 
-    // The major version is already in the directory path.
-    assert_eq!(
-        changed_version.major, DATABASE_FORMAT_VERSION,
-        "tried to do in-place database format change to an incompatible version"
-    );
+pub(crate) mod hidden {
 
-    let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+    use super::*;
 
-    // # Concurrency
-    //
-    // The caller handles locking for this file write.
-    fs::write(version_path, version.as_bytes())?;
+    /// Writes `changed_version` to the on-disk database after the format is changed.
+    /// (Or a new database is created.)
+    ///
+    /// # Correctness
+    ///
+    /// This should only be called:
+    /// - after each format upgrade is complete,
+    /// - when creating a new database, or
+    /// - when an older Zebra version opens a newer database.
+    ///
+    /// # Concurrency
+    ///
+    /// This must only be called while RocksDB has an open database for `config`.
+    /// Otherwise, multiple Zebra processes could write the version at the same time,
+    /// corrupting the file.
+    ///
+    /// # Panics
+    ///
+    /// If the major versions do not match. (The format is incompatible.)
+    pub fn write_database_format_version_to_disk(
+        changed_version: &Version,
+        config: &Config,
+        network: Network,
+    ) -> Result<(), BoxError> {
+        let version_path = config.version_file_path(network);
 
-    Ok(())
+        // The major version is already in the directory path.
+        assert_eq!(
+            changed_version.major, DATABASE_FORMAT_VERSION,
+            "tried to do in-place database format change to an incompatible version"
+        );
+
+        let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+
+        // # Concurrency
+        //
+        // The caller handles locking for this file write.
+        fs::write(version_path, version.as_bytes())?;
+
+        Ok(())
+    }
 }

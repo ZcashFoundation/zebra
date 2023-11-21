@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 # Sends a `zcash-cli` command to a Zebra and zcashd instance,
 # and compares the results.
@@ -22,6 +22,11 @@ JQ="${JQ:-jq}"
 # - Use `-rpccookiefile=your/cookie/file` for a cookie file.
 # - Use `-rpcpassword=your-password` for a password.
 ZCASHD_EXTRA_ARGS="${ZCASHD_EXTRA_ARGS:-}"
+# We show this many lines of data, removing excess lines from the middle or end of the output.
+OUTPUT_DATA_LINE_LIMIT="${OUTPUT_DATA_LINE_LIMIT:-40}"
+# When checking different mempools, we show this many different transactions.
+MEMPOOL_TX_LIMIT="${MEMPOOL_TX_LIMIT:-5}"
+
 
 if [ $# -lt 2 ]; then
     usage
@@ -31,31 +36,42 @@ fi
 ZEBRAD_RPC_PORT=$1
 shift
 
+echo "Using '$($ZCASH_CLI -version | head -1)' via command '$ZCASH_CLI'."
+echo "Using bash shell '$BASH_VERSION' launched from '$SHELL'."
+
+echo
+
 # Use an easily identified temp directory name,
 # but fall back to the default temp name if `mktemp` does not understand `--suffix`.
 ZCASH_RPC_TMP_DIR=$(mktemp --suffix=.rpc-diff -d 2>/dev/null || mktemp -d)
 
-ZEBRAD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/first-check-getinfo.json"
-ZCASHD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/second-check-getinfo.json"
+ZEBRAD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/first-node-check-getinfo.json"
+ZCASHD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/second-node-check-getinfo.json"
 
 echo "Checking first node release info..."
 $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getinfo > "$ZEBRAD_RELEASE_INFO"
 
-ZEBRAD=$(cat "$ZEBRAD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
+ZEBRAD_NAME=$(cat "$ZEBRAD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
              tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
+ZEBRAD_VERSION=$(cat "$ZEBRAD_RELEASE_INFO" | grep '"build"' | cut -d: -f2 | cut -d'"' -f2 | \
+                     tr 'A-Z' 'a-z')
+ZEBRAD="$ZEBRAD_NAME $ZEBRAD_VERSION"
 
 echo "Checking second node release info..."
 $ZCASH_CLI $ZCASHD_EXTRA_ARGS getinfo > "$ZCASHD_RELEASE_INFO"
 
-ZCASHD=$(cat "$ZCASHD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
+ZCASHD_NAME=$(cat "$ZCASHD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
              tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
+ZCASHD_VERSION=$(cat "$ZCASHD_RELEASE_INFO" | grep '"build"' | cut -d: -f2 | cut -d'"' -f2 | \
+             tr 'A-Z' 'a-z')
+ZCASHD="$ZCASHD_NAME $ZCASHD_VERSION"
 
-echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
+echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD (zcash.conf port)."
 
 echo
 
-ZEBRAD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZEBRAD-check-getblockchaininfo.json"
-ZCASHD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZCASHD-check-getblockchaininfo.json"
+ZEBRAD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-check-getblockchaininfo.json"
+ZCASHD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-check-getblockchaininfo.json"
 
 echo "Checking $ZEBRAD network and tip height..."
 $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getblockchaininfo > "$ZEBRAD_BLOCKCHAIN_INFO"
@@ -85,8 +101,8 @@ if [ "$ZEBRAD_HEIGHT" -ne "$ZCASHD_HEIGHT" ]; then
     echo
 fi
 
-ZEBRAD_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
-ZCASHD_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
+ZEBRAD_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
+ZCASHD_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
 
 echo "Request:"
 echo "$@"
@@ -102,17 +118,27 @@ echo
 
 echo
 
-echo "Response diff between $ZEBRAD and $ZCASHD:"
+echo "Response diff between $ZEBRAD and $ZCASHD (limited to ${OUTPUT_DATA_LINE_LIMIT} lines):"
 
-$DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" \
-    && ( \
-        echo "RPC responses were identical"; \
-        echo ; \
-        echo "$ZEBRAD_RESPONSE:"; \
-        cat "$ZEBRAD_RESPONSE"; \
-        )
+RESPONSE_DIFF="$ZCASH_RPC_TMP_DIR/diff-$1.json"
 
+$DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" > "$RESPONSE_DIFF"
 EXIT_STATUS=$?
+cat "$RESPONSE_DIFF" | head -$OUTPUT_DATA_LINE_LIMIT
+
+if [[ "$EXIT_STATUS" -eq "0" ]]; then
+    echo "RPC responses were identical"
+    echo
+    echo "$ZEBRAD_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"
+    export ZEBRAD_RESPONSE=$ZEBRAD_RESPONSE
+    if [[ $(cat "$ZEBRAD_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then
+        cat "$ZEBRAD_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+        echo "..."
+        cat "$ZEBRAD_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+    else
+        cat "$ZEBRAD_RESPONSE"
+    fi
+fi
 
 # Consistency checks between RPCs
 #
@@ -130,8 +156,8 @@ else
     exit $EXIT_STATUS
 fi
 
-ZEBRAD_CHECK_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
-ZCASHD_CHECK_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
+ZEBRAD_CHECK_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
+ZCASHD_CHECK_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
 
 echo
 
@@ -147,33 +173,43 @@ $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" > "$ZCASHD_CHECK_RESPONSE"
 
 echo
 
-echo "$1 diff between $ZEBRAD and $ZCASHD:"
+echo "$1 diff between $ZEBRAD and $ZCASHD (limited to ${OUTPUT_DATA_LINE_LIMIT} lines):"
 
-$DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" \
-    && ( \
-        echo "RPC check responses were identical"; \
-        echo ; \
-        echo "$ZEBRAD_CHECK_RESPONSE:"; \
-        cat "$ZEBRAD_CHECK_RESPONSE"; \
-        )
+CHECK_DIFF="$ZCASH_RPC_TMP_DIR/diff-$1.json"
 
+$DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" > "$CHECK_DIFF"
 CHECK_EXIT_STATUS=$?
+cat "$CHECK_DIFF" | head -$OUTPUT_DATA_LINE_LIMIT
+
+if [[ "$CHECK_EXIT_STATUS" -eq "0" ]]; then
+    echo "RPC check responses were identical"
+    echo
+    echo "$ZEBRAD_CHECK_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"
+    export ZEBRAD_CHECK_RESPONSE=$ZEBRAD_CHECK_RESPONSE
+    if [[ $(cat "$ZEBRAD_CHECK_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then
+        cat "$ZEBRAD_CHECK_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+        echo "..."
+        cat "$ZEBRAD_CHECK_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true
+    else
+        cat "$ZEBRAD_CHECK_RESPONSE"
+    fi
+fi
 
 if [ "$1" == "getaddressbalance" ]; then
     echo
 
     echo "Extracting getaddressbalance.balance..."
 
-    ZEBRAD_NUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressbalance-num.txt"
-    ZCASHD_NUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressbalance-num.txt"
+    ZEBRAD_NUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressbalance-num.txt"
+    ZCASHD_NUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressbalance-num.txt"
 
     cat "$ZEBRAD_CHECK_RESPONSE" | $JQ '.balance' > "$ZEBRAD_NUM_RESPONSE"
     cat "$ZCASHD_CHECK_RESPONSE" | $JQ '.balance' > "$ZCASHD_NUM_RESPONSE"
 
     echo "Summing getaddressutxos.satoshis..."
 
-    ZEBRAD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressutxos-sum.txt"
-    ZCASHD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressutxos-sum.txt"
+    ZEBRAD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressutxos-sum.txt"
+    ZCASHD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressutxos-sum.txt"
 
     cat "$ZEBRAD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZEBRAD_SUM_RESPONSE"
     cat "$ZCASHD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZCASHD_SUM_RESPONSE"
@@ -188,8 +224,15 @@ if [ "$1" == "getaddressbalance" ]; then
         && ( \
              echo "RPC balances were identical"; \
              echo ; \
-             echo "$ZEBRAD_NUM_RESPONSE:"; \
-             cat "$ZEBRAD_NUM_RESPONSE"; \
+             echo "$ZEBRAD_NUM_RESPONSE, limited to $OUTPUT_DATA_LINE_LIMIT lines:"; \
+             export ZEBRAD_NUM_RESPONSE=$ZEBRAD_NUM_RESPONSE
+             if [[ $(cat "$ZEBRAD_NUM_RESPONSE" | wc -l) -gt $OUTPUT_DATA_LINE_LIMIT ]]; then \
+                 cat "$ZEBRAD_NUM_RESPONSE" | head -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+                 echo "..."; \
+                 cat "$ZEBRAD_NUM_RESPONSE" | tail -$((OUTPUT_DATA_LINE_LIMIT / 2)) || true; \
+             else \
+                 cat "$ZEBRAD_NUM_RESPONSE"; \
+             fi; \
         )
 
     COMPARE_EXIT_STATUS=$?
@@ -204,46 +247,46 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     set TRANSACTION_HEX_FILE
     set TRANSACTION_DECODED
 
-    ZEBRAD_TRANSACTION_IDS=$(cat "$ZEBRAD_RESPONSE" | $JQ -r 'join(" ")')
-    ZCASHD_TRANSACTION_IDS=$(cat "$ZCASHD_RESPONSE" | $JQ -r 'join(" ")')
+    ZEBRAD_TRANSACTION_IDS=$(cat "$ZEBRAD_RESPONSE" | $JQ -r 'join("\n")' | head -$MEMPOOL_TX_LIMIT)
+    ZCASHD_TRANSACTION_IDS=$(cat "$ZCASHD_RESPONSE" | $JQ -r 'join("\n")' | head -$MEMPOOL_TX_LIMIT)
 
     echo
-    echo "# Dumping transactions from zebrad mempool"
+    echo "# Dumping transactions from zebrad mempool (limited to ${MEMPOOL_TX_LIMIT})"
     echo
 
     for TRANSACTION_ID in $ZEBRAD_TRANSACTION_IDS; do
-        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$TRANSACTION_ID.json"
+        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$TRANSACTION_ID.json"
 
         $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
-        echo "## Displaying transaction $TRANSACTION_ID from zebrad"
+        echo "## Displaying transaction $TRANSACTION_ID from zebrad (limited to ${OUTPUT_DATA_LINE_LIMIT} lines)"
         echo
 
         # read the proposal data from a file, to avoid command-line length limits
         TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
             $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
-        echo $TRANSACTION_DECODED | $JQ
+        echo $TRANSACTION_DECODED | $JQ | head -$OUTPUT_DATA_LINE_LIMIT
         echo
     done
 
     echo
-    echo "# Dumping transactions from zcashd mempool"
+    echo "# Dumping transactions from zcashd mempool  (limited to ${MEMPOOL_TX_LIMIT})"
     echo
 
     for TRANSACTION_ID in $ZCASHD_TRANSACTION_IDS; do
-        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZCASHD-$ZCASHD_NET-$ZCASHD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
+        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
 
         $ZCASH_CLI $ZCASHD_EXTRA_ARGS getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
-        echo "## Displaying transaction $TRANSACTION_ID from zcashd"
+        echo "## Displaying transaction $TRANSACTION_ID from zcashd (limited to ${OUTPUT_DATA_LINE_LIMIT} lines)"
         echo
 
         # read the proposal data from a file, to avoid command-line length limits
         TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
             $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
-        echo $TRANSACTION_DECODED | $JQ
+        echo $TRANSACTION_DECODED | $JQ | head -$OUTPUT_DATA_LINE_LIMIT
         echo
     done
 

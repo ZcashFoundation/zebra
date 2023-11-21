@@ -8,6 +8,7 @@ use std::{
 
 use indexmap::IndexSet;
 
+use zebra_chain::parameters::Network;
 use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
@@ -176,22 +177,19 @@ impl TestType {
         test_name: Str,
         use_internet_connection: bool,
         replace_cache_dir: Option<&Path>,
+        network: Network,
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
-            random_known_rpc_port_config(true)
+            random_known_rpc_port_config(true, network)
         } else {
-            default_test_config()
+            default_test_config(network)
         };
 
         let mut config = match config {
             Ok(config) => config,
             Err(error) => return Some(Err(error)),
         };
-
-        // We want to preload the consensus parameters,
-        // except when we're doing the quick empty state test
-        config.consensus.debug_skip_parameter_preload = !self.needs_zebra_cached_state();
 
         // We want to run multi-threaded RPCs, if we're using them
         if self.launches_lightwalletd() {
@@ -208,12 +206,6 @@ impl TestType {
             // Activate the mempool immediately by default
             config.mempool.debug_enable_at_height = Some(0);
         }
-
-        // Add a fake miner address for mining RPCs
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        let _ = config.mining.miner_address.insert(
-            zebra_chain::transparent::Address::from_script_hash(config.network.network, [0x7e; 20]),
-        );
 
         // If we have a cached state, or we don't want to be ephemeral, update the config to use it
         if replace_cache_dir.is_some() || self.needs_zebra_cached_state() {

@@ -1,6 +1,7 @@
 //! Block height.
 
 use std::ops::{Add, Sub};
+use thiserror::Error;
 
 use crate::{serialization::SerializationError, BoxError};
 
@@ -23,6 +24,14 @@ pub mod json_conversion;
 /// `ZcashSerialize` or `ZcashDeserialize` for `Height`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Height(pub u32);
+
+#[derive(Error, Debug)]
+pub enum HeightError {
+    #[error("The resulting height would overflow Height::MAX.")]
+    Overflow,
+    #[error("The resulting height would underflow Height::MIN.")]
+    Underflow,
+}
 
 impl std::str::FromStr for Height {
     type Err = SerializationError;
@@ -71,9 +80,8 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its maximum.
-    // TODO Return an error instead of panicking #7263.
-    pub fn next(self) -> Self {
-        (self + 1).expect("Height should not be at its maximum.")
+    pub fn next(self) -> Result<Self, HeightError> {
+        (self + 1).ok_or(HeightError::Overflow)
     }
 
     /// Returns the previous [`Height`].
@@ -81,14 +89,18 @@ impl Height {
     /// # Panics
     ///
     /// - If the current height is at its minimum.
-    // TODO Return an error instead of panicking #7263.
-    pub fn previous(self) -> Self {
-        (self - 1).expect("Height should not be at its minimum.")
+    pub fn previous(self) -> Result<Self, HeightError> {
+        (self - 1).ok_or(HeightError::Underflow)
     }
 
     /// Returns `true` if the [`Height`] is at its minimum.
     pub fn is_min(self) -> bool {
         self == Self::MIN
+    }
+
+    /// Returns the value as a `usize`.
+    pub fn as_usize(self) -> usize {
+        self.0.try_into().expect("fits in usize")
     }
 }
 
@@ -157,6 +169,14 @@ impl TryIntoHeight for String {
 
     fn try_into_height(&self) -> Result<Height, Self::Error> {
         self.as_str().try_into_height()
+    }
+}
+
+impl TryIntoHeight for i32 {
+    type Error = BoxError;
+
+    fn try_into_height(&self) -> Result<Height, Self::Error> {
+        u32::try_from(*self)?.try_into().map_err(Into::into)
     }
 }
 

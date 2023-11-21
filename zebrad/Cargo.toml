@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "1.2.0"
+version = "1.4.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -52,14 +52,14 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info"]
+default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Experimental mining RPC support
+# Mining RPC support
 getblocktemplate-rpcs = [
     "zebra-rpc/getblocktemplate-rpcs",
     "zebra-consensus/getblocktemplate-rpcs",
@@ -68,12 +68,13 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+# Experimental elasticsearch indexing
 elasticsearch = [
     "zebra-state/elasticsearch",
 ]
 
+# Tracing and monitoring
 sentry = ["dep:sentry"]
-flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper"]
 
@@ -105,6 +106,8 @@ max_level_info = ["tracing/max_level_info", "log/max_level_info"]
 max_level_debug = ["tracing/max_level_debug", "log/max_level_debug"]
 
 # Testing features that activate extra dependencies
+flamegraph = ["tracing-flame", "inferno"]
+
 proptest-impl = [
     "proptest",
     "proptest-derive",
@@ -145,29 +148,30 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.29" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.29" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.29" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.29" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.29" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.31" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.31" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.31" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.31" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.29", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.31", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.4.0", features = ["cargo"] }
-chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.4.7", features = ["cargo"] }
+chrono = { version = "0.4.31", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "2.0.0"
+indexmap = "2.0.1"
 lazy_static = "1.4.0"
-semver = "1.0.18"
-serde = { version = "1.0.188", features = ["serde_derive"] }
-toml = "0.7.6"
+semver = "1.0.20"
+serde = { version = "1.0.190", features = ["serde_derive"] }
+toml = "0.8.3"
 
-futures = "0.3.28"
+futures = "0.3.29"
 rayon = "1.7.0"
-tokio = { version = "1.32.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.33.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio-stream = { version = "0.1.14", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.3"
 
@@ -176,13 +180,13 @@ color-eyre = { version = "0.6.2", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-appender = "0.2.2"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
-tracing = "0.1.37"
+tracing = "0.1.39"
 
 metrics = "0.21.1"
 
@@ -193,11 +197,11 @@ num-integer = "0.1.45"
 rand = "0.8.5"
 
 # prod feature sentry
-sentry = { version = "0.31.6", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { version = "0.31.7", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
-inferno = { version = "0.11.16", default-features = false, optional = true }
+inferno = { version = "0.11.17", default-features = false, optional = true }
 
 # prod feature journald
 tracing-journald = { version = "0.3.0", optional = true }
@@ -219,40 +223,42 @@ howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
 indicatif = { version = "0.17.6", optional = true }
 
 # test feature proptest-impl
-proptest = { version = "1.2.0", optional = true }
+proptest = { version = "1.3.1", optional = true }
 proptest-derive = { version = "0.4.0", optional = true }
 
 # test feature tokio-console
-console-subscriber = { version = "0.1.10", optional = true }
+console-subscriber = { version = "0.2.0", optional = true }
 
 [build-dependencies]
-vergen = { version = "8.2.4", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
+vergen = { version = "8.2.5", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { version = "0.9.2", optional = true }
+tonic-build = { version = "0.10.2", optional = true }
 
 [dev-dependencies]
 abscissa_core = { version = "0.7.0", features = ["testing"] }
 hex = "0.4.3"
+hex-literal = "0.4.1"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
-regex = "1.9.4"
+regex = "1.10.2"
+insta = { version = "1.33.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.105", features = ["preserve_order"] }
-tempfile = "3.8.0"
+serde_json = { version = "1.0.108", features = ["preserve_order"] }
+tempfile = "3.8.1"
 
 hyper = { version = "0.14.27", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.33.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.14"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.11.9"
-tonic = "0.9.2"
+prost = "0.12.1"
+tonic = "0.10.2"
 
-proptest = "1.2.0"
+proptest = "1.3.1"
 proptest-derive = "0.4.0"
 
 # enable span traces and track caller in tests

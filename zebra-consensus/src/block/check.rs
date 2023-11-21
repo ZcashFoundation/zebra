@@ -33,7 +33,7 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     let first = block
         .transactions
-        .get(0)
+        .first()
         .ok_or(BlockError::NoTransactions)?;
     // > The first transaction in a block MUST be a coinbase transaction,
     // > and subsequent transactions MUST NOT be coinbase transactions.
@@ -142,7 +142,7 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
-    let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
+    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     // Validate funding streams
     let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
@@ -211,7 +211,7 @@ pub fn miner_fees_are_valid(
     block_miner_fees: Amount<NonNegative>,
 ) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
-    let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
+    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
         .iter()

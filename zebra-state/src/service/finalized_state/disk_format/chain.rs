@@ -10,8 +10,12 @@ use std::collections::BTreeMap;
 use bincode::Options;
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::NonEmptyHistoryTree, parameters::Network,
-    primitives::zcash_history, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::Height,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
+    parameters::Network,
+    primitives::zcash_history,
+    value_balance::ValueBalance,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -76,5 +80,12 @@ impl FromDisk for NonEmptyHistoryTree {
             parts.current_height,
         )
         .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+// We don't write empty history trees to disk, so we know this one is non-empty.
+impl FromDisk for HistoryTree {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        NonEmptyHistoryTree::from_bytes(bytes).into()
     }
 }

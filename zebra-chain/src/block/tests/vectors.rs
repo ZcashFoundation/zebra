@@ -385,7 +385,7 @@ fn node_time_check(
 fn time_check_now() {
     let _init_guard = zebra_test::init();
 
-    // These checks are deteministic, because all the times are offset
+    // These checks are deterministic, because all the times are offset
     // from the current time.
     let now = Utc::now();
     let three_hours_in_the_past = now - Duration::hours(3);

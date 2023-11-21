@@ -21,4 +21,3 @@
 !zebra-*
 !zebrad
 !docker/entrypoint.sh
-!docker/runtime-entrypoint.sh

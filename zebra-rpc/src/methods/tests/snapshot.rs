@@ -5,16 +5,18 @@
 //! cargo insta test --review
 //! ```
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use insta::dynamic_redaction;
 
 use zebra_chain::{
     block::Block,
+    chain_tip::mock::MockChainTip,
     parameters::Network::{Mainnet, Testnet},
     serialization::ZcashDeserializeInto,
+    subtree::NoteCommitmentSubtreeData,
 };
-use zebra_state::MAX_ON_DISK_HEIGHT;
+use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -31,8 +33,12 @@ pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
 
-    test_rpc_response_data_for_network(Mainnet).await;
-    test_rpc_response_data_for_network(Testnet).await;
+    tokio::join!(
+        test_rpc_response_data_for_network(Mainnet),
+        test_rpc_response_data_for_network(Testnet),
+        test_mocked_rpc_response_data_for_network(Mainnet),
+        test_mocked_rpc_response_data_for_network(Testnet),
+    );
 }
 
 async fn test_rpc_response_data_for_network(network: Network) {
@@ -314,6 +320,84 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+}
+
+async fn test_mocked_rpc_response_data_for_network(network: Network) {
+    // Prepare the test harness.
+
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(network_string(network));
+
+    let (latest_chain_tip, _) = MockChainTip::new();
+    let mut state = MockService::build().for_unit_tests();
+    let mempool = MockService::build().for_unit_tests();
+
+    let (rpc, _) = RpcImpl::new(
+        "RPC test",
+        "/Zebra:RPC test/",
+        network,
+        false,
+        true,
+        Buffer::new(mempool, 1),
+        state.clone(),
+        latest_chain_tip,
+    );
+
+    // Test the response format from `z_getsubtreesbyindex` for Sapling.
+
+    // Mock the data for the response.
+    let mut subtrees = BTreeMap::new();
+    let subtree_root = sapling::tree::Node::default();
+
+    for i in 0..2u16 {
+        let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);
+        subtrees.insert(i.into(), subtree);
+    }
+
+    // Prepare the response.
+    let rsp = state
+        .expect_request_that(|req| matches!(req, ReadRequest::SaplingSubtrees { .. }))
+        .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
+
+    // Make the request.
+    let req = rpc.z_get_subtrees_by_index(String::from("sapling"), 0u16.into(), Some(2u16.into()));
+
+    // Get the response.
+    let (subtrees_rsp, ..) = tokio::join!(req, rsp);
+    let subtrees = subtrees_rsp.expect("The RPC response should contain a `GetSubtrees` struct.");
+
+    // Check the response.
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_get_subtrees_by_index_for_sapling"), subtrees)
+    });
+
+    // Test the response format from `z_getsubtreesbyindex` for Orchard.
+
+    // Mock the data for the response.
+    let mut subtrees = BTreeMap::new();
+    let subtree_root = orchard::tree::Node::default();
+
+    for i in 0..2u16 {
+        let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);
+        subtrees.insert(i.into(), subtree);
+    }
+
+    // Prepare the response.
+    let rsp = state
+        .expect_request_that(|req| matches!(req, ReadRequest::OrchardSubtrees { .. }))
+        .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
+
+    // Make the request.
+    let req = rpc.z_get_subtrees_by_index(String::from("orchard"), 0u16.into(), Some(2u16.into()));
+
+    // Get the response.
+    let (subtrees_rsp, ..) = tokio::join!(req, rsp);
+    let subtrees = subtrees_rsp.expect("The RPC response should contain a `GetSubtrees` struct.");
+
+    // Check the response.
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_get_subtrees_by_index_for_orchard"), subtrees)
+    });
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.

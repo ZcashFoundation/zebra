@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.29"
+version = "1.0.0-beta.31"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -56,16 +56,16 @@ tx-v6 = ["orchard_zsa"]
 
 # Cryptography
 bitvec = "1.0.1"
-bitflags = "2.4.0"
+bitflags = "2.4.1"
 bitflags-serde-legacy = "0.1.1"
-blake2b_simd = "1.0.1"
-blake2s_simd = "1.0.1"
-bridgetree = "0.3.0"
+blake2b_simd = "1.0.2"
+blake2s_simd = "1.0.2"
+bridgetree = "0.4.0"
 bs58 = { version = "0.5.0", features = ["check"] }
-byteorder = "1.4.3"
+byteorder = "1.5.0"
 equihash = "0.2.0"
 group = "0.13.0"
-incrementalmerkletree = "0.4.0"
+incrementalmerkletree = "0.5.0"
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.45"
@@ -80,55 +80,55 @@ x25519-dalek = { version = "2.0.0-rc.3", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
-orchard = "0.5.0"
+orchard = "0.6.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
 zcash_note_encryption = "0.4.0"
-zcash_primitives = { version = "0.12.0", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.13.0-rc.1", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.26", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.31", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
 displaydoc = "0.2.4"
 static_assertions = "1.1.0"
-thiserror = "1.0.47"
-tracing = "0.1.37"
+thiserror = "1.0.48"
+tracing = "0.1.39"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.188", features = ["serde_derive", "rc"] }
-serde_with = "3.3.0"
+serde = { version = "1.0.190", features = ["serde_derive", "rc"] }
+serde_with = "3.4.0"
 serde-big-array = "0.5.1"
 
 # Processing
-futures = "0.3.28"
+futures = "0.3.29"
 itertools = "0.11.0"
 rayon = "1.7.0"
 
 # ZF deps
-ed25519-zebra = "4.0.1"
+ed25519-zebra = "4.0.3"
 redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.105", optional = true }
+serde_json = { version = "1.0.108", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
-tokio = { version = "1.32.0", optional = true }
+tokio = { version = "1.33.0", optional = true }
 
 # Experimental feature getblocktemplate-rpcs
 zcash_address = { version = "0.3.0", optional = true }
 
 # Optional testing dependencies
-proptest = { version = "1.2.0", optional = true }
+proptest = { version = "1.3.1", optional = true }
 proptest-derive = { version = "0.4.0", optional = true }
 
 rand = { version = "0.8.5", optional = true }
 rand_chacha = { version = "0.3.1", optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.29", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.31", optional = true }
 
 # ZSA deps
 orchard_zsa = { package = "orchard", version = "0.5", git = "https://github.com/QED-it/orchard", branch = "zsa1", optional = true }
@@ -143,16 +143,16 @@ color-eyre = "0.6.2"
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
-tracing = "0.1.37"
+tracing = "0.1.39"
 
 # Make the optional testing dependencies required
-proptest = "1.2.0"
+proptest = "1.3.1"
 proptest-derive = "0.4.0"
 
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.32.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.33.0", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }
 

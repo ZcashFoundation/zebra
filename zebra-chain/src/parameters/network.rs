@@ -101,7 +101,7 @@ impl Network {
     pub fn mandatory_checkpoint_height(&self) -> Height {
         // Currently this is after the ZIP-212 grace period.
         //
-        // See the `ZIP_212_GRACE_PERIOD_DOCUMENTATION` for more information.
+        // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
         let canopy_activation = Canopy
             .activation_height(*self)

@@ -35,6 +35,7 @@
 //! purposes.
 
 use color_eyre::eyre::Result;
+use hex_literal::hex;
 
 use zebra_chain::{
     block::Block,
@@ -42,15 +43,21 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
+use zebra_state::database_format_version_in_code;
 
 use crate::common::{
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{
             connect_to_lightwalletd, Address, AddressList, BlockId, BlockRange, ChainSpec, Empty,
-            GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
+            GetAddressUtxosArg, GetSubtreeRootsArg, ShieldedProtocol,
+            TransparentAddressBlockFilter, TxFilter,
         },
     },
     test_type::TestType::UpdateCachedState,
@@ -95,12 +102,30 @@ pub async fn run() -> Result<()> {
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
+    // Store the state version message so we can wait for the upgrade later if needed.
+    let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
     tracing::info!(
         ?test_type,
         ?zebra_rpc_address,
         "launched zebrad, waiting for zebrad to open its RPC port..."
     );
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+
+    // Wait for the state to upgrade, if the upgrade is short.
+    //
+    // If incompletely upgraded states get written to the CI cache,
+    // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
+    //
+    // If this line hangs, move it before the RPC port check.
+    // (The RPC port is usually much faster than even a quick state upgrade.)
+    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            [format!("Opened RPC endpoint at {zebra_rpc_address}")],
+        )?;
+    }
 
     tracing::info!(
         ?zebra_rpc_address,
@@ -117,7 +142,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
@@ -127,6 +152,17 @@ pub async fn run() -> Result<()> {
         true,
         use_internet_connection,
     )?;
+
+    // Wait for the state to upgrade, if the upgrade is long.
+    // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
+    if DATABASE_FORMAT_UPGRADE_IS_LONG {
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            None,
+        )?;
+    }
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -333,7 +369,7 @@ pub async fn run() -> Result<()> {
     assert_eq!(treestate.time, 1540779438);
     // Check that the note commitment tree is correct.
     assert_eq!(
-        treestate.tree,
+        treestate.sapling_tree,
         *zebra_test::vectors::SAPLING_TREESTATE_MAINNET_419201_STRING
     );
 
@@ -376,6 +412,78 @@ pub async fn run() -> Result<()> {
         lightd_info.zcashd_subversion,
         zebrad::application::user_agent()
     );
+
+    // Call `z_getsubtreesbyindex` separately for...
+
+    // ... Sapling.
+    let mut subtrees = rpc_client
+        .get_subtree_roots(GetSubtreeRootsArg {
+            start_index: 0u32,
+            shielded_protocol: ShieldedProtocol::Sapling.into(),
+            max_entries: 2u32,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(subtree) = subtrees.message().await? {
+        match counter {
+            0 => {
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
+                );
+                assert_eq!(subtree.completing_block_height, 558822u64);
+            }
+            1 => {
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("03654c3eacbb9b93e122cf6d77b606eae29610f4f38a477985368197fd68e02d")
+                );
+                assert_eq!(subtree.completing_block_height, 670209u64);
+            }
+            _ => {
+                panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Sapling subtrees.")
+            }
+        }
+        counter += 1;
+    }
+    assert_eq!(counter, 2);
+
+    // ... Orchard.
+    let mut subtrees = rpc_client
+        .get_subtree_roots(GetSubtreeRootsArg {
+            start_index: 0u32,
+            shielded_protocol: ShieldedProtocol::Orchard.into(),
+            max_entries: 2u32,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(subtree) = subtrees.message().await? {
+        match counter {
+            0 => {
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+                );
+                assert_eq!(subtree.completing_block_height, 1707429u64);
+            }
+            1 => {
+                assert_eq!(
+                    subtree.root_hash,
+                    hex!("8c47d0ca43f323ac573ee57c90af4ced484682827248ca5f3eead95eb6415a14")
+                );
+                assert_eq!(subtree.completing_block_height, 1708132u64);
+            }
+            _ => {
+                panic!("The response from the `z_getsubtreesbyindex` RPC contains a wrong number of Orchard subtrees.")
+            }
+        }
+        counter += 1;
+    }
+    assert_eq!(counter, 2);
 
     Ok(())
 }

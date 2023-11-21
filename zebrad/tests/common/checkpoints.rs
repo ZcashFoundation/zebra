@@ -15,11 +15,12 @@ use tempfile::TempDir;
 
 use zebra_chain::{
     block::{Height, HeightDiff, TryIntoHeight},
-    parameters::Network,
+    parameters::Network::{self, *},
     transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_state::database_format_version_in_code;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
@@ -27,6 +28,7 @@ use zebra_test::{
 };
 
 use crate::common::{
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
     test_type::TestType::*,
@@ -77,6 +79,30 @@ pub async fn run(network: Network) -> Result<()> {
         return Ok(());
     };
 
+    // Wait for the upgrade if needed.
+    // Currently we only write an image for testnet, which is quick.
+    // (Mainnet would need to wait at the end of this function, if the upgrade is long.)
+    if network == Testnet {
+        let state_version_message = wait_for_state_version_message(&mut zebrad)?;
+
+        // Before we write a cached state image, wait for a database upgrade.
+        //
+        // It is ok if the logs are in the wrong order and the test sometimes fails,
+        // because testnet is unreliable anyway.
+        //
+        // TODO: this line will hang if the state upgrade is slower than the RPC server spawn.
+        // But that is unlikely, because both 25.1 and 25.2 are quick on testnet.
+        //
+        // TODO: combine this check with the CHECKPOINT_VERIFIER_REGEX and RPC endpoint checks.
+        // This is tricky because we need to get the last checkpoint log.
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            database_format_version_in_code(),
+            None,
+        )?;
+    }
+
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
 
     tracing::info!(
@@ -86,6 +112,7 @@ pub async fn run(network: Network) -> Result<()> {
     );
 
     let last_checkpoint = zebrad.expect_stdout_line_matches(CHECKPOINT_VERIFIER_REGEX)?;
+
     // TODO: do this with a regex?
     let (_prefix, last_checkpoint) = last_checkpoint
         .split_once("max_checkpoint_height")

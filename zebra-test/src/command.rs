@@ -1,6 +1,7 @@
 //! Launching test commands for Zebra integration and acceptance tests.
 
 use std::{
+    collections::HashSet,
     convert::Infallible as NoDir,
     fmt::{self, Debug, Write as _},
     io::{BufRead, BufReader, ErrorKind, Read, Write as _},
@@ -21,10 +22,11 @@ use tracing::instrument;
 
 #[macro_use]
 mod arguments;
+
 pub mod to_regex;
 
 pub use self::arguments::Arguments;
-use self::to_regex::{CollectRegexSet, ToRegex, ToRegexSet};
+use self::to_regex::{CollectRegexSet, RegexSetExt, ToRegexSet};
 
 /// A super-trait for [`Iterator`] + [`Debug`].
 pub trait IteratorDebug: Iterator + Debug {}
@@ -780,7 +782,7 @@ impl<T> TestChild<T> {
         self
     }
 
-    /// Checks each line of the child's stdout against `success_regex`,
+    /// Checks each line of the child's stdout against any regex in `success_regex`,
     /// and returns the first matching line. Prints all stdout lines.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
@@ -791,7 +793,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -814,7 +816,7 @@ impl<T> TestChild<T> {
         }
     }
 
-    /// Checks each line of the child's stderr against `success_regex`,
+    /// Checks each line of the child's stderr against any regex in `success_regex`,
     /// and returns the first matching line. Prints all stderr lines to stdout.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
@@ -823,7 +825,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -846,6 +848,96 @@ impl<T> TestChild<T> {
         }
     }
 
+    /// Checks each line of the child's stdout, until it finds every regex in `unordered_regexes`,
+    /// and returns all lines matched by any regex, until each regex has been matched at least once.
+    /// If the output finishes or the command times out before all regexes are matched, returns an error with
+    /// a list of unmatched regexes. Prints all stdout lines.
+    ///
+    /// Kills the child on error, or after the configured timeout has elapsed.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
+    //
+    // TODO: these methods could block if stderr is full and stdout is waiting for stderr to be read
+    #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
+    pub fn expect_stdout_line_matches_all_unordered<RegexList>(
+        &mut self,
+        unordered_regexes: RegexList,
+    ) -> Result<Vec<String>>
+    where
+        RegexList: IntoIterator + Debug,
+        RegexList::Item: ToRegexSet,
+    {
+        let regex_list = unordered_regexes.collect_regex_set()?;
+
+        let mut unmatched_indexes: HashSet<usize> = (0..regex_list.len()).collect();
+        let mut matched_lines = Vec::new();
+
+        while !unmatched_indexes.is_empty() {
+            let line = self
+                .expect_stdout_line_matches(regex_list.clone())
+                .map_err(|err| {
+                    let unmatched_regexes = regex_list.patterns_for_indexes(&unmatched_indexes);
+
+                    err.with_section(|| {
+                        format!("{unmatched_regexes:#?}").header("Unmatched regexes:")
+                    })
+                    .with_section(|| format!("{matched_lines:#?}").header("Matched lines:"))
+                })?;
+
+            let matched_indices: HashSet<usize> = regex_list.matches(&line).iter().collect();
+            unmatched_indexes = &unmatched_indexes - &matched_indices;
+
+            matched_lines.push(line);
+        }
+
+        Ok(matched_lines)
+    }
+
+    /// Checks each line of the child's stderr, until it finds every regex in `unordered_regexes`,
+    /// and returns all lines matched by any regex, until each regex has been matched at least once.
+    /// If the output finishes or the command times out before all regexes are matched, returns an error with
+    /// a list of unmatched regexes. Prints all stderr lines.
+    ///
+    /// Kills the child on error, or after the configured timeout has elapsed.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
+    //
+    // TODO: these methods could block if stdout is full and stderr is waiting for stdout to be read
+    #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
+    pub fn expect_stderr_line_matches_all_unordered<RegexList>(
+        &mut self,
+        unordered_regexes: RegexList,
+    ) -> Result<Vec<String>>
+    where
+        RegexList: IntoIterator + Debug,
+        RegexList::Item: ToRegexSet,
+    {
+        let regex_list = unordered_regexes.collect_regex_set()?;
+
+        let mut unmatched_indexes: HashSet<usize> = (0..regex_list.len()).collect();
+        let mut matched_lines = Vec::new();
+
+        while !unmatched_indexes.is_empty() {
+            let line = self
+                .expect_stderr_line_matches(regex_list.clone())
+                .map_err(|err| {
+                    let unmatched_regexes = regex_list.patterns_for_indexes(&unmatched_indexes);
+
+                    err.with_section(|| {
+                        format!("{unmatched_regexes:#?}").header("Unmatched regexes:")
+                    })
+                    .with_section(|| format!("{matched_lines:#?}").header("Matched lines:"))
+                })?;
+
+            let matched_indices: HashSet<usize> = regex_list.matches(&line).iter().collect();
+            unmatched_indexes = &unmatched_indexes - &matched_indices;
+
+            matched_lines.push(line);
+        }
+
+        Ok(matched_lines)
+    }
+
     /// Checks each line of the child's stdout against `success_regex`,
     /// and returns the first matching line. Does not print any output.
     ///
@@ -855,7 +947,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -887,7 +979,7 @@ impl<T> TestChild<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_stderr_line_matches_silent<R>(&mut self, success_regex: R) -> Result<String>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
         self.apply_failure_regexes_to_outputs();
 
@@ -1246,9 +1338,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stdout_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.output_check(
             |stdout| re.is_match(stdout),
@@ -1270,9 +1362,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stdout_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),
@@ -1300,9 +1392,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stderr_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.output_check(
             |stderr| re.is_match(stderr),
@@ -1324,9 +1416,9 @@ impl<T> TestOutput<T> {
     #[allow(clippy::unwrap_in_result)]
     pub fn stderr_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
-        R: ToRegex + Debug,
+        R: ToRegexSet + Debug,
     {
-        let re = regex.to_regex().expect("regex must be valid");
+        let re = regex.to_regex_set().expect("regex must be valid");
 
         self.any_output_line(
             |line| re.is_match(line),

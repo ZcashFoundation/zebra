@@ -414,6 +414,8 @@ where
     }
 
     /// Returns the address book for this `CandidateSet`.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
     pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
         self.address_book.clone()
     }

@@ -24,11 +24,11 @@ To find the latest checkpoints on the `main` branch:
 1. Find the [latest completed `CI Docker` workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml?query=branch%3Amain).
    Due to GitHub UI issues, some runs will show as waiting, cancelled, or failed,
    but the checkpoints have still been generated.
-2. Go to the `Result of generate-checkpoints-mainnet` step in the
-   `Run generate-checkpoints-mainnet` job, in the `Generate checkpoints mainnet` job
+2. Go to the `Result of checkpoints-mainnet` step in the
+   `Run checkpoints-mainnet` job, in the `Generate checkpoints mainnet` job
 3. Scroll down until you see the list of checkpoints, it should start around line 200
 4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
-5. Repeat steps 2 to 4 for `testnet`
+5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
 
 #### Manual Checkpoint Generation
@@ -39,10 +39,10 @@ To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
 
 #### Checkpoint Generation Setup
 
-Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
+Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc-internal.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
 and synced to the network tip.
 
-If you are on a Debian system, `zcash-cli` [can be installed as a package](https://zcash.readthedocs.io/en/latest/rtd_pages/install_debian_bin_packages.html).
+If you are on a Debian system, `zcash-cli` [can be installed as a package](https://zcash.readthedocs.io/en/master/rtd_pages/install_debian_bin_packages.html).
 
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
@@ -81,10 +81,10 @@ For more details about checkpoint lists, see the [`zebra-checkpoints` README.](h
 To update the testnet checkpoints, `zebra-checkpoints` needs to connect to a testnet node.
 
 To launch a testnet node, you can either:
-- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.network), or
+- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://docs.rs/zebra-network/latest/zebra_network/struct.Config.html#structfield.network), or
 - run `zcashd -testnet`.
 
-Then use the commands above to renegerate the checkpoints.
+Then use the commands above to regenerate the checkpoints.
 
 #### Submit new checkpoints as pull request
 

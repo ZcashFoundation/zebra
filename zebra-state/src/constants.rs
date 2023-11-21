@@ -2,6 +2,7 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
+use semver::Version;
 
 // For doc comment links
 #[allow(unused_imports)]
@@ -48,11 +49,18 @@ pub(crate) const DATABASE_FORMAT_VERSION: u64 = 25;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 3;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
-pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 1;
+pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
+
+/// Returns the highest database version that modifies the subtree index format.
+///
+/// This version is used by tests to wait for the subtree upgrade to finish.
+pub fn latest_version_for_adding_subtrees() -> Version {
+    Version::parse("25.2.2").expect("Hardcoded version string should be valid.")
+}
 
 /// The name of the file containing the minor and patch database versions.
 ///

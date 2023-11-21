@@ -11,10 +11,10 @@ use zcash_address::{self, unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::Amount,
-    block::{self, Block, Height},
+    block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{Network, POW_AVERAGING_WINDOW},
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -142,27 +142,32 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getmininginfo")]
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>>;
 
-    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
-    /// If `num_blocks` is not supplied, uses 120 blocks.
-    /// If `height` is not supplied or is 0, uses the tip height.
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before
+    /// `height`.
+    ///
+    /// If `num_blocks` is not supplied, uses 120 blocks. If it is 0 or -1, uses the difficulty
+    /// averaging window.
+    /// If `height` is not supplied or is -1, uses the tip height.
     ///
     /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
     #[rpc(name = "getnetworksolps")]
     fn get_network_sol_ps(
         &self,
-        num_blocks: Option<usize>,
+        num_blocks: Option<i32>,
         height: Option<i32>,
     ) -> BoxFuture<Result<u64>>;
 
-    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
-    /// If `num_blocks` is not supplied, uses 120 blocks.
-    /// If `height` is not supplied or is 0, uses the tip height.
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before
+    /// `height`.
+    ///
+    /// This method name is deprecated, use [`getnetworksolps`](Self::get_network_sol_ps) instead.
+    /// See that method for details.
     ///
     /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
     #[rpc(name = "getnetworkhashps")]
     fn get_network_hash_ps(
         &self,
-        num_blocks: Option<usize>,
+        num_blocks: Option<i32>,
         height: Option<i32>,
     ) -> BoxFuture<Result<u64>> {
         self.get_network_sol_ps(num_blocks, height)
@@ -838,13 +843,22 @@ where
 
     fn get_network_sol_ps(
         &self,
-        num_blocks: Option<usize>,
+        num_blocks: Option<i32>,
         height: Option<i32>,
     ) -> BoxFuture<Result<u64>> {
-        let num_blocks = num_blocks
-            .map(|num_blocks| num_blocks.max(1))
-            .unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
-        let height = height.and_then(|height| (height > 1).then_some(Height(height as u32)));
+        // Default number of blocks is 120 if not supplied.
+        let mut num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
+        // But if it is 0 or negative, it uses the proof of work averaging window.
+        if num_blocks < 1 {
+            num_blocks = i32::try_from(POW_AVERAGING_WINDOW).expect("fits in i32");
+        }
+        let num_blocks =
+            usize::try_from(num_blocks).expect("just checked for negatives, i32 fits in usize");
+
+        // Default height is the tip height if not supplied. Negative values also mean the tip
+        // height. Since negative values aren't valid heights, we can just use the conversion.
+        let height = height.and_then(|height| height.try_into_height().ok());
+
         let mut state = self.state.clone();
 
         async move {
@@ -861,11 +875,9 @@ where
                 })?;
 
             let solution_rate = match response {
-                ReadResponse::SolutionRate(solution_rate) => solution_rate.ok_or(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No blocks in state".to_string(),
-                    data: None,
-                })?,
+                // zcashd returns a 0 rate when the calculation is invalid
+                ReadResponse::SolutionRate(solution_rate) => solution_rate.unwrap_or(0),
+
                 _ => unreachable!("unmatched response to a solution rate request"),
             };
 

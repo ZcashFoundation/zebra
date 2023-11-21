@@ -1,0 +1,149 @@
+# TODO: we should stop using this build approach with lightwalletd and move to using our
+# reusable workflow to building all the docker images of our repo 
+name: Build lightwalletd
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+#
+# Cancelling old jobs is the most efficient approach, because the workflow is quick.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+
+  # Update the lightwalletd image when related changes merge to the `zebra/main` branch
+  push:
+    branches:
+      - 'main'
+    paths:
+      # rebuild lightwalletd whenever the related Zebra code changes
+      #
+      # TODO: this code isn't compiled in this docker image
+      #       rebuild whenever the actual code at lightwalletd/master changes
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
+      - 'zebrad/src/commands/start.rs'
+      # these workflow definitions actually change the docker image
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/sub-build-lightwalletd.yml'
+
+  # Update the lightwalletd image when each related PR changes
+  pull_request:
+    paths:
+      # rebuild lightwalletd whenever the related Zebra code changes
+      # (this code isn't actually compiled in this docker image)
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
+      - 'zebrad/src/commands/start.rs'
+      # these workflow definitions actually change the docker image
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/sub-build-lightwalletd.yml'
+
+env:
+  IMAGE_NAME: lightwalletd
+
+jobs:
+  build:
+    name: Build lightwalletd Docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          # Note: check service.proto when modifying lightwalletd repo
+          repository: zcash/lightwalletd
+          ref: 'master'
+          persist-credentials: false
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: zebra
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Automatic tag management and OCI Image Format Specification for labels
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.0.0
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ env.IMAGE_NAME }}
+          # generate Docker tags based on the following events/attributes
+          # set latest tag for default branch
+          tags: |
+            type=schedule
+            # semver and ref,tag automatically add a "latest" tag, but only on stable releases
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=tag
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha
+            # edge is the latest commit on the default branch.
+            type=edge,enable={{is_default_branch}}
+
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          image: tonistiigi/binfmt:latest
+          platforms: all
+
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
+          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.1.1
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v3.0.0
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      # Build and push image to Google Artifact Registry
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@v5.0.0
+        with:
+          target: build
+          context: .
+          file: ./zebra/docker/zcash-lightwalletd/Dockerfile
+          platforms: |
+            linux/amd64
+            linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          cache-from: |
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ env.IMAGE_NAME }}:main-cache
+          cache-to: |
+            type=registry,ref=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra-caching/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

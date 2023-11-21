@@ -16,7 +16,7 @@
 //! were obtained. This is to ensure that zebra does not reject the transactions because they have
 //! already been seen in a block.
 
-use std::{cmp::min, sync::Arc};
+use std::{cmp::min, sync::Arc, time::Duration};
 
 use color_eyre::eyre::Result;
 
@@ -36,6 +36,7 @@ use crate::common::{
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{self, connect_to_lightwalletd, Empty, Exclude},
     },
+    sync::LARGE_CHECKPOINT_TIMEOUT,
     test_type::TestType::{self, *},
 };
 
@@ -84,8 +85,7 @@ pub async fn run() -> Result<()> {
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
-    let mut transactions =
-        load_transactions_from_future_blocks(network, test_type, test_name).await?;
+    let transactions = load_transactions_from_future_blocks(network, test_type, test_name).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -130,7 +130,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
@@ -148,8 +148,24 @@ pub async fn run() -> Result<()> {
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
-    // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
-    transactions.truncate(max_sent_transactions());
+    // Call GetMempoolTx so lightwalletd caches the empty mempool state.
+    // This is a workaround for a bug where lightwalletd will skip calling `get_raw_transaction`
+    // the first time GetMempoolTx is called because it replaces the cache early and only calls the
+    // RPC method for transaction ids that are missing in the old cache as keys.
+    // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L495-L502>
+    //
+    // TODO: Fix this issue in lightwalletd and delete this
+    rpc_client
+        .get_mempool_tx(Exclude { txid: vec![] })
+        .await?
+        .into_inner();
+
+    // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
+    // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
+    //
+    // So we need to wait much longer than that here.
+    let sleep_until_lwd_last_mempool_refresh =
+        tokio::time::sleep(std::time::Duration::from_secs(4));
 
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
@@ -160,8 +176,13 @@ pub async fn run() -> Result<()> {
         "connected gRPC client to lightwalletd, sending transactions...",
     );
 
+    let mut has_tx_with_shielded_elements = false;
     for transaction in transactions {
         let transaction_hash = transaction.hash();
+
+        // See <https://github.com/zcash/lightwalletd/blob/master/parser/transaction.go#L367>
+        has_tx_with_shielded_elements |= transaction.version() >= 4
+            && (transaction.has_shielded_inputs() || transaction.has_shielded_outputs());
 
         let expected_response = wallet_grpc::SendResponse {
             error_code: 0,
@@ -177,13 +198,14 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    // The timing of verification logs are unreliable, so we've disabled this check for now.
-    //
-    // TODO: when lightwalletd starts returning transactions again:
-    //       re-enable this check, find a better way to check, or delete this commented-out check
-    //
-    //tracing::info!("waiting for mempool to verify some transactions...");
-    //zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    // Check if some transaction is sent to mempool,
+    // Fails if there are only coinbase transactions in the first 50 future blocks
+    tracing::info!("waiting for mempool to verify some transactions...");
+    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
+    // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L537>
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    sleep_until_lwd_last_mempool_refresh.await;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client
@@ -191,10 +213,26 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // We'd like to check that lightwalletd queries the mempool, but it looks like it doesn't do it after each GetMempoolTx request.
-    //zebrad.expect_stdout_line_matches("answered mempool request req=TransactionIds")?;
+    // Sometimes lightwalletd doesn't check the mempool, and waits for the next block instead.
+    // If that happens, we skip the rest of the test.
+    tracing::info!("checking if lightwalletd has queried the mempool...");
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    // We need a short timeout here, because sometimes this message is not logged.
+    zebrad = zebrad.with_timeout(Duration::from_secs(60));
+    let tx_log =
+        zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds");
+    // Reset the failed timeout and give the rest of the test enough time to finish.
+    #[allow(unused_assignments)]
+    {
+        zebrad = zebrad.with_timeout(LARGE_CHECKPOINT_TIMEOUT);
+    }
+
+    if tx_log.is_err() {
+        tracing::info!("lightwalletd didn't query the mempool, skipping mempool contents checks");
+        return Ok(());
+    }
+
+    tracing::info!("checking the mempool contains some of the sent transactions...");
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
@@ -209,36 +247,24 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L529-L531
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     //
-    // TODO: re-enable it when lightwalletd starts returning transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(
-        counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
+    // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
+    //       only check if a transaction from the first block has shielded elements
+    assert!(
+        !has_tx_with_shielded_elements || counter >= 1,
+        "failed to read v4+ transactions with shielded elements from future blocks in mempool via lightwalletd"
     );
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
-    let mut counter = 0;
+    let mut _counter = 0;
     while let Some(_tx) = transaction_stream.message().await? {
         // TODO: check tx.data or tx.height here?
-
-        counter += 1;
+        _counter += 1;
     }
-
-    // This RPC has temporarily been disabled in `lightwalletd`:
-    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
-    //
-    // TODO: re-enable it when lightwalletd starts streaming transactions again.
-    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(
-        counter, 0,
-        "developers: update this test for lightwalletd sending transactions"
-    );
 
     Ok(())
 }
@@ -274,6 +300,6 @@ fn prepare_send_transaction_request(transaction: Arc<Transaction>) -> wallet_grp
 
     wallet_grpc::RawTransaction {
         data: transaction_bytes,
-        height: -1,
+        height: 0,
     }
 }

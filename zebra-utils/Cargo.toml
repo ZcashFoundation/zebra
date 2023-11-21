@@ -1,6 +1,6 @@
 [package]
 name = "zebra-utils"
-version = "1.0.0-beta.29"
+version = "1.0.0-beta.31"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
@@ -69,24 +69,24 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 structopt = "0.3.26"
 hex = "0.4.3"
-serde_json = "1.0.105"
+serde_json = "1.0.108"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.17"
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.29" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.29" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.31" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.29", optional = true }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.31", optional = true }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { version = "0.11.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
-regex = { version = "1.9.4", optional = true }
+regex = { version = "1.10.2", optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts. 
-reqwest = { version = "0.11.20", default-features = false, features = ["rustls-tls"], optional = true }
+reqwest = { version = "0.11.22", default-features = false, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
-tokio = { version = "1.32.0", features = ["full"], optional = true }
+tokio = { version = "1.33.0", features = ["full"], optional = true }

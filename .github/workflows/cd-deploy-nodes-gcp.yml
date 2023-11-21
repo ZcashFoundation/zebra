@@ -1,0 +1,357 @@
+name: Deploy Nodes to GCP
+
+# Ensures that only one workflow task will run at a time. Previous deployments, if
+# already in process, won't get cancelled. Instead, we let the first to complete
+# then queue the latest pending workflow, cancelling any workflows in between.
+#
+# Since the different event types each use a different Managed Instance Group or instance,
+# we can run different event types concurrently.
+#
+# For pull requests, we only run the tests from this workflow, and don't do any deployments.
+# So an in-progress pull request gets cancelled, just like other tests.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      log_file:
+        default: ''
+        description: 'Log to a file path rather than standard output'
+      no_cache:
+        description: 'Disable the Docker cache for this build'
+        required: false
+        type: boolean
+        default: false
+
+  # TODO: Temporarily disabled to reduce network load, see #6894.
+  #push:
+  #  branches:
+  #    - main
+  #  paths:
+  #    # code and tests
+  #    - '**/*.rs'
+  #    # hard-coded checkpoints and proptest regressions
+  #    - '**/*.txt'
+  #    # dependencies
+  #    - '**/Cargo.toml'
+  #    - '**/Cargo.lock'
+  #    # configuration files
+  #    - '.cargo/config.toml'
+  #    - '**/clippy.toml'
+  #    # workflow definitions
+  #    - 'docker/**'
+  #    - '.dockerignore'
+  #    - '.github/workflows/cd-deploy-nodes-gcp.yml'
+  #    - '.github/workflows/sub-build-docker-image.yml'
+
+  # Only runs the Docker image tests, doesn't deploy any instances
+  pull_request:
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/cd-deploy-nodes-gcp.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
+
+  release:
+    types:
+      - published
+
+jobs:
+  # If a release was made we want to extract the first part of the semver from the
+  # tag_name
+  #
+  # Generate the following output to pass to subsequent jobs
+  # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
+  #
+  # Note: We just use the first part of the version to replace old instances, and change
+  # it when a major version is released, to keep a segregation between new and old
+  # versions.
+  versioning:
+    name: Versioning
+    runs-on: ubuntu-latest
+    outputs:
+      major_version: ${{ steps.set.outputs.major_version }}
+    if: ${{ github.event_name == 'release' }}
+    steps:
+      - name: Getting Zebrad Version
+        id: get
+        uses: actions/github-script@v6.4.1
+        with:
+          result-encoding: string
+          script: |
+            return context.payload.release.tag_name.substring(0,2)
+      - name: Setting API Version
+        id: set
+        run: echo "major_version=${{ steps.get.outputs.result }}" >> "$GITHUB_OUTPUT"
+
+  # Each time this workflow is executed, a build will be triggered to create a new image
+  # with the corresponding tags using information from Git
+  #
+  # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
+  build:
+    name: Build CD Docker
+    uses: ./.github/workflows/sub-build-docker-image.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: runtime
+      image_name: zebrad
+      no_cache: ${{ inputs.no_cache || false }}
+      rust_log: info
+
+  # Test that Zebra works using the default config with the latest Zebra version.
+  test-configuration-file:
+    name: Test CD default Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'default-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK'
+      network: 'Mainnet'
+
+  # Test reconfiguring the docker image for testnet.
+  test-configuration-file-testnet:
+    name: Test CD testnet Docker config file
+    needs: build
+    # Make sure Zebra can sync the genesis block on testnet
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'testnet-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+      test_variables: '-e NETWORK'
+      network: 'Testnet'
+
+  # Test that Zebra works using $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test CD custom Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: 'custom-conf'
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+
+  # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
+  # with one node in the configured GCP region.
+  #
+  # Separate Mainnet and Testnet MiGs are deployed whenever there are:
+  # - pushes to the main branch, or
+  # - version releases of Zebra.
+  #
+  # Once this workflow is triggered:
+  # - by pushes to main: the MiG is always replaced,
+  # - by releases: the MiG is only replaced if the same major version is being deployed,
+  #   otherwise a new major version is deployed in a new MiG.
+  #
+  # Runs:
+  # - on every push to the `main` branch
+  # - on every release, when it's published
+  deploy-nodes:
+    strategy:
+      matrix:
+        network: [Mainnet, Testnet]
+    name: Deploy ${{ matrix.network }} nodes
+    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase the network.
+      #
+      # Passes the lowercase network to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS="${{ matrix.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.1.1
+
+      # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
+      # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
+      - name: Create instance template for ${{ matrix.network }}
+        run: |
+          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
+          --boot-disk-size 300GB \
+          --boot-disk-type=pd-ssd \
+          --image-project=cos-cloud \
+          --image-family=cos-stable \
+          --user-output-enabled \
+          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --container-stdin \
+          --container-tty \
+          --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
+          --scopes cloud-platform \
+          --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --tags zebrad
+
+      # Check if our destination instance group exists already
+      - name: Check if ${{ matrix.network }} instance group exists
+        id: does-group-exist
+        continue-on-error: true
+        run: |
+          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" | grep "${{ vars.GCP_REGION }}"
+
+      # Deploy new managed instance group using the new instance template
+      - name: Create managed instance group for ${{ matrix.network }}
+        if: steps.does-group-exist.outcome == 'failure'
+        run: |
+          gcloud compute instance-groups managed create \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" \
+          --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
+          --health-check zebrad-tracing-filter \
+          --initial-delay 30 \
+          --region "${{ vars.GCP_REGION }}" \
+          --size 1
+
+      # Rolls out update to existing group using the new instance template
+      - name: Update managed instance group for ${{ matrix.network }}
+        if: steps.does-group-exist.outcome == 'success'
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" \
+          --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
+          --region "${{ vars.GCP_REGION }}"
+
+  # This jobs handles the deployment of a single node (1) in the configured GCP zone
+  # when an instance is required to test a specific commit
+  #
+  # Runs:
+  # - on request, using workflow_dispatch with regenerate-disks
+  #
+  # Note: this instances are not automatically replaced or deleted
+  deploy-instance:
+    name: Deploy single ${{ inputs.network }} instance
+    needs: [ build, test-configuration-file, test-zebra-conf-path ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase the network.
+      #
+      # Passes the lowercase network to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          retries: '3'
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.1.1
+
+      # Create instance template from container image
+      - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
+        run: |
+          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
+          --boot-disk-size 300GB \
+          --boot-disk-type=pd-ssd \
+          --image-project=cos-cloud \
+          --image-family=cos-stable \
+          --user-output-enabled \
+          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --container-stdin \
+          --container-tty \
+          --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
+          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
+          --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --tags zebrad \
+          --zone ${{ vars.GCP_ZONE }}
+
+  failure-issue:
+    name: Open or update issues for release failures
+    # When a new job is added to this workflow, add it to this list.
+    needs: [ versioning, build, deploy-nodes, deploy-instance ]
+    # Only open tickets for failed or cancelled jobs that are not coming from PRs.
+    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: jayqi/failed-build-issue-action@v1
+        with:
+          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
+          # New failures open an issue with this label.
+          label-name: S-ci-fail-release-auto-issue
+          # If there is already an open issue with this label, any failures become comments on that issue.
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,102 +1,86 @@
 //! Iterators for blocks in the non-finalized and finalized state.
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::block::{self, Block, Height};
 
-use crate::{service::non_finalized_state::NonFinalizedState, HashOrHeight};
+use crate::{
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{Chain, NonFinalizedState},
+        read,
+    },
+    HashOrHeight,
+};
 
-use super::finalized_state::ZebraDb;
-
-/// Iterator for state blocks.
+/// Generic state chain iterator, which iterates by block height or hash.
+/// Can be used for blocks, block headers, or any type indexed by [`HashOrHeight`].
 ///
-/// Starts at any block in any non-finalized or finalized chain,
+/// Starts at any hash or height in any non-finalized or finalized chain,
 /// and iterates in reverse height order. (Towards the genesis block.)
-pub(crate) struct Iter<'a> {
-    pub(super) non_finalized_state: &'a NonFinalizedState,
-    pub(super) db: &'a ZebraDb,
-    pub(super) state: IterState,
+#[derive(Clone, Debug)]
+pub(crate) struct Iter<Item: ChainItem> {
+    /// The non-finalized chain fork we're iterating, if the iterator is in the non-finalized state.
+    ///
+    /// This is a cloned copy of a potentially out-of-date chain fork.
+    pub(super) chain: Option<Arc<Chain>>,
+
+    /// The finalized database we're iterating.
+    ///
+    /// This is the shared live database instance, which can concurrently write blocks.
+    pub(super) db: ZebraDb,
+
+    /// The height of the item which will be yielded by `Iterator::next()`.
+    pub(super) height: Option<Height>,
+
+    /// An internal marker type that tells the Rust type system what we're iterating.
+    iterable: PhantomData<Item::Type>,
 }
 
-pub(super) enum IterState {
-    NonFinalized(block::Hash),
-    Finalized(block::Height),
-    Finished,
-}
+impl<Item> Iter<Item>
+where
+    Item: ChainItem,
+{
+    /// Returns an item by height, and updates the iterator's internal state to point to the
+    /// previous height.
+    fn yield_by_height(&mut self) -> Option<Item::Type> {
+        let current_height = self.height?;
 
-impl Iter<'_> {
-    fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter {
-            non_finalized_state,
-            db: _,
-            state,
-        } = self;
+        // TODO:
+        // Check if the root of the chain connects to the finalized state. Cloned chains can become
+        // disconnected if they are concurrently pruned by a finalized block from another chain
+        // fork. If that happens, the iterator is invalid and should stop returning items.
+        //
+        // Currently, we skip from the disconnected chain root to the previous height in the
+        // finalized state, which is usually ok, but could cause consensus or light wallet bugs.
+        let item = Item::read(self.chain.as_ref(), &self.db, current_height);
 
-        let hash = match state {
-            IterState::NonFinalized(hash) => *hash,
-            IterState::Finalized(_) | IterState::Finished => unreachable!(),
-        };
+        // The iterator is finished if the current height is genesis.
+        self.height = current_height.previous().ok();
 
-        if let Some(block) = non_finalized_state.any_block_by_hash(hash) {
-            let hash = block.header.previous_block_hash;
-            self.state = IterState::NonFinalized(hash);
-            Some(block)
-        } else {
-            None
-        }
-    }
-
-    #[allow(clippy::unwrap_in_result)]
-    fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
-        let Iter {
-            non_finalized_state: _,
-            db,
-            state,
-        } = self;
-
-        let hash_or_height: HashOrHeight = match *state {
-            IterState::Finalized(height) => height.into(),
-            IterState::NonFinalized(hash) => hash.into(),
-            IterState::Finished => unreachable!(),
-        };
-
-        if let Some(block) = db.block(hash_or_height) {
-            let height = block
-                .coinbase_height()
-                .expect("valid blocks have a coinbase height");
-
-            if let Some(next_height) = height - 1 {
-                self.state = IterState::Finalized(next_height);
+        // Drop the chain if we've finished using it.
+        if let Some(chain) = self.chain.as_ref() {
+            if let Some(height) = self.height {
+                if !chain.contains_block_height(height) {
+                    std::mem::drop(self.chain.take());
+                }
             } else {
-                self.state = IterState::Finished;
+                std::mem::drop(self.chain.take());
             }
-
-            Some(block)
-        } else {
-            self.state = IterState::Finished;
-            None
         }
-    }
 
-    /// Return the height for the block at `hash` in any chain.
-    fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
-        self.non_finalized_state
-            .any_height_by_hash(hash)
-            .or_else(|| self.db.height(hash))
+        item
     }
 }
 
-impl Iterator for Iter<'_> {
-    type Item = Arc<Block>;
+impl<Item> Iterator for Iter<Item>
+where
+    Item: ChainItem,
+{
+    type Item = Item::Type;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.state {
-            IterState::NonFinalized(_) => self
-                .next_non_finalized_block()
-                .or_else(|| self.next_finalized_block()),
-            IterState::Finalized(_) => self.next_finalized_block(),
-            IterState::Finished => None,
-        }
+        self.yield_by_height()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -105,34 +89,121 @@ impl Iterator for Iter<'_> {
     }
 }
 
-impl std::iter::FusedIterator for Iter<'_> {}
-
-impl ExactSizeIterator for Iter<'_> {
+impl<Item> ExactSizeIterator for Iter<Item>
+where
+    Item: ChainItem,
+{
     fn len(&self) -> usize {
-        match self.state {
-            IterState::NonFinalized(hash) => self
-                .any_height_by_hash(hash)
-                .map(|height| (height.0 + 1) as _)
-                .unwrap_or(0),
-            IterState::Finalized(height) => (height.0 + 1) as _,
-            IterState::Finished => 0,
-        }
+        // Add one to the height for the genesis block.
+        //
+        // TODO:
+        // If the Item can skip heights, or return multiple items per block, we can't calculate
+        // its length using the block height. For example, subtree end height iterators, or
+        // transaction iterators.
+        //
+        // TODO:
+        // Check if the root of the chain connects to the finalized state. If that happens, the
+        // iterator is invalid and the length should be zero. See the comment in yield_by_height()
+        // for details.
+        self.height.map_or(0, |height| height.as_usize() + 1)
     }
 }
 
-/// Return an iterator over the relevant chain of the block identified by
-/// `hash`, in order from the largest height to the genesis block.
+// TODO:
+// If the Item can return None before it gets to genesis, it is not fused. For example, subtree
+// end height iterators.
+impl<Item> std::iter::FusedIterator for Iter<Item> where Item: ChainItem {}
+
+/// A trait that implements iteration for a specific chain type.
+pub(crate) trait ChainItem {
+    type Type;
+
+    /// Read the `Type` at `height` from the non-finalized `chain` or finalized `db`.
+    fn read(chain: Option<&Arc<Chain>>, db: &ZebraDb, height: Height) -> Option<Self::Type>;
+}
+
+// Block iteration
+
+impl ChainItem for Block {
+    type Type = Arc<Block>;
+
+    fn read(chain: Option<&Arc<Chain>>, db: &ZebraDb, height: Height) -> Option<Self::Type> {
+        read::block(chain, db, height.into())
+    }
+}
+
+// Block header iteration
+
+impl ChainItem for block::Header {
+    type Type = Arc<block::Header>;
+
+    fn read(chain: Option<&Arc<Chain>>, db: &ZebraDb, height: Height) -> Option<Self::Type> {
+        read::block_header(chain, db, height.into())
+    }
+}
+
+/// Returns a block iterator over the relevant chain containing `hash`,
+/// in order from the largest height to genesis.
 ///
-/// The block identified by `hash` is included in the chain of blocks yielded
-/// by the iterator. `hash` can come from any chain.
-pub(crate) fn any_ancestor_blocks<'a>(
-    non_finalized_state: &'a NonFinalizedState,
-    db: &'a ZebraDb,
+/// The block with `hash` is included in the iterator.
+/// `hash` can come from any chain or `db`.
+///
+/// Use [`any_chain_ancestor_iter()`] in new code.
+pub(crate) fn any_ancestor_blocks(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
     hash: block::Hash,
-) -> Iter<'a> {
+) -> Iter<Block> {
+    any_chain_ancestor_iter(non_finalized_state, db, hash)
+}
+
+/// Returns a generic chain item iterator over the relevant chain containing `hash`,
+/// in order from the largest height to genesis.
+///
+/// The item with `hash` is included in the iterator.
+/// `hash` can come from any chain or `db`.
+pub(crate) fn any_chain_ancestor_iter<Item>(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    hash: block::Hash,
+) -> Iter<Item>
+where
+    Item: ChainItem,
+{
+    // We need to look up the relevant chain, and the height for the hash.
+    let chain = non_finalized_state.find_chain(|chain| chain.contains_block_hash(hash));
+    let height = read::height_by_hash(chain.as_ref(), db, hash);
+
     Iter {
-        non_finalized_state,
-        db,
-        state: IterState::NonFinalized(hash),
+        chain,
+        db: db.clone(),
+        height,
+        iterable: PhantomData,
+    }
+}
+
+/// Returns a generic chain item iterator over a `chain` containing `hash_or_height`,
+/// in order from the largest height to genesis.
+///
+/// The item with `hash_or_height` is included in the iterator.
+/// `hash_or_height` must be in `chain` or `db`.
+#[allow(dead_code)]
+pub(crate) fn known_chain_ancestor_iter<Item>(
+    chain: Option<Arc<Chain>>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Iter<Item>
+where
+    Item: ChainItem,
+{
+    // We need to look up the height for the hash.
+    let height =
+        hash_or_height.height_or_else(|hash| read::height_by_hash(chain.as_ref(), db, hash));
+
+    Iter {
+        chain,
+        db: db.clone(),
+        height,
+        iterable: PhantomData,
     }
 }

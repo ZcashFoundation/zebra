@@ -129,6 +129,11 @@ pub struct ExpandedDifficulty(U256);
 pub struct Work(u128);
 
 impl Work {
+    /// Returns a value representing no work.
+    pub fn zero() -> Self {
+        Self(0)
+    }
+
     /// Return the inner `u128` value.
     pub fn as_u128(self) -> u128 {
         self.0
@@ -660,6 +665,11 @@ impl std::ops::Add for Work {
 pub struct PartialCumulativeWork(u128);
 
 impl PartialCumulativeWork {
+    /// Returns a value representing no work.
+    pub fn zero() -> Self {
+        Self(0)
+    }
+
     /// Return the inner `u128` value.
     pub fn as_u128(self) -> u128 {
         self.0

@@ -38,14 +38,17 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation, MAX_ON_DISK_HEIGHT};
+pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use disk_format::MAX_ON_DISK_HEIGHT;
 
 pub(super) use zebra_db::ZebraDb;
 
-#[cfg(not(any(test, feature = "proptest-impl")))]
-pub(super) use disk_db::DiskWriteBatch;
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use disk_db::{DiskWriteBatch, WriteDisk};
+pub use disk_db::DiskWriteBatch;
+#[cfg(not(any(test, feature = "proptest-impl")))]
+use disk_db::DiskWriteBatch;
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -91,14 +94,33 @@ pub struct FinalizedState {
 }
 
 impl FinalizedState {
-    /// Returns an on-disk database instance for `config` and `network`.
+    /// Returns an on-disk database instance for `config`, `network`, and `elastic_db`.
     /// If there is no existing database, creates a new database on disk.
     pub fn new(
         config: &Config,
         network: Network,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
-        let db = ZebraDb::new(config, network);
+        Self::new_with_debug(
+            config,
+            network,
+            false,
+            #[cfg(feature = "elasticsearch")]
+            elastic_db,
+        )
+    }
+
+    /// Returns an on-disk database instance with the supplied production and debug settings.
+    /// If there is no existing database, creates a new database on disk.
+    ///
+    /// This method is intended for use in tests.
+    pub(crate) fn new_with_debug(
+        config: &Config,
+        network: Network,
+        debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
+    ) -> Self {
+        let db = ZebraDb::new(config, network, debug_skip_format_upgrades);
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
@@ -245,8 +267,8 @@ impl FinalizedState {
 
                 let block = checkpoint_verified.block.clone();
                 let mut history_tree = self.db.history_tree();
-                let prev_note_commitment_trees =
-                    prev_note_commitment_trees.unwrap_or_else(|| self.db.note_commitment_trees());
+                let prev_note_commitment_trees = prev_note_commitment_trees
+                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
                 // Update the note commitment trees.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();

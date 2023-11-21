@@ -54,9 +54,6 @@ skip-tree = [
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
-    # wait for prost-build to upgrade
-    { name = "prettyplease", version = "=0.1.25" },
-
     # wait for criterion to upgrade
     { name = "itertools", version = "=0.10.5" },
 
@@ -66,6 +63,13 @@ skip-tree = [
     # wait for rocksdb to upgrade
     { name = "bindgen", version = "=0.65.1" },
 
+    # wait for tracing and many other crates to upgrade
+    # this duplicate dependency currently only exists in testing builds
+    { name = "regex-syntax", version = "=0.6.29" },
+
+    # wait for `parking_lot` crate inside `jsonrpc-http-server` to upgrade
+    { name = "redox_syscall", version = "=0.2.16" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
@@ -73,11 +77,8 @@ skip-tree = [
 
     # ECC crates
 
-    # wait for minreq and zcash_proofs to upgrade
-    { name = "rustls", version = "=0.20.9" },
-
-    # wait for zcash_proofs to upgrade
-    { name = "webpki-roots", version = "=0.22.6" },
+    # wait for hdwallet to upgrade
+    { name = "ring", version = "=0.16.20" },
 
     # zebra-utils dependencies
 

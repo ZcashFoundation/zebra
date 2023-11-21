@@ -1,0 +1,69 @@
+name: Docker Unit Tests
+
+# These jobs *don't* depend on cached Google Cloud state disks,
+# so they can be skipped when the modified files make the actual workflow run.
+on:
+  pull_request:
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
+      # workflow definitions
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/ci-unit-tests-docker.yml'
+      - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
+      - '.github/workflows/sub-find-cached-disks.yml'
+      - '.github/workflows/sub-build-docker-image.yml'
+
+jobs:
+  build:
+    name: Build CI Docker / Build images
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-all:
+    name: Test all
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-fake-activation-heights:
+    name: Test with fake activation heights
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-lightwalletd-integration:
+    name: Test integration with lightwalletd
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-configuration-file:
+    name: Test CI default Docker config file / Test default-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-zebra-conf-path:
+    name: Test CI custom Docker config file / Test custom-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'

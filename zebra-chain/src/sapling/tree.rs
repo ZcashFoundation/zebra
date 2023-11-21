@@ -33,7 +33,7 @@ use crate::{
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
-    subtree::TRACKED_SUBTREE_HEIGHT,
+    subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
 
 pub mod legacy;
@@ -166,7 +166,7 @@ impl ZcashDeserialize for Root {
 ///
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Default)]
 pub struct Node([u8; 32]);
 
 impl AsRef<[u8; 32]> for Node {
@@ -190,14 +190,11 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    /// Return the node bytes in big-endian byte-order suitable for printing out byte by byte.
+    /// Return the node bytes in little-endian byte order suitable for printing out byte by byte.
     ///
-    /// Zebra displays note commitment tree nodes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
+    /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+        self.0
     }
 }
 
@@ -373,28 +370,159 @@ impl NoteCommitmentTree {
         }
     }
 
+    /// Returns frontier of non-empty tree, or None.
+    fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
+        self.inner.value()
+    }
+
+    /// Returns the position of the most recently appended leaf in the tree.
+    ///
+    /// This method is used for debugging, use `incrementalmerkletree::Address` for tree operations.
+    pub fn position(&self) -> Option<u64> {
+        let Some(tree) = self.frontier() else {
+            // An empty tree doesn't have a previous leaf.
+            return None;
+        };
+
+        Some(tree.position().into())
+    }
+
+    /// Returns true if this tree has at least one new subtree, when compared with `prev_tree`.
+    pub fn contains_new_subtree(&self, prev_tree: &Self) -> bool {
+        // Use -1 for the index of the subtree with no notes, so the comparisons are valid.
+        let index = self.subtree_index().map_or(-1, |index| i32::from(index.0));
+        let prev_index = prev_tree
+            .subtree_index()
+            .map_or(-1, |index| i32::from(index.0));
+
+        // This calculation can't overflow, because we're using i32 for u16 values.
+        let index_difference = index - prev_index;
+
+        // There are 4 cases we need to handle:
+        // - lower index: never a new subtree
+        // - equal index: sometimes a new subtree
+        // - next index: sometimes a new subtree
+        // - greater than the next index: always a new subtree
+        //
+        // To simplify the function, we deal with the simple cases first.
+
+        // There can't be any new subtrees if the current index is strictly lower.
+        if index < prev_index {
+            return false;
+        }
+
+        // There is at least one new subtree, even if there is a spurious index difference.
+        if index_difference > 1 {
+            return true;
+        }
+
+        // If the indexes are equal, there can only be a new subtree if `self` just completed it.
+        if index == prev_index {
+            return self.is_complete_subtree();
+        }
+
+        // If `self` is the next index, check if the last note completed a subtree.
+        if self.is_complete_subtree() {
+            return true;
+        }
+
+        // Then check for spurious index differences.
+        //
+        // There is one new subtree somewhere in the trees. It is either:
+        // - a new subtree at the end of the previous tree, or
+        // - a new subtree in this tree (but not at the end).
+        //
+        // Spurious index differences happen because the subtree index only increases when the
+        // first note is added to the new subtree. So we need to exclude subtrees completed by the
+        // last note commitment in the previous tree.
+        //
+        // We also need to exclude empty previous subtrees, because the index changes to zero when
+        // the first note is added, but a subtree wasn't completed.
+        if prev_tree.is_complete_subtree() || prev_index == -1 {
+            return false;
+        }
+
+        // A new subtree was completed by a note commitment that isn't in the previous tree.
+        true
+    }
+
     /// Returns true if the most recently appended leaf completes the subtree
-    pub fn is_complete_subtree(tree: &NonEmptyFrontier<Node>) -> bool {
+    pub fn is_complete_subtree(&self) -> bool {
+        let Some(tree) = self.frontier() else {
+            // An empty tree can't be a complete subtree.
+            return false;
+        };
+
         tree.position()
             .is_complete_subtree(TRACKED_SUBTREE_HEIGHT.into())
     }
 
-    /// Returns subtree address at [`TRACKED_SUBTREE_HEIGHT`]
-    pub fn subtree_address(tree: &NonEmptyFrontier<Node>) -> incrementalmerkletree::Address {
-        incrementalmerkletree::Address::above_position(
+    /// Returns the subtree index at [`TRACKED_SUBTREE_HEIGHT`].
+    /// This is the number of complete or incomplete subtrees that are currently in the tree.
+    /// Returns `None` if the tree is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn subtree_index(&self) -> Option<NoteCommitmentSubtreeIndex> {
+        let tree = self.frontier()?;
+
+        let index = incrementalmerkletree::Address::above_position(
             TRACKED_SUBTREE_HEIGHT.into(),
             tree.position(),
         )
+        .index()
+        .try_into()
+        .expect("fits in u16");
+
+        Some(index)
+    }
+
+    /// Returns the number of leaf nodes required to complete the subtree at
+    /// [`TRACKED_SUBTREE_HEIGHT`].
+    ///
+    /// Returns `2^TRACKED_SUBTREE_HEIGHT` if the tree is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn remaining_subtree_leaf_nodes(&self) -> usize {
+        let remaining = match self.frontier() {
+            // If the subtree has at least one leaf node, the remaining number of nodes can be
+            // calculated using the maximum subtree position and the current position.
+            Some(tree) => {
+                let max_position = incrementalmerkletree::Address::above_position(
+                    TRACKED_SUBTREE_HEIGHT.into(),
+                    tree.position(),
+                )
+                .max_position();
+
+                max_position - tree.position().into()
+            }
+            // If the subtree has no nodes, the remaining number of nodes is the number of nodes in
+            // a subtree.
+            None => {
+                let subtree_address = incrementalmerkletree::Address::above_position(
+                    TRACKED_SUBTREE_HEIGHT.into(),
+                    // This position is guaranteed to be in the first subtree.
+                    0.into(),
+                );
+
+                assert_eq!(
+                    subtree_address.position_range_start(),
+                    0.into(),
+                    "address is not in the first subtree"
+                );
+
+                subtree_address.position_range_end()
+            }
+        };
+
+        u64::from(remaining).try_into().expect("fits in usize")
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
-    #[allow(clippy::unwrap_in_result)]
-    pub fn completed_subtree_index_and_root(&self) -> Option<(u16, Node)> {
-        let value = self.inner.value()?;
-        Self::is_complete_subtree(value).then_some(())?;
-        let address = Self::subtree_address(value);
-        let index = address.index().try_into().expect("should fit in u16");
-        let root = value.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+    pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
+        if !self.is_complete_subtree() {
+            return None;
+        }
+
+        let index = self.subtree_index()?;
+        let root = self.frontier()?.root(Some(TRACKED_SUBTREE_HEIGHT.into()));
 
         Some((index, root))
     }

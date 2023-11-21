@@ -177,7 +177,7 @@ fn candidate_set_updates_are_rate_limited() {
     });
 }
 
-/// Test that a call to [`CandidateSet::update`] after a call to [`CandidateSet::update_inital`] is
+/// Test that a call to [`CandidateSet::update`] after a call to [`CandidateSet::update_initial`] is
 /// rate limited.
 #[test]
 fn candidate_set_update_after_update_initial_is_rate_limited() {
