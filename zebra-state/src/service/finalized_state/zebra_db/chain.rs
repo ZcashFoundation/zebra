@@ -65,7 +65,7 @@ impl ZebraDb {
             history_tree = self
                 .db
                 .zs_last_key_value(&history_tree_cf)
-                .map(|(_key: Height, tree_value)| tree_value);
+                .map(|(_key, tree_value): (Height, _)| tree_value);
         }
 
         history_tree.unwrap_or_default()

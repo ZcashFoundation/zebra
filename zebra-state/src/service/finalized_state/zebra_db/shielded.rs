@@ -115,7 +115,7 @@ impl ZebraDb {
             sprout_tree = self
                 .db
                 .zs_last_key_value(&sprout_tree_cf)
-                .map(|(_key: Height, tree_value)| tree_value);
+                .map(|(_key, tree_value): (Height, _)| tree_value);
         }
 
         sprout_tree.expect("Sprout note commitment tree must exist if there is a finalized tip")
