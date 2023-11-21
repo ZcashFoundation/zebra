@@ -1,3 +1,6 @@
+# Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository.
+# (External PRs are tested/deployed by mergify.)
 name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -31,6 +34,7 @@ on:
 
   # TODO: Temporarily disabled to reduce network load, see #6894.
   #push:
+  #  # Skip main branch updates where Rust code and dependencies aren't modified.
   #  branches:
   #    - main
   #  paths:
@@ -52,6 +56,7 @@ on:
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
+    # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -73,6 +78,9 @@ on:
     types:
       - published
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
 jobs:
   # If a release was made we want to extract the first part of the semver from the
   # tag_name
@@ -107,6 +115,9 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them.
+    # Since this workflow also runs on release tags, we need to check for them as well.
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') || contains(github.head_ref || github.ref, 'refs/tags/') }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
