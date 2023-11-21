@@ -9,7 +9,7 @@ use std::{
 
 use super::*;
 
-/// The minumum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
+/// The minimum duration that a `CachedPeerAddrResponse` is considered fresh before the inbound service
 /// should get new peer addresses from the address book to send as a `GetAddr` response.
 ///
 /// Cached responses are considered stale and should be cleared after twice this duration.
@@ -68,6 +68,7 @@ impl CachedPeerAddrResponse {
                 self.value = zn::Response::Peers(peers);
             }
 
+            // Clear the cached response if the time has past the cache expiry time.
             Ok(_) if now > cache_expiry => {
                 self.value = zn::Response::Nil;
             }
@@ -77,6 +78,8 @@ impl CachedPeerAddrResponse {
                 self.value = zn::Response::Nil;
             }
 
+            // Don't update the cached response or refresh time if unable to get new peer addresses
+            // from the address book and `now` is before the cache expiry.
             Ok(_) => {
                 debug!(
                     "could not refresh cached response because our address \
@@ -86,6 +89,7 @@ impl CachedPeerAddrResponse {
 
             Err(TryLockError::WouldBlock) => {}
 
+            // Panic if the address book lock is poisoned
             Err(TryLockError::Poisoned(_)) => {
                 panic!("previous thread panicked while holding the address book lock")
             }
