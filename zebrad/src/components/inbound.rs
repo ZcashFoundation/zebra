@@ -9,17 +9,15 @@ use std::{
     collections::HashSet,
     future::Future,
     pin::Pin,
-    sync::{Arc, TryLockError},
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-use chrono::Utc;
 use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
-use num_integer::div_ceil;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
@@ -32,10 +30,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::router::RouterError;
-use zebra_network::{
-    constants::{ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
-    AddressBook, InventoryResponse,
-};
+use zebra_network::{AddressBook, InventoryResponse};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -45,7 +40,10 @@ use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 use InventoryResponse::*;
 
+mod cached_peer_addr_response;
 pub(crate) mod downloads;
+
+use cached_peer_addr_response::CachedPeerAddrResponse;
 
 #[cfg(test)]
 mod tests;
@@ -135,8 +133,12 @@ pub enum Setup {
     Initialized {
         // Services
         //
-        /// A shared list of peer addresses.
-        address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
+        /// An owned partial list of peer addresses used as a `GetAddr` response, and
+        /// a shared list of peer addresses used to periodically refresh the partial list.
+        ///
+        /// Refreshed from the address book in `poll_ready` method
+        /// after [`CACHED_ADDRS_REFRESH_INTERVAL`](cached_peer_addr_response::CACHED_ADDRS_REFRESH_INTERVAL).
+        cached_peer_addr_response: CachedPeerAddrResponse,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
         block_downloads: Pin<Box<GossipedBlockDownloads>>,
@@ -261,6 +263,8 @@ impl Service<zn::Request> for Inbound {
                         latest_chain_tip,
                     } = setup_data;
 
+                    let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
+
                     let block_downloads = Box::pin(BlockDownloads::new(
                         full_verify_concurrency_limit,
                         Timeout::new(block_download_peer_set, BLOCK_DOWNLOAD_TIMEOUT),
@@ -271,7 +275,7 @@ impl Service<zn::Request> for Inbound {
 
                     result = Ok(());
                     Setup::Initialized {
-                        address_book,
+                        cached_peer_addr_response,
                         block_downloads,
                         mempool,
                         state,
@@ -306,7 +310,7 @@ impl Service<zn::Request> for Inbound {
             }
             // Clean up completed download tasks, ignoring their results
             Setup::Initialized {
-                address_book,
+                cached_peer_addr_response,
                 mut block_downloads,
                 mempool,
                 state,
@@ -321,7 +325,7 @@ impl Service<zn::Request> for Inbound {
                 result = Ok(());
 
                 Setup::Initialized {
-                    address_book,
+                    cached_peer_addr_response,
                     block_downloads,
                     mempool,
                     state,
@@ -352,13 +356,13 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
-        let (address_book, block_downloads, mempool, state) = match &mut self.setup {
+        let (cached_peer_addr_response, block_downloads, mempool, state) = match &mut self.setup {
             Setup::Initialized {
-                address_book,
+                cached_peer_addr_response,
                 block_downloads,
                 mempool,
                 state,
-            } => (address_book, block_downloads, mempool, state),
+            } => (cached_peer_addr_response, block_downloads, mempool, state),
             _ => {
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
@@ -377,58 +381,11 @@ impl Service<zn::Request> for Inbound {
                 //
                 // If the address book is busy, try again inside the future. If it can't be locked
                 // twice, ignore the request.
-                let address_book = address_book.clone();
-
-                let get_peers = move || match address_book.try_lock() {
-                    Ok(address_book) => Some(address_book.clone()),
-                    Err(TryLockError::WouldBlock) => None,
-                    Err(TryLockError::Poisoned(_)) => panic!("previous thread panicked while holding the address book lock"),
-                };
-
-                let peers = get_peers();
+                cached_peer_addr_response.try_refresh();
+                let response = cached_peer_addr_response.value();
 
                 async move {
-                    // Correctness: get the current time inside the future.
-                    //
-                    // This time is used to filter outdated peers, so it doesn't matter much
-                    // if we get it when the future is created, or when it starts running.
-                    let now = Utc::now();
-
-                    // If we didn't get the peers when the future was created, wait for other tasks
-                    // to run, then try again when the future first runs.
-                    if peers.is_none() {
-                        tokio::task::yield_now().await;
-                    }
-                    let peers = peers.or_else(get_peers);
-                    let is_busy = peers.is_none();
-
-                    // Send a sanitized response
-                    let mut peers = peers.map_or_else(Vec::new, |peers| peers.sanitized(now));
-
-                    // Truncate the list
-                    let address_limit = div_ceil(peers.len(), ADDR_RESPONSE_LIMIT_DENOMINATOR);
-                    let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
-                    peers.truncate(address_limit);
-
-                    if peers.is_empty() {
-                        // Sometimes we don't know if the peer response will be empty until we've
-                        // sanitized them.
-                        if is_busy {
-                            info!(
-                                "ignoring `Peers` request from remote peer because our address \
-                                 book is busy"
-                            );
-                        } else {
-                            debug!(
-                                "ignoring `Peers` request from remote peer because our address \
-                                 book has no available peers"
-                            );
-                        }
-
-                        Ok(zn::Response::Nil)
-                    } else {
-                        Ok(zn::Response::Peers(peers))
-                    }
+                    Ok(response)
                 }.boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
