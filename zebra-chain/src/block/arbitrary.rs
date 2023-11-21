@@ -517,8 +517,16 @@ impl Block {
                         }
                     }
                     // update history tree for the next block
-                    #[allow(clippy::unnecessary_unwrap)]
-                    if history_tree.is_none() {
+                    if let Some(history_tree) = history_tree.as_mut() {
+                        history_tree
+                            .push(
+                                current.network,
+                                Arc::new(block.clone()),
+                                sapling_tree.root(),
+                                orchard_tree.root(),
+                            )
+                            .unwrap();
+                    } else {
                         history_tree = Some(
                             HistoryTree::from_block(
                                 current.network,
@@ -528,17 +536,6 @@ impl Block {
                             )
                             .unwrap(),
                         );
-                    } else {
-                        history_tree
-                            .as_mut()
-                            .unwrap()
-                            .push(
-                                current.network,
-                                Arc::new(block.clone()),
-                                sapling_tree.root(),
-                                orchard_tree.root(),
-                            )
-                            .unwrap();
                     }
                 }
 
@@ -668,7 +665,7 @@ where
         attempts += 1;
 
         // Avoid O(n^2) algorithmic complexity by giving up early,
-        // rather than exhausively checking the entire UTXO set
+        // rather than exhaustively checking the entire UTXO set
         if attempts > 100 {
             return None;
         }
