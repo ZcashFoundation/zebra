@@ -46,7 +46,7 @@ pub trait OrchardVariant: Clone + Debug {
 pub struct Orchard;
 
 /// A structure representing a tag for Orchard protocol variant used for the transaction version `V6`
-/// (which supports ZSA features).
+/// (which ZSA features support).
 #[cfg(feature = "tx-v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
