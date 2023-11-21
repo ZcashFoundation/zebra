@@ -499,9 +499,9 @@ dependencies = [
 
 [[package]]
 name = "blake2b_simd"
-version = "1.0.2"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23285ad32269793932e830392f2fe2f83e26488fd3ec778883a93c8323735780"
+checksum = "3c2f0dc9a68c6317d884f97cc36cf5a3d20ba14ce404227df55e1af708ab04bc"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -510,9 +510,9 @@ dependencies = [
 
 [[package]]
 name = "blake2s_simd"
-version = "1.0.2"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94230421e395b9920d23df13ea5d77a20e1725331f90fbbf6df6040b33f756ae"
+checksum = "6637f448b9e61dfadbdcbae9a885fadee1f3eaffb1f8d3c1965d3ade8bdfd44f"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -906,9 +906,9 @@ checksum = "28c122c3980598d243d63d9a704629a2d748d101f278052ff068be5a4423ab6f"
 
 [[package]]
 name = "constant_time_eq"
-version = "0.3.0"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7144d30dcf0fafbce74250a3963025d8d52177934239851c917d29f1df280c2"
+checksum = "21a53c0a4d288377e7415b53dcfc3c04da5cdc2cc95c8d5ac178b58f0b861ad6"
 
 [[package]]
 name = "core-foundation"
@@ -1694,7 +1694,24 @@ dependencies = [
  "bitvec",
  "ff",
  "group",
- "halo2_proofs",
+ "halo2_proofs 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static",
+ "pasta_curves",
+ "rand 0.8.5",
+ "subtle",
+ "uint",
+]
+
+[[package]]
+name = "halo2_gadgets"
+version = "0.3.0"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#3c14fe44dd6c5b81b60bbc59ec0098dcb0b0081a"
+dependencies = [
+ "arrayvec",
+ "bitvec",
+ "ff",
+ "group",
+ "halo2_proofs 0.3.0 (git+https://github.com/QED-it/halo2?branch=zsa1)",
  "lazy_static",
  "pasta_curves",
  "rand 0.8.5",
@@ -1713,6 +1730,21 @@ name = "halo2_proofs"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b867a8d9bbb85fca76fff60652b5cd19b853a1c4d0665cb89bee68b18d2caf0"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_legacy_pdqsort",
+ "maybe-rayon",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "tracing",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.3.0"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#3c14fe44dd6c5b81b60bbc59ec0098dcb0b0081a"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2696,9 +2728,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d31e68534df32024dcc89a8390ec6d7bef65edd87d91b45cfb481a2eb2d77c5"
+version = "0.5.0"
+source = "git+https://github.com/QED-it/orchard?branch=zsa1#f38d6b9e4cac7b56ec88c6aae91a9783ec977017"
 dependencies = [
  "aes",
  "bitvec",
@@ -2706,8 +2737,8 @@ dependencies = [
  "ff",
  "fpe",
  "group",
- "halo2_gadgets",
- "halo2_proofs",
+ "halo2_gadgets 0.3.0 (git+https://github.com/QED-it/halo2?branch=zsa1)",
+ "halo2_proofs 0.3.0 (git+https://github.com/QED-it/halo2?branch=zsa1)",
  "hex",
  "incrementalmerkletree",
  "lazy_static",
@@ -2719,7 +2750,35 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/librustzcash?branch=zsa1-zebra)",
+]
+
+[[package]]
+name = "orchard"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d31e68534df32024dcc89a8390ec6d7bef65edd87d91b45cfb481a2eb2d77c5"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "ff",
+ "fpe",
+ "group",
+ "halo2_gadgets 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_proofs 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "incrementalmerkletree",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand 0.8.5",
+ "reddsa",
+ "serde",
+ "subtle",
+ "tracing",
+ "zcash_note_encryption 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -5448,6 +5507,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_note_encryption"
+version = "0.4.0"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1-zebra#d55ef03ea2fce9e9ed20f24e1de93a5d2c20dc35"
+dependencies = [
+ "chacha20",
+ "chacha20poly1305",
+ "cipher",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.13.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5471,7 +5542,7 @@ dependencies = [
  "lazy_static",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.6.0",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "ripemd",
@@ -5480,7 +5551,7 @@ dependencies = [
  "subtle",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -5527,7 +5598,7 @@ dependencies = [
  "libc",
  "memuse",
  "metrics",
- "orchard",
+ "orchard 0.6.0",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rayon",
@@ -5536,7 +5607,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives",
  "zcash_proofs",
 ]
@@ -5561,7 +5632,7 @@ dependencies = [
  "equihash",
  "futures",
  "group",
- "halo2_proofs",
+ "halo2_proofs 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "humantime",
  "incrementalmerkletree",
@@ -5569,7 +5640,8 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard",
+ "orchard 0.5.0",
+ "orchard 0.6.0",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5597,7 +5669,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_history",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives",
  "zebra-test",
 ]
@@ -5614,7 +5686,7 @@ dependencies = [
  "displaydoc",
  "futures",
  "futures-util",
- "halo2_proofs",
+ "halo2_proofs 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "howudoin",
  "jubjub",
@@ -5622,7 +5694,7 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard",
+ "orchard 0.6.0",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -5756,7 +5828,7 @@ dependencies = [
  "dirs",
  "elasticsearch",
  "futures",
- "halo2_proofs",
+ "halo2_proofs 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "hex-literal",
  "howudoin",
