@@ -62,7 +62,7 @@ impl ZebraDb {
             // In Zebra 1.4.0 and later, we only update the history tip tree when it has changed (for every block after heartwood).
             // But we write with a `()` key, not a height key.
             // So we need to look for the most recent update height if the `()` key has never been written.
-            history_tree = self.db.zs_last_key_value(&history_tree_cf);
+            history_tree = self.db.zs_last_key_value(&history_tree_cf).map(|(_height_key, tree_value)| tree_value);
         }
 
         history_tree.unwrap_or_default()
