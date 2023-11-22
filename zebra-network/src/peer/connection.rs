@@ -609,6 +609,7 @@ where
             .field("error_slot", &self.error_slot)
             .field("metrics_label", &self.metrics_label)
             .field("last_metrics_state", &self.last_metrics_state)
+            .field("last_overload_time", &self.last_overload_time)
             .finish()
     }
 }
