@@ -109,11 +109,13 @@ impl ZebraDb {
             self.db.zs_get(&sprout_tree_cf, &());
 
         if sprout_tree.is_none() {
-            let tip_height = self
-                .finalized_tip_height()
-                .expect("just checked for an empty database");
-
-            sprout_tree = self.db.zs_get(&sprout_tree_cf, &tip_height);
+            // In Zebra 1.4.0 and later, we don't update the sprout tip tree unless it is changed.
+            // And we write with a `()` key, not a height key.
+            // So we need to look for the most recent update height if the `()` key has never been written.
+            sprout_tree = self
+                .db
+                .zs_last_key_value(&sprout_tree_cf)
+                .map(|(_key, tree_value): (Height, _)| tree_value);
         }
 
         sprout_tree.expect("Sprout note commitment tree must exist if there is a finalized tip")
