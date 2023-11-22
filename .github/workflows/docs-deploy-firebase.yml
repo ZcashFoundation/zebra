@@ -1,3 +1,5 @@
+# Google Cloud docs updates that run when docs, Rust code, or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by mergify.)
 name: Docs
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -9,7 +11,9 @@ concurrency:
 
 on:
   workflow_dispatch:
+
   push:
+    # Skip main branch updates where docs, Rust code, and dependencies aren't modified.
     branches:
       - main
     paths:
@@ -29,8 +33,7 @@ on:
       - '.github/workflows/docs-deploy-firebase.yml'
 
   pull_request:
-    branches:
-      - main
+    # Skip PRs where docs, Rust code, and dependencies aren't modified.
     paths:
       # doc source files
       - 'book/**'
@@ -60,9 +63,14 @@ env:
   # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
   RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
@@ -116,6 +124,7 @@ jobs:
 
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
+    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
     timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:

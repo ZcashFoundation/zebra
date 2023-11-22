@@ -1,9 +1,10 @@
+# Workflow patches for skipping Google Cloud docs updates when docs, Rust code, or dependencies
+# aren't modified in a PR.
 name: Docs
 
+# Run on PRs with unmodified docs, code, and dependency files.
 on:
   pull_request:
-    branches:
-      - main
     paths-ignore:
       # doc source files
       - 'book/**'
@@ -20,6 +21,9 @@ on:
       # workflow definitions
       - '.github/workflows/docs-deploy-firebase.yml'
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch-external.yml` and `.yml` files.
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
@@ -29,7 +33,6 @@ jobs:
 
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
-    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

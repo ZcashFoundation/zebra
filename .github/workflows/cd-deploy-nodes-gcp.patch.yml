@@ -1,5 +1,8 @@
+# Workflow patches for skipping Google Cloud CD deployments, when Rust code or dependencies aren't
+# modified in a PR.
 name: Deploy Nodes to GCP
 
+# Run on PRs with unmodified code and dependency files.
 on:
   pull_request:
    paths-ignore:
@@ -19,7 +22,11 @@ on:
      - '.github/workflows/cd-deploy-nodes-gcp.yml'
      - '.github/workflows/sub-build-docker-image.yml'
 
+# IMPORTANT
+#
+# These job names must be kept in sync with the `.patch-external.yml` and `.yml` files.
 jobs:
+  # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   build:
     name: Build CD Docker / Build images
     runs-on: ubuntu-latest
