@@ -41,7 +41,7 @@ pub fn run(
         .write_batch(batch)
         .expect("updating tree key formats should always succeed");
 
-    // These deletes can be slow due to tombstones for previously deleted keys,
+    // The deletes below can be slow due to tombstones for previously deleted keys,
     // so we do it in a separate batch to avoid data races with syncing (#7961).
     let mut batch = DiskWriteBatch::new();
 
