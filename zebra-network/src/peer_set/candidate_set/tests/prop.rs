@@ -107,7 +107,7 @@ proptest! {
         let _guard = runtime.enter();
 
         let peers = peers.into_iter().map(|(ip, port)| {
-            MetaAddr::new_alternate(canonical_peer_addr(SocketAddr::new(ip, port)), &PeerServices::NODE_NETWORK)
+            MetaAddr::new_initial_peer(canonical_peer_addr(SocketAddr::new(ip, port)))
         }).collect::<Vec<_>>();
 
         let peer_service = tower::service_fn(|_| async {
