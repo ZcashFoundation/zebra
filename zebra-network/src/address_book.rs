@@ -667,9 +667,6 @@ impl AddressBook {
         let never_attempted_gossiped = self
             .state_peers(PeerAddrState::NeverAttemptedGossiped)
             .count();
-        let never_attempted_alternate = self
-            .state_peers(PeerAddrState::NeverAttemptedAlternate)
-            .count();
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 

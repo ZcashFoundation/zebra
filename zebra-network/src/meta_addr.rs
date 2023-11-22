@@ -54,14 +54,9 @@ pub enum PeerAddrState {
     Responded,
 
     /// The peer's address has just been fetched from a DNS seeder, or via peer
-    /// gossip, but we haven't attempted to connect to it yet.
+    /// gossip, or as part of a `Version` message, or guessed from an inbound remote IP,
+    /// but we haven't attempted to connect to it yet.
     NeverAttemptedGossiped,
-
-    /// The peer's address has just been received as part of a `Version` message,
-    /// so we might already be connected to this peer.
-    ///
-    /// Alternate addresses are attempted after gossiped addresses.
-    NeverAttemptedAlternate,
 
     /// The peer's TCP connection failed, or the peer sent us an unexpected
     /// Zcash protocol message, so we failed the connection.
@@ -75,7 +70,7 @@ impl PeerAddrState {
     /// Return true if this state is a "never attempted" state.
     pub fn is_never_attempted(&self) -> bool {
         match self {
-            NeverAttemptedGossiped | NeverAttemptedAlternate => true,
+            NeverAttemptedGossiped => true,
             AttemptPending | Responded | Failed => false,
         }
     }
@@ -88,17 +83,8 @@ impl PeerAddrState {
         use Ordering::*;
         match (self, other) {
             _ if self == other => Equal,
-            // Peers start in one of the "never attempted" states,
+            // Peers start in the "never attempted" state,
             // then typically progress towards a "responded" or "failed" state.
-            //
-            // # Security
-            //
-            // Prefer gossiped addresses to alternate addresses,
-            // so that peers can't replace the addresses of other peers.
-            // (This is currently checked explicitly by the address update code,
-            // but we respect the same order here as a precaution.)
-            (NeverAttemptedAlternate, _) => Less,
-            (_, NeverAttemptedAlternate) => Greater,
             (NeverAttemptedGossiped, _) => Less,
             (_, NeverAttemptedGossiped) => Greater,
             (AttemptPending, _) => Less,
@@ -139,8 +125,6 @@ impl Ord for PeerAddrState {
             (_, Responded) => Greater,
             (NeverAttemptedGossiped, _) => Less,
             (_, NeverAttemptedGossiped) => Greater,
-            (NeverAttemptedAlternate, _) => Less,
-            (_, NeverAttemptedAlternate) => Greater,
             (Failed, _) => Less,
             (_, Failed) => Greater,
             // These patterns are redundant, but Rust doesn't assume that `==` is reflexive,

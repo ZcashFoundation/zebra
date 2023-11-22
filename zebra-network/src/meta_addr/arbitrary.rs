@@ -45,28 +45,6 @@ impl MetaAddr {
             })
             .boxed()
     }
-
-    /// Create a strategy that generates [`MetaAddr`]s in the
-    /// [`NeverAttemptedAlternate`][1] state.
-    ///
-    /// [1]: super::PeerAddrState::NeverAttemptedAlternate
-    pub fn alternate_strategy() -> BoxedStrategy<Self> {
-        (
-            canonical_peer_addr_strategy(),
-            any::<PeerServices>(),
-            any::<Instant>(),
-            any::<DateTime32>(),
-        )
-            .prop_map(
-                |(socket_addr, untrusted_services, instant_now, local_now)| {
-                    // instant_now is not actually used for this variant,
-                    // so we could just provide a default value
-                    MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                        .into_new_meta_addr(instant_now, local_now)
-                },
-            )
-            .boxed()
-    }
 }
 
 impl MetaAddrChange {
