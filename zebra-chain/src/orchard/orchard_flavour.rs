@@ -23,7 +23,7 @@ pub const ENCRYPTED_NOTE_SIZE_V6: usize = orchard_zsa::note_encryption_v3::ENC_C
 
 /// A trait representing compile-time settings of Orchard Shielded Protocol used in
 /// the transactions `V5` and `V6`.
-pub trait OrchardVariant: Clone + Debug {
+pub trait OrchardFlavour: Clone + Debug {
     /// The size of the encrypted note for this protocol version.
     const ENCRYPTED_NOTE_SIZE: usize;
 
@@ -71,14 +71,14 @@ impl ZcashDeserialize for NoBurn {
     }
 }
 
-impl OrchardVariant for Orchard {
+impl OrchardFlavour for Orchard {
     const ENCRYPTED_NOTE_SIZE: usize = ENCRYPTED_NOTE_SIZE_V5;
     type EncryptedNote = note::EncryptedNote<ENCRYPTED_NOTE_SIZE_V5>;
     type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
-impl OrchardVariant for OrchardZSA {
+impl OrchardFlavour for OrchardZSA {
     const ENCRYPTED_NOTE_SIZE: usize = ENCRYPTED_NOTE_SIZE_V6;
     type EncryptedNote = note::EncryptedNote<ENCRYPTED_NOTE_SIZE_V6>;
     type BurnType = Vec<BurnItem>;

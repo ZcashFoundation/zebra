@@ -11,7 +11,7 @@ use super::{
     commitment::{self, ValueCommitment},
     keys,
     note::{self, Nullifier},
-    OrchardVariant,
+    OrchardFlavour,
 };
 
 /// An Action description, as described in the [Zcash specification §7.3][actiondesc].
@@ -22,7 +22,7 @@ use super::{
 ///
 /// [actiondesc]: https://zips.z.cash/protocol/nu5.pdf#actiondesc
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Action<V: OrchardVariant> {
+pub struct Action<V: OrchardFlavour> {
     /// A value commitment to net value of the input note minus the output note
     pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note being spent.
@@ -43,7 +43,7 @@ pub struct Action<V: OrchardVariant> {
     pub out_ciphertext: note::WrappedNoteKey,
 }
 
-impl<V: OrchardVariant> ZcashSerialize for Action<V> {
+impl<V: OrchardFlavour> ZcashSerialize for Action<V> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.nullifier)[..])?;
@@ -56,7 +56,7 @@ impl<V: OrchardVariant> ZcashSerialize for Action<V> {
     }
 }
 
-impl<V: OrchardVariant> ZcashDeserialize for Action<V> {
+impl<V: OrchardFlavour> ZcashDeserialize for Action<V> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //

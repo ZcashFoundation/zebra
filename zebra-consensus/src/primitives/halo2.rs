@@ -131,7 +131,7 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl<V: zebra_chain::orchard::OrchardVariant> From<&zebra_chain::orchard::ShieldedData<V>>
+impl<V: zebra_chain::orchard::OrchardFlavour> From<&zebra_chain::orchard::ShieldedData<V>>
     for Item
 {
     fn from(shielded_data: &zebra_chain::orchard::ShieldedData<V>) -> Item {
