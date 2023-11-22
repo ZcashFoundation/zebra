@@ -21,7 +21,6 @@ use crate::{
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
-    protocol::types::PeerServices,
     AddressBook, BoxError, Request, Response,
 };
 
