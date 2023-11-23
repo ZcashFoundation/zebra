@@ -3,7 +3,7 @@
 //! Zebra's database is implemented in 4 layers:
 //! - [`FinalizedState`]: queues, validates, and commits blocks, using...
 //! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the database, using...
-//! - [`DiskDb`](disk_db::DiskDb): reads and writes format-specific types
+//! - [`DiskDb`]: reads and writes format-specific types
 //!   to the database, using...
 //! - [`disk_format`]: converts types to raw database bytes.
 //!
@@ -38,17 +38,17 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+#[allow(unused_imports)]
+pub use disk_db::{DiskWriteBatch, WriteDisk};
 pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+
+#[cfg(feature = "shielded-scan")]
+pub use disk_db::{DiskDb, ReadDisk};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::MAX_ON_DISK_HEIGHT;
 
 pub(super) use zebra_db::ZebraDb;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use disk_db::DiskWriteBatch;
-#[cfg(not(any(test, feature = "proptest-impl")))]
-use disk_db::DiskWriteBatch;
 
 /// The finalized part of the chain state, stored in the db.
 ///

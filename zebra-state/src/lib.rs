@@ -59,6 +59,12 @@ pub use service::{
     OutputIndex, OutputLocation, TransactionLocation,
 };
 
+#[cfg(feature = "shielded-scan")]
+pub use service::finalized_state::{DiskDb, ReadDisk};
+
+#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+pub use service::finalized_state::{DiskWriteBatch, WriteDisk};
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
 
@@ -66,7 +72,7 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::{DiskWriteBatch, MAX_ON_DISK_HEIGHT},
+    finalized_state::MAX_ON_DISK_HEIGHT,
     init_test, init_test_services, ReadStateService,
 };
 
