@@ -52,3 +52,9 @@ impl Storage {
         self.sapling_keys.clone()
     }
 }
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self::new()
+    }
+}

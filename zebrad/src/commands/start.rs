@@ -195,7 +195,7 @@ impl StartCmd {
             block_download_peer_set: peer_set.clone(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
-            state,
+            state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
         };
         setup_tx
@@ -262,6 +262,7 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        // Spawn never ending end of support task.
         info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
             sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
@@ -285,6 +286,18 @@ impl StartCmd {
         info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
+        #[cfg(feature = "zebra-scan")]
+        // Spawn never ending scan task.
+        let scan_task_handle = {
+            info!("spawning zebra_scanner");
+            let mut storage = zebra_scan::storage::Storage::new();
+            for (key, birthday) in config.shielded_scan.sapling_keys_to_scan.iter() {
+                storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
+            }
+
+            tokio::spawn(zebra_scan::scan::start(state, storage).in_current_span())
+        };
+
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
@@ -299,6 +312,8 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
+        #[cfg(feature = "zebra-scan")]
+        pin!(scan_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -385,6 +400,8 @@ impl StartCmd {
                     exit_when_task_finishes = false;
                     Ok(())
                 }
+
+                // TODO: add scan task which is tricky because it needs to be behind a feature.
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -410,6 +427,9 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
+
+        #[cfg(feature = "zebra-scan")]
+        scan_task_handle.abort();
 
         // startup tasks
         state_checkpoint_verify_handle.abort();
