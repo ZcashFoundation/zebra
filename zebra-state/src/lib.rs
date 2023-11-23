@@ -60,7 +60,7 @@ pub use service::{
 };
 
 #[cfg(feature = "shielded-scan")]
-pub use service::finalized_state::{DiskDb, ReadDisk};
+pub use service::finalized_state::{ReadDisk, ZebraDb};
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
 pub use service::finalized_state::{DiskWriteBatch, WriteDisk};

@@ -39,16 +39,16 @@ mod arbitrary;
 mod tests;
 
 #[allow(unused_imports)]
-pub use disk_db::{DiskWriteBatch, WriteDisk};
+pub use disk_db::{DiskDb, DiskWriteBatch, WriteDisk};
 pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+pub use zebra_db::ZebraDb;
 
 #[cfg(feature = "shielded-scan")]
-pub use disk_db::{DiskDb, ReadDisk};
+pub use disk_db::ReadDisk;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::MAX_ON_DISK_HEIGHT;
 
-pub(super) use zebra_db::ZebraDb;
 
 /// The finalized part of the chain state, stored in the db.
 ///
