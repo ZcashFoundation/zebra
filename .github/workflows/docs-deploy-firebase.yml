@@ -1,3 +1,7 @@
+# This workflow focuses on building and deploying different types of documentation for the Zebra project.
+# - Builds and deploys Zebra Book Docs using mdBook, setting up necessary tools and deploying to Firebase.
+# - Compiles and deploys external documentation, setting up Rust with the beta toolchain and default profile, building the docs, and deploying them to Firebase.
+# - Assembles and deploys internal documentation with similar steps, including private items in the documentation, and deploys to Firebase.
 name: Docs
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if

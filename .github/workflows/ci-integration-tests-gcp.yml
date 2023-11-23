@@ -1,3 +1,7 @@
+# This workflow performs a series of integration tests on GCP, primarily focusing on Zebra, but it also tests with Lightwalletd
+#
+# Specific conditions and dependencies are set for each job to ensure they are executed in the correct sequence and under the right circumstances.
+# Each test has a description of the conditions under which it runs.
 name: Integration Tests on GCP
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
