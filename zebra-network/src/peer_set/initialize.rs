@@ -870,6 +870,12 @@ where
 
                 // Spawn each handshake or crawl into an independent task, so handshakes can make
                 // progress while crawls are running.
+                //
+                // # Concurrency
+                //
+                // The peer crawler must be able to make progress even if some handshakes are
+                // rate-limited. So the async mutex and next peer timeout are awaited inside the
+                // spawned task.
                 let handshake_or_crawl_handle = tokio::spawn(
                     async move {
                         // Try to get the next available peer for a handshake.
