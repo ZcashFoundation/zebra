@@ -80,7 +80,8 @@ on:
 
 # IMPORTANT
 #
-# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
+# The job names in `cd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
+# `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
 jobs:
   # If a release was made we want to extract the first part of the semver from the
   # tag_name

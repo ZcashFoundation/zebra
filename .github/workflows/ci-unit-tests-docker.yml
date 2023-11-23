@@ -81,7 +81,8 @@ env:
 
 # IMPORTANT
 #
-# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
+# The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
+# `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
   # Build the docker image used by the tests.
   #

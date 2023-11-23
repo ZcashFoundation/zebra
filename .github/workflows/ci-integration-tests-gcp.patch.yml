@@ -28,7 +28,8 @@ on:
 
 # IMPORTANT
 #
-# These job names must be kept in sync with the `.patch-external.yml` and `.yml` files.
+# The job names in `ci-integration-tests-gcp.yml`, `ci-integration-tests-gcp.patch.yml` and
+# `ci-integration-tests-gcp.patch-external.yml` must be kept in sync.
 jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-available-disks:

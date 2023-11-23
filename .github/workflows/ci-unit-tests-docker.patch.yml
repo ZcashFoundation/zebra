@@ -27,7 +27,8 @@ on:
 
 # IMPORTANT
 #
-# These job names must be kept in sync with the `.patch-external.yml` and `.yml` files.
+# The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
+# `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
   build:
     name: Build CI Docker / Build images
