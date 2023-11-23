@@ -546,10 +546,11 @@ where
     ///
     /// When peers send solicited or unsolicited peer advertisements, Zebra puts them in this cache.
     ///
-    /// When Zebra's components request peers, some cached peers are consumed and returned as a
-    /// synthetic response. This works around `zcashd`'s address response rate-limit.
+    /// When Zebra's components request peers, some cached peers are randomly selected,
+    /// consumed, and returned as a modified response. This works around `zcashd`'s address
+    /// response rate-limit.
     ///
-    /// The cache is limited to avoid denial of service attacks.
+    /// The cache size is limited to avoid denial of service attacks.
     pub(super) cached_addrs: Vec<MetaAddr>,
 
     /// The `inbound` service, used to answer requests from this connection's peer.
