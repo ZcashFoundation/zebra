@@ -49,6 +49,39 @@ pub use disk_db::ReadDisk;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::MAX_ON_DISK_HEIGHT;
 
+/// The column families supported by the running `zebra-state` database code.
+pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    // Blocks
+    "hash_by_height",
+    "height_by_hash",
+    "block_header_by_height",
+    // Transactions
+    "tx_by_loc",
+    "hash_by_tx_loc",
+    "tx_loc_by_hash",
+    // Transparent
+    "balance_by_transparent_addr",
+    "tx_loc_by_transparent_addr_loc",
+    "utxo_by_out_loc",
+    "utxo_loc_by_transparent_addr_loc",
+    // Sprout
+    "sprout_nullifiers",
+    "sprout_anchors",
+    "sprout_note_commitment_tree",
+    // Sapling
+    "sapling_nullifiers",
+    "sapling_anchors",
+    "sapling_note_commitment_tree",
+    "sapling_note_commitment_subtree",
+    // Orchard
+    "orchard_nullifiers",
+    "orchard_anchors",
+    "orchard_note_commitment_tree",
+    "orchard_note_commitment_subtree",
+    // Chain
+    "history_tree",
+    "tip_chain_value_pool",
+];
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -120,7 +153,14 @@ impl FinalizedState {
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
-        let db = ZebraDb::new(config, network, debug_skip_format_upgrades);
+        let db = ZebraDb::new(
+            config,
+            network,
+            debug_skip_format_upgrades,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+        );
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {

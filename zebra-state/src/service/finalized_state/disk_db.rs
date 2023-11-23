@@ -617,43 +617,13 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
-    /// The column families supported by the running database code.
-    const COLUMN_FAMILIES_IN_CODE: &'static [&'static str] = &[
-        // Blocks
-        "hash_by_height",
-        "height_by_hash",
-        "block_header_by_height",
-        // Transactions
-        "tx_by_loc",
-        "hash_by_tx_loc",
-        "tx_loc_by_hash",
-        // Transparent
-        "balance_by_transparent_addr",
-        "tx_loc_by_transparent_addr_loc",
-        "utxo_by_out_loc",
-        "utxo_loc_by_transparent_addr_loc",
-        // Sprout
-        "sprout_nullifiers",
-        "sprout_anchors",
-        "sprout_note_commitment_tree",
-        // Sapling
-        "sapling_nullifiers",
-        "sapling_anchors",
-        "sapling_note_commitment_tree",
-        "sapling_note_commitment_subtree",
-        // Orchard
-        "orchard_nullifiers",
-        "orchard_anchors",
-        "orchard_note_commitment_tree",
-        "orchard_note_commitment_subtree",
-        // Chain
-        "history_tree",
-        "tip_chain_value_pool",
-    ];
-
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
-    pub fn new(config: &Config, network: Network) -> DiskDb {
+    pub fn new(
+        config: &Config,
+        network: Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> DiskDb {
         let path = config.db_path(network);
 
         let db_options = DiskDb::options();
@@ -666,9 +636,7 @@ impl DiskDb {
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
         let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
-        let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string);
+        let column_families_in_code = column_families_in_code.into_iter();
 
         let column_families = column_families_on_disk
             .into_iter()

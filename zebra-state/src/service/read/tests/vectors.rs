@@ -21,7 +21,7 @@ use crate::{
     init_test_services, populated_state,
     response::MinedTx,
     service::{
-        finalized_state::{DiskWriteBatch, ZebraDb},
+        finalized_state::{DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
         non_finalized_state::Chain,
         read::{orchard_subtrees, sapling_subtrees},
     },
@@ -122,7 +122,8 @@ async fn test_read_subtrees() -> Result<()> {
 
     // Prepare the finalized state.
     let db = {
-        let db = ZebraDb::new(&Config::ephemeral(), Mainnet, true);
+        let db = new_ephemeral_db();
+
         let db_subtrees = db_height_range.enumerate().map(dummy_subtree);
         for db_subtree in db_subtrees {
             let mut db_batch = DiskWriteBatch::new();
@@ -206,7 +207,8 @@ async fn test_sapling_subtrees() -> Result<()> {
 
     // Prepare the finalized state.
     let db_subtree = NoteCommitmentSubtree::new(0, Height(1), dummy_subtree_root);
-    let db = ZebraDb::new(&Config::ephemeral(), Mainnet, true);
+
+    let db = new_ephemeral_db();
     let mut db_batch = DiskWriteBatch::new();
     db_batch.insert_sapling_subtree(&db, &db_subtree);
     db.write(db_batch)
@@ -271,7 +273,8 @@ async fn test_orchard_subtrees() -> Result<()> {
 
     // Prepare the finalized state.
     let db_subtree = NoteCommitmentSubtree::new(0, Height(1), dummy_subtree_root);
-    let db = ZebraDb::new(&Config::ephemeral(), Mainnet, true);
+
+    let db = new_ephemeral_db();
     let mut db_batch = DiskWriteBatch::new();
     db_batch.insert_orchard_subtree(&db, &db_subtree);
     db.write(db_batch)
@@ -360,4 +363,16 @@ where
     N: PartialEq + Copy,
 {
     index == &subtree.index && subtree_data == &subtree.into_data()
+}
+
+/// Returns a new ephemeral database with no consistency checks.
+fn new_ephemeral_db() -> ZebraDb {
+    ZebraDb::new(
+        &Config::ephemeral(),
+        Mainnet,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+    )
 }

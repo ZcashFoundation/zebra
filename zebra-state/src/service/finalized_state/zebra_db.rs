@@ -80,7 +80,12 @@ impl ZebraDb {
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
     /// This argument is only used when running tests, it is ignored in production code.
-    pub fn new(config: &Config, network: Network, debug_skip_format_upgrades: bool) -> ZebraDb {
+    pub fn new(
+        config: &Config,
+        network: Network,
+        debug_skip_format_upgrades: bool,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> ZebraDb {
         let running_version = database_format_version_in_code();
         let disk_version = database_format_version_on_disk(config, network)
             .expect("unable to read database format version file");
@@ -97,7 +102,7 @@ impl ZebraDb {
             // changes to the default database version. Then we set the correct version in the
             // upgrade thread. We need to do the version change in this order, because the version
             // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(config, network),
+            db: DiskDb::new(config, network, column_families_in_code),
         };
 
         db.spawn_format_change(config, network, format_change);

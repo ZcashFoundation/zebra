@@ -27,7 +27,7 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb},
+    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
     CheckpointVerifiedBlock, Config,
 };
 
@@ -83,6 +83,9 @@ fn test_block_db_round_trip_with(
         network,
         // The raw database accesses in this test create invalid database formats.
         true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
     );
 
     // Check that each block round-trips to the database
