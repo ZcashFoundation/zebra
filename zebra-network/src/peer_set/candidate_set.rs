@@ -368,7 +368,8 @@ where
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
     /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
-    /// apart.
+    /// apart. If `next()` has recently provided a peer, then its future will sleep
+    /// until the rate-limit has passed.
     ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
