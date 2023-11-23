@@ -59,11 +59,13 @@ impl ZebraDb {
         let mut history_tree: Option<Arc<HistoryTree>> = self.db.zs_get(&history_tree_cf, &());
 
         if history_tree.is_none() {
-            let tip_height = self
-                .finalized_tip_height()
-                .expect("just checked for an empty database");
-
-            history_tree = self.db.zs_get(&history_tree_cf, &tip_height);
+            // In Zebra 1.4.0 and later, we only update the history tip tree when it has changed (for every block after heartwood).
+            // But we write with a `()` key, not a height key.
+            // So we need to look for the most recent update height if the `()` key has never been written.
+            history_tree = self
+                .db
+                .zs_last_key_value(&history_tree_cf)
+                .map(|(_key, tree_value): (Height, _)| tree_value);
         }
 
         history_tree.unwrap_or_default()
