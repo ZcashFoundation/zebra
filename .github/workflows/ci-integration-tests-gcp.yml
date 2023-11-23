@@ -97,7 +97,8 @@ on:
 
 # IMPORTANT
 #
-# These job names must be kept in sync with the `.patch.yml` and `.patch-external.yml` files.
+# The job names in `ci-integration-tests-gcp.yml`, `ci-integration-tests-gcp.patch.yml` and
+# `ci-integration-tests-gcp.patch-external.yml` must be kept in sync.
 jobs:
   # to also run a job on Mergify head branches,
   # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
