@@ -541,13 +541,16 @@ where
     /// other state handling.
     pub(super) request_timer: Option<Pin<Box<Sleep>>>,
 
-    /// A cached copy of the last unsolicited `addr` or `addrv2` message from this peer.
+    /// Unused peers from recent `addr` or `addrv2` messages from this peer.
+    /// Also holds the initial addresses sent in `version` messages, or guessed from the remote IP.
     ///
-    /// When Zebra requests peers, the cache is consumed and returned as a synthetic response.
-    /// This works around `zcashd`'s address response rate-limit.
+    /// When peers send solicited or unsolicited peer advertisements, Zebra puts them in this cache.
     ///
-    /// Multi-peer `addr` or `addrv2` messages replace single-peer messages in the cache.
-    /// (`zcashd` also gossips its own address at regular intervals.)
+    /// When Zebra's components request peers, some cached peers are randomly selected,
+    /// consumed, and returned as a modified response. This works around `zcashd`'s address
+    /// response rate-limit.
+    ///
+    /// The cache size is limited to avoid denial of service attacks.
     pub(super) cached_addrs: Vec<MetaAddr>,
 
     /// The `inbound` service, used to answer requests from this connection's peer.
@@ -609,6 +612,7 @@ where
             .field("error_slot", &self.error_slot)
             .field("metrics_label", &self.metrics_label)
             .field("last_metrics_state", &self.last_metrics_state)
+            .field("last_overload_time", &self.last_overload_time)
             .finish()
     }
 }
@@ -617,7 +621,7 @@ impl<S, Tx> Connection<S, Tx>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
-    /// Return a new connection from its channels, services, and shared state.
+    /// Return a new connection from its channels, services, shared state, and metadata.
     pub(crate) fn new(
         inbound_service: S,
         client_rx: futures::channel::mpsc::Receiver<ClientRequest>,
@@ -625,6 +629,7 @@ where
         peer_tx: Tx,
         connection_tracker: ConnectionTracker,
         connection_info: Arc<ConnectionInfo>,
+        initial_cached_addrs: Vec<MetaAddr>,
     ) -> Self {
         let metrics_label = connection_info.connected_addr.get_transient_addr_label();
 
@@ -632,7 +637,7 @@ where
             connection_info,
             state: State::AwaitingRequest,
             request_timer: None,
-            cached_addrs: Vec::new(),
+            cached_addrs: initial_cached_addrs,
             svc: inbound_service,
             client_rx: client_rx.into(),
             error_slot,
