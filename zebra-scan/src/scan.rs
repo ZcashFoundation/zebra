@@ -26,7 +26,7 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 /// - Real scanning code functionality will be added in the future here.
 pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
     // We want to make sure the state has a tip height available before we start scanning.
-    std::thread::sleep(INITIAL_WAIT);
+    tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
         // Make sure we can query the state
@@ -53,6 +53,6 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
             );
         }
 
-        std::thread::sleep(CHECK_INTERVAL);
+        tokio::time::sleep(CHECK_INTERVAL).await;
     }
 }
