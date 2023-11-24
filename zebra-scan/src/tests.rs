@@ -6,18 +6,18 @@
 use std::sync::Arc;
 
 use zcash_client_backend::{
-    data_api::BlockMetadata,
+    data_api::ScannedBlock,
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
         self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
         CompactTx,
     },
-    scanning::scan_block,
+    scanning::{ScanError, ScanningKey},
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight, Network},
+    consensus::BlockHeight,
     constants::{mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SPENDING_KEY_GENERATOR},
     memo::MemoBytes,
     sapling::{
@@ -35,24 +35,22 @@ use rand::{rngs::OsRng, RngCore};
 
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
+
 use zebra_chain::{
     block::Block,
     chain_tip::ChainTip,
+    parameters::Network,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{Hash, Transaction},
 };
 
-/// Prove that Zebra blocks can be scanned using the `zcash_client_backend::scanning::scan_block` function:
-/// - Populates the state with a continuous chain of mainnet blocks from genesis.
-/// - Scan the chain from the tip going backwards down to genesis.
-/// - Verifies that no relevant transaction is found in the chain when scanning for a fake account's nullifier.
+/// Scans a continuous chain of Mainnet blocks from tip to genesis.
+///
+/// Also verifies that no relevant transaction is found in the chain when scanning for a fake
+/// account's nullifier.
 #[tokio::test]
 async fn scanning_from_populated_zebra_state() -> Result<()> {
-    let account = AccountId::from(12);
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
-    let nf = Nullifier([7; 32]);
-
-    let network = zebra_chain::parameters::Network::default();
+    let network = Network::default();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -75,41 +73,32 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
     // TODO: Accessing the state database directly is ok in the tests, but not in production code.
     // Use `Request::Block` if the code is copied to production.
     while let Some(block) = db.block(height.into()) {
-        // We fake the sapling tree size to 1 because we are not in Sapling heights.
-        let sapling_tree_size = 1;
-        let orchard_tree_size = db
-            .orchard_tree_by_hash_or_height(height.into())
-            .expect("each state block must have a sapling tree")
-            .count();
+        // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
+        // because the underlying scanning function would return
+        // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
+        let sapling_commitment_tree_size = 1;
+
+        let orchard_commitment_tree_size = 0;
 
         let chain_metadata = ChainMetadata {
-            sapling_commitment_tree_size: sapling_tree_size
-                .try_into()
-                .expect("sapling position is limited to u32::MAX"),
-            orchard_commitment_tree_size: orchard_tree_size
-                .try_into()
-                .expect("orchard position is limited to u32::MAX"),
+            sapling_commitment_tree_size,
+            orchard_commitment_tree_size,
         };
 
-        let compact_block = block_to_compact(block, chain_metadata);
+        let compact_block = block_to_compact(block.clone(), chain_metadata);
 
-        let res = scan_block(
-            &zcash_primitives::consensus::MainNetwork,
-            compact_block.clone(),
-            &vks[..],
-            &[(account, nf)],
-            None,
-        )
-        .unwrap();
+        let res =
+            scan_block::<SaplingIvk>(network, block, sapling_commitment_tree_size, &[]).unwrap();
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
         blocks_scanned += 1;
 
-        // scan backwards
         if height.is_min() {
             break;
         }
+
+        // scan backwards
         height = height.previous()?;
     }
 
@@ -150,7 +139,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
     // The fake block function will have our transaction and a random one.
     assert_eq!(cb.vtx.len(), 2);
 
-    let res = scan_block(
+    let res = zcash_client_backend::scanning::scan_block(
         &zcash_primitives::consensus::MainNetwork,
         cb.clone(),
         &vks[..],
@@ -185,12 +174,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     )
     .unwrap();
 
-    let account = AccountId::from(1);
-
     // Build a vector of viewing keys `vks` to scan for.
     let fvk = efvk.fvk;
     let ivk = fvk.vk.ivk();
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
 
     let network = zebra_chain::parameters::Network::Mainnet;
 
@@ -213,54 +199,22 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        // zcash_client_backend doesn't support scanning the genesis block, but that's ok, because
-        // Sapling activates at height 419,200. So we'll never scan these blocks in production code.
-        let sapling_tree_size = if height.is_min() {
-            1
-        } else {
-            db.sapling_tree_by_hash_or_height(height.into())
-                .expect("each state block must have a sapling tree")
-                .count()
-        };
+        // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
+        // because the underlying scanning function would return
+        // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
+        let sapling_commitment_tree_size = 1;
 
-        let orchard_tree_size = db
-            .orchard_tree_by_hash_or_height(height.into())
-            .expect("each state block must have a orchard tree")
-            .count();
+        let orchard_commitment_tree_size = 0;
 
         let chain_metadata = ChainMetadata {
-            sapling_commitment_tree_size: sapling_tree_size
-                .try_into()
-                .expect("sapling position is limited to u32::MAX"),
-            orchard_commitment_tree_size: orchard_tree_size
-                .try_into()
-                .expect("orchard position is limited to u32::MAX"),
+            sapling_commitment_tree_size,
+            orchard_commitment_tree_size,
         };
 
-        let block_metadata = if height.is_min() {
-            None
-        } else {
-            Some(BlockMetadata::from_parts(
-                height.previous()?.0.into(),
-                BlockHash(block.header.previous_block_hash.0),
-                db.sapling_tree_by_hash_or_height(block.header.previous_block_hash.into())
-                    .expect("each state block must have a sapling tree")
-                    .count()
-                    .try_into()
-                    .expect("sapling position is limited to u32::MAX"),
-            ))
-        };
+        let compact_block = block_to_compact(block.clone(), chain_metadata);
 
-        let compact_block = block_to_compact(block, chain_metadata);
-
-        let res = scan_block(
-            &zcash_primitives::consensus::MainNetwork,
-            compact_block.clone(),
-            &vks[..],
-            &[],
-            block_metadata.as_ref(),
-        )
-        .expect("scanning block for the ZECpages viewing key should work");
+        let res = scan_block(network, block, sapling_commitment_tree_size, &[&ivk])
+            .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
@@ -322,7 +276,7 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     );
 
     // Scan with our key
-    let res = scan_block(
+    let res = zcash_client_backend::scanning::scan_block(
         &zcash_primitives::consensus::MainNetwork,
         cb.clone(),
         &vks[..],
