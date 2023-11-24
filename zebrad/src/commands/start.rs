@@ -297,6 +297,10 @@ impl StartCmd {
 
             tokio::spawn(zebra_scan::scan::start(state, storage).in_current_span())
         };
+        #[cfg(not(feature = "zebra-scan"))]
+        // Spawn a dummy scan task which doesn't do anything and never finishes.
+        let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
+            tokio::spawn(std::future::pending().in_current_span());
 
         info!("spawned initial Zebra tasks");
 
@@ -312,7 +316,6 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
-        #[cfg(feature = "zebra-scan")]
         pin!(scan_task_handle);
 
         // startup tasks
@@ -401,7 +404,9 @@ impl StartCmd {
                     Ok(())
                 }
 
-                // TODO: add scan task which is tricky because it needs to be behind a feature.
+                scan_result = &mut scan_task_handle => scan_result
+                    .expect("unexpected panic in the scan task")
+                    .map(|_| info!("scan task exited")),
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -427,8 +432,6 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
-
-        #[cfg(feature = "zebra-scan")]
         scan_task_handle.abort();
 
         // startup tasks
