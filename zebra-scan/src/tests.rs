@@ -510,6 +510,12 @@ fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     ctx
 }
 
+/// Returns transactions belonging to any of the given [`ScanningKey`]s.
+///
+/// TODO:
+/// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
+/// Zebra's state, and we can retrieve the tree size ourselves.
+/// - Add prior block metadata once we have access to Zebra's state.
 fn scan_block<K: ScanningKey>(
     network: Network,
     block: Arc<Block>,
