@@ -550,3 +550,41 @@ fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     ctx.outputs.push(cout);
     ctx
 }
+
+fn scan_block<K: ScanningKey>(
+    network: Network,
+    block: Arc<Block>,
+    sapling_tree_size: u32,
+    scanning_keys: &[&K],
+) -> Result<ScannedBlock<K::Nf>, ScanError> {
+    let network: zcash_primitives::consensus::Network = match network {
+        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
+        Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
+    };
+
+    // TODO: Implement a check that returns early when the block height is below the Sapling
+    // activation height.
+
+    let chain_metadata = ChainMetadata {
+        sapling_commitment_tree_size: sapling_tree_size,
+        orchard_commitment_tree_size: 0,
+    };
+
+    // Use a dummy `AccountId` as we don't use accounts yet.
+    let dummy_account = AccountId::from(0);
+
+    let scanning_keys: Vec<_> = scanning_keys
+        .iter()
+        .map(|key| (&dummy_account, key))
+        .collect();
+
+    zcash_client_backend::scanning::scan_block(
+        &network,
+        block_to_compact(block, chain_metadata),
+        &scanning_keys,
+        // Ignore whether notes are change from a viewer's own spends for now.
+        &[],
+        // Ignore previous blocks for now.
+        None,
+    )
+}
