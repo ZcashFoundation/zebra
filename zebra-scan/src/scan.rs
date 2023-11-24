@@ -38,7 +38,7 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
             .await
             .map_err(|e| eyre!(e));
 
-        let tip_height = match request? {
+        let tip = match request? {
             zebra_state::Response::Tip(tip) => tip.unwrap().0,
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
@@ -48,8 +48,8 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
 
         for key in available_keys {
             info!(
-                "Scanning the blockchain for key {} from block 1 to {}",
-                key.0, tip_height.0
+                "Scanning the blockchain for key {} from block 1 to {:?}",
+                key.0, tip,
             );
         }
 
