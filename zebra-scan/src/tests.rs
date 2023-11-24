@@ -402,18 +402,23 @@ fn fake_compact_block(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
+    let rseed = generate_random_rseed(
+        &zcash_primitives::consensus::Network::TestNetwork,
+        height,
+        &mut rng,
+    );
     let note = Note::from_parts(to, NoteValue::from_raw(value), rseed);
-    let encryptor = sapling_note_encryption::<_, Network>(
+    let encryptor = sapling_note_encryption::<_, zcash_primitives::consensus::Network>(
         Some(dfvk.fvk().ovk),
         note.clone(),
         MemoBytes::empty(),
         &mut rng,
     );
     let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-        .0
-        .to_vec();
+    let ephemeral_key =
+        SaplingDomain::<zcash_primitives::consensus::Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
     // Create a fake CompactBlock containing the note
