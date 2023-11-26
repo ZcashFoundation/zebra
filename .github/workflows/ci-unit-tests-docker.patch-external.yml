@@ -15,11 +15,10 @@ jobs:
   build:
     name: Build CI Docker / Build images
     # Only run on PRs from external repositories.
-    # (github.ref is always a local branch, so this check will skip non-PRs as well.)
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-all:
     name: Test all
@@ -28,39 +27,39 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-fake-activation-heights:
     name: Test with fake activation heights
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-empty-sync:
     name: Test checkpoint sync from empty state
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-configuration-file:
     name: Test CI default Docker config file / Test default-conf in Docker
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-zebra-conf-path:
     name: Test CI custom Docker config file / Test custom-conf in Docker
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'

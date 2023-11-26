@@ -16,11 +16,10 @@ jobs:
   get-available-disks:
     name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
     # Only run on PRs from external repositories.
-    # (github.ref is always a local branch, so this check will skip non-PRs as well.)
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   build:
     name: Build CI Docker / Build images
@@ -29,74 +28,74 @@ jobs:
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-update-sync:
     name: Zebra tip update / Run update-to-tip test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   checkpoints-mainnet:
     name: Generate checkpoints mainnet / Run checkpoints-mainnet test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-transactions-test:
     name: lightwalletd tip send / Run lwd-send-transactions test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   get-block-template-test:
     name: get block template / Run get-block-template test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   submit-block-test:
     name: submit block / Run submit-block test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-update-sync:
     name: lightwalletd tip update / Run lwd-update-sync test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
     needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'

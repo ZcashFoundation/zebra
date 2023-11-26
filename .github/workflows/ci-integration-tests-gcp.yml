@@ -113,7 +113,7 @@ jobs:
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
     # Skip PRs from external repositories, let them pass, and then Mergify will check them
-    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.head.repo.fork }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -124,7 +124,7 @@ jobs:
   # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
-    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.head.repo.fork }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
       network: 'Testnet'
@@ -136,7 +136,7 @@ jobs:
   # testnet when running the image.
   build:
     name: Build CI Docker
-    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
