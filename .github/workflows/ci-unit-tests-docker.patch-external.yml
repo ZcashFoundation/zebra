@@ -19,7 +19,7 @@ jobs:
     if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo "${{ format('No build required for ! contains({} || {}, refs/heads/', github.head_ref, github.ref) }}"
+      - run: echo "${{ format('No build required for ! contains({0} || {1}, refs/heads/', github.head_ref, github.ref) }}"
 
   test-all:
     name: Test all
