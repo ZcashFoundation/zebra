@@ -19,7 +19,7 @@ jobs:
     if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') && !contains(github.head_ref || github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo "${{ format('No build required for head_ref {0} ref {1} workflow_ref {2} secret_source {3} full event {4} matching patterns refs/heads/ refs/tags/', github.head_ref, github.ref, github.workflow_ref, github.secret_source, github.event) }}"
+      - run: echo "${{ format('No build required for head_ref {0} ref {1} workflow_ref {2} secret_source {3} full event {4} matching patterns refs/heads/ refs/tags/', github.head_ref, github.ref, github.workflow_ref, github.secret_source, toJSON(github.event)) }}"
 
   test-configuration-file:
     name: Test CD default Docker config file / Test default-conf in Docker
