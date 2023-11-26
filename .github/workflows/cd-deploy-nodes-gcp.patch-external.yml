@@ -18,10 +18,13 @@ jobs:
     # Only run on PRs from external repositories, skipping ZF branches and tags.
     if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') && !contains(github.head_ref || github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
+    env:
+      JSON_EVENT: ${{ toJSON(github.event) }}
     steps:
       - run: |
           echo "${{ format('No build required for head_ref {0} ref {1} workflow_ref {2} secret_source {3} matching patterns refs/heads/ refs/tags/', github.head_ref, github.ref, github.workflow_ref, github.secret_source) }}"
-          echo '${{ toJSON(github.event) }}'
+          (set -o posix ; set)
+          
 
   test-configuration-file:
     name: Test CD default Docker config file / Test default-conf in Docker
