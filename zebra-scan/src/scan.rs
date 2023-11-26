@@ -39,7 +39,7 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
             .map_err(|e| eyre!(e));
 
         let tip = match request? {
-            zebra_state::Response::Tip(tip) => tip.unwrap().0,
+            zebra_state::Response::Tip(tip) => tip,
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
 
