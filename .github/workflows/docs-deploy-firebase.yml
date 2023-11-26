@@ -71,7 +71,7 @@ jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
     # Skip PRs from external repositories, let them pass, and then Mergify will check them
-    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.head.repo.fork }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
@@ -125,7 +125,7 @@ jobs:
 
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
-    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.head.repo.fork }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:

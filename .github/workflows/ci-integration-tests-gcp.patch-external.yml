@@ -16,7 +16,7 @@ jobs:
   get-available-disks:
     name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
     # Only run on PRs from external repositories.
-    if: ${{ startsWith(github.event_name, 'pull') && github.event.head.repo.fork }}
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
