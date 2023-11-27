@@ -171,7 +171,7 @@ impl ZebraDb {
 
     /// Returns the fixed major version for this database.
     pub fn major_version(&self) -> u64 {
-        self.format_version_in_code().major
+        self.db.major_version()
     }
 
     /// Returns the format version of this database on disk.
