@@ -5806,6 +5806,8 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tokio",
+ "tower",
+ "tracing",
  "zcash_client_backend",
  "zcash_note_encryption",
  "zcash_primitives",
