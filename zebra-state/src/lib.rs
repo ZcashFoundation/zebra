@@ -73,6 +73,9 @@ pub use service::{
     init_test, init_test_services, ReadStateService,
 };
 
+#[cfg(not(any(test, feature = "proptest-impl")))]
+pub(crate) use config::hidden::write_database_format_version_to_disk;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use config::hidden::write_database_format_version_to_disk;
 
