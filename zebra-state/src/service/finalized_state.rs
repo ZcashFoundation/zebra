@@ -50,6 +50,8 @@ pub use disk_db::ReadDisk;
 pub use disk_format::MAX_ON_DISK_HEIGHT;
 
 /// The column families supported by the running `zebra-state` database code.
+///
+/// Existing column families that aren't listed here are preserved when the database is opened.
 pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Blocks
     "hash_by_height",
