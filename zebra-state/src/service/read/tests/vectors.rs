@@ -18,6 +18,7 @@ use zebra_test::{
 };
 
 use crate::{
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     init_test_services, populated_state,
     response::MinedTx,
     service::{
@@ -369,6 +370,8 @@ where
 fn new_ephemeral_db() -> ZebraDb {
     ZebraDb::new(
         &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
         Mainnet,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE

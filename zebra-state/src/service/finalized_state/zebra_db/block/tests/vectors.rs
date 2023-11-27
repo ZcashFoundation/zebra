@@ -26,6 +26,7 @@ use zebra_chain::{
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
     service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
     CheckpointVerifiedBlock, Config,
@@ -80,6 +81,8 @@ fn test_block_db_round_trip_with(
 
     let state = ZebraDb::new(
         &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
         network,
         // The raw database accesses in this test create invalid database formats.
         true,
