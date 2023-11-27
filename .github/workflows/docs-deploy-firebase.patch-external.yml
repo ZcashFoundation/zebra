@@ -15,11 +15,10 @@ jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
     # Only run on PRs from external repositories.
-    # (github.ref is always a local branch, so this check will skip non-PRs as well.)
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
@@ -28,4 +27,4 @@ jobs:
     needs: build-docs-book
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
