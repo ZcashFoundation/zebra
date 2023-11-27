@@ -392,6 +392,8 @@ impl DbFormatChange {
         Ok(())
     }
 
+    // TODO: Move state-specific upgrade code to a finalized_state/* module.
+
     /// Apply any required format updates to the database.
     /// Format changes should be launched in an independent `std::thread`.
     ///
