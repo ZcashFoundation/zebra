@@ -159,7 +159,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
+use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 use zebra_test::{
     args,
@@ -1856,7 +1856,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             [format!(
                 "Opened RPC endpoint at {}",
                 zebra_rpc_address.expect("lightwalletd test must have RPC port")
@@ -1866,7 +1866,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             None,
         )?;
     }
@@ -1978,7 +1978,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                     wait_for_state_version_upgrade(
                         &mut zebrad,
                         &state_version_message,
-                        database_format_version_in_code(),
+                        state_database_format_version_in_code(),
                         None,
                     )?;
                 }
@@ -2004,7 +2004,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                 wait_for_state_version_upgrade(
                     &mut zebrad,
                     &state_version_message,
-                    database_format_version_in_code(),
+                    state_database_format_version_in_code(),
                     None,
                 )?;
             }
@@ -2192,7 +2192,7 @@ fn zebra_state_conflict() -> Result<()> {
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
-            zebra_state::database_format_version_in_code().major,
+            zebra_state::state_database_format_version_in_code().major,
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(
@@ -2526,7 +2526,7 @@ async fn new_state_format() -> Result<()> {
 ///       (or just add a delay during tests)
 #[tokio::test]
 async fn update_state_format() -> Result<()> {
-    let mut fake_version = database_format_version_in_code();
+    let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = 0;
     fake_version.patch = 0;
 
@@ -2543,7 +2543,7 @@ async fn update_state_format() -> Result<()> {
 /// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
 #[tokio::test]
 async fn downgrade_state_format() -> Result<()> {
-    let mut fake_version = database_format_version_in_code();
+    let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = u16::MAX.into();
     fake_version.patch = 0;
 
@@ -2631,7 +2631,7 @@ async fn state_format_test(
         // Give zebra_state enough time to actually write the database version to disk.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let running_version = database_format_version_in_code();
+        let running_version = state_database_format_version_in_code();
 
         match fake_version.cmp(&running_version) {
             Ordering::Less => expect_older_version = true,
@@ -2737,7 +2737,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     wait_for_state_version_upgrade(
         &mut zebrad,
         &state_version_message,
-        database_format_version_in_code(),
+        state_database_format_version_in_code(),
         None,
     )?;
 

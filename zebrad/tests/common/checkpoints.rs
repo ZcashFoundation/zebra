@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::database_format_version_in_code;
+use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
@@ -98,7 +98,7 @@ pub async fn run(network: Network) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             None,
         )?;
     }
