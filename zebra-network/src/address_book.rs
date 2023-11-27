@@ -112,9 +112,6 @@ pub struct AddressMetrics {
     /// The number of addresses in the `NeverAttemptedGossiped` state.
     pub never_attempted_gossiped: usize,
 
-    /// The number of addresses in the `NeverAttemptedAlternate` state.
-    pub never_attempted_alternate: usize,
-
     /// The number of addresses in the `Failed` state.
     pub failed: usize,
 
@@ -667,9 +664,6 @@ impl AddressBook {
         let never_attempted_gossiped = self
             .state_peers(PeerAddrState::NeverAttemptedGossiped)
             .count();
-        let never_attempted_alternate = self
-            .state_peers(PeerAddrState::NeverAttemptedAlternate)
-            .count();
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
@@ -683,7 +677,6 @@ impl AddressBook {
         AddressMetrics {
             responded,
             never_attempted_gossiped,
-            never_attempted_alternate,
             failed,
             attempt_pending,
             recently_live,
@@ -705,10 +698,6 @@ impl AddressBook {
         // TODO: rename to address_book.[state_name]
         metrics::gauge!("candidate_set.responded", m.responded as f64);
         metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
-        metrics::gauge!(
-            "candidate_set.alternate",
-            m.never_attempted_alternate as f64,
-        );
         metrics::gauge!("candidate_set.failed", m.failed as f64);
         metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
 
@@ -754,12 +743,7 @@ impl AddressBook {
 
         self.last_address_log = Some(now);
         // if all peers have failed
-        if m.responded
-            + m.attempt_pending
-            + m.never_attempted_gossiped
-            + m.never_attempted_alternate
-            == 0
-        {
+        if m.responded + m.attempt_pending + m.never_attempted_gossiped == 0 {
             warn!(
                 address_metrics = ?m,
                 "all peer addresses have failed. Hint: check your network connection"
