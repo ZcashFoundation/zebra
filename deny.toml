@@ -86,6 +86,12 @@ skip-tree = [
     { name = "clap", version = "=2.34.0" },
     { name = "heck", version = "=0.3.3" },
 
+    # wait for abscissa_core to upgrade
+    {name = "tracing-log", version = "=0.1.4" },
+
+    # wait for prost to upgrade
+    {name = "itertools", version = "=0.11.0" },
+
     # Test-only dependencies
 
     # wait for tokio-test -> tokio-stream to upgrade
