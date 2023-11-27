@@ -31,7 +31,7 @@ Zebra uses the following inbound and outbound TCP ports:
 - 18233 on Testnet
 
 If you configure Zebra with a specific
-[`listen_addr`](https://doc.zebra.zfnd.org/zebra_network/struct.Config.html#structfield.listen_addr),
+[`listen_addr`](https://docs.rs/zebra_network/latest/zebra_network/struct.Config.html#structfield.listen_addr),
 it will advertise this address to other nodes for inbound connections. Outbound
 connections are required to sync, inbound connections are optional. Zebra also
 needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port

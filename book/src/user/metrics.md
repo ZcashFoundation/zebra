@@ -56,4 +56,4 @@ front end that you can visualize:
 
 ![image info](grafana.png)
 
-[metrics_section]: https://doc.zebra.zfnd.org/zebrad/config/struct.MetricsSection.html
+[metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html

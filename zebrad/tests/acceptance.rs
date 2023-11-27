@@ -1167,8 +1167,6 @@ fn create_cached_database(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height,
-        // We don't need the ZK parameters, we're only using checkpoints
-        true,
         // Use checkpoints to increase sync performance while caching the database
         true,
         // Check that we're still using checkpoints when we finish the cached sync
@@ -1185,8 +1183,6 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
-        // We need the ZK parameters for full validation
-        false,
         // Test full validation by turning checkpoints off
         false,
         // Check that we're doing full validation when we finish the cached sync
@@ -1216,8 +1212,6 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             network,
             // Just keep going until we reach the chain tip
             block::Height::MAX,
-            // We need the ZK parameters for full validation
-            false,
             // Use the checkpoints to sync quickly, then do full validation until the chain tip
             true,
             // Finish when we reach the chain tip
@@ -2802,6 +2796,49 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     output
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+#[cfg(feature = "zebra-scan")]
+/// Test that the scanner gets started when the node starts.
+#[tokio::test]
+async fn scan_task_starts() -> Result<()> {
+    use indexmap::IndexMap;
+
+    const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+
+    let _init_guard = zebra_test::init();
+
+    let mut config = default_test_config(Mainnet)?;
+    let mut keys = IndexMap::new();
+    keys.insert(ZECPAGES_VIEWING_KEY.to_string(), 1);
+    config.shielded_scan.sapling_keys_to_scan = keys;
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let testdir = &testdir;
+
+    let mut child = testdir.spawn_child(args!["start"])?;
+
+    // Run the program and kill it after the scanner starts and the first scanning is done.
+    std::thread::sleep(LAUNCH_DELAY * 2);
+    child.kill(false)?;
+
+    // Check that scan task started and the first scanning is done.
+    let output = child.wait_with_output()?;
+
+    output.stdout_line_contains("spawning zebra_scanner")?;
+    output.stdout_line_contains(
+        format!(
+            "Scanning the blockchain for key {} from block 1 to",
+            ZECPAGES_VIEWING_KEY
+        )
+        .as_str(),
+    )?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+    output.assert_failure()?;
 
     Ok(())
 }

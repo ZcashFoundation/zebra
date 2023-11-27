@@ -67,6 +67,9 @@ skip-tree = [
     # this duplicate dependency currently only exists in testing builds
     { name = "regex-syntax", version = "=0.6.29" },
 
+    # wait for `parking_lot` crate inside `jsonrpc-http-server` to upgrade
+    { name = "redox_syscall", version = "=0.2.16" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
@@ -74,17 +77,20 @@ skip-tree = [
 
     # ECC crates
 
-    # wait for minreq and zcash_proofs to upgrade
-    { name = "rustls", version = "=0.20.9" },
-
-    # wait for zcash_proofs to upgrade
-    { name = "webpki-roots", version = "=0.22.6" },
+    # wait for hdwallet to upgrade
+    { name = "ring", version = "=0.16.20" },
 
     # zebra-utils dependencies
 
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
     { name = "heck", version = "=0.3.3" },
+
+    # wait for abscissa_core to upgrade
+    {name = "tracing-log", version = "=0.1.4" },
+
+    # wait for prost to upgrade
+    {name = "itertools", version = "=0.11.0" },
 
     # Test-only dependencies
 

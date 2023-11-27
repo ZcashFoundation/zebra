@@ -179,7 +179,10 @@ async fn test_read_subtrees() -> Result<()> {
         .pop_first()
         .expect("chain_subtrees should not be empty");
     assert_eq!(first_chain_index, index, "subtree indexes should match");
-    assert_eq!(end_height, subtree.end, "subtree end heights should match");
+    assert_eq!(
+        end_height, subtree.end_height,
+        "subtree end heights should match"
+    );
 
     // Check that Zebra retrieves subtrees correctly when using a range with an Excluded start bound
 

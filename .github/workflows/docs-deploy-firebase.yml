@@ -1,3 +1,5 @@
+# Google Cloud docs updates that run when docs, Rust code, or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by mergify.)
 name: Docs
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -9,7 +11,9 @@ concurrency:
 
 on:
   workflow_dispatch:
+
   push:
+    # Skip main branch updates where docs, Rust code, and dependencies aren't modified.
     branches:
       - main
     paths:
@@ -29,8 +33,7 @@ on:
       - '.github/workflows/docs-deploy-firebase.yml'
 
   pull_request:
-    branches:
-      - main
+    # Skip PRs where docs, Rust code, and dependencies aren't modified.
     paths:
       # doc source files
       - 'book/**'
@@ -60,9 +63,15 @@ env:
   # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
   RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links
 
+# IMPORTANT
+#
+# The job names in `docs-deploy-firebase.yml`, `docs-deploy-firebase.patch.yml` and
+# `docs-deploy-firebase.patch-external.yml` must be kept in sync.
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
@@ -79,7 +88,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Setup mdBook
-        uses: jontze/action-mdbook@v2.2.2
+        uses: jontze/action-mdbook@v3.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mdbook-version: '~0.4'
@@ -114,64 +123,9 @@ jobs:
           projectId: ${{ vars.GCP_FIREBASE_PROJECT }}
           target: docs-book
 
-  build-docs-external:
-    name: Build and Deploy Zebra External Docs
-    timeout-minutes: 45
-    runs-on: ubuntu-latest
-    permissions:
-      checks: write
-      contents: 'read'
-      id-token: 'write'
-      pull-requests: write
-    steps:
-      - name: Checkout the source code
-        uses: actions/checkout@v4.1.1
-        with:
-          persist-credentials: false
-
-      - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v2.1.0
-        with:
-          version: '23.x'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Setup Rust with beta toolchain and default profile (to include rust-docs)
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
-
-      - uses: Swatinem/rust-cache@v2.7.1
-
-      - name: Build external docs
-        run: |
-          # Exclude zebra-utils, it is not for library or app users
-          cargo doc --no-deps --workspace --all-features --exclude zebra-utils --target-dir "$(pwd)"/target/external
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v1.1.1
-        with:
-          retries: '3'
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
-
-      # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
-      - name: Add $GCP_FIREBASE_SA_PATH to env
-        run: |
-          # shellcheck disable=SC2002
-          echo "GCP_FIREBASE_SA_PATH=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
-
-      - name: Deploy external docs to firebase
-        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
-        with:
-          firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
-          channelId: ${{ env.FIREBASE_CHANNEL }}
-          target: docs-external
-          projectId: ${{ vars.GCP_FIREBASE_PROJECT }}
-
   build-docs-internal:
     name: Build and Deploy Zebra Internal Docs
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:

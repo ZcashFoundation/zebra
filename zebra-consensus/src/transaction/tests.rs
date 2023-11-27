@@ -2791,7 +2791,7 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
                 .unwrap();
         let coinbase_tx = block
             .transactions
-            .get(0)
+            .first()
             .expect("must have coinbase transaction");
 
         // Check if the coinbase outputs are decryptable with an all-zero key.

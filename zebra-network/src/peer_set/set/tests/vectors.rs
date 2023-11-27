@@ -10,7 +10,6 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use super::{PeerSetBuilder, PeerVersions};
 use crate::{
     constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientRequest, MinimumPeerVersion},
@@ -18,6 +17,8 @@ use crate::{
     protocol::external::{types::Version, InventoryHash},
     Request, SharedPeerError,
 };
+
+use super::{PeerSetBuilder, PeerVersions};
 
 #[test]
 fn peer_set_ready_single_connection() {

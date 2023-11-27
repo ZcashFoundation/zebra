@@ -18,6 +18,8 @@ use futures::{
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
+use zebra_chain::diagnostic::task::CheckForPanics;
+
 use crate::{
     peer::{
         error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
@@ -421,8 +423,15 @@ impl MissingInventoryCollector {
 
 impl Client {
     /// Check if this connection's heartbeat task has exited.
+    ///
+    /// Returns an error if the heartbeat task exited. Otherwise, schedules the client task for
+    /// wakeup when the heartbeat task finishes, or the channel closes, and returns `Pending`.
+    ///
+    /// # Panics
+    ///
+    /// If the heartbeat task panicked.
     #[allow(clippy::unwrap_in_result)]
-    fn check_heartbeat(&mut self, cx: &mut Context<'_>) -> Result<(), SharedPeerError> {
+    fn poll_heartbeat(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
         let is_canceled = self
             .shutdown_tx
             .as_mut()
@@ -430,17 +439,19 @@ impl Client {
             .poll_canceled(cx)
             .is_ready();
 
-        if is_canceled {
-            return self.set_task_exited_error(
-                "heartbeat",
-                PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
-            );
-        }
-
-        match self.heartbeat_task.poll_unpin(cx) {
+        let result = match self.heartbeat_task.poll_unpin(cx) {
             Poll::Pending => {
-                // Heartbeat task is still running.
-                Ok(())
+                // The heartbeat task returns `Pending` while it continues to run.
+                // But if it has dropped its receiver, it is shutting down, and we should also shut down.
+                if is_canceled {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                } else {
+                    // Heartbeat task is still running.
+                    return Poll::Pending;
+                }
             }
             Poll::Ready(Ok(Ok(_))) => {
                 // Heartbeat task stopped unexpectedly, without panic or error.
@@ -459,6 +470,9 @@ impl Client {
                 )
             }
             Poll::Ready(Err(error)) => {
+                // Heartbeat task panicked.
+                let error = error.panic_if_task_has_panicked();
+
                 // Heartbeat task was cancelled.
                 if error.is_cancelled() {
                     self.set_task_exited_error(
@@ -466,11 +480,7 @@ impl Client {
                         PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
                     )
                 }
-                // Heartbeat task stopped with panic.
-                else if error.is_panic() {
-                    panic!("heartbeat task has panicked: {error}");
-                }
-                // Heartbeat task stopped with error.
+                // Heartbeat task stopped with another kind of task error.
                 else {
                     self.set_task_exited_error(
                         "heartbeat",
@@ -478,25 +488,48 @@ impl Client {
                     )
                 }
             }
-        }
+        };
+
+        Poll::Ready(result)
     }
 
-    /// Check if the connection's task has exited.
-    fn check_connection(&mut self, context: &mut Context<'_>) -> Result<(), SharedPeerError> {
-        match self.connection_task.poll_unpin(context) {
-            Poll::Pending => {
-                // Connection task is still running.
-                Ok(())
-            }
-            Poll::Ready(Ok(())) => {
+    /// Check if the connection's request/response task has exited.
+    ///
+    /// Returns an error if the connection task exited. Otherwise, schedules the client task for
+    /// wakeup when the connection task finishes, and returns `Pending`.
+    ///
+    /// # Panics
+    ///
+    /// If the connection task panicked.
+    fn poll_connection(&mut self, context: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
+        // Return `Pending` if the connection task is still running.
+        let result = match ready!(self.connection_task.poll_unpin(context)) {
+            Ok(()) => {
                 // Connection task stopped unexpectedly, without panicking.
                 self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
-            Poll::Ready(Err(error)) => {
-                // Connection task stopped unexpectedly with a panic.
-                panic!("connection task has panicked: {error}");
+            Err(error) => {
+                // Connection task panicked.
+                let error = error.panic_if_task_has_panicked();
+
+                // Connection task was cancelled.
+                if error.is_cancelled() {
+                    self.set_task_exited_error(
+                        "connection",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                }
+                // Connection task stopped with another kind of task error.
+                else {
+                    self.set_task_exited_error(
+                        "connection",
+                        PeerError::HeartbeatTaskExited(error.to_string()),
+                    )
+                }
             }
-        }
+        };
+
+        Poll::Ready(result)
     }
 
     /// Properly update the error slot after a background task has unexpectedly stopped.
@@ -522,6 +555,9 @@ impl Client {
     }
 
     /// Poll for space in the shared request sender channel.
+    ///
+    /// Returns an error if the sender channel is closed. If there is no space in the channel,
+    /// returns `Pending`, and schedules the task for wakeup when there is space available.
     fn poll_request(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
         let server_result = ready!(self.server_tx.poll_ready(cx));
         if server_result.is_err() {
@@ -534,6 +570,33 @@ impl Client {
         } else {
             Poll::Ready(Ok(()))
         }
+    }
+
+    /// Poll for space in the shared request sender channel, and for errors in the connection tasks.
+    ///
+    /// Returns an error if the sender channel is closed, or the heartbeat or connection tasks have
+    /// terminated. If there is no space in the channel, returns `Pending`, and schedules the task
+    /// for wakeup when there is space available, or one of the tasks terminates.
+    fn poll_client(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
+        // # Correctness
+        //
+        // The current task must be scheduled for wakeup every time we return
+        // `Poll::Pending`.
+        //
+        // `poll_heartbeat()` and `poll_connection()` schedule the client task for wakeup
+        // if either task exits, or if the heartbeat task drops the cancel handle.
+        //
+        //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
+        // schedules this task for wakeup.
+        //
+        // It's ok to exit early and skip wakeups when there is an error, because the connection
+        // and its tasks are shut down immediately on error.
+
+        let _heartbeat_pending: Poll<()> = self.poll_heartbeat(cx)?;
+        let _connection_pending: Poll<()> = self.poll_connection(cx)?;
+
+        // We're only pending if the sender channel is full.
+        self.poll_request(cx)
     }
 
     /// Shut down the resources held by the client half of this peer connection.
@@ -566,20 +629,16 @@ impl Service<Request> for Client {
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        // `check_heartbeat` and `check_connection` schedule the client task for wakeup
-        // if either task exits, or if the heartbeat task drops the cancel handle.
+        // `poll_client()` schedules the client task for wakeup if the sender channel has space,
+        // either connection task exits, or if the heartbeat task drops the cancel handle.
+
+        // Check all the tasks and channels.
         //
         //`ready!` returns `Poll::Pending` when `server_tx` is unready, and
         // schedules this task for wakeup.
+        let result = ready!(self.poll_client(cx));
 
-        let mut result = self
-            .check_heartbeat(cx)
-            .and_then(|()| self.check_connection(cx));
-
-        if result.is_ok() {
-            result = ready!(self.poll_request(cx));
-        }
-
+        // Shut down the client and connection if there is an error.
         if let Err(error) = result {
             self.shutdown();
 

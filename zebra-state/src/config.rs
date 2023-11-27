@@ -385,44 +385,52 @@ pub(crate) fn database_format_version_at_path(
     }
 }
 
-/// Writes `changed_version` to the on-disk database after the format is changed.
-/// (Or a new database is created.)
-///
-/// # Correctness
-///
-/// This should only be called:
-/// - after each format upgrade is complete,
-/// - when creating a new database, or
-/// - when an older Zebra version opens a newer database.
-///
-/// # Concurrency
-///
-/// This must only be called while RocksDB has an open database for `config`.
-/// Otherwise, multiple Zebra processes could write the version at the same time,
-/// corrupting the file.
-///
-/// # Panics
-///
-/// If the major versions do not match. (The format is incompatible.)
-pub fn write_database_format_version_to_disk(
-    changed_version: &Version,
-    config: &Config,
-    network: Network,
-) -> Result<(), BoxError> {
-    let version_path = config.version_file_path(network);
+// Hide this destructive method from the public API, except in tests.
+pub(crate) use hidden::write_database_format_version_to_disk;
 
-    // The major version is already in the directory path.
-    assert_eq!(
-        changed_version.major, DATABASE_FORMAT_VERSION,
-        "tried to do in-place database format change to an incompatible version"
-    );
+pub(crate) mod hidden {
 
-    let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+    use super::*;
 
-    // # Concurrency
-    //
-    // The caller handles locking for this file write.
-    fs::write(version_path, version.as_bytes())?;
+    /// Writes `changed_version` to the on-disk database after the format is changed.
+    /// (Or a new database is created.)
+    ///
+    /// # Correctness
+    ///
+    /// This should only be called:
+    /// - after each format upgrade is complete,
+    /// - when creating a new database, or
+    /// - when an older Zebra version opens a newer database.
+    ///
+    /// # Concurrency
+    ///
+    /// This must only be called while RocksDB has an open database for `config`.
+    /// Otherwise, multiple Zebra processes could write the version at the same time,
+    /// corrupting the file.
+    ///
+    /// # Panics
+    ///
+    /// If the major versions do not match. (The format is incompatible.)
+    pub fn write_database_format_version_to_disk(
+        changed_version: &Version,
+        config: &Config,
+        network: Network,
+    ) -> Result<(), BoxError> {
+        let version_path = config.version_file_path(network);
 
-    Ok(())
+        // The major version is already in the directory path.
+        assert_eq!(
+            changed_version.major, DATABASE_FORMAT_VERSION,
+            "tried to do in-place database format change to an incompatible version"
+        );
+
+        let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+
+        // # Concurrency
+        //
+        // The caller handles locking for this file write.
+        fs::write(version_path, version.as_bytes())?;
+
+        Ok(())
+    }
 }

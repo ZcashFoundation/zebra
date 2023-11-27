@@ -1,7 +1,7 @@
+# Workflow patches for skipping unit test CI when Rust code or dependencies aren't modified in a PR.
 name: Docker Unit Tests
 
-# These jobs *don't* depend on cached Google Cloud state disks,
-# so they can be skipped when the modified files make the actual workflow run.
+# Run on PRs with unmodified code and dependency files.
 on:
   pull_request:
     paths-ignore:
@@ -25,14 +25,11 @@ on:
       - '.github/workflows/sub-find-cached-disks.yml'
       - '.github/workflows/sub-build-docker-image.yml'
 
+# IMPORTANT
+#
+# The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
+# `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
-  # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
-  get-available-disks:
-    name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
   build:
     name: Build CI Docker / Build images
     runs-on: ubuntu-latest

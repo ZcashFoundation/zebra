@@ -22,12 +22,13 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{Context, Poll},
 };
 
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::broadcast;
+use tokio_stream::StreamExt;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -42,7 +43,7 @@ use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::sync::SyncStatus;
+use crate::components::{mempool::crawler::RATE_LIMIT_DELAY, sync::SyncStatus};
 
 pub mod config;
 mod crawler;
@@ -580,9 +581,11 @@ impl Service<Request> for Mempool {
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Clean up completed download tasks and add to mempool if successful.
-            while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
+            while let Poll::Ready(Some(r)) =
+                pin!(tx_downloads.timeout(RATE_LIMIT_DELAY)).poll_next(cx)
+            {
                 match r {
-                    Ok((tx, expected_tip_height)) => {
+                    Ok(Ok((tx, expected_tip_height))) => {
                         // # Correctness:
                         //
                         // It's okay to use tip height here instead of the tip hash since
@@ -609,11 +612,19 @@ impl Service<Request> for Mempool {
                                 tx_downloads.download_if_needed_and_verify(tx.transaction.into());
                         }
                     }
-                    Err((txid, error)) => {
+                    Ok(Err((txid, error))) => {
                         tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
                         storage.reject_if_needed(txid, error);
+                    }
+                    Err(_elapsed) => {
+                        // A timeout happens when the stream hangs waiting for another service,
+                        // so there is no specific transaction ID.
+
+                        tracing::info!("mempool transaction failed to verify due to timeout");
+
+                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => "timeout");
                     }
                 };
             }

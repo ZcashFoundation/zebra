@@ -10,10 +10,11 @@ pub use self::{entry_point::EntryPoint, start::StartCmd};
 
 use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
 
+pub mod start;
+
 mod copy_state;
 mod entry_point;
 mod generate;
-mod start;
 mod tip_height;
 
 #[cfg(test)]

@@ -206,6 +206,10 @@ pub enum NoteCommitmentTreeError {
 /// Internally this wraps [`bridgetree::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
 ///
+/// Note that the default value of the [`Root`] type is `[0, 0, 0, 0]`. However, this value differs
+/// from the default value of the root of the default tree (which is the empty tree) since it is the
+/// pair-wise root-hash of the tree's empty leaves at the tree's root level.
+///
 /// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
 /// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
 #[derive(Debug, Serialize, Deserialize)]

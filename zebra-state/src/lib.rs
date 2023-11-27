@@ -1,4 +1,4 @@
-//! State contextual verification and storage code for Zebra. 🦓
+//! State contextual verification and storage code for Zebra.
 //!
 //! # Correctness
 //!
@@ -10,7 +10,7 @@
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
-#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
+#![doc(html_root_url = "https://docs.rs/zebra_state")]
 //
 // Rust 1.72 has a false positive when nested generics are used inside Arc.
 // This makes the `arc_with_non_send_sync` lint trigger on a lot of proptest code.
@@ -25,12 +25,12 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod config;
 pub mod constants;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
-mod config;
 mod error;
 mod request;
 mod response;
@@ -71,7 +71,7 @@ pub use service::{
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use config::write_database_format_version_to_disk;
+pub use config::hidden::write_database_format_version_to_disk;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use constants::latest_version_for_adding_subtrees;

@@ -18,15 +18,18 @@ impl<T> CheckForPanics for Result<T, JoinError> {
     type Output = Result<T, JoinError>;
 
     /// Returns the task result if the task finished normally.
-    /// Otherwise, resumes any panics, logs unexpected errors, and ignores any expected errors.
+    /// Otherwise, resumes any panics, and ignores any expected errors.
+    /// Handles unexpected errors based on `panic_on_unexpected_termination`.
     ///
     /// If the task finished normally, returns `Some(T)`.
     /// If the task was cancelled, returns `None`.
     #[track_caller]
-    fn check_for_panics(self) -> Self::Output {
+    fn check_for_panics_with(self, panic_on_unexpected_termination: bool) -> Self::Output {
         match self {
             Ok(task_output) => Ok(task_output),
-            Err(join_error) => Err(join_error.check_for_panics()),
+            Err(join_error) => {
+                Err(join_error.check_for_panics_with(panic_on_unexpected_termination))
+            }
         }
     }
 }
@@ -38,22 +41,26 @@ impl CheckForPanics for JoinError {
     /// Resume any panics and panic on unexpected task cancellations.
     /// Always returns [`JoinError::Cancelled`](JoinError::is_cancelled).
     #[track_caller]
-    fn check_for_panics(self) -> Self::Output {
+    fn check_for_panics_with(self, panic_on_unexpected_termination: bool) -> Self::Output {
         match self.try_into_panic() {
             Ok(panic_payload) => panic::resume_unwind(panic_payload),
 
             // We could ignore this error, but then we'd have to change the return type.
-            Err(task_cancelled) if is_shutting_down() => {
-                debug!(
-                    ?task_cancelled,
-                    "ignoring cancelled task because Zebra is shutting down"
-                );
-
-                task_cancelled
-            }
-
             Err(task_cancelled) => {
-                panic!("task cancelled during normal Zebra operation: {task_cancelled:?}");
+                if !panic_on_unexpected_termination {
+                    debug!(?task_cancelled, "ignoring expected task termination");
+
+                    task_cancelled
+                } else if is_shutting_down() {
+                    debug!(
+                        ?task_cancelled,
+                        "ignoring task termination because Zebra is shutting down"
+                    );
+
+                    task_cancelled
+                } else {
+                    panic!("task unexpectedly exited with: {:?}", task_cancelled)
+                }
             }
         }
     }
@@ -67,7 +74,9 @@ where
 
     /// Returns a future which waits for `self` to finish, then checks if its output is:
     /// - a panic payload: resume that panic,
-    /// - an unexpected termination: panic with that error,
+    /// - an unexpected termination:
+    ///   - if `panic_on_unexpected_termination` is true, panic with that error,
+    ///   - otherwise, hang waiting for shutdown,
     /// - an expected termination: hang waiting for shutdown.
     ///
     /// Otherwise, returns the task return value of `self`.
@@ -79,11 +88,15 @@ where
     /// # Hangs
     ///
     /// If `self` contains an expected termination, and we're shutting down anyway.
+    /// If we're ignoring terminations because `panic_on_unexpected_termination` is `false`.
     /// Futures hang by returning `Pending` and not setting a waker, so this uses minimal resources.
     #[track_caller]
-    fn wait_for_panics(self) -> Self::Output {
+    fn wait_for_panics_with(self, panic_on_unexpected_termination: bool) -> Self::Output {
         async move {
-            match self.await.check_for_panics() {
+            match self
+                .await
+                .check_for_panics_with(panic_on_unexpected_termination)
+            {
                 Ok(task_output) => task_output,
                 Err(_expected_cancel_error) => future::pending().await,
             }

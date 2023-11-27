@@ -19,12 +19,16 @@ use zebra_chain::{
     block::{Block, Height},
     fmt::humantime_seconds,
     parameters::Network::{self, *},
-    serialization::ZcashDeserializeInto,
+    serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{
-    constants::DEFAULT_MAX_CONNS_PER_IP, AddressBook, InventoryResponse, Request, Response,
+    constants::{
+        ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
+    },
+    types::{MetaAddr, PeerServices},
+    AddressBook, InventoryResponse, Request, Response,
 };
 use zebra_node_services::mempool;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
@@ -742,6 +746,112 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+/// Checks that Zebra won't give out its entire address book over a short duration.
+async fn caches_getaddr_response() {
+    const NUM_ADDRESSES: usize = 20;
+    const NUM_REQUESTS: usize = 10;
+    const EXPECTED_NUM_RESULTS: usize = NUM_ADDRESSES / ADDR_RESPONSE_LIMIT_DENOMINATOR;
+
+    let _init_guard = zebra_test::init();
+
+    let addrs = (0..NUM_ADDRESSES)
+        .map(|idx| format!("127.0.0.{idx}:{idx}"))
+        .map(|addr| {
+            MetaAddr::new_gossiped_meta_addr(
+                addr.parse().unwrap(),
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )
+        });
+
+    let inbound = {
+        let network = Mainnet;
+        let consensus_config = ConsensusConfig::default();
+        let state_config = StateConfig::ephemeral();
+        let address_book = AddressBook::new_with_addrs(
+            SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            addrs,
+        );
+
+        let address_book = Arc::new(std::sync::Mutex::new(address_book));
+
+        // UTXO verification doesn't matter for these tests.
+        let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+            zebra_state::init(state_config.clone(), network, Height::MAX, 0);
+
+        let state_service = ServiceBuilder::new().buffer(1).service(state);
+
+        // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
+        let (
+            block_verifier,
+            _transaction_verifier,
+            _groth16_download_handle,
+            _max_checkpoint_height,
+        ) = zebra_consensus::router::init(consensus_config.clone(), network, state_service.clone())
+            .await;
+
+        let peer_set = MockService::build()
+            .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+            .for_unit_tests();
+        let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
+
+        let buffered_mempool_service =
+            Buffer::new(BoxService::new(MockService::build().for_unit_tests()), 10);
+        let (setup_tx, setup_rx) = oneshot::channel();
+
+        let inbound_service = ServiceBuilder::new()
+            .load_shed()
+            .service(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
+        let inbound_service = BoxService::new(inbound_service);
+        let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
+
+        let setup_data = InboundSetupData {
+            address_book: address_book.clone(),
+            block_download_peer_set: buffered_peer_set,
+            block_verifier,
+            mempool: buffered_mempool_service.clone(),
+            state: state_service.clone(),
+            latest_chain_tip,
+        };
+        let r = setup_tx.send(setup_data);
+        // We can't expect or unwrap because the returned Result does not implement Debug
+        assert!(r.is_ok(), "unexpected setup channel send failure");
+
+        inbound_service
+    };
+
+    let Ok(zebra_network::Response::Peers(first_result)) =
+        inbound.clone().oneshot(zebra_network::Request::Peers).await
+    else {
+        panic!("result should match Ok(Peers(_))")
+    };
+
+    assert_eq!(
+        first_result.len(),
+        EXPECTED_NUM_RESULTS,
+        "inbound service should respond with expected number of peer addresses",
+    );
+
+    for _ in 0..NUM_REQUESTS {
+        let Ok(zebra_network::Response::Peers(peers)) =
+            inbound.clone().oneshot(zebra_network::Request::Peers).await
+        else {
+            panic!("result should match Ok(Peers(_))")
+        };
+
+        assert_eq!(
+            peers,
+            first_result,
+            "inbound service should return the same result for every Peers request until the refresh time",
+        );
+    }
+}
+
 /// Setup a fake Zebra network stack, with fake peer set.
 ///
 /// Adds some initial state blocks, and mempool transactions if `add_transactions` is true.
@@ -787,13 +897,8 @@ async fn setup(
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init(
-            consensus_config.clone(),
-            network,
-            state_service.clone(),
-            true,
-        )
-        .await;
+        zebra_consensus::router::init(consensus_config.clone(), network, state_service.clone())
+            .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)

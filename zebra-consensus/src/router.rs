@@ -192,12 +192,10 @@ where
     }
 }
 
-/// Initialize block and transaction verification services,
-/// and pre-download Groth16 parameters if requested by the `debug_skip_parameter_preload`
-/// config parameter and if the download is not already started.
+/// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, transaction verifier,
-/// the Groth16 parameter download task [`JoinHandle`],
+/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
 /// and the maximum configured checkpoint verification height.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -209,12 +207,6 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
-///
-/// Pre-downloads the Sapling and Sprout Groth16 parameters if needed,
-/// checks they were downloaded correctly, and loads them into Zebra.
-/// (The transaction verifier automatically downloads the parameters on first use.
-/// But the parameter downloads can take around 10 minutes.
-/// So we pre-download the parameters, to avoid verification timeouts.)
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -230,7 +222,6 @@ pub async fn init<S>(
     config: Config,
     network: Network,
     mut state_service: S,
-    debug_skip_parameter_preload: bool,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -244,23 +235,8 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // Give other tasks priority before spawning the download and checkpoint tasks.
+    // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
-
-    // Pre-download Groth16 parameters in a separate thread.
-
-    // The parameter download thread must be launched before initializing any verifiers.
-    // Otherwise, the download might happen on the startup thread.
-    let span = Span::current();
-    let groth16_download_handle = tokio::task::spawn_blocking(move || {
-        span.in_scope(|| {
-            if !debug_skip_parameter_preload {
-                // The lazy static initializer does the download, if needed,
-                // and the file hash checks.
-                lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
-            }
-        })
-    });
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
@@ -381,7 +357,6 @@ where
     let router = Buffer::new(BoxService::new(router), VERIFIER_BUFFER_BOUND);
 
     let task_handles = BackgroundTaskHandles {
-        groth16_download_handle,
         state_checkpoint_verify_handle,
     };
 
@@ -408,10 +383,6 @@ pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList
 /// The background task handles for `zebra-consensus` verifier initialization.
 #[derive(Debug)]
 pub struct BackgroundTaskHandles {
-    /// A handle to the Groth16 parameter download task.
-    /// Finishes when the parameters are downloaded and their checksums verified.
-    pub groth16_download_handle: JoinHandle<()>,
-
     /// A handle to the state checkpoint verify task.
     /// Finishes when all the checkpoints are verified, or when the state tip is reached.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
