@@ -77,10 +77,14 @@ pub use service::{
 };
 
 #[cfg(not(any(test, feature = "proptest-impl")))]
-pub(crate) use config::hidden::write_database_format_version_to_disk;
+pub(crate) use config::hidden::{
+    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use config::hidden::write_database_format_version_to_disk;
+pub use config::hidden::{
+    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use constants::latest_version_for_adding_subtrees;

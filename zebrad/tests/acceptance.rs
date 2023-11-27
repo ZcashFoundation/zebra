@@ -2625,8 +2625,12 @@ async fn state_format_test(
             .zebrad_config(test_name, false, Some(dir.path()), network)
             .expect("already checked config")?;
 
-        zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
-            .expect("can't write fake database version to disk");
+        zebra_state::write_state_database_format_version_to_disk(
+            &config.state,
+            fake_version,
+            network,
+        )
+        .expect("can't write fake database version to disk");
 
         // Give zebra_state enough time to actually write the database version to disk.
         tokio::time::sleep(Duration::from_secs(1)).await;

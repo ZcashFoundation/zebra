@@ -458,11 +458,25 @@ pub(crate) fn database_format_version_at_path(
 
 // Hide this destructive method from the public API, except in tests.
 #[allow(unused_imports)]
-pub(crate) use hidden::write_database_format_version_to_disk;
+pub(crate) use hidden::{
+    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+};
 
 pub(crate) mod hidden {
 
     use super::*;
+
+    /// Writes `changed_version` to the on-disk state database after the format is changed.
+    /// (Or a new database is created.)
+    ///
+    /// See `write_database_format_version_to_disk()` for details.
+    pub fn write_state_database_format_version_to_disk(
+        config: &Config,
+        changed_version: &Version,
+        network: Network,
+    ) -> Result<(), BoxError> {
+        write_database_format_version_to_disk(config, STATE_DATABASE_KIND, changed_version, network)
+    }
 
     /// Writes `changed_version` to the on-disk database after the format is changed.
     /// (Or a new database is created.)
