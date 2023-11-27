@@ -14,7 +14,10 @@ use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
-use crate::{constants::DATABASE_FORMAT_VERSION_FILE_NAME, BoxError};
+use crate::{
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    state_database_format_version_in_code, BoxError,
+};
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -356,7 +359,20 @@ fn parse_major_version(dir_name: &str) -> Option<u64> {
 
 // TODO: move these to the format upgrade module
 
-/// Returns the full semantic version of the on-disk database, based on its kind, major version,
+/// Returns the full semantic version of the on-disk state database, based on its config and network.
+pub fn state_database_format_version_on_disk(
+    config: &Config,
+    network: Network,
+) -> Result<Option<Version>, BoxError> {
+    database_format_version_on_disk(
+        config,
+        STATE_DATABASE_KIND,
+        state_database_format_version_in_code().major,
+        network,
+    )
+}
+
+/// Returns the full semantic version of the on-disk database, based on its config, kind, major version,
 /// and network.
 ///
 /// Typically, the version is read from a version text file.
