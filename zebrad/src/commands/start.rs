@@ -249,8 +249,10 @@ impl StartCmd {
         );
 
         info!("spawning delete old databases task");
-        let mut old_databases_task_handle =
-            zebra_state::check_and_delete_old_databases(config.state.clone());
+        let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
+            config.state.clone(),
+            config.network.network,
+        );
 
         info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(

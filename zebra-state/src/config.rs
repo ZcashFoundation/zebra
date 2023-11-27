@@ -196,6 +196,19 @@ impl Default for Config {
 // Cleaning up old database versions
 // TODO: put this in a different module?
 
+/// Spawns a task that checks if there are old state database folders,
+/// and deletes them from the filesystem.
+///
+/// See `check_and_delete_old_databases()` for details.
+pub fn check_and_delete_old_state_databases(config: &Config, network: Network) -> JoinHandle<()> {
+    check_and_delete_old_databases(
+        config,
+        STATE_DATABASE_KIND,
+        state_database_format_version_in_code().major,
+        network,
+    )
+}
+
 /// Spawns a task that checks if there are old database folders,
 /// and deletes them from the filesystem.
 ///
