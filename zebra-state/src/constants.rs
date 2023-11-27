@@ -6,7 +6,10 @@ use semver::Version;
 
 // For doc comment links
 #[allow(unused_imports)]
-use crate::config::{self, Config};
+use crate::{
+    config::{self, Config},
+    constants,
+};
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
@@ -41,8 +44,8 @@ pub const STATE_DATABASE_KIND: &str = "state";
 /// - we previously added compatibility code, and
 /// - it's available in all supported Zebra versions.
 ///
-/// Use [`config::database_format_version_in_code()`] or
-/// [`config::database_format_version_on_disk()`] to get the full semantic format version.
+/// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
+/// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
 const DATABASE_FORMAT_VERSION: u64 = 25;
 
 /// The database format minor version, incremented each time the on-disk database format has a
