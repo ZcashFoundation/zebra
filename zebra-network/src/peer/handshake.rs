@@ -29,7 +29,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network,
-    serialization::SerializationError,
+    serialization::{DateTime32, SerializationError},
 };
 
 use crate::{
@@ -915,28 +915,7 @@ where
             )
             .await?;
 
-            let remote_canonical_addr = connection_info.remote.address_from.addr();
             let remote_services = connection_info.remote.services;
-
-            // If we've learned potential peer addresses from an inbound
-            // connection or handshake, add those addresses to our address book.
-            //
-            // # Security
-            //
-            // We must handle alternate addresses separately from connected
-            // addresses. Otherwise, malicious peers could interfere with the
-            // address book state of other peers by providing their addresses in
-            // `Version` messages.
-            //
-            // New alternate peer address and peer responded updates are rate-limited because:
-            // - opening connections is rate-limited
-            // - we only send these messages once per handshake
-            let alternate_addrs = connected_addr.get_alternate_addrs(remote_canonical_addr);
-            for alt_addr in alternate_addrs {
-                let alt_addr = MetaAddr::new_alternate(alt_addr, &remote_services);
-                // awaiting a local task won't hang
-                let _ = address_book_updater.send(alt_addr).await;
-            }
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
             // and send initial connection info.
@@ -1055,6 +1034,33 @@ where
                 })
                 .boxed();
 
+            // If we've learned potential peer addresses from the inbound connection remote address
+            // or the handshake version message, add those addresses to the peer cache for this
+            // peer.
+            //
+            // # Security
+            //
+            // We can't add these alternate addresses directly to the address book. If we did,
+            // malicious peers could interfere with the address book state of other peers by
+            // providing their addresses in `Version` messages. Or they could fill the address book
+            // with fake addresses.
+            //
+            // These peer addresses are rate-limited because:
+            // - opening connections is rate-limited
+            // - these addresses are put in the peer address cache
+            // - the peer address cache is only used when Zebra requests addresses from that peer
+            let remote_canonical_addr = connection_info.remote.address_from.addr();
+            let alternate_addrs = connected_addr
+                .get_alternate_addrs(remote_canonical_addr)
+                .map(|addr| {
+                    // Assume the connecting node is a server node, and it's available now.
+                    MetaAddr::new_gossiped_meta_addr(
+                        addr,
+                        PeerServices::NODE_NETWORK,
+                        DateTime32::now(),
+                    )
+                });
+
             let server = Connection::new(
                 inbound_service,
                 server_rx,
@@ -1062,6 +1068,7 @@ where
                 peer_tx,
                 connection_tracker,
                 connection_info.clone(),
+                alternate_addrs.collect(),
             );
 
             let connection_task = tokio::spawn(

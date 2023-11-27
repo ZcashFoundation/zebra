@@ -1,30 +1,11 @@
-# Workflow patches for skipping Google Cloud integration test CI when Rust code or dependencies
-# aren't modified in a PR.
+# Workflow patches for skipping Google Cloud unit test CI on PRs from external repositories.
 name: Integration Tests on GCP
 
-# Run on PRs with unmodified code and dependency files.
+# Run on PRs from external repositories, let them pass, and then Mergify will check them.
+# GitHub doesn't support filtering workflows by source branch names, so we have to do it for each
+# job.
 on:
   pull_request:
-    paths-ignore:
-      # code and tests
-      - '**/*.rs'
-      # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
-      # test data snapshots
-      - '**/*.snap'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
-      # workflow definitions
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/ci-unit-tests-docker.yml'
-      - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
-      - '.github/workflows/sub-find-cached-disks.yml'
-      - '.github/workflows/sub-build-docker-image.yml'
 
 # IMPORTANT
 #
@@ -34,72 +15,88 @@ jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-available-disks:
     name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
+    # Only run on PRs from external repositories.
+    # (github.ref is always a local branch, so this check will skip non-PRs as well.)
+    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   build:
     name: Build CI Docker / Build images
+    # This dependency allows all these jobs to depend on a single condition, making it easier to
+    # change.
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-update-sync:
     name: Zebra tip update / Run update-to-tip test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   checkpoints-mainnet:
     name: Generate checkpoints mainnet / Run checkpoints-mainnet test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-transactions-test:
     name: lightwalletd tip send / Run lwd-send-transactions test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   get-block-template-test:
     name: get block template / Run get-block-template test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   submit-block-test:
     name: submit block / Run submit-block test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-update-sync:
     name: lightwalletd tip update / Run lwd-update-sync test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
+    needs: get-available-disks
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
