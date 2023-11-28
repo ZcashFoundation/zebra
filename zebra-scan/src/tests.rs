@@ -6,18 +6,15 @@
 use std::sync::Arc;
 
 use zcash_client_backend::{
-    data_api::BlockMetadata,
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
-        self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
-        CompactTx,
+        ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    scanning::scan_block,
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight, Network},
+    consensus::BlockHeight,
     constants::{mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, SPENDING_KEY_GENERATOR},
     memo::MemoBytes,
     sapling::{
@@ -35,24 +32,21 @@ use rand::{rngs::OsRng, RngCore};
 
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
+
 use zebra_chain::{
-    block::Block,
-    chain_tip::ChainTip,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::{Hash, Transaction},
+    block::Block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
+    transaction::Hash,
 };
 
-/// Prove that Zebra blocks can be scanned using the `zcash_client_backend::scanning::scan_block` function:
-/// - Populates the state with a continuous chain of mainnet blocks from genesis.
-/// - Scan the chain from the tip going backwards down to genesis.
-/// - Verifies that no relevant transaction is found in the chain when scanning for a fake account's nullifier.
+use crate::scan::{block_to_compact, scan_block};
+
+/// Scans a continuous chain of Mainnet blocks from tip to genesis.
+///
+/// Also verifies that no relevant transaction is found in the chain when scanning for a fake
+/// account's nullifier.
 #[tokio::test]
 async fn scanning_from_populated_zebra_state() -> Result<()> {
-    let account = AccountId::from(12);
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
-    let nf = Nullifier([7; 32]);
-
-    let network = zebra_chain::parameters::Network::default();
+    let network = Network::default();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -75,41 +69,32 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
     // TODO: Accessing the state database directly is ok in the tests, but not in production code.
     // Use `Request::Block` if the code is copied to production.
     while let Some(block) = db.block(height.into()) {
-        // We fake the sapling tree size to 1 because we are not in Sapling heights.
-        let sapling_tree_size = 1;
-        let orchard_tree_size = db
-            .orchard_tree_by_hash_or_height(height.into())
-            .expect("each state block must have a sapling tree")
-            .count();
+        // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
+        // because the underlying scanning function would return
+        // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
+        let sapling_commitment_tree_size = 1;
+
+        let orchard_commitment_tree_size = 0;
 
         let chain_metadata = ChainMetadata {
-            sapling_commitment_tree_size: sapling_tree_size
-                .try_into()
-                .expect("sapling position is limited to u32::MAX"),
-            orchard_commitment_tree_size: orchard_tree_size
-                .try_into()
-                .expect("orchard position is limited to u32::MAX"),
+            sapling_commitment_tree_size,
+            orchard_commitment_tree_size,
         };
 
-        let compact_block = block_to_compact(block, chain_metadata);
+        let compact_block = block_to_compact(block.clone(), chain_metadata);
 
-        let res = scan_block(
-            &zcash_primitives::consensus::MainNetwork,
-            compact_block.clone(),
-            &vks[..],
-            &[(account, nf)],
-            None,
-        )
-        .unwrap();
+        let res =
+            scan_block::<SaplingIvk>(network, block, sapling_commitment_tree_size, &[]).unwrap();
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
         blocks_scanned += 1;
 
-        // scan backwards
         if height.is_min() {
             break;
         }
+
+        // scan backwards
         height = height.previous()?;
     }
 
@@ -150,7 +135,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
     // The fake block function will have our transaction and a random one.
     assert_eq!(cb.vtx.len(), 2);
 
-    let res = scan_block(
+    let res = zcash_client_backend::scanning::scan_block(
         &zcash_primitives::consensus::MainNetwork,
         cb.clone(),
         &vks[..],
@@ -185,12 +170,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     )
     .unwrap();
 
-    let account = AccountId::from(1);
-
     // Build a vector of viewing keys `vks` to scan for.
     let fvk = efvk.fvk;
     let ivk = fvk.vk.ivk();
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![(&account, &ivk)];
 
     let network = zebra_chain::parameters::Network::Mainnet;
 
@@ -213,54 +195,22 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
     while let Some(block) = db.block(height.into()) {
-        // zcash_client_backend doesn't support scanning the genesis block, but that's ok, because
-        // Sapling activates at height 419,200. So we'll never scan these blocks in production code.
-        let sapling_tree_size = if height.is_min() {
-            1
-        } else {
-            db.sapling_tree_by_hash_or_height(height.into())
-                .expect("each state block must have a sapling tree")
-                .count()
-        };
+        // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
+        // because the underlying scanning function would return
+        // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
+        let sapling_commitment_tree_size = 1;
 
-        let orchard_tree_size = db
-            .orchard_tree_by_hash_or_height(height.into())
-            .expect("each state block must have a orchard tree")
-            .count();
+        let orchard_commitment_tree_size = 0;
 
         let chain_metadata = ChainMetadata {
-            sapling_commitment_tree_size: sapling_tree_size
-                .try_into()
-                .expect("sapling position is limited to u32::MAX"),
-            orchard_commitment_tree_size: orchard_tree_size
-                .try_into()
-                .expect("orchard position is limited to u32::MAX"),
+            sapling_commitment_tree_size,
+            orchard_commitment_tree_size,
         };
 
-        let block_metadata = if height.is_min() {
-            None
-        } else {
-            Some(BlockMetadata::from_parts(
-                height.previous()?.0.into(),
-                BlockHash(block.header.previous_block_hash.0),
-                db.sapling_tree_by_hash_or_height(block.header.previous_block_hash.into())
-                    .expect("each state block must have a sapling tree")
-                    .count()
-                    .try_into()
-                    .expect("sapling position is limited to u32::MAX"),
-            ))
-        };
+        let compact_block = block_to_compact(block.clone(), chain_metadata);
 
-        let compact_block = block_to_compact(block, chain_metadata);
-
-        let res = scan_block(
-            &zcash_primitives::consensus::MainNetwork,
-            compact_block.clone(),
-            &vks[..],
-            &[],
-            block_metadata.as_ref(),
-        )
-        .expect("scanning block for the ZECpages viewing key should work");
+        let res = scan_block(network, block, sapling_commitment_tree_size, &[&ivk])
+            .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
@@ -322,7 +272,7 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     );
 
     // Scan with our key
-    let res = scan_block(
+    let res = zcash_client_backend::scanning::scan_block(
         &zcash_primitives::consensus::MainNetwork,
         cb.clone(),
         &vks[..],
@@ -347,89 +297,6 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     Ok(())
 }
 
-/// Convert a zebra block and meta data into a compact block.
-fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
-    CompactBlock {
-        height: block
-            .coinbase_height()
-            .expect("verified block should have a valid height")
-            .0
-            .into(),
-        hash: block.hash().bytes_in_display_order().to_vec(),
-        prev_hash: block
-            .header
-            .previous_block_hash
-            .bytes_in_display_order()
-            .to_vec(),
-        time: block
-            .header
-            .time
-            .timestamp()
-            .try_into()
-            .expect("unsigned 32-bit times should work until 2105"),
-        header: block
-            .header
-            .zcash_serialize_to_vec()
-            .expect("verified block should serialize"),
-        vtx: block
-            .transactions
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(transaction_to_compact)
-            .collect(),
-        chain_metadata: Some(chain_metadata),
-
-        // The protocol version is used for the gRPC wire format, so it isn't needed here.
-        proto_version: 0,
-    }
-}
-
-/// Convert a zebra transaction into a compact transaction.
-fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
-    CompactTx {
-        index: index
-            .try_into()
-            .expect("tx index in block should fit in u64"),
-        hash: tx.hash().bytes_in_display_order().to_vec(),
-
-        // `fee` is not checked by the `scan_block` function. It is allowed to be unset.
-        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactTx.html#structfield.fee>
-        fee: 0,
-
-        spends: tx
-            .sapling_nullifiers()
-            .map(|nf| CompactSaplingSpend {
-                nf: <[u8; 32]>::from(*nf).to_vec(),
-            })
-            .collect(),
-
-        // > output encodes the cmu field, ephemeralKey field, and a 52-byte prefix of the encCiphertext field of a Sapling Output
-        //
-        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactSaplingOutput.html>
-        outputs: tx
-            .sapling_outputs()
-            .map(|output| CompactSaplingOutput {
-                cmu: output.cm_u.to_bytes().to_vec(),
-                ephemeral_key: output
-                    .ephemeral_key
-                    .zcash_serialize_to_vec()
-                    .expect("verified output should serialize successfully"),
-                ciphertext: output
-                    .enc_ciphertext
-                    .zcash_serialize_to_vec()
-                    .expect("verified output should serialize successfully")
-                    .into_iter()
-                    .take(52)
-                    .collect(),
-            })
-            .collect(),
-
-        // `actions` is not checked by the `scan_block` function.
-        actions: vec![],
-    }
-}
-
 /// Create a fake compact block with provided fake account data.
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
 // be a number for easier conversion:
@@ -448,18 +315,23 @@ fn fake_compact_block(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
+    let rseed = generate_random_rseed(
+        &zcash_primitives::consensus::Network::TestNetwork,
+        height,
+        &mut rng,
+    );
     let note = Note::from_parts(to, NoteValue::from_raw(value), rseed);
-    let encryptor = sapling_note_encryption::<_, Network>(
+    let encryptor = sapling_note_encryption::<_, zcash_primitives::consensus::Network>(
         Some(dfvk.fvk().ovk),
         note.clone(),
         MemoBytes::empty(),
         &mut rng,
     );
     let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-        .0
-        .to_vec();
+    let ephemeral_key =
+        SaplingDomain::<zcash_primitives::consensus::Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
     // Create a fake CompactBlock containing the note
@@ -503,7 +375,7 @@ fn fake_compact_block(
         cb.vtx.push(tx);
     }
 
-    cb.chain_metadata = initial_sapling_tree_size.map(|s| compact::ChainMetadata {
+    cb.chain_metadata = initial_sapling_tree_size.map(|s| ChainMetadata {
         sapling_commitment_tree_size: s + cb
             .vtx
             .iter()
