@@ -43,7 +43,7 @@ use zebra_chain::{
     parameters::NetworkUpgrade::{Nu5, Sapling},
     serialization::ZcashDeserializeInto,
 };
-use zebra_state::database_format_version_in_code;
+use zebra_state::state_database_format_version_in_code;
 
 use crate::common::{
     cached_state::{
@@ -122,7 +122,7 @@ pub async fn run() -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             [format!("Opened RPC endpoint at {zebra_rpc_address}")],
         )?;
     }
@@ -159,7 +159,7 @@ pub async fn run() -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             None,
         )?;
     }

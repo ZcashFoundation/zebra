@@ -6,7 +6,10 @@ use semver::Version;
 
 // For doc comment links
 #[allow(unused_imports)]
-use crate::config::{self, Config};
+use crate::{
+    config::{self, Config},
+    constants,
+};
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
@@ -27,6 +30,9 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 // TODO: change to HeightDiff
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
+/// The directory name used to distinguish the state database from Zebra's other databases or flat files.
+pub const STATE_DATABASE_KIND: &str = "state";
+
 /// The database format major version, incremented each time the on-disk database format has a
 /// breaking data format change.
 ///
@@ -38,9 +44,9 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 /// - we previously added compatibility code, and
 /// - it's available in all supported Zebra versions.
 ///
-/// Use [`config::database_format_version_in_code()`] or
-/// [`config::database_format_version_on_disk()`] to get the full semantic format version.
-pub(crate) const DATABASE_FORMAT_VERSION: u64 = 25;
+/// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
+/// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
+const DATABASE_FORMAT_VERSION: u64 = 25;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -49,11 +55,23 @@ pub(crate) const DATABASE_FORMAT_VERSION: u64 = 25;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-pub(crate) const DATABASE_FORMAT_MINOR_VERSION: u64 = 3;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 3;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
-pub(crate) const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
+const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
+
+/// Returns the full semantic version of the currently running state database format code.
+///
+/// This is the version implemented by the Zebra code that's currently running,
+/// the minor and patch versions on disk can be different.
+pub fn state_database_format_version_in_code() -> Version {
+    Version::new(
+        DATABASE_FORMAT_VERSION,
+        DATABASE_FORMAT_MINOR_VERSION,
+        DATABASE_FORMAT_PATCH_VERSION,
+    )
+}
 
 /// Returns the highest database version that modifies the subtree index format.
 ///

@@ -150,9 +150,8 @@ jobs:
           fail_on_error: false
       # This gives an error when run on PRs from external repositories, so we skip it.
       - name: validate-dependabot
-        # If this is a PR, check that the PR source is from a local branch.
-        # (github.ref is always a local branch, so this check always passes for non-PRs.)
-        if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
+        # If this is a PR, check that the PR source is a local branch. Always runs on non-PRs.
+        if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
         uses: marocchino/validate-dependabot@v2.1.0
 
   codespell:

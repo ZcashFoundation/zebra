@@ -1,6 +1,6 @@
 //! Candidate peer selection for outbound connections using the [`CandidateSet`].
 
-use std::{cmp::min, sync::Arc};
+use std::{any::type_name, cmp::min, sync::Arc};
 
 use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -26,13 +26,12 @@ mod tests;
 ///
 /// 1. [`Responded`] peers, which we have had an outbound connection to.
 /// 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
-///    but have never connected to.
-/// 3. [`NeverAttemptedAlternate`] peers, canonical addresses which we learned
-///    from the [`Version`] messages of inbound and outbound connections,
-///    but have never connected to.
-/// 4. [`Failed`] peers, which failed a connection attempt, or had an error
+///    but have never connected to. This includes gossiped peers, DNS seeder peers,
+///    cached peers, canonical addresses from the [`Version`] messages of inbound
+///    and outbound connections, and remote IP addresses of inbound connections.
+/// 3. [`Failed`] peers, which failed a connection attempt, or had an error
 ///    during an outbound connection.
-/// 5. [`AttemptPending`] peers, which we've recently queued for a connection.
+/// 4. [`AttemptPending`] peers, which we've recently queued for a connection.
 ///
 /// Never attempted peers are always available for connection.
 ///
@@ -68,8 +67,7 @@ mod tests;
 ///  │ disjoint `PeerAddrState`s     ▼                               │
 ///  │ ┌─────────────┐  ┌─────────────────────────┐  ┌─────────────┐ │
 ///  │ │ `Responded` │  │`NeverAttemptedGossiped` │  │  `Failed`   │ │
-/// ┌┼▶│    Peers    │  │`NeverAttemptedAlternate`│  │   Peers     │◀┼┐
-/// ││ │             │  │          Peers          │  │             │ ││
+/// ┌┼▶│    Peers    │  │          Peers          │  │   Peers     │◀┼┐
 /// ││ └─────────────┘  └─────────────────────────┘  └─────────────┘ ││
 /// ││        │                      │                      │        ││
 /// ││ #1 oldest_first        #2 newest_first        #3 oldest_first ││
@@ -115,23 +113,50 @@ mod tests;
 /// [`Responded`]: crate::PeerAddrState::Responded
 /// [`Version`]: crate::protocol::external::types::Version
 /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
-/// [`NeverAttemptedAlternate`]: crate::PeerAddrState::NeverAttemptedAlternate
 /// [`Failed`]: crate::PeerAddrState::Failed
 /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
 // TODO:
 //   * show all possible transitions between Attempt/Responded/Failed,
 //     except Failed -> Responded is invalid, must go through Attempt
+//
+// Note: the CandidateSet can't be cloned, because there needs to be a single
+// instance of its timers, so that rate limits are enforced correctly.
 pub(crate) struct CandidateSet<S>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
-    // Correctness: the address book must be private,
-    //              so all operations are performed on a blocking thread (see #1976).
+    /// The outbound address book for this peer set.
+    ///
+    /// # Correctness
+    ///
+    /// The address book must be private, so all operations are performed on a blocking thread
+    /// (see #1976).
     address_book: Arc<std::sync::Mutex<AddressBook>>,
+
+    /// The peer set used to crawl the network for peers.
     peer_service: S,
+
+    /// A timer that enforces a rate-limit on new outbound connections.
     min_next_handshake: Instant,
+
+    /// A timer that enforces a rate-limit on peer set requests for more peers.
     min_next_crawl: Instant,
+}
+
+impl<S> std::fmt::Debug for CandidateSet<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S::Future: Send + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CandidateSet")
+            .field("address_book", &self.address_book)
+            .field("peer_service", &type_name::<S>())
+            .field("min_next_handshake", &self.min_next_handshake)
+            .field("min_next_crawl", &self.min_next_crawl)
+            .finish()
+    }
 }
 
 impl<S> CandidateSet<S>

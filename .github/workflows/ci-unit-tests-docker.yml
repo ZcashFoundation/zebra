@@ -92,7 +92,7 @@ jobs:
   build:
     name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then Mergify will check them
-    if: ${{ contains(github.head_ref || github.ref, 'refs/heads/') }}
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile

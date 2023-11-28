@@ -6,18 +6,19 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{
     path::Path,
     sync::{mpsc, Arc},
 };
 
+use semver::Version;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    config::{database_format_version_in_code, database_format_version_on_disk},
+    config::database_format_version_on_disk,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -25,7 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    Config,
+    write_database_format_version_to_disk, BoxError, Config,
 };
 
 pub mod block;
@@ -37,7 +38,7 @@ pub mod transparent;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
-/// Wrapper struct to ensure high-level typed database access goes through the correct API.
+/// Wrapper struct to ensure high-level `zebra-state` database access goes through the correct API.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,
 /// so database instances are cloneable. When the final clone is dropped,
@@ -51,11 +52,13 @@ pub struct ZebraDb {
     //
     /// The configuration for the database.
     //
-    // TODO: use the database and version paths instead, and refactor the upgrade code to use paths
+    // TODO: move the config to DiskDb
     config: Arc<Config>,
 
     /// Should format upgrades and format checks be skipped for this instance?
     /// Only used in test code.
+    //
+    // TODO: move this to DiskDb
     debug_skip_format_upgrades: bool,
 
     // Owned State
@@ -68,6 +71,8 @@ pub struct ZebraDb {
     ///
     /// This field should be dropped before the database field, so the format upgrade task is
     /// cancelled before the database is dropped. This helps avoid some kinds of deadlocks.
+    //
+    // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
     /// The inner low-level database wrapper for the RocksDB database.
@@ -75,18 +80,32 @@ pub struct ZebraDb {
 }
 
 impl ZebraDb {
-    /// Opens or creates the database at `config.path` for `network`,
+    /// Opens or creates the database at a path based on the kind, major version and network,
+    /// with the supplied column families, preserving any existing column families,
     /// and returns a shared high-level typed database wrapper.
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
     /// This argument is only used when running tests, it is ignored in production code.
-    pub fn new(config: &Config, network: Network, debug_skip_format_upgrades: bool) -> ZebraDb {
-        let running_version = database_format_version_in_code();
-        let disk_version = database_format_version_on_disk(config, network)
-            .expect("unable to read database format version file");
+    //
+    // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
+    pub fn new(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: Network,
+        debug_skip_format_upgrades: bool,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> ZebraDb {
+        let disk_version = database_format_version_on_disk(
+            config,
+            &db_kind,
+            format_version_in_code.major,
+            network,
+        )
+        .expect("unable to read database format version file");
 
         // Log any format changes before opening the database, in case opening fails.
-        let format_change = DbFormatChange::open_database(running_version, disk_version);
+        let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
@@ -97,21 +116,22 @@ impl ZebraDb {
             // changes to the default database version. Then we set the correct version in the
             // upgrade thread. We need to do the version change in this order, because the version
             // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(config, network),
+            db: DiskDb::new(
+                config,
+                db_kind,
+                format_version_in_code,
+                network,
+                column_families_in_code,
+            ),
         };
 
-        db.spawn_format_change(config, network, format_change);
+        db.spawn_format_change(format_change);
 
         db
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.
-    pub fn spawn_format_change(
-        &mut self,
-        config: &Config,
-        network: Network,
-        format_change: DbFormatChange,
-    ) {
+    pub fn spawn_format_change(&mut self, format_change: DbFormatChange) {
         // Always do format upgrades & checks in production code.
         if cfg!(test) && self.debug_skip_format_upgrades {
             return;
@@ -128,16 +148,57 @@ impl ZebraDb {
 
         // TODO:
         // - should debug_stop_at_height wait for the upgrade task to finish?
-        // - if needed, make upgrade_db into a FinalizedState,
-        //   or move the FinalizedState methods needed for upgrades to ZebraDb.
-        let format_change_handle = format_change.spawn_format_change(
-            config.clone(),
-            network,
-            initial_tip_height,
-            upgrade_db,
-        );
+        let format_change_handle =
+            format_change.spawn_format_change(upgrade_db, initial_tip_height);
 
         self.format_change_handle = Some(format_change_handle);
+    }
+
+    /// Returns config for this database.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Returns the configured database kind for this database.
+    pub fn db_kind(&self) -> String {
+        self.db.db_kind()
+    }
+
+    /// Returns the format version of the running code that created this `ZebraDb` instance in memory.
+    pub fn format_version_in_code(&self) -> Version {
+        self.db.format_version_in_code()
+    }
+
+    /// Returns the fixed major version for this database.
+    pub fn major_version(&self) -> u64 {
+        self.db.major_version()
+    }
+
+    /// Returns the format version of this database on disk.
+    ///
+    /// See `database_format_version_on_disk()` for details.
+    pub fn format_version_on_disk(&self) -> Result<Option<Version>, BoxError> {
+        database_format_version_on_disk(
+            self.config(),
+            self.db_kind(),
+            self.major_version(),
+            self.network(),
+        )
+    }
+
+    /// Updates the format of this database on disk to the suppled version.
+    ///
+    /// See `write_database_format_version_to_disk()` for details.
+    pub(crate) fn update_format_version_on_disk(
+        &self,
+        new_version: &Version,
+    ) -> Result<(), BoxError> {
+        write_database_format_version_to_disk(
+            self.config(),
+            self.db_kind(),
+            new_version,
+            self.network(),
+        )
     }
 
     /// Returns the configured network for this database.
@@ -191,8 +252,13 @@ impl ZebraDb {
             // which would then make unrelated PRs fail when Zebra starts up.
 
             // If the upgrade has completed, or we've done a downgrade, check the state is valid.
-            let disk_version = database_format_version_on_disk(&self.config, self.network())
-                .expect("unexpected invalid or unreadable database version file");
+            let disk_version = database_format_version_on_disk(
+                &self.config,
+                self.db_kind(),
+                self.major_version(),
+                self.network(),
+            )
+            .expect("unexpected invalid or unreadable database version file");
 
             if let Some(disk_version) = disk_version {
                 // We need to keep the cancel handle until the format check has finished,
@@ -201,14 +267,12 @@ impl ZebraDb {
 
                 // We block here because the checks are quick and database validity is
                 // consensus-critical.
-                if disk_version >= database_format_version_in_code() {
-                    DbFormatChange::check_new_blocks()
+                if disk_version >= self.db.format_version_in_code() {
+                    DbFormatChange::check_new_blocks(self)
                         .run_format_change_or_check(
-                            &self.config,
-                            self.network(),
-                            // This argument is not used by the format check.
-                            None,
                             self,
+                            // The initial tip height is not used by the new blocks format check.
+                            None,
                             &never_cancel_receiver,
                         )
                         .expect("cancel handle is never used");

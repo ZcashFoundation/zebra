@@ -16,10 +16,10 @@ jobs:
   build:
     name: Build CD Docker / Build images
     # Only run on PRs from external repositories, skipping ZF branches and tags.
-    if: ${{ !contains(github.head_ref || github.ref, 'refs/heads/') && !contains(github.head_ref || github.ref, 'refs/tags/') }}
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-configuration-file:
     name: Test CD default Docker config file / Test default-conf in Docker
@@ -28,11 +28,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-zebra-conf-path:
     name: Test CD custom Docker config file / Test custom-conf in Docker
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
