@@ -6,13 +6,10 @@
 use std::sync::Arc;
 
 use zcash_client_backend::{
-    data_api::ScannedBlock,
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
-        self as compact, ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend,
-        CompactTx,
+        ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    scanning::{ScanError, ScanningKey},
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -37,12 +34,11 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 
 use zebra_chain::{
-    block::Block,
-    chain_tip::ChainTip,
-    parameters::Network,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::{Hash, Transaction},
+    block::Block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
+    transaction::Hash,
 };
+
+use crate::scan::{block_to_compact, scan_block};
 
 /// Scans a continuous chain of Mainnet blocks from tip to genesis.
 ///
@@ -301,89 +297,6 @@ async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     Ok(())
 }
 
-/// Convert a zebra block and meta data into a compact block.
-fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
-    CompactBlock {
-        height: block
-            .coinbase_height()
-            .expect("verified block should have a valid height")
-            .0
-            .into(),
-        hash: block.hash().bytes_in_display_order().to_vec(),
-        prev_hash: block
-            .header
-            .previous_block_hash
-            .bytes_in_display_order()
-            .to_vec(),
-        time: block
-            .header
-            .time
-            .timestamp()
-            .try_into()
-            .expect("unsigned 32-bit times should work until 2105"),
-        header: block
-            .header
-            .zcash_serialize_to_vec()
-            .expect("verified block should serialize"),
-        vtx: block
-            .transactions
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(transaction_to_compact)
-            .collect(),
-        chain_metadata: Some(chain_metadata),
-
-        // The protocol version is used for the gRPC wire format, so it isn't needed here.
-        proto_version: 0,
-    }
-}
-
-/// Convert a zebra transaction into a compact transaction.
-fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
-    CompactTx {
-        index: index
-            .try_into()
-            .expect("tx index in block should fit in u64"),
-        hash: tx.hash().bytes_in_display_order().to_vec(),
-
-        // `fee` is not checked by the `scan_block` function. It is allowed to be unset.
-        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactTx.html#structfield.fee>
-        fee: 0,
-
-        spends: tx
-            .sapling_nullifiers()
-            .map(|nf| CompactSaplingSpend {
-                nf: <[u8; 32]>::from(*nf).to_vec(),
-            })
-            .collect(),
-
-        // > output encodes the cmu field, ephemeralKey field, and a 52-byte prefix of the encCiphertext field of a Sapling Output
-        //
-        // <https://docs.rs/zcash_client_backend/latest/zcash_client_backend/proto/compact_formats/struct.CompactSaplingOutput.html>
-        outputs: tx
-            .sapling_outputs()
-            .map(|output| CompactSaplingOutput {
-                cmu: output.cm_u.to_bytes().to_vec(),
-                ephemeral_key: output
-                    .ephemeral_key
-                    .zcash_serialize_to_vec()
-                    .expect("verified output should serialize successfully"),
-                ciphertext: output
-                    .enc_ciphertext
-                    .zcash_serialize_to_vec()
-                    .expect("verified output should serialize successfully")
-                    .into_iter()
-                    .take(52)
-                    .collect(),
-            })
-            .collect(),
-
-        // `actions` is not checked by the `scan_block` function.
-        actions: vec![],
-    }
-}
-
 /// Create a fake compact block with provided fake account data.
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
 // be a number for easier conversion:
@@ -462,7 +375,7 @@ fn fake_compact_block(
         cb.vtx.push(tx);
     }
 
-    cb.chain_metadata = initial_sapling_tree_size.map(|s| compact::ChainMetadata {
+    cb.chain_metadata = initial_sapling_tree_size.map(|s| ChainMetadata {
         sapling_commitment_tree_size: s + cb
             .vtx
             .iter()
@@ -508,46 +421,4 @@ fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     ctx.spends.push(cspend);
     ctx.outputs.push(cout);
     ctx
-}
-
-/// Returns transactions belonging to any of the given [`ScanningKey`]s.
-///
-/// TODO:
-/// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
-/// Zebra's state, and we can retrieve the tree size ourselves.
-/// - Add prior block metadata once we have access to Zebra's state.
-fn scan_block<K: ScanningKey>(
-    network: Network,
-    block: Arc<Block>,
-    sapling_tree_size: u32,
-    scanning_keys: &[&K],
-) -> Result<ScannedBlock<K::Nf>, ScanError> {
-    // TODO: Implement a check that returns early when the block height is below the Sapling
-    // activation height.
-
-    let network: zcash_primitives::consensus::Network = network.into();
-
-    let chain_metadata = ChainMetadata {
-        sapling_commitment_tree_size: sapling_tree_size,
-        // Orchard is not supported at the moment so the tree size can be 0.
-        orchard_commitment_tree_size: 0,
-    };
-
-    // Use a dummy `AccountId` as we don't use accounts yet.
-    let dummy_account = AccountId::from(0);
-
-    let scanning_keys: Vec<_> = scanning_keys
-        .iter()
-        .map(|key| (&dummy_account, key))
-        .collect();
-
-    zcash_client_backend::scanning::scan_block(
-        &network,
-        block_to_compact(block, chain_metadata),
-        &scanning_keys,
-        // Ignore whether notes are change from a viewer's own spends for now.
-        &[],
-        // Ignore previous blocks for now.
-        None,
-    )
 }

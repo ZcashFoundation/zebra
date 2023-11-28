@@ -22,6 +22,9 @@ categories = ["cryptography::cryptocurrencies"]
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31" }
 
+zcash_primitives = "0.13.0-rc.1"
+zcash_client_backend = "0.10.0-rc.1"
+
 color-eyre = "0.6.2"
 indexmap = { version = "2.0.1", features = ["serde"] }
 serde = { version = "1.0.193", features = ["serde_derive"] }
@@ -30,9 +33,6 @@ tower = "0.4.13"
 tracing = "0.1.39"
 
 [dev-dependencies]
-
-zcash_client_backend = "0.10.0-rc.1"
-zcash_primitives = "0.13.0-rc.1"
 zcash_note_encryption = "0.4.0"
 
 rand = "0.8.5"
