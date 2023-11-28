@@ -463,6 +463,7 @@ pub(crate) use hidden::{
 };
 
 pub(crate) mod hidden {
+    #![allow(dead_code)]
 
     use super::*;
 

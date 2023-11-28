@@ -77,6 +77,7 @@ pub use service::{
 };
 
 #[cfg(not(any(test, feature = "proptest-impl")))]
+#[allow(unused_imports)]
 pub(crate) use config::hidden::{
     write_database_format_version_to_disk, write_state_database_format_version_to_disk,
 };
