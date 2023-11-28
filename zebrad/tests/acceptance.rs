@@ -2379,7 +2379,7 @@ fn delete_old_databases() -> Result<()> {
 
     // inside dir was deleted
     child.expect_stdout_line_matches(format!(
-        "deleted outdated state directory deleted_db={canonicalized_inside_dir:?}"
+        "deleted outdated state database directory.*deleted_db.*=.*{canonicalized_inside_dir:?}"
     ))?;
     assert!(!inside_dir.as_path().exists());
 
