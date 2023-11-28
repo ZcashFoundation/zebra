@@ -283,9 +283,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
             if let Some(deleted_db_version) = deleted_db_version {
                 info!(
-                    ?deleted_db_version,
-                    ?db_kind,
-                    "deleted outdated database directory"
+                    ?deleted_db,
+                    "deleted outdated {db_kind} database directory"
                 );
             }
         }
