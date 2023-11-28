@@ -279,13 +279,10 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     if let Some(db_kind_dir) = read_dir(&db_path) {
         for entry in db_kind_dir.flatten() {
-            let deleted_db_version = check_and_delete_database(&config, major_version, &entry);
+            let deleted_db = check_and_delete_database(&config, major_version, &entry);
 
-            if let Some(deleted_db_version) = deleted_db_version {
-                info!(
-                    ?deleted_db,
-                    "deleted outdated {db_kind} database directory"
-                );
+            if let Some(deleted_db) = deleted_db {
+                info!(?deleted_db, "deleted outdated {db_kind} database directory");
             }
         }
     }
