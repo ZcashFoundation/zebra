@@ -2331,8 +2331,8 @@ async fn fully_synced_rpc_test() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn delete_old_databases() -> Result<()> {
+#[test]
+fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 
     let _init_guard = zebra_test::init();
@@ -2804,10 +2804,10 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "zebra-scan")]
 /// Test that the scanner gets started when the node starts.
-#[tokio::test]
-async fn scan_task_starts() -> Result<()> {
+#[cfg(feature = "zebra-scan")]
+#[test]
+fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
 
     const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
