@@ -2,9 +2,8 @@
 //!
 //! Zebra's database is implemented in 4 layers:
 //! - [`FinalizedState`]: queues, validates, and commits blocks, using...
-//! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the database, using...
-//! - [`DiskDb`](disk_db::DiskDb): reads and writes format-specific types
-//!   to the database, using...
+//! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the state database, using...
+//! - [`DiskDb`]: reads and writes generic types to any column family in the database, using...
 //! - [`disk_format`]: converts types to raw database bytes.
 //!
 //! These layers allow us to split [`zebra_chain`] types for efficient database storage.
@@ -12,8 +11,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{
     io::{stderr, stdout, Write},
@@ -23,6 +22,7 @@ use std::{
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
 
 use crate::{
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
@@ -38,17 +38,52 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+#[allow(unused_imports)]
+pub use disk_db::{DiskDb, DiskWriteBatch, WriteDisk};
 pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+pub use zebra_db::ZebraDb;
+
+#[cfg(feature = "shielded-scan")]
+pub use disk_db::ReadDisk;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::MAX_ON_DISK_HEIGHT;
 
-pub(super) use zebra_db::ZebraDb;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use disk_db::DiskWriteBatch;
-#[cfg(not(any(test, feature = "proptest-impl")))]
-use disk_db::DiskWriteBatch;
+/// The column families supported by the running `zebra-state` database code.
+///
+/// Existing column families that aren't listed here are preserved when the database is opened.
+pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    // Blocks
+    "hash_by_height",
+    "height_by_hash",
+    "block_header_by_height",
+    // Transactions
+    "tx_by_loc",
+    "hash_by_tx_loc",
+    "tx_loc_by_hash",
+    // Transparent
+    "balance_by_transparent_addr",
+    "tx_loc_by_transparent_addr_loc",
+    "utxo_by_out_loc",
+    "utxo_loc_by_transparent_addr_loc",
+    // Sprout
+    "sprout_nullifiers",
+    "sprout_anchors",
+    "sprout_note_commitment_tree",
+    // Sapling
+    "sapling_nullifiers",
+    "sapling_anchors",
+    "sapling_note_commitment_tree",
+    "sapling_note_commitment_subtree",
+    // Orchard
+    "orchard_nullifiers",
+    "orchard_anchors",
+    "orchard_note_commitment_tree",
+    "orchard_note_commitment_subtree",
+    // Chain
+    "history_tree",
+    "tip_chain_value_pool",
+];
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -65,9 +100,6 @@ pub struct FinalizedState {
     // This configuration cannot be modified after the database is initialized,
     // because some clones would have different values.
     //
-    /// The configured network.
-    network: Network,
-
     /// The configured stop height.
     ///
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -120,11 +152,19 @@ impl FinalizedState {
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
-        let db = ZebraDb::new(config, network, debug_skip_format_upgrades);
+        let db = ZebraDb::new(
+            config,
+            STATE_DATABASE_KIND,
+            &state_database_format_version_in_code(),
+            network,
+            debug_skip_format_upgrades,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+        );
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
-            network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
             elastic_db,
@@ -133,7 +173,6 @@ impl FinalizedState {
 
         #[cfg(not(feature = "elasticsearch"))]
         let new_state = Self {
-            network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
         };
@@ -182,7 +221,7 @@ impl FinalizedState {
 
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
-        self.network
+        self.db.network()
     }
 
     /// Commit a checkpoint-verified block to the state.
@@ -293,7 +332,7 @@ impl FinalizedState {
                 // thread, if it shows up in profiles
                 check::block_commitment_is_valid_for_chain_history(
                     block.clone(),
-                    self.network,
+                    self.network(),
                     &history_tree,
                 )?;
 
@@ -359,9 +398,12 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
-        let result =
-            self.db
-                .write_block(finalized, prev_note_commitment_trees, self.network, source);
+        let result = self.db.write_block(
+            finalized,
+            prev_note_commitment_trees,
+            self.network(),
+            source,
+        );
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
@@ -421,7 +463,7 @@ impl FinalizedState {
             // less than this number of seconds.
             const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
-            let mut blocks_size_to_dump = match self.network {
+            let mut blocks_size_to_dump = match self.network() {
                 Network::Mainnet => MAINNET_AWAY_FROM_TIP_BULK_SIZE,
                 Network::Testnet => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
             };
@@ -451,7 +493,7 @@ impl FinalizedState {
                 let rt = tokio::runtime::Runtime::new()
                     .expect("runtime creation for elasticsearch should not fail.");
                 let blocks = self.elastic_blocks.clone();
-                let network = self.network;
+                let network = self.network();
 
                 rt.block_on(async move {
                     let response = client

@@ -7,8 +7,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constants must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -22,6 +22,7 @@ use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use rocksdb::ReadOptions;
+use semver::Version;
 use zebra_chain::parameters::Network;
 
 use crate::{
@@ -65,6 +66,12 @@ pub struct DiskDb {
     // This configuration cannot be modified after the database is initialized,
     // because some clones would have different values.
     //
+    /// The configured database kind for this database.
+    db_kind: String,
+
+    /// The format version of the running Zebra code.
+    format_version_in_code: Version,
+
     /// The configured network for this database.
     network: Network,
 
@@ -93,10 +100,6 @@ pub struct DiskDb {
 ///
 /// [`rocksdb::WriteBatch`] is a batched set of database updates,
 /// which must be written to the database using `DiskDb::write(batch)`.
-//
-// TODO: move DiskDb, FinalizedBlock, and the source String into this struct,
-//       (DiskDb can be cloned),
-//       and make them accessible via read-only methods
 #[must_use = "batches must be written to the database"]
 #[derive(Default)]
 pub struct DiskWriteBatch {
@@ -617,44 +620,18 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
-    /// The column families supported by the running database code.
-    const COLUMN_FAMILIES_IN_CODE: &'static [&'static str] = &[
-        // Blocks
-        "hash_by_height",
-        "height_by_hash",
-        "block_header_by_height",
-        // Transactions
-        "tx_by_loc",
-        "hash_by_tx_loc",
-        "tx_loc_by_hash",
-        // Transparent
-        "balance_by_transparent_addr",
-        "tx_loc_by_transparent_addr_loc",
-        "utxo_by_out_loc",
-        "utxo_loc_by_transparent_addr_loc",
-        // Sprout
-        "sprout_nullifiers",
-        "sprout_anchors",
-        "sprout_note_commitment_tree",
-        // Sapling
-        "sapling_nullifiers",
-        "sapling_anchors",
-        "sapling_note_commitment_tree",
-        "sapling_note_commitment_subtree",
-        // Orchard
-        "orchard_nullifiers",
-        "orchard_anchors",
-        "orchard_note_commitment_tree",
-        "orchard_note_commitment_subtree",
-        // Chain
-        "history_tree",
-        "tip_chain_value_pool",
-    ];
-
-    /// Opens or creates the database at `config.path` for `network`,
+    /// Opens or creates the database at a path based on the kind, major version and network,
+    /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
-    pub fn new(config: &Config, network: Network) -> DiskDb {
-        let path = config.db_path(network);
+    pub fn new(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> DiskDb {
+        let db_kind = db_kind.as_ref();
+        let path = config.db_path(db_kind, format_version_in_code.major, network);
 
         let db_options = DiskDb::options();
 
@@ -666,9 +643,7 @@ impl DiskDb {
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
         let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
-        let column_families_in_code = Self::COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string);
+        let column_families_in_code = column_families_in_code.into_iter();
 
         let column_families = column_families_on_disk
             .into_iter()
@@ -683,6 +658,8 @@ impl DiskDb {
                 info!("Opened Zebra state cache at {}", path.display());
 
                 let db = DiskDb {
+                    db_kind: db_kind.to_string(),
+                    format_version_in_code: format_version_in_code.clone(),
                     network,
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
@@ -703,6 +680,21 @@ impl DiskDb {
     }
 
     // Accessor methods
+
+    /// Returns the configured database kind for this database.
+    pub fn db_kind(&self) -> String {
+        self.db_kind.clone()
+    }
+
+    /// Returns the format version of the running code that created this `DiskDb` instance in memory.
+    pub fn format_version_in_code(&self) -> Version {
+        self.format_version_in_code.clone()
+    }
+
+    /// Returns the fixed major version for this database.
+    pub fn major_version(&self) -> u64 {
+        self.format_version_in_code().major
+    }
 
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
