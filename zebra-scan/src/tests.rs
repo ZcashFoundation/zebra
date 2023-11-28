@@ -522,13 +522,10 @@ fn scan_block<K: ScanningKey>(
     sapling_tree_size: u32,
     scanning_keys: &[&K],
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
-    let network: zcash_primitives::consensus::Network = match network {
-        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-        Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
-    };
-
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
+
+    let network: zcash_primitives::consensus::Network = network.into();
 
     let chain_metadata = ChainMetadata {
         sapling_commitment_tree_size: sapling_tree_size,
