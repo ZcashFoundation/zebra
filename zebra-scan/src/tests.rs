@@ -529,6 +529,7 @@ fn scan_block<K: ScanningKey>(
 
     let chain_metadata = ChainMetadata {
         sapling_commitment_tree_size: sapling_tree_size,
+        // Orchard is not supported at the moment so the tree size can be 0.
         orchard_commitment_tree_size: 0,
     };
 
