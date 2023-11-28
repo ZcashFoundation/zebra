@@ -35,6 +35,9 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
+# Experimental shielded blockchain scanning
+shielded-scan = []
+
 # Experimental elasticsearch support
 elasticsearch = [
     "dep:elasticsearch",
@@ -59,7 +62,7 @@ regex = "1.10.2"
 rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.20"
-serde = { version = "1.0.192", features = ["serde_derive"] }
+serde = { version = "1.0.193", features = ["serde_derive"] }
 tempfile = "3.8.1"
 thiserror = "1.0.48"
 

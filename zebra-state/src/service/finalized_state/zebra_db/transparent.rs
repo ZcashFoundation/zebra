@@ -8,8 +8,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},

@@ -1,6 +1,6 @@
 //! Randomised test data generation for MetaAddr.
 
-use std::{net::IpAddr, time::Instant};
+use std::net::IpAddr;
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
@@ -45,28 +45,6 @@ impl MetaAddr {
             })
             .boxed()
     }
-
-    /// Create a strategy that generates [`MetaAddr`]s in the
-    /// [`NeverAttemptedAlternate`][1] state.
-    ///
-    /// [1]: super::PeerAddrState::NeverAttemptedAlternate
-    pub fn alternate_strategy() -> BoxedStrategy<Self> {
-        (
-            canonical_peer_addr_strategy(),
-            any::<PeerServices>(),
-            any::<Instant>(),
-            any::<DateTime32>(),
-        )
-            .prop_map(
-                |(socket_addr, untrusted_services, instant_now, local_now)| {
-                    // instant_now is not actually used for this variant,
-                    // so we could just provide a default value
-                    MetaAddr::new_alternate(socket_addr, &untrusted_services)
-                        .into_new_meta_addr(instant_now, local_now)
-                },
-            )
-            .boxed()
-    }
 }
 
 impl MetaAddrChange {
@@ -109,33 +87,27 @@ impl MetaAddrChange {
             .boxed()
     }
 
-    /// Create a strategy that generates port numbers for [`MetaAddrChange`]s which are ready for
+    /// Create a strategy that generates port numbers for [`MetaAddr`]s which are ready for
     /// outbound connections.
     ///
-    /// Currently, all generated changes are the [`NewAlternate`][1] variant.
-    /// TODO: Generate all [`MetaAddrChange`] variants, and give them ready
-    /// fields. (After PR #2276 merges.)
+    /// Currently, all generated [`MetaAddr`]s are the [`NeverAttemptedGossiped`][1] variant.
     ///
-    /// [1]: super::NewAlternate
+    /// TODO: Generate all [`MetaAddr`] variants, and give them ready fields.
+    ///
+    /// [1]: super::NeverAttemptedGossiped
     pub fn ready_outbound_strategy_port() -> BoxedStrategy<u16> {
         (
             canonical_peer_addr_strategy(),
-            any::<Instant>(),
+            any::<PeerServices>(),
             any::<DateTime32>(),
         )
             .prop_filter_map(
                 "failed MetaAddr::is_valid_for_outbound",
-                |(addr, instant_now, local_now)| {
-                    // Alternate nodes use the current time, so they're always ready
-                    //
-                    // TODO: create a "Zebra supported services" constant
+                |(addr, services, local_now)| {
+                    let addr = MetaAddr::new_gossiped_meta_addr(addr, services, local_now);
 
-                    let change = MetaAddr::new_alternate(addr, &PeerServices::NODE_NETWORK);
-                    if change
-                        .into_new_meta_addr(instant_now, local_now)
-                        .last_known_info_is_valid_for_outbound(Mainnet)
-                    {
-                        Some(addr.port())
+                    if addr.last_known_info_is_valid_for_outbound(Mainnet) {
+                        Some(addr.addr.port())
                     } else {
                         None
                     }
