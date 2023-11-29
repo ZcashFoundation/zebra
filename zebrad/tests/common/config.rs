@@ -15,7 +15,7 @@ use std::{
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
-use zebra_chain::parameters::Network::{self, *};
+use zebra_chain::parameters::Network;
 use zebra_test::net::random_known_port;
 use zebrad::{
     components::{mempool, sync, tracing},
@@ -70,10 +70,11 @@ pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     {
-        let miner_address = if network.network == Mainnet {
-            "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
-        } else {
+        let miner_address = if network.network.is_a_test_network() {
+            // Assume test networks all use the same address prefix and format
             "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
+        } else {
+            "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
         };
 
         mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
