@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Configuration for the state service.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The root directory for storing cached block data.

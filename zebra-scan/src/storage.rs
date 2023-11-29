@@ -19,6 +19,7 @@ pub type SaplingScanningKey = String;
 /// `rocksdb` allows concurrent writes through a shared reference,
 /// so clones of the scanner storage represent the same database instance.
 /// When the final clone is dropped, the database is closed.
+#[derive(Clone, Debug)]
 pub struct Storage {
     // Configuration
     //
