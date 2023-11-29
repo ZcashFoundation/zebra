@@ -23,8 +23,7 @@ updates:
         prod:
           dependency-type: "production"
           exclude-patterns:
-            # TODO: remove hyper from pattern after jsonrpc-http-server upgrades to v1
-            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash|hyper"
+            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
         dev:
           dependency-type: "development"
   # Devops section
