@@ -4,15 +4,13 @@
 
 use std::collections::HashMap;
 
-use zebra_chain::{block::Height, parameters::Network, transaction::Hash};
+use zebra_chain::{block::Height, parameters::Network};
 
 use crate::config::Config;
 
 pub mod db;
 
-/// The type used in Zebra to store Sapling scanning keys.
-/// It can represent a full viewing key or an individual viewing key.
-pub type SaplingScanningKey = String;
+pub use db::{SaplingScanningKey, SaplingScannedResult};
 
 /// Store key info and results of the scan.
 ///
@@ -46,7 +44,7 @@ pub struct Storage {
     sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
 
     /// The sapling key and the related transaction id.
-    sapling_results: HashMap<SaplingScanningKey, Vec<Hash>>,
+    sapling_results: HashMap<SaplingScanningKey, Vec<SaplingScannedResult>>,
 }
 
 impl Storage {
@@ -74,7 +72,7 @@ impl Storage {
     }
 
     /// Add a sapling result to the storage.
-    pub fn add_sapling_result(&mut self, key: SaplingScanningKey, txid: Hash) {
+    pub fn add_sapling_result(&mut self, key: SaplingScanningKey, txid: SaplingScannedResult) {
         if let Some(results) = self.sapling_results.get_mut(&key) {
             results.push(txid);
         } else {
@@ -82,19 +80,19 @@ impl Storage {
         }
     }
 
-    /// Get the results of a sapling key.
+    /// Returns all the results for a sapling key, for every scanned block height.
     //
     // TODO: Rust style - remove "get_" from these names
-    pub fn get_sapling_results(&self, key: &str) -> Vec<Hash> {
+    pub fn get_sapling_results(&self, key: &str) -> Vec<SaplingScannedResult> {
         self.sapling_results.get(key).cloned().unwrap_or_default()
     }
 
-    /// Get all keys and their birthdays.
+    /// Returns all the keys and their birthdays.
     //
     // TODO: any value below sapling activation as the birthday height, or `None`, should default
     // to sapling activation. This requires the configured network.
     // Return Height not Option<Height>.
-    pub fn get_sapling_keys(&self) -> HashMap<String, Option<Height>> {
+    pub fn get_sapling_keys(&self) -> HashMap<SaplingScanningKey, Option<Height>> {
         self.sapling_keys.clone()
     }
 }

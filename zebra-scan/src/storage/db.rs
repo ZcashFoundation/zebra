@@ -11,7 +11,7 @@ use crate::Config;
 use super::Storage;
 
 // Public types and APIs
-pub use zebra_state::ZebraDb as ScannerDb;
+pub use zebra_state::{SaplingScanningKey, SaplingScannedResult, ZebraDb as ScannerDb};
 
 /// The directory name used to distinguish the scanner database from Zebra's other databases or
 /// flat files.
