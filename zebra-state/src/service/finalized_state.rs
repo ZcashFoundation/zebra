@@ -39,15 +39,12 @@ mod arbitrary;
 mod tests;
 
 #[allow(unused_imports)]
-pub use disk_db::{DiskDb, DiskWriteBatch, WriteDisk};
-pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
+pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
+#[allow(unused_imports)]
+pub use disk_format::{
+    FromDisk, IntoDisk, OutputIndex, OutputLocation, TransactionLocation, MAX_ON_DISK_HEIGHT,
+};
 pub use zebra_db::ZebraDb;
-
-#[cfg(feature = "shielded-scan")]
-pub use disk_db::ReadDisk;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use disk_format::MAX_ON_DISK_HEIGHT;
 
 /// The column families supported by the running `zebra-state` database code.
 ///
