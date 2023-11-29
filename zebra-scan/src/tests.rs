@@ -35,7 +35,10 @@ use zebra_chain::{
     block::Block, chain_tip::ChainTip, serialization::ZcashDeserializeInto, transaction::Hash,
 };
 
-use crate::scan::{block_to_compact, scan_block};
+use crate::{
+    config::Config,
+    scan::{block_to_compact, scan_block},
+};
 
 /// Prove that we can create fake blocks with fake notes and scan them using the
 /// `zcash_client_backend::scanning::scan_block` function:
@@ -177,7 +180,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         zcash_client_backend::encoding::encode_extended_full_viewing_key("zxviews", &extfvk);
 
     // Create a database
-    let mut s = crate::storage::Storage::new();
+    let mut s = crate::storage::Storage::new(Config::ephemeral());
 
     // Insert the generated key to the database
     s.add_sapling_key(key_to_be_stored.clone(), None);

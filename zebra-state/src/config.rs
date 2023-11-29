@@ -162,7 +162,7 @@ impl Config {
         version_path
     }
 
-    /// Construct a config for an ephemeral database
+    /// Returns a config for a temporary database that is deleted when it is dropped.
     pub fn ephemeral() -> Config {
         Config {
             ephemeral: true,

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 
 use zebra_chain::{block::Height, transaction::Hash};
 
+use crate::config::Config;
+
 pub mod db;
 
 /// The type used in Zebra to store Sapling scanning keys.
@@ -14,6 +16,8 @@ pub type SaplingScanningKey = String;
 
 /// Store key info and results of the scan.
 pub struct Storage {
+    // TODO: replace these fields with a database instance.
+    //
     /// The sapling key and an optional birthday for it.
     sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
 
@@ -22,8 +26,10 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Create a new storage.
-    pub fn new() -> Self {
+    /// Create a new storage based on `config`.
+    //
+    // TODO: replace this with `new_db()`.
+    pub fn new(_config: Config) -> Self {
         Self {
             sapling_keys: HashMap::new(),
             sapling_results: HashMap::new(),
@@ -50,13 +56,11 @@ impl Storage {
     }
 
     /// Get all keys and their birthdays.
+    //
+    // TODO: any value below sapling activation as the birthday height, or `None`, should default
+    // to sapling activation. This requires the configured network.
+    // Return Height not Option<Height>.
     pub fn get_sapling_keys(&self) -> HashMap<String, Option<Height>> {
         self.sapling_keys.clone()
-    }
-}
-
-impl Default for Storage {
-    fn default() -> Self {
-        Self::new()
     }
 }
