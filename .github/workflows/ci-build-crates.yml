@@ -101,7 +101,8 @@ jobs:
     name: Build ${{ matrix.crate }} crate
     timeout-minutes: 90
     needs: [ matrix, check-matrix ]
-    runs-on: ubuntu-latest
+    # Some of these builds take more than 14GB disk space
+    runs-on: ubuntu-latest-m
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time
       max-parallel: 2
@@ -142,11 +143,6 @@ jobs:
 
       - name: Build ${{ matrix.crate }} crate with all features
         run: |
-          # Work around a "No space left on device" error
-          # TODO: use a runner with a bigger disk
-          if [[ ${{ matrix.crate }} == "zebrad" ]]; then
-            cargo clean
-          fi
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
