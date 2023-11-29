@@ -142,6 +142,11 @@ jobs:
 
       - name: Build ${{ matrix.crate }} crate with all features
         run: |
+          # Work around a "No space left on device" error
+          # TODO: use a runner with a bigger disk
+          if [[ ${{ matrix.crate }} == "zebrad" ]]; then
+            cargo clean
+          fi
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
