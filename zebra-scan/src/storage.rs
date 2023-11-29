@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use zebra_chain::{block::Height, transaction::Hash};
+use zebra_chain::{block::Height, parameters::Network, transaction::Hash};
 
 use crate::config::Config;
 
@@ -29,7 +29,7 @@ impl Storage {
     /// Create a new storage based on `config`.
     //
     // TODO: replace this with `new_db()`.
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, _network: Network) -> Self {
         let mut storage = Self {
             sapling_keys: HashMap::new(),
             sapling_results: HashMap::new(),

@@ -292,7 +292,7 @@ impl StartCmd {
         // Spawn never ending scan task.
         let scan_task_handle = {
             info!("spawning shielded scanner with configured viewing keys");
-            zebra_scan::init(&config.shielded_scan, state)
+            zebra_scan::init(&config.shielded_scan, config.network.network, state)
         };
 
         #[cfg(not(feature = "zebra-scan"))]
