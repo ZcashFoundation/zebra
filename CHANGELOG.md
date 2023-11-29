@@ -5,6 +5,43 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) - 2023-11-28
+
+This release avoids a panic when reading cached sprout or history trees in Zebra v1.4.0, 
+improves how Zebra recovers from network interruptions, avoids potential network hangs, and
+limits the ability of syntethic nodes to spread throughout the network through Zebra to
+address some of the Ziggurat's report.
+
+Finally, we've added an experimental "shielded-scan" feature and the zebra-scan crate as steps
+towards supporting shielded scanning in Zebra.
+
+### Security
+
+- security(net): Stop sending peer addresses from version messages directly to the address book ([#7977](https://github.com/ZcashFoundation/zebra/pull/7977))
+- security(net): Limit how many addresses are sent directly to the address book for a single peer address message ([#7952](https://github.com/ZcashFoundation/zebra/pull/7952))
+- security(net): Rate-limit GetAddr responses to avoid sharing the entire address book over a short period ([#7955](https://github.com/ZcashFoundation/zebra/pull/7955))
+
+### Added
+
+- feat(config): Add config field for the viewing keys used by zebra-scan ([#7949](https://github.com/ZcashFoundation/zebra/pull/7949))
+- feat(scanner): Add basic RAM database to store keys and scan results ([#7942](https://github.com/ZcashFoundation/zebra/pull/7942))
+- feat(scanner): Spawn zebra-scan task from zebrad with configured viewing keys ([#7989](https://github.com/ZcashFoundation/zebra/pull/7989))
+
+### Changed
+
+- change(state): Expose ZebraDb methods that can create different kinds of databases ([#8002](https://github.com/ZcashFoundation/zebra/pull/8002))
+- change(state): Make the types for finalized blocks consistent ([#7923](https://github.com/ZcashFoundation/zebra/pull/7923))
+
+### Fixed
+
+- fix(db): Fix a sprout/history tree read panic in Zebra v1.4.0, which only happens before the 25.3.0 state upgrade completes ([#7972](https://github.com/ZcashFoundation/zebra/pull/7972))
+- fix(net): Fix potential network hangs, and reduce code complexity ([#7859](https://github.com/ZcashFoundation/zebra/pull/7859))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dependabot[bot], @oxarbitrage, @teor2345 and @upbqdn
+
 ## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - 2023-11-07
 
 Zebra's mining RPCs are now available in release builds. Our Docker images are significantly
