@@ -23,7 +23,10 @@ pub use block::{TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::{OutputIndex, OutputLocation};
 
 #[cfg(feature = "shielded-scan")]
-pub use scan::{SaplingScanningKey, SaplingScannedResult};
+pub use scan::{
+    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
+    SaplingScanningKey,
+};
 
 /// Helper type for writing types to disk as raw bytes.
 /// Also used to convert key types to raw bytes for disk lookups.

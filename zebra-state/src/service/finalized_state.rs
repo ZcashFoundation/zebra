@@ -47,7 +47,10 @@ pub use disk_format::{
 pub use zebra_db::ZebraDb;
 
 #[cfg(feature = "shielded-scan")]
-pub use disk_format::{SaplingScanningKey, SaplingScannedResult};
+pub use disk_format::{
+    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
+    SaplingScanningKey,
+};
 
 /// The column families supported by the running `zebra-state` database code.
 ///

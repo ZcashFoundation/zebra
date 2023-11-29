@@ -61,7 +61,8 @@ pub use service::{
 
 #[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
-    FromDisk, IntoDisk, ReadDisk, SaplingScanningKey, SaplingScannedResult, ZebraDb,
+    FromDisk, IntoDisk, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
+    SaplingScannedResult, SaplingScanningKey, ZebraDb,
 };
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
