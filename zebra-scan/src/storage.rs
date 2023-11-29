@@ -29,11 +29,17 @@ impl Storage {
     /// Create a new storage based on `config`.
     //
     // TODO: replace this with `new_db()`.
-    pub fn new(_config: Config) -> Self {
-        Self {
+    pub fn new(config: &Config) -> Self {
+        let mut storage = Self {
             sapling_keys: HashMap::new(),
             sapling_results: HashMap::new(),
+        };
+
+        for (key, birthday) in config.sapling_keys_to_scan.iter() {
+            storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
         }
+
+        storage
     }
 
     /// Add a sapling key to the storage.

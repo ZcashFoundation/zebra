@@ -180,7 +180,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         zcash_client_backend::encoding::encode_extended_full_viewing_key("zxviews", &extfvk);
 
     // Create a database
-    let mut s = crate::storage::Storage::new(Config::ephemeral());
+    let mut s = crate::storage::Storage::new(&Config::ephemeral());
 
     // Insert the generated key to the database
     s.add_sapling_key(key_to_be_stored.clone(), None);
