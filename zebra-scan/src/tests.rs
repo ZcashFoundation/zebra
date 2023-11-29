@@ -112,8 +112,8 @@ async fn scanning_from_populated_zebra_state() -> Result<()> {
 /// the transaction and one additional random transaction without it.
 /// - Verify one relevant transaction is found in the chain when scanning for the pre created fake
 /// account's nullifier.
-#[tokio::test]
-async fn scanning_from_fake_generated_blocks() -> Result<()> {
+#[test]
+fn scanning_from_fake_generated_blocks() -> Result<()> {
     let account = AccountId::from(12);
     let extsk = ExtendedSpendingKey::master(&[]);
     let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
@@ -233,9 +233,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
 /// In this test we generate a viewing key and manually add it to the database. Also we send results to the Storage database.
 /// The purpose of this test is to check if our database and our scanning code are compatible.
-#[tokio::test]
+#[test]
 #[allow(deprecated)]
-async fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
+fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     // Generate a key
     let account = AccountId::from(12);
     let extsk = ExtendedSpendingKey::master(&[]);
