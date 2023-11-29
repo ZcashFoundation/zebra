@@ -5,13 +5,19 @@ use std::{collections::HashMap, path::Path};
 use semver::Version;
 
 use zebra_chain::parameters::Network;
+use zebra_state::ReadDisk;
 
 use crate::Config;
 
 use super::Storage;
 
 // Public types and APIs
-pub use zebra_state::{SaplingScanningKey, SaplingScannedResult, ZebraDb as ScannerDb};
+pub use zebra_state::{
+    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
+    SaplingScanningKey, ZebraDb as ScannerDb,
+};
+
+pub mod sapling;
 
 /// The directory name used to distinguish the scanner database from Zebra's other databases or
 /// flat files.
@@ -24,12 +30,14 @@ pub const SCANNER_DATABASE_KIND: &str = "private-scan";
 /// Existing column families that aren't listed here are preserved when the database is opened.
 pub const SCANNER_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Sapling
-    "sapling_tx_ids",
+    sapling::SAPLING_TX_IDS,
     // Orchard
-    // TODO
+    // TODO: add Orchard support
 ];
 
 impl Storage {
+    // Creation
+
     /// Opens and returns an on-disk scanner results database instance for `config` and `network`.
     /// If there is no existing database, creates a new database on disk.
     ///
@@ -76,11 +84,7 @@ impl Storage {
         new_storage
     }
 
-    /// The database format version in the running scanner code.
-    pub fn database_format_version_in_code() -> Version {
-        // TODO: implement scanner database versioning
-        Version::new(0, 0, 0)
-    }
+    // Config
 
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
@@ -92,6 +96,14 @@ impl Storage {
         self.db.path()
     }
 
+    // Versioning & Upgrades
+
+    /// The database format version in the running scanner code.
+    pub fn database_format_version_in_code() -> Version {
+        // TODO: implement scanner database versioning
+        Version::new(0, 0, 0)
+    }
+
     /// Check for panics in code running in spawned threads.
     /// If a thread exited with a panic, resume that panic.
     ///
@@ -100,5 +112,13 @@ impl Storage {
     // TODO: when we implement format changes, call this method regularly
     pub fn check_for_panics(&mut self) {
         self.db.check_for_panics()
+    }
+
+    // General database status
+
+    /// Returns true if the database is empty.
+    pub fn is_empty(&self) -> bool {
+        // Any column family that is populated at (or near) startup can be used here.
+        self.db.zs_is_empty(&self.sapling_tx_ids_cf())
     }
 }

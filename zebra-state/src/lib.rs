@@ -60,6 +60,8 @@ pub use service::{
 };
 
 #[cfg(feature = "shielded-scan")]
+pub use rocksdb::AsColumnFamilyRef;
+#[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
     FromDisk, IntoDisk, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
     SaplingScannedResult, SaplingScanningKey, ZebraDb,

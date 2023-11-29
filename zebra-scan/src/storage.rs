@@ -10,7 +10,8 @@ use crate::config::Config;
 
 pub mod db;
 
-pub use db::{SaplingScanningKey, SaplingScannedResult};
+// Public types and APIs
+pub use db::{SaplingScannedResult, SaplingScanningKey};
 
 /// Store key info and results of the scan.
 ///
