@@ -5,6 +5,11 @@
 
 use std::sync::Arc;
 
+use color_eyre::Result;
+use ff::{Field, PrimeField};
+use group::GroupEncoding;
+use rand::{rngs::OsRng, RngCore};
+
 use zcash_client_backend::{
     encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
@@ -25,13 +30,6 @@ use zcash_primitives::{
     },
     zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
 };
-
-use color_eyre::Result;
-
-use rand::{rngs::OsRng, RngCore};
-
-use ff::{Field, PrimeField};
-use group::GroupEncoding;
 
 use zebra_chain::{
     block::Block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
