@@ -12,6 +12,8 @@ use crate::storage::SaplingScanningKey;
 /// Configuration for scanning.
 pub struct Config {
     /// The sapling keys to scan for and the birthday height of each of them.
+    //
+    // TODO: allow keys without birthdays
     pub sapling_keys_to_scan: IndexMap<SaplingScanningKey, u32>,
 
     /// The scanner results database config.
@@ -37,5 +39,10 @@ impl Config {
             db_config: DbConfig::ephemeral(),
             ..Self::default()
         }
+    }
+
+    /// Returns the database-specific config.
+    pub fn db_config(&self) -> &DbConfig {
+        &self.db_config
     }
 }

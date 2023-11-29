@@ -5804,6 +5804,7 @@ dependencies = [
  "indexmap 2.1.0",
  "jubjub",
  "rand 0.8.5",
+ "semver 1.0.20",
  "serde",
  "tokio",
  "tower",

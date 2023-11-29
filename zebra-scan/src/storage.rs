@@ -15,9 +15,32 @@ pub mod db;
 pub type SaplingScanningKey = String;
 
 /// Store key info and results of the scan.
+///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so clones of the scanner storage represent the same database instance.
+/// When the final clone is dropped, the database is closed.
 pub struct Storage {
-    // TODO: replace these fields with a database instance.
+    // Configuration
     //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    //
+    // TODO: add config if needed?
+
+    // Owned State
+    //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
+    /// The underlying database.
+    ///
+    /// `rocksdb` allows reads and writes via a shared reference,
+    /// so this database object can be freely cloned.
+    /// The last instance that is dropped will close the underlying database.
+    //
+    // This database is created but not actually used for results.
+    // TODO: replace the fields below with a database instance.
+    db: db::ScannerDb,
+
     /// The sapling key and an optional birthday for it.
     sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
 
@@ -26,14 +49,16 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Create a new storage based on `config`.
-    //
-    // TODO: replace this with `new_db()`.
-    pub fn new(config: &Config, _network: Network) -> Self {
-        let mut storage = Self {
-            sapling_keys: HashMap::new(),
-            sapling_results: HashMap::new(),
-        };
+    /// Opens and returns the on-disk scanner results storage for `config` and `network`.
+    /// If there is no existing storage, creates a new storage on disk.
+    ///
+    /// TODO:
+    /// New keys in `config` are inserted into the database with their birthday heights. Shielded
+    /// activation is the minimum birthday height.
+    ///
+    /// Birthdays and scanner progress are marked by inserting an empty result for that height.
+    pub fn new(config: &Config, network: Network) -> Self {
+        let mut storage = Self::new_db(config, network);
 
         for (key, birthday) in config.sapling_keys_to_scan.iter() {
             storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
@@ -57,6 +82,8 @@ impl Storage {
     }
 
     /// Get the results of a sapling key.
+    //
+    // TODO: Rust style - remove "get_" from these names
     pub fn get_sapling_results(&self, key: &str) -> Vec<Hash> {
         self.sapling_results.get(key).cloned().unwrap_or_default()
     }
