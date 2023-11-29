@@ -1,6 +1,6 @@
 [package]
 name = "zebra-scan"
-version = "0.1.0-alpha.0"
+version = "0.1.0-beta.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Shielded transaction scanner for the Zcash blockchain"
 license = "MIT OR Apache-2.0"
