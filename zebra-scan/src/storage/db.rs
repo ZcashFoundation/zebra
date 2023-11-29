@@ -96,6 +96,8 @@ impl Storage {
     /// If a thread exited with a panic, resume that panic.
     ///
     /// This method should be called regularly, so that panics are detected as soon as possible.
+    //
+    // TODO: when we implement format changes, call this method regularly
     pub fn check_for_panics(&mut self) {
         self.db.check_for_panics()
     }

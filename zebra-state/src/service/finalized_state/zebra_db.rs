@@ -229,13 +229,16 @@ impl ZebraDb {
     ///
     /// See [`DiskDb::shutdown`] for details.
     pub fn shutdown(&mut self, force: bool) {
+        // Are we shutting down the underlying database instance?
+        let is_shutdown = force || self.db.shared_database_owners() <= 1;
+
         // # Concurrency
         //
         // The format upgrade task should be cancelled before the database is flushed or shut down.
         // This helps avoid some kinds of deadlocks.
         //
         // See also the correctness note in `DiskDb::shutdown()`.
-        if force || self.db.shared_database_owners() <= 1 {
+        if !self.debug_skip_format_upgrades && is_shutdown {
             if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
             }
