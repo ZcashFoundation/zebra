@@ -1,15 +1,18 @@
 //! Store viewing keys and results of the scan.
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use zebra_chain::{block::Height, transaction::Hash};
+
+pub mod db;
 
 /// The type used in Zebra to store Sapling scanning keys.
 /// It can represent a full viewing key or an individual viewing key.
 pub type SaplingScanningKey = String;
 
 /// Store key info and results of the scan.
-#[allow(dead_code)]
 pub struct Storage {
     /// The sapling key and an optional birthday for it.
     sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
@@ -18,7 +21,6 @@ pub struct Storage {
     sapling_results: HashMap<SaplingScanningKey, Vec<Hash>>,
 }
 
-#[allow(dead_code)]
 impl Storage {
     /// Create a new storage.
     pub fn new() -> Self {
