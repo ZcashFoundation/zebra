@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 This release avoids a panic when reading cached sprout or history trees in Zebra v1.4.0, 
 improves how Zebra recovers from network interruptions, avoids potential network hangs, and
-limits the ability of syntethic nodes to spread throughout the network through Zebra to
-address some of the Ziggurat's report.
+limits the ability of synthetic nodes to spread throughout the network through Zebra to
+address some of the Ziggurat red team report.
 
 Finally, we've added an experimental "shielded-scan" feature and the zebra-scan crate as steps
 towards supporting shielded scanning in Zebra.
