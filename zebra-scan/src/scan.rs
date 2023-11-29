@@ -68,7 +68,7 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
     }
 }
 
-/// Returns transactions belonging to any of the given [`ScanningKey`]s.
+/// Returns transactions belonging to the given `ScanningKey`.
 ///
 /// TODO:
 /// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
