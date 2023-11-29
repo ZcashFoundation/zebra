@@ -5,8 +5,12 @@
 #![doc(html_root_url = "https://docs.rs/zebra_scan")]
 
 pub mod config;
+pub mod init;
 pub mod scan;
 pub mod storage;
 
 #[cfg(test)]
 mod tests;
+
+pub use config::Config;
+pub use init::init;

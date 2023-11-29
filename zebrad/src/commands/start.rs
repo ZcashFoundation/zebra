@@ -291,11 +291,10 @@ impl StartCmd {
         #[cfg(feature = "zebra-scan")]
         // Spawn never ending scan task.
         let scan_task_handle = {
-            // TODO: move this into a zebra_scan::init() method
-            info!("spawning zebra_scanner");
-            let storage = zebra_scan::storage::Storage::new(&config.shielded_scan);
-            tokio::spawn(zebra_scan::scan::start(state, storage).in_current_span())
+            info!("spawning shielded scanner with configured viewing keys");
+            zebra_scan::init(&config.shielded_scan, state)
         };
+
         #[cfg(not(feature = "zebra-scan"))]
         // Spawn a dummy scan task which doesn't do anything and never finishes.
         let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
