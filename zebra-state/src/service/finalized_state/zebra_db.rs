@@ -132,8 +132,12 @@ impl ZebraDb {
 
     /// Launch any required format changes or format checks, and store their thread handle.
     pub fn spawn_format_change(&mut self, format_change: DbFormatChange) {
-        // Always do format upgrades & checks in production code.
-        if cfg!(test) && self.debug_skip_format_upgrades {
+        // Always do format upgrades in production, but allow them to be skipped by the scanner
+        // (because it doesn't support them yet).
+        //
+        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
+        let can_skip_format_upgrades = cfg!(test) || cfg!(feature = "shielded-scan");
+        if can_skip_format_upgrades && self.debug_skip_format_upgrades {
             return;
         }
 
