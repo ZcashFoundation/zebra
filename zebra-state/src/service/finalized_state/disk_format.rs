@@ -13,6 +13,9 @@ pub mod shielded;
 pub mod transparent;
 pub mod upgrade;
 
+#[cfg(feature = "shielded-scan")]
+pub mod scan;
+
 #[cfg(test)]
 mod tests;
 
