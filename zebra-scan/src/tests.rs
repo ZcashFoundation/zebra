@@ -32,7 +32,10 @@ use zcash_primitives::{
 };
 
 use zebra_chain::{
-    block::Block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
+    block::{Block, Height},
+    chain_tip::ChainTip,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
     transaction::Hash,
 };
 
@@ -222,12 +225,16 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let found_transaction_hash = Hash::from_bytes_in_display_order(found_transaction);
 
     // Add result to database
-    s.add_sapling_result(key_to_be_stored.clone(), found_transaction_hash);
+    s.add_sapling_result(
+        key_to_be_stored.clone(),
+        Height(1),
+        vec![found_transaction_hash],
+    );
 
     // Check the result was added
     assert_eq!(
-        s.get_sapling_results(key_to_be_stored.as_str())[0],
-        found_transaction_hash
+        s.sapling_results(&key_to_be_stored).get(&Height(1)),
+        Some(&vec![found_transaction_hash])
     );
 
     Ok(())
