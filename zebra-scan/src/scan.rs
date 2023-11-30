@@ -32,7 +32,7 @@ pub type State = Buffer<
 const INITIAL_WAIT: Duration = Duration::from_secs(10);
 
 /// The amount of time between checking and starting new scans.
-const CHECK_INTERVAL: Duration = Duration::from_secs(10);
+const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Start the scan task given state and storage.
 ///
