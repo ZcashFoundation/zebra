@@ -13,4 +13,4 @@ pub mod storage;
 mod tests;
 
 pub use config::Config;
-pub use init::init;
+pub use init::{init, spawn_init};

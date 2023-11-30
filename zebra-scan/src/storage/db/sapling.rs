@@ -37,6 +37,8 @@ impl Storage {
     // Reading Sapling database entries
 
     /// Returns the results for a specific key and block height.
+    //
+    // TODO: add tests for this method
     pub fn sapling_result_for_key_and_block(
         &self,
         index: &SaplingScannedDatabaseIndex,
