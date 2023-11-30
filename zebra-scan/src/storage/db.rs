@@ -74,7 +74,6 @@ impl Storage {
 
         let new_storage = Self {
             db,
-            sapling_keys: HashMap::new(),
             sapling_results: HashMap::new(),
         };
 

@@ -14,6 +14,14 @@ use crate::{FromDisk, IntoDisk};
 
 use super::block::HEIGHT_DISK_BYTES;
 
+/// The fixed length of the scanning result.
+///
+/// TODO: If the scanning result doesn't have a fixed length, either:
+/// - deserialize using internal length or end markers,
+/// - prefix it with a length, or
+/// - stop storing vectors of results on disk, instead store each result with a unique key.
+pub const SAPLING_SCANNING_RESULT_LENGTH: usize = 32;
+
 /// The type used in Zebra to store Sapling scanning keys.
 /// It can represent a full viewing key or an individual viewing key.
 pub type SaplingScanningKey = String;
@@ -41,13 +49,18 @@ pub struct SaplingScannedDatabaseIndex {
     pub height: Height,
 }
 
-/// The fixed length of the scanning result.
-///
-/// TODO: If the scanning result doesn't have a fixed length, either:
-/// - deserialize using internal length or end markers,
-/// - prefix it with a length, or
-/// - stop storing vectors of results on disk, instead store each result with a unique key.
-pub const SAPLING_SCANNING_RESULT_LENGTH: usize = 32;
+impl SaplingScannedDatabaseIndex {
+    /// The minimum value of a sapling scanned database index.
+    /// This value is guarateed to be the minimum, and not correspond to a valid key.
+    pub const fn min() -> Self {
+        Self {
+            // The empty string is the minimum value in RocksDB lexicographic order.
+            sapling_key: String::new(),
+            // Genesis is the minimum height.
+            height: Height(0),
+        }
+    }
+}
 
 impl IntoDisk for SaplingScanningKey {
     type Bytes = Vec<u8>;

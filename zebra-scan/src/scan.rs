@@ -58,7 +58,7 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
         };
 
         // Read keys from the storage
-        let available_keys = storage.get_sapling_keys();
+        let available_keys = storage.sapling_keys();
 
         for key in available_keys {
             info!(

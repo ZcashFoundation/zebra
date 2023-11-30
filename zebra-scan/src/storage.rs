@@ -46,9 +46,6 @@ pub struct Storage {
     // TODO: replace the fields below with a database instance.
     db: db::ScannerDb,
 
-    /// The sapling key and an optional birthday for it.
-    sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
-
     /// The sapling key and the related transaction id.
     sapling_results: HashMap<SaplingScanningKey, Vec<SaplingScannedResult>>,
 }
@@ -74,7 +71,8 @@ impl Storage {
 
     /// Add a sapling key to the storage.
     pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
-        // TODO: re-use this batch for all the keys
+        // It's ok to write some keys and not others during shutdown, so each key can get its own
+        // batch. (They will be re-written on startup anyway.)
         let mut batch = ScannerWriteBatch::default();
 
         batch.insert_sapling_key(self, key, birthday);
@@ -99,12 +97,12 @@ impl Storage {
     }
 
     /// Returns all the keys and their birthdays.
-    //
-    // TODO: any value below sapling activation as the birthday height, or `None`, should default
-    // to sapling activation. This requires the configured network.
-    // Return Height not Option<Height>.
-    pub fn get_sapling_keys(&self) -> HashMap<SaplingScanningKey, Option<Height>> {
-        self.sapling_keys.clone()
+    ///
+    /// Birthdays are adjusted to sapling activation if they are too low or missing.
+    ///
+    /// TODO: this method reads database files, so it should be in spawn_blocking() in async code.
+    pub fn sapling_keys(&self) -> HashMap<SaplingScanningKey, Height> {
+        self.sapling_keys_and_birthday_heights()
     }
 
     // Parameters

@@ -187,8 +187,11 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     s.add_sapling_key(key_to_be_stored.clone(), None);
 
     // Check key was added
-    assert_eq!(s.get_sapling_keys().len(), 1);
-    assert_eq!(s.get_sapling_keys().get(&key_to_be_stored), Some(&None));
+    assert_eq!(s.sapling_keys().len(), 1);
+    assert_eq!(
+        s.sapling_keys().get(&key_to_be_stored),
+        Some(&s.min_sapling_birthday_height())
+    );
 
     let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
