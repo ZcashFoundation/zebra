@@ -35,7 +35,8 @@ pub mod metrics;
 pub mod shielded;
 pub mod transparent;
 
-#[cfg(any(test, feature = "proptest-impl"))]
+#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+// TODO: when the database is split out of zebra-state, always expose these methods.
 pub mod arbitrary;
 
 /// Wrapper struct to ensure high-level `zebra-state` database access goes through the correct API.

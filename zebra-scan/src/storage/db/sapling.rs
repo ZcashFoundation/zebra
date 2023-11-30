@@ -113,7 +113,9 @@ impl Storage {
 
     /// Returns a handle to the `sapling_tx_ids` column family.
     pub(crate) fn sapling_tx_ids_cf(&self) -> impl AsColumnFamilyRef + '_ {
-        self.db.cf_handle(SAPLING_TX_IDS).unwrap()
+        self.db
+            .cf_handle(SAPLING_TX_IDS)
+            .expect("column family was created when database was created")
     }
 
     // Writing batches
