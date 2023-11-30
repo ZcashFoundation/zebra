@@ -4,7 +4,10 @@
 
 use std::collections::HashMap;
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::Height,
+    parameters::{Network, NetworkUpgrade},
+};
 
 use crate::config::Config;
 
@@ -12,6 +15,8 @@ pub mod db;
 
 // Public types and APIs
 pub use db::{SaplingScannedResult, SaplingScanningKey};
+
+use self::db::ScannerWriteBatch;
 
 /// Store key info and results of the scan.
 ///
@@ -69,7 +74,12 @@ impl Storage {
 
     /// Add a sapling key to the storage.
     pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
-        self.sapling_keys.insert(key, birthday);
+        // TODO: re-use this batch for all the keys
+        let mut batch = ScannerWriteBatch::default();
+
+        batch.insert_sapling_key(self, key, birthday);
+
+        self.write_batch(batch);
     }
 
     /// Add a sapling result to the storage.
@@ -95,5 +105,20 @@ impl Storage {
     // Return Height not Option<Height>.
     pub fn get_sapling_keys(&self) -> HashMap<SaplingScanningKey, Option<Height>> {
         self.sapling_keys.clone()
+    }
+
+    // Parameters
+
+    /// Returns the minimum sapling birthday height for the configured network.
+    pub fn min_sapling_birthday_height(&self) -> Height {
+        // Assume that the genesis block never contains shielded inputs or outputs.
+        //
+        // # Consensus
+        //
+        // For Zcash mainnet and the public testnet, Sapling activates above genesis,
+        // so this is always true.
+        NetworkUpgrade::Sapling
+            .activation_height(self.network())
+            .unwrap_or(Height(0))
     }
 }
