@@ -1,10 +1,11 @@
-//! The scan task.
+//! The scanner task and scanning APIs.
 
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::{eyre::eyre, Report};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::info;
+
 use zcash_client_backend::{
     data_api::ScannedBlock,
     proto::compact_formats::{
@@ -13,6 +14,7 @@ use zcash_client_backend::{
     scanning::{ScanError, ScanningKey},
 };
 use zcash_primitives::zip32::AccountId;
+
 use zebra_chain::{
     block::Block, parameters::Network, serialization::ZcashSerialize, transaction::Transaction,
 };
