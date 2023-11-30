@@ -2804,7 +2804,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     Ok(())
 }
 
-/// Test that the scanner gets started when the node starts.
+/// Test that the scanner task gets started when the node starts.
 #[cfg(feature = "zebra-scan")]
 #[test]
 fn scan_task_starts() -> Result<()> {
