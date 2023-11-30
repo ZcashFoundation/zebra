@@ -1,13 +1,12 @@
 //! Store viewing keys and results of the scan.
 
-#![allow(dead_code)]
-
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
 };
+use zebra_state::{SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex};
 
 use crate::config::Config;
 
@@ -41,24 +40,19 @@ pub struct Storage {
     /// `rocksdb` allows reads and writes via a shared reference,
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
-    //
-    // This database is created but not actually used for results.
-    // TODO: replace the fields below with a database instance.
     db: db::ScannerDb,
-
-    /// The sapling key and the related transaction id.
-    sapling_results: HashMap<SaplingScanningKey, Vec<SaplingScannedResult>>,
 }
 
 impl Storage {
     /// Opens and returns the on-disk scanner results storage for `config` and `network`.
     /// If there is no existing storage, creates a new storage on disk.
     ///
-    /// TODO:
-    /// New keys in `config` are inserted into the database with their birthday heights. Shielded
-    /// activation is the minimum birthday height.
-    ///
     /// Birthdays and scanner progress are marked by inserting an empty result for that height.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while creating or reading database files, so it must be inside
+    /// spawn_blocking() in async code.
     pub fn new(config: &Config, network: Network) -> Self {
         let mut storage = Self::new_db(config, network);
 
@@ -70,6 +64,11 @@ impl Storage {
     }
 
     /// Add a sapling key to the storage.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while writing database files, so it must be inside spawn_blocking()
+    /// in async code.
     pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
@@ -78,22 +77,6 @@ impl Storage {
         batch.insert_sapling_key(self, key, birthday);
 
         self.write_batch(batch);
-    }
-
-    /// Add a sapling result to the storage.
-    pub fn add_sapling_result(&mut self, key: SaplingScanningKey, txid: SaplingScannedResult) {
-        if let Some(results) = self.sapling_results.get_mut(&key) {
-            results.push(txid);
-        } else {
-            self.sapling_results.insert(key, vec![txid]);
-        }
-    }
-
-    /// Returns all the results for a sapling key, for every scanned block height.
-    //
-    // TODO: Rust style - remove "get_" from these names
-    pub fn get_sapling_results(&self, key: &str) -> Vec<SaplingScannedResult> {
-        self.sapling_results.get(key).cloned().unwrap_or_default()
     }
 
     /// Returns all the keys and their birthdays.
@@ -106,6 +89,50 @@ impl Storage {
     /// in async code.
     pub fn sapling_keys(&self) -> HashMap<SaplingScanningKey, Height> {
         self.sapling_keys_and_birthday_heights()
+    }
+
+    /// Add a sapling result to the storage.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while writing database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn add_sapling_result(
+        &mut self,
+        sapling_key: SaplingScanningKey,
+        height: Height,
+        result: Vec<SaplingScannedResult>,
+    ) {
+        // It's ok to write some results and not others during shutdown, so each result can get its
+        // own batch. (They will be re-scanned on startup anyway.)
+        let mut batch = ScannerWriteBatch::default();
+
+        let index = SaplingScannedDatabaseIndex {
+            sapling_key,
+            height,
+        };
+
+        let entry = SaplingScannedDatabaseEntry {
+            index,
+            value: result,
+        };
+
+        batch.insert_sapling_result(self, entry);
+
+        self.write_batch(batch);
+    }
+
+    /// Returns all the results for a sapling key, for every scanned block height.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while reading database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn sapling_results(
+        &self,
+        sapling_key: &SaplingScanningKey,
+    ) -> BTreeMap<Height, Vec<SaplingScannedResult>> {
+        self.sapling_results_for_key(sapling_key)
     }
 
     // Parameters

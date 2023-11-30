@@ -16,7 +16,7 @@
 //! each key from the next height after we restart. We also use this mechanism to store key
 //! birthday heights, by storing the height before the birthday as the "last scanned" block.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use zebra_chain::block::Height;
 use zebra_state::{
@@ -46,8 +46,28 @@ impl Storage {
             .unwrap_or_default()
     }
 
+    /// Returns all the results for a specific key, indexed by height.
+    pub fn sapling_results_for_key(
+        &self,
+        sapling_key: &SaplingScanningKey,
+    ) -> BTreeMap<Height, Vec<SaplingScannedResult>> {
+        let k_min = SaplingScannedDatabaseIndex::min_for_key(sapling_key);
+        let k_max = SaplingScannedDatabaseIndex::max_for_key(sapling_key);
+
+        self.db
+            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), k_min..=k_max)
+            .into_iter()
+            .map(|(index, result)| (index.height, result))
+            .collect()
+    }
+
     /// Returns all the keys and their birthday heights.
     pub fn sapling_keys_and_birthday_heights(&self) -> HashMap<SaplingScanningKey, Height> {
+        // This code is a bit complex because we don't have a separate column family for keys
+        // and their birthday heights.
+        //
+        // TODO: make a separate column family after the MVP.
+
         let sapling_tx_ids = self.sapling_tx_ids_cf();
         let mut keys = HashMap::new();
 
@@ -69,19 +89,19 @@ impl Storage {
                 mut height,
             } = index;
 
-            // If there are no results, then it's a "skip up to height" marker, and the birthday height
-            // is the next height. If there are some results, it's the actual birthday height.
+            // If there are no results, then it's a "skip up to height" marker, and the birthday
+            // height is the next height. If there are some results, it's the actual birthday
+            // height.
             if results.is_empty() {
                 height = height
                     .next()
                     .expect("results should only be stored for validated block heights");
             }
 
-            keys.insert(sapling_key, height);
+            keys.insert(sapling_key.clone(), height);
 
             // Skip all the results before the next key.
-            // The maximum height block will never be mined, so we will never have an entry for it.
-            find_next_key_index.height = Height::MAX;
+            find_next_key_index = SaplingScannedDatabaseIndex::max_for_key(&sapling_key);
         }
 
         keys

@@ -1,6 +1,6 @@
 //! Persistent storage for scanner results.
 
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use semver::Version;
 
@@ -72,10 +72,7 @@ impl Storage {
                 .map(ToString::to_string),
         );
 
-        let new_storage = Self {
-            db,
-            sapling_results: HashMap::new(),
-        };
+        let new_storage = Self { db };
 
         // TODO: report the last scanned height here?
         tracing::info!("loaded Zebra scanner cache");

@@ -36,11 +36,11 @@ pub struct SaplingScannedDatabaseEntry {
     pub index: SaplingScannedDatabaseIndex,
 
     /// The database column family value.
-    pub value: SaplingScannedResult,
+    pub value: Vec<SaplingScannedResult>,
 }
 
 /// A database column family key for a block scanned with a Sapling vieweing key.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SaplingScannedDatabaseIndex {
     /// The Sapling viewing key used to scan the block.
     pub sapling_key: SaplingScanningKey,
@@ -56,8 +56,28 @@ impl SaplingScannedDatabaseIndex {
         Self {
             // The empty string is the minimum value in RocksDB lexicographic order.
             sapling_key: String::new(),
-            // Genesis is the minimum height.
+            // Genesis is the minimum height, and never has valid shielded transfers.
             height: Height(0),
+        }
+    }
+
+    /// The minimum value of a sapling scanned database index for `sapling_key`.
+    /// This value is guarateed to be the minimum, and not correspond to a valid entry.
+    pub fn min_for_key(sapling_key: &SaplingScanningKey) -> Self {
+        Self {
+            sapling_key: sapling_key.clone(),
+            // Genesis is the minimum height, and never has valid shielded transfers.
+            height: Height(0),
+        }
+    }
+
+    /// The maximum value of a sapling scanned database index for `sapling_key`.
+    /// This value is guarateed to be the maximum, and not correspond to a valid entry.
+    pub fn max_for_key(sapling_key: &SaplingScanningKey) -> Self {
+        Self {
+            sapling_key: sapling_key.clone(),
+            // The maximum height will never be mined - we'll increase it before that happens.
+            height: Height::MAX,
         }
     }
 }
