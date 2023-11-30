@@ -70,7 +70,7 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
     }
 }
 
-/// Returns transactions belonging to any of the given [`ScanningKey`]s.
+/// Returns transactions belonging to the given `ScanningKey`.
 ///
 /// TODO:
 /// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
@@ -80,7 +80,7 @@ pub fn scan_block<K: ScanningKey>(
     network: Network,
     block: Arc<Block>,
     sapling_tree_size: u32,
-    scanning_keys: &[&K],
+    scanning_key: &K,
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
@@ -96,10 +96,8 @@ pub fn scan_block<K: ScanningKey>(
     // Use a dummy `AccountId` as we don't use accounts yet.
     let dummy_account = AccountId::from(0);
 
-    let scanning_keys: Vec<_> = scanning_keys
-        .iter()
-        .map(|key| (&dummy_account, key))
-        .collect();
+    // We only support scanning one key and one block per function call for now.
+    let scanning_keys = vec![(&dummy_account, scanning_key)];
 
     zcash_client_backend::scanning::scan_block(
         &network,
