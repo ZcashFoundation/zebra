@@ -100,7 +100,10 @@ impl Storage {
     ///
     /// Birthdays are adjusted to sapling activation if they are too low or missing.
     ///
-    /// TODO: this method reads database files, so it should be in spawn_blocking() in async code.
+    /// # Performance / Hangs
+    ///
+    /// This method can block while reading database files, so it must be inside spawn_blocking()
+    /// in async code.
     pub fn sapling_keys(&self) -> HashMap<SaplingScanningKey, Height> {
         self.sapling_keys_and_birthday_heights()
     }
