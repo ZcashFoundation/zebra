@@ -402,7 +402,7 @@ impl ZebraDb {
     }
 
     /// Writes the given batch to the database.
-    pub(crate) fn write_batch(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
+    pub fn write_batch(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         self.db.write(batch)
     }
 }

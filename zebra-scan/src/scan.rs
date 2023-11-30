@@ -16,7 +16,8 @@ use zcash_client_backend::{
 use zcash_primitives::zip32::AccountId;
 
 use zebra_chain::{
-    block::Block, parameters::Network, serialization::ZcashSerialize, transaction::Transaction,
+    block::Block, diagnostic::task::WaitForPanics, parameters::Network,
+    serialization::ZcashSerialize, transaction::Transaction,
 };
 
 use crate::storage::Storage;
@@ -31,7 +32,7 @@ pub type State = Buffer<
 const INITIAL_WAIT: Duration = Duration::from_secs(10);
 
 /// The amount of time between checking and starting new scans.
-const CHECK_INTERVAL: Duration = Duration::from_secs(10);
+const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Start the scan task given state and storage.
 ///
@@ -57,13 +58,16 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
 
-        // Read keys from the storage
-        let available_keys = storage.get_sapling_keys();
+        // Read keys from the storage on disk, which can block.
+        let key_storage = storage.clone();
+        let available_keys = tokio::task::spawn_blocking(move || key_storage.sapling_keys())
+            .wait_for_panics()
+            .await;
 
         for key in available_keys {
             info!(
-                "Scanning the blockchain for key {} from block 1 to {:?}",
-                key.0, tip,
+                "Scanning the blockchain for key {} from block {:?} to {:?}",
+                key.0, key.1, tip,
             );
         }
 
@@ -72,6 +76,11 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
 }
 
 /// Returns transactions belonging to the given `ScanningKey`.
+///
+/// # Performance / Hangs
+///
+/// This method can block while reading database files, so it must be inside spawn_blocking()
+/// in async code.
 ///
 /// TODO:
 /// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to

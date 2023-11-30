@@ -2804,7 +2804,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     Ok(())
 }
 
-/// Test that the scanner gets started when the node starts.
+/// Test that the scanner task gets started when the node starts.
 #[cfg(feature = "zebra-scan")]
 #[test]
 fn scan_task_starts() -> Result<()> {
@@ -2831,10 +2831,10 @@ fn scan_task_starts() -> Result<()> {
     // Check that scan task started and the first scanning is done.
     let output = child.wait_with_output()?;
 
-    output.stdout_line_contains("spawning zebra_scanner")?;
+    output.stdout_line_contains("spawning shielded scanner with configured viewing keys")?;
     output.stdout_line_contains(
         format!(
-            "Scanning the blockchain for key {} from block 1 to",
+            "Scanning the blockchain for key {} from block",
             ZECPAGES_VIEWING_KEY
         )
         .as_str(),

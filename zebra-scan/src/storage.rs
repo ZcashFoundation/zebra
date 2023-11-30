@@ -1,18 +1,21 @@
 //! Store viewing keys and results of the scan.
 
-#![allow(dead_code)]
+use std::collections::{BTreeMap, HashMap};
 
-use std::collections::HashMap;
-
-use zebra_chain::{block::Height, parameters::Network, transaction::Hash};
+use zebra_chain::{
+    block::Height,
+    parameters::{Network, NetworkUpgrade},
+};
+use zebra_state::{SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex};
 
 use crate::config::Config;
 
 pub mod db;
 
-/// The type used in Zebra to store Sapling scanning keys.
-/// It can represent a full viewing key or an individual viewing key.
-pub type SaplingScanningKey = String;
+// Public types and APIs
+pub use db::{SaplingScannedResult, SaplingScanningKey};
+
+use self::db::ScannerWriteBatch;
 
 /// Store key info and results of the scan.
 ///
@@ -37,27 +40,19 @@ pub struct Storage {
     /// `rocksdb` allows reads and writes via a shared reference,
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
-    //
-    // This database is created but not actually used for results.
-    // TODO: replace the fields below with a database instance.
     db: db::ScannerDb,
-
-    /// The sapling key and an optional birthday for it.
-    sapling_keys: HashMap<SaplingScanningKey, Option<Height>>,
-
-    /// The sapling key and the related transaction id.
-    sapling_results: HashMap<SaplingScanningKey, Vec<Hash>>,
 }
 
 impl Storage {
     /// Opens and returns the on-disk scanner results storage for `config` and `network`.
     /// If there is no existing storage, creates a new storage on disk.
     ///
-    /// TODO:
-    /// New keys in `config` are inserted into the database with their birthday heights. Shielded
-    /// activation is the minimum birthday height.
-    ///
     /// Birthdays and scanner progress are marked by inserting an empty result for that height.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while creating or reading database files, so it must be inside
+    /// spawn_blocking() in async code.
     pub fn new(config: &Config, network: Network) -> Self {
         let mut storage = Self::new_db(config, network);
 
@@ -69,32 +64,89 @@ impl Storage {
     }
 
     /// Add a sapling key to the storage.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while writing database files, so it must be inside spawn_blocking()
+    /// in async code.
     pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
-        self.sapling_keys.insert(key, birthday);
+        // It's ok to write some keys and not others during shutdown, so each key can get its own
+        // batch. (They will be re-written on startup anyway.)
+        let mut batch = ScannerWriteBatch::default();
+
+        batch.insert_sapling_key(self, key, birthday);
+
+        self.write_batch(batch);
+    }
+
+    /// Returns all the keys and their birthdays.
+    ///
+    /// Birthdays are adjusted to sapling activation if they are too low or missing.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while reading database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn sapling_keys(&self) -> HashMap<SaplingScanningKey, Height> {
+        self.sapling_keys_and_birthday_heights()
     }
 
     /// Add a sapling result to the storage.
-    pub fn add_sapling_result(&mut self, key: SaplingScanningKey, txid: Hash) {
-        if let Some(results) = self.sapling_results.get_mut(&key) {
-            results.push(txid);
-        } else {
-            self.sapling_results.insert(key, vec![txid]);
-        }
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while writing database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn add_sapling_result(
+        &mut self,
+        sapling_key: SaplingScanningKey,
+        height: Height,
+        result: Vec<SaplingScannedResult>,
+    ) {
+        // It's ok to write some results and not others during shutdown, so each result can get its
+        // own batch. (They will be re-scanned on startup anyway.)
+        let mut batch = ScannerWriteBatch::default();
+
+        let index = SaplingScannedDatabaseIndex {
+            sapling_key,
+            height,
+        };
+
+        let entry = SaplingScannedDatabaseEntry {
+            index,
+            value: result,
+        };
+
+        batch.insert_sapling_result(self, entry);
+
+        self.write_batch(batch);
     }
 
-    /// Get the results of a sapling key.
-    //
-    // TODO: Rust style - remove "get_" from these names
-    pub fn get_sapling_results(&self, key: &str) -> Vec<Hash> {
-        self.sapling_results.get(key).cloned().unwrap_or_default()
+    /// Returns all the results for a sapling key, for every scanned block height.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while reading database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn sapling_results(
+        &self,
+        sapling_key: &SaplingScanningKey,
+    ) -> BTreeMap<Height, Vec<SaplingScannedResult>> {
+        self.sapling_results_for_key(sapling_key)
     }
 
-    /// Get all keys and their birthdays.
-    //
-    // TODO: any value below sapling activation as the birthday height, or `None`, should default
-    // to sapling activation. This requires the configured network.
-    // Return Height not Option<Height>.
-    pub fn get_sapling_keys(&self) -> HashMap<String, Option<Height>> {
-        self.sapling_keys.clone()
+    // Parameters
+
+    /// Returns the minimum sapling birthday height for the configured network.
+    pub fn min_sapling_birthday_height(&self) -> Height {
+        // Assume that the genesis block never contains shielded inputs or outputs.
+        //
+        // # Consensus
+        //
+        // For Zcash mainnet and the public testnet, Sapling activates above genesis,
+        // so this is always true.
+        NetworkUpgrade::Sapling
+            .activation_height(self.network())
+            .unwrap_or(Height(0))
     }
 }
