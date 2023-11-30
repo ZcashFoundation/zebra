@@ -32,7 +32,8 @@ use zcash_primitives::{
 };
 
 use zebra_chain::{
-    block::Block, chain_tip::ChainTip, serialization::ZcashDeserializeInto, transaction::Hash,
+    block::Block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
+    transaction::Hash,
 };
 
 use crate::{
