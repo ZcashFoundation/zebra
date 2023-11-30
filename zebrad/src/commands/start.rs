@@ -291,14 +291,10 @@ impl StartCmd {
         #[cfg(feature = "zebra-scan")]
         // Spawn never ending scan task.
         let scan_task_handle = {
-            info!("spawning zebra_scanner");
-            let mut storage = zebra_scan::storage::Storage::new();
-            for (key, birthday) in config.shielded_scan.sapling_keys_to_scan.iter() {
-                storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
-            }
-
-            tokio::spawn(zebra_scan::scan::start(state, storage).in_current_span())
+            info!("spawning shielded scanner with configured viewing keys");
+            zebra_scan::init(&config.shielded_scan, config.network.network, state)
         };
+
         #[cfg(not(feature = "zebra-scan"))]
         // Spawn a dummy scan task which doesn't do anything and never finishes.
         let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =

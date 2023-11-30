@@ -21,7 +21,8 @@ use zebra_chain::{
 
 use crate::storage::Storage;
 
-type State = Buffer<
+/// The generic state type used by the scanner.
+pub type State = Buffer<
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
     zebra_state::Request,
 >;
@@ -35,7 +36,7 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 /// Start the scan task given state and storage.
 ///
 /// - This function is dummy at the moment. It just makes sure we can read the storage and the state.
-/// - Modificatiuons here might have an impact in the `scan_task_starts` test.
+/// - Modifications here might have an impact in the `scan_task_starts` test.
 /// - Real scanning code functionality will be added in the future here.
 pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
     // We want to make sure the state has a tip height available before we start scanning.

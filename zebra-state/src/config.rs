@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Configuration for the state service.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The root directory for storing cached block data.
@@ -162,7 +162,7 @@ impl Config {
         version_path
     }
 
-    /// Construct a config for an ephemeral database
+    /// Returns a config for a temporary database that is deleted when it is dropped.
     pub fn ephemeral() -> Config {
         Config {
             ephemeral: true,

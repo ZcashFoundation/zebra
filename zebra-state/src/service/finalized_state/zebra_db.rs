@@ -107,10 +107,16 @@ impl ZebraDb {
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
+        // Always do format upgrades in production, but allow them to be skipped by the scanner
+        // (because it doesn't support them yet).
+        //
+        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
+        let can_skip_format_upgrades = cfg!(test) || cfg!(feature = "shielded-scan");
+
         // Open the database and do initial checks.
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
-            debug_skip_format_upgrades,
+            debug_skip_format_upgrades: can_skip_format_upgrades && debug_skip_format_upgrades,
             format_change_handle: None,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
@@ -132,8 +138,7 @@ impl ZebraDb {
 
     /// Launch any required format changes or format checks, and store their thread handle.
     pub fn spawn_format_change(&mut self, format_change: DbFormatChange) {
-        // Always do format upgrades & checks in production code.
-        if cfg!(test) && self.debug_skip_format_upgrades {
+        if self.debug_skip_format_upgrades {
             return;
         }
 
@@ -229,13 +234,16 @@ impl ZebraDb {
     ///
     /// See [`DiskDb::shutdown`] for details.
     pub fn shutdown(&mut self, force: bool) {
+        // Are we shutting down the underlying database instance?
+        let is_shutdown = force || self.db.shared_database_owners() <= 1;
+
         // # Concurrency
         //
         // The format upgrade task should be cancelled before the database is flushed or shut down.
         // This helps avoid some kinds of deadlocks.
         //
         // See also the correctness note in `DiskDb::shutdown()`.
-        if force || self.db.shared_database_owners() <= 1 {
+        if !self.debug_skip_format_upgrades && is_shutdown {
             if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
             }

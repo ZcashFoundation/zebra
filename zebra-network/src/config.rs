@@ -46,7 +46,7 @@ pub use cache_dir::CacheDir;
 const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
 /// Configuration for networking code.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address on which this node should listen for connections.

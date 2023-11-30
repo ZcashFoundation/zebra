@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub mod mining;
 
 /// RPC configuration section.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// IP address and port for the RPC server.
