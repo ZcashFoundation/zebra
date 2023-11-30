@@ -30,7 +30,10 @@ impl Storage {
     // Reading Sapling database entries
 
     /// Returns the results for a specific key and block height.
-    pub fn sapling_tx_ids(&self, index: &SaplingScannedDatabaseIndex) -> Vec<SaplingScannedResult> {
+    pub fn sapling_result_for_key_and_block(
+        &self,
+        index: &SaplingScannedDatabaseIndex,
+    ) -> Vec<SaplingScannedResult> {
         self.db
             .zs_get(&self.sapling_tx_ids_cf(), &index)
             .unwrap_or_default()
