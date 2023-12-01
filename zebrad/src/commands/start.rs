@@ -291,6 +291,7 @@ impl StartCmd {
         #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task.
         let scan_task_handle = {
+            // TODO: log the number of keys and update the scan_task_starts() test
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
                 &config.shielded_scan,
