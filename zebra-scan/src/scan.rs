@@ -49,13 +49,38 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 /// This is just under half the target block interval.
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Start the scan task given state and storage.
-///
-/// - This function is dummy at the moment. It just makes sure we can read the storage and the state.
-/// - Modifications here might have an impact in the `scan_task_starts` test.
-/// - Real scanning code functionality will be added in the future here.
-pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
-    // We want to make sure the state has a tip height available before we start scanning.
+/// We log an info log with progress after this many blocks.
+const INFO_LOG_INTERVAL: u32 = 100_000;
+
+/// Start a scan task that reads blocks from `state`, scans them with the configured keys in
+/// `storage`, and then writes the results to `storage`.
+pub async fn start(
+    mut state: State,
+    chain_tip_change: ChainTipChange,
+    mut storage: Storage,
+) -> Result<(), Report> {
+    let mut height = storage.min_sapling_birthday_height();
+
+    // Read keys from the storage on disk, which can block async execution.
+    let key_storage = storage.clone();
+    let key_birthdays = tokio::task::spawn_blocking(move || key_storage.sapling_keys())
+        .wait_for_panics()
+        .await;
+
+    // Parse and convert keys once, then use them to scan all blocks.
+    // There is some cryptography here, but it should be fast even with thousands of keys.
+    let parsed_keys: HashMap<
+        SaplingScanningKey,
+        (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
+    > = key_birthdays
+        .keys()
+        .map(|key| {
+            let parsed_keys = sapling_key_to_scan_block_keys(key, storage.network())?;
+            Ok::<_, Report>((key.clone(), parsed_keys))
+        })
+        .try_collect()?;
+
+    // Give empty states time to verify some blocks before we start scanning.
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
@@ -73,11 +98,6 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
 
-        // Read keys from the storage on disk, which can block.
-        let key_storage = storage.clone();
-        let available_keys = tokio::task::spawn_blocking(move || key_storage.sapling_keys())
-            .wait_for_panics()
-            .await;
 
         for key in available_keys {
             info!(
