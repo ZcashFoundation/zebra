@@ -104,11 +104,18 @@ pub async fn start(
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
 
+        // Only log at info level every 100,000 blocks
+        let is_info_log =
+            height == storage.min_sapling_birthday_height() || height.0 % INFO_LOG_INTERVAL == 0;
 
-        for key in available_keys {
+        // TODO: add debug logs?
+        if is_info_log {
             info!(
-                "Scanning the blockchain for key {} from block {:?} to {:?}",
-                key.0, key.1, tip,
+                "Scanning the blockchain: now at block {:?}, current tip {:?}",
+                height,
+                chain_tip_change
+                    .latest_chain_tip()
+                    .best_tip_height_and_hash(),
             );
         }
 
