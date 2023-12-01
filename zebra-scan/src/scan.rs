@@ -243,3 +243,12 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
         actions: vec![],
     }
 }
+
+/// Convert a scanned block to a list of scanner database results.
+fn scanned_block_to_db_result<Nf>(scanned_block: ScannedBlock<Nf>) -> Vec<SaplingScannedResult> {
+    scanned_block
+        .transactions()
+        .iter()
+        .map(|tx| transaction::Hash::from_bytes_in_display_order(tx.txid.as_ref()))
+        .collect()
+}
