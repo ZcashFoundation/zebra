@@ -86,7 +86,8 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
     }
 }
 
-/// Returns transactions belonging to the given `ScanningKey`.
+/// Returns transactions belonging to the given `ScanningKey`. This list of keys should come from
+/// a single configured `SaplingScanningKey`.
 ///
 /// # Performance / Hangs
 ///
@@ -99,9 +100,9 @@ pub async fn start(mut state: State, storage: Storage) -> Result<(), Report> {
 /// - Add prior block metadata once we have access to Zebra's state.
 pub fn scan_block<K: ScanningKey>(
     network: Network,
-    block: Arc<Block>,
+    block: &Arc<Block>,
     sapling_tree_size: u32,
-    scanning_key: &K,
+    scanning_keys: &[K],
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
@@ -116,14 +117,15 @@ pub fn scan_block<K: ScanningKey>(
 
     // Use a dummy `AccountId` as we don't use accounts yet.
     let dummy_account = AccountId::from(0);
-
-    // We only support scanning one key and one block per function call for now.
-    let scanning_keys = vec![(&dummy_account, scanning_key)];
+    let scanning_keys: Vec<_> = scanning_keys
+        .iter()
+        .map(|key| (&dummy_account, key))
+        .collect();
 
     zcash_client_backend::scanning::scan_block(
         &network,
         block_to_compact(block, chain_metadata),
-        &scanning_keys,
+        scanning_keys.as_slice(),
         // Ignore whether notes are change from a viewer's own spends for now.
         &[],
         // Ignore previous blocks for now.
@@ -162,13 +164,14 @@ pub fn sapling_key_to_scan_block_keys(
 }
 
 /// Converts a zebra block and meta data into a compact block.
-pub fn block_to_compact(block: Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
+pub fn block_to_compact(block: &Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
     CompactBlock {
         height: block
             .coinbase_height()
             .expect("verified block should have a valid height")
             .0
             .into(),
+        // TODO: performance: look up the block hash from the state rather than recalculating it
         hash: block.hash().bytes_in_display_order().to_vec(),
         prev_hash: block
             .header
@@ -205,6 +208,7 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
         index: index
             .try_into()
             .expect("tx index in block should fit in u64"),
+        // TODO: performance: look up the tx hash from the state rather than recalculating it
         hash: tx.hash().bytes_in_display_order().to_vec(),
 
         // `fee` is not checked by the `scan_block` function. It is allowed to be unset.
