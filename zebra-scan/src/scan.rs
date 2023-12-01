@@ -84,17 +84,23 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        // Make sure we can query the state
-        let request = state
+        // Get a block from the state.
+        // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().
+        let block = state
             .ready()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Tip)
+            .call(zebra_state::Request::Block(height.into()))
             .await
-            .map_err(|e| eyre!(e));
+            .map_err(|e| eyre!(e))?;
 
-        let tip = match request? {
-            zebra_state::Response::Tip(tip) => tip,
+        let block = match block {
+            zebra_state::Response::Block(Some(block)) => block,
+            zebra_state::Response::Block(None) => {
+                // If we've reached the tip, sleep for a while then try and get the same block.
+                tokio::time::sleep(CHECK_INTERVAL).await;
+                continue;
+            }
             _ => unreachable!("unmatched response to a state::Tip request"),
         };
 
