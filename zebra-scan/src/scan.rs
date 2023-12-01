@@ -143,10 +143,15 @@ pub async fn start(
             let block = block.clone();
             let mut storage = storage.clone();
 
-            // We use a dummy size of the Sapling note commitment tree. We can't set the size to
-            // zero, because the underlying scanning function would return
+            // We use a dummy size of the Sapling note commitment tree.
+            //
+            // We can't set the size to zero, because the underlying scanning function would return
             // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
-            let sapling_tree_size = 1;
+            //
+            // And we can't set them close to 0, because the scanner subtracts the number of notes
+            // in the block, and panics with "attempt to subtract with overflow". The number of
+            // notes in a block must be less than this value, this is a consensus rule.
+            let sapling_tree_size = 1 << 16;
 
             tokio::task::spawn_blocking(move || {
                 let dfvk_res =
