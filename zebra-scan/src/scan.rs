@@ -1,26 +1,37 @@
 //! The scanner task and scanning APIs.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::{eyre::eyre, Report};
+use itertools::Itertools;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::info;
 
 use zcash_client_backend::{
     data_api::ScannedBlock,
+    encoding::decode_extended_full_viewing_key,
     proto::compact_formats::{
         ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
     scanning::{ScanError, ScanningKey},
 };
-use zcash_primitives::zip32::AccountId;
-
-use zebra_chain::{
-    block::Block, diagnostic::task::WaitForPanics, parameters::Network,
-    serialization::ZcashSerialize, transaction::Transaction,
+use zcash_primitives::{
+    constants::*,
+    sapling::SaplingIvk,
+    zip32::{AccountId, DiversifiableFullViewingKey, Scope},
 };
 
-use crate::storage::Storage;
+use zebra_chain::{
+    block::Block,
+    chain_tip::ChainTip,
+    diagnostic::task::WaitForPanics,
+    parameters::Network,
+    serialization::ZcashSerialize,
+    transaction::{self, Transaction},
+};
+use zebra_state::{ChainTipChange, SaplingScannedResult};
+
+use crate::storage::{SaplingScanningKey, Storage};
 
 /// The generic state type used by the scanner.
 pub type State = Buffer<
@@ -118,6 +129,36 @@ pub fn scan_block<K: ScanningKey>(
         // Ignore previous blocks for now.
         None,
     )
+}
+
+/// Converts a Zebra-format scanning key into some `scan_block()` keys.
+///
+/// Currently only accepts extended full viewing keys, and returns both their diversifiable full
+/// viewing key and their individual viewing key, for testing purposes.
+///
+/// TODO: work out what string format is used for SaplingIvk, if any, and support it here
+///       performance: stop returning both the dfvk and ivk for the same key
+pub fn sapling_key_to_scan_block_keys(
+    sapling_key: &SaplingScanningKey,
+    network: Network,
+) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
+    let hrp = if network.is_a_test_network() {
+        // Assume custom testnets have the same HRP
+        //
+        // TODO: add the regtest HRP here
+        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+    } else {
+        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
+    };
+
+    let efvk = decode_extended_full_viewing_key(hrp, sapling_key).map_err(|e| eyre!(e))?;
+
+    // Just return all the keys for now, so we can be sure our code supports them.
+    let dfvk = efvk.to_diversifiable_full_viewing_key();
+    let eivk = dfvk.to_ivk(Scope::External);
+    let iivk = dfvk.to_ivk(Scope::Internal);
+
+    Ok((vec![dfvk], vec![eivk, iivk]))
 }
 
 /// Converts a zebra block and meta data into a compact block.
