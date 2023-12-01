@@ -119,7 +119,39 @@ pub async fn start(
             );
         }
 
-        tokio::time::sleep(CHECK_INTERVAL).await;
+        for (key_num, (sapling_key, birthday_height)) in key_birthdays.iter().enumerate() {
+            // # Security
+            //
+            // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
+            // the logs could use the key to view those transactions.
+            if is_info_log {
+                info!(
+                    "Scanning the blockchain for key {}, started at block {:?}",
+                    key_num, birthday_height,
+                );
+            }
+
+            // Scan the block, which blocks async execution until the scan is complete.
+            //
+            // TODO: skip scanning before birthday height (#8022)
+            // TODO: scan each key in parallel (after MVP?)
+            let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
+
+            let dfvk_results =
+                scan_block(storage.network(), &block, 0, &dfvks).map_err(|e| eyre!(e))?;
+            let ivk_results =
+                scan_block(storage.network(), &block, 0, &ivks).map_err(|e| eyre!(e))?;
+
+            let dfvk_results = scanned_block_to_db_result(dfvk_results);
+            let ivk_results = scanned_block_to_db_result(ivk_results);
+
+            storage.add_sapling_result(sapling_key.clone(), height, dfvk_results);
+            storage.add_sapling_result(sapling_key.clone(), height, ivk_results);
+        }
+
+        height = height
+            .next()
+            .expect("a valid blockchain never reaches the max height");
     }
 }
 
