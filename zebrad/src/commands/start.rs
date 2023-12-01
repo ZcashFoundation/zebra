@@ -282,7 +282,7 @@ impl StartCmd {
             peer_set,
             mempool.clone(),
             sync_status,
-            chain_tip_change,
+            chain_tip_change.clone(),
         );
 
         info!("spawning syncer task");
@@ -292,7 +292,12 @@ impl StartCmd {
         // Spawn never ending scan task.
         let scan_task_handle = {
             info!("spawning shielded scanner with configured viewing keys");
-            zebra_scan::spawn_init(&config.shielded_scan, config.network.network, state)
+            zebra_scan::spawn_init(
+                &config.shielded_scan,
+                config.network.network,
+                state,
+                chain_tip_change,
+            )
         };
 
         #[cfg(not(feature = "shielded-scan"))]

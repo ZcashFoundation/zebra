@@ -2805,8 +2805,8 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 }
 
 /// Test that the scanner task gets started when the node starts.
-#[cfg(feature = "shielded-scan")]
 #[test]
+#[cfg(feature = "shielded-scan")]
 fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
 
