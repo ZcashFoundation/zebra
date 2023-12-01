@@ -288,14 +288,14 @@ impl StartCmd {
         info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        #[cfg(feature = "zebra-scan")]
+        #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task.
         let scan_task_handle = {
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(&config.shielded_scan, config.network.network, state)
         };
 
-        #[cfg(not(feature = "zebra-scan"))]
+        #[cfg(not(feature = "shielded-scan"))]
         // Spawn a dummy scan task which doesn't do anything and never finishes.
         let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
             tokio::spawn(std::future::pending().in_current_span());

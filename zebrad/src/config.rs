@@ -44,7 +44,7 @@ pub struct ZebradConfig {
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
 
-    #[cfg(feature = "zebra-scan")]
+    #[cfg(feature = "shielded-scan")]
     /// Scanner configuration
     pub shielded_scan: zebra_scan::config::Config,
 }
