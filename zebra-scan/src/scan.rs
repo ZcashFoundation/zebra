@@ -57,8 +57,9 @@ const INFO_LOG_INTERVAL: u32 = 100_000;
 pub async fn start(
     mut state: State,
     chain_tip_change: ChainTipChange,
-    mut storage: Storage,
+    storage: Storage,
 ) -> Result<(), Report> {
+    let network = storage.network();
     let mut height = storage.min_sapling_birthday_height();
 
     // Read keys from the storage on disk, which can block async execution.
@@ -75,7 +76,7 @@ pub async fn start(
     > = key_birthdays
         .keys()
         .map(|key| {
-            let parsed_keys = sapling_key_to_scan_block_keys(key, storage.network())?;
+            let parsed_keys = sapling_key_to_scan_block_keys(key, network)?;
             Ok::<_, Report>((key.clone(), parsed_keys))
         })
         .try_collect()?;
@@ -131,22 +132,31 @@ pub async fn start(
                 );
             }
 
+            // Get the pre-parsed keys for this configured key.
+            let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
+
             // Scan the block, which blocks async execution until the scan is complete.
             //
             // TODO: skip scanning before birthday height (#8022)
             // TODO: scan each key in parallel (after MVP?)
-            let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
+            let sapling_key = sapling_key.clone();
+            let block = block.clone();
+            let mut storage = storage.clone();
 
-            let dfvk_results =
-                scan_block(storage.network(), &block, 0, &dfvks).map_err(|e| eyre!(e))?;
-            let ivk_results =
-                scan_block(storage.network(), &block, 0, &ivks).map_err(|e| eyre!(e))?;
+            tokio::task::spawn_blocking(move || {
+                let dfvk_res = scan_block(network, &block, 0, &dfvks).map_err(|e| eyre!(e))?;
+                let ivk_res = scan_block(network, &block, 0, &ivks).map_err(|e| eyre!(e))?;
 
-            let dfvk_results = scanned_block_to_db_result(dfvk_results);
-            let ivk_results = scanned_block_to_db_result(ivk_results);
+                let dfvk_res = scanned_block_to_db_result(dfvk_res);
+                let ivk_res = scanned_block_to_db_result(ivk_res);
 
-            storage.add_sapling_result(sapling_key.clone(), height, dfvk_results);
-            storage.add_sapling_result(sapling_key.clone(), height, ivk_results);
+                storage.add_sapling_result(sapling_key.clone(), height, dfvk_res);
+                storage.add_sapling_result(sapling_key, height, ivk_res);
+
+                Ok::<_, Report>(())
+            })
+            .wait_for_panics()
+            .await?;
         }
 
         height = height
