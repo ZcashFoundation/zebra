@@ -39,10 +39,14 @@ pub type State = Buffer<
     zebra_state::Request,
 >;
 
-/// Wait a few seconds at startup so tip height is always `Some`.
-const INITIAL_WAIT: Duration = Duration::from_secs(10);
+/// Wait a few seconds at startup for some blocks to get verified.
+///
+/// But sometimes the state might be empty if the network is slow.
+const INITIAL_WAIT: Duration = Duration::from_secs(15);
 
-/// The amount of time between checking and starting new scans.
+/// The amount of time between checking for new blocks and starting new scans.
+///
+/// This is just under half the target block interval.
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Start the scan task given state and storage.
