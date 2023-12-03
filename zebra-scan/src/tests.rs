@@ -109,6 +109,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     // Build a vector of viewing keys `vks` to scan for.
     let fvk = efvk.fvk;
     let ivk = fvk.vk.ivk();
+    let ivks = vec![ivk];
 
     let network = zebra_chain::parameters::Network::Mainnet;
 
@@ -143,9 +144,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
             orchard_commitment_tree_size,
         };
 
-        let compact_block = block_to_compact(block.clone(), chain_metadata);
+        let compact_block = block_to_compact(&block, chain_metadata);
 
-        let res = scan_block(network, block, sapling_commitment_tree_size, &ivk)
+        let res = scan_block(network, &block, sapling_commitment_tree_size, &ivks)
             .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();

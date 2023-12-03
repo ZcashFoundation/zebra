@@ -101,7 +101,7 @@ impl Storage {
         &mut self,
         sapling_key: SaplingScanningKey,
         height: Height,
-        result: Vec<SaplingScannedResult>,
+        sapling_result: Vec<SaplingScannedResult>,
     ) {
         // It's ok to write some results and not others during shutdown, so each result can get its
         // own batch. (They will be re-scanned on startup anyway.)
@@ -114,7 +114,7 @@ impl Storage {
 
         let entry = SaplingScannedDatabaseEntry {
             index,
-            value: result,
+            value: sapling_result,
         };
 
         batch.insert_sapling_result(self, entry);

@@ -12,13 +12,15 @@ use crate::storage::SaplingScanningKey;
 /// Configuration for scanning.
 pub struct Config {
     /// The sapling keys to scan for and the birthday height of each of them.
+    ///
+    /// Currently only supports Extended Full Viewing Keys in ZIP-32 format.
     //
     // TODO: allow keys without birthdays
     pub sapling_keys_to_scan: IndexMap<SaplingScanningKey, u32>,
 
     /// The scanner results database config.
     //
-    // TODO: Remove fields that are only used by the state to create a common database config.
+    // TODO: Remove fields that are only used by the state, and create a common database config.
     #[serde(flatten)]
     db_config: DbConfig,
 }
