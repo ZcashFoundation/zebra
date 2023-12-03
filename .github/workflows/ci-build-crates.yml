@@ -127,21 +127,32 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-        # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
-        # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
-        #
-        # Some Zebra crates do not have any features, and most don't have any default features.
+      # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
+      # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
+      #
+      # Some Zebra crates do not have any features, and most don't have any default features.
+      # Some targets activate features, but we still need to be able to build without them.
       - name: Build ${{ matrix.crate }} crate with no default features
+        run: |
+          cargo clippy --package ${{ matrix.crate }} --no-default-features -- -D warnings
+          cargo build --package ${{ matrix.crate }} --no-default-features
+
+      - name: Build ${{ matrix.crate }} crate with no default features and all targets
         run: |
           cargo clippy --package ${{ matrix.crate }} --no-default-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --no-default-features --all-targets
 
       - name: Build ${{ matrix.crate }} crate with default features
         run: |
+          cargo clippy --package ${{ matrix.crate }} -- -D warnings
+          cargo build --package ${{ matrix.crate }}
+
+      - name: Build ${{ matrix.crate }} crate with default features and all targets
+        run: |
           cargo clippy --package ${{ matrix.crate }} --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-targets
 
-      - name: Build ${{ matrix.crate }} crate with all features
+      - name: Build ${{ matrix.crate }} crate with all features and all targets
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
