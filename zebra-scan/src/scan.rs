@@ -180,15 +180,18 @@ pub async fn start(
 /// Returns transactions belonging to the given `ScanningKey`. This list of keys should come from
 /// a single configured `SaplingScanningKey`.
 ///
+/// For example, there are two individual viewing keys for most shielded transfers:
+/// - the payment (external) key, and
+/// - the change (internal) key.
+///
 /// # Performance / Hangs
 ///
 /// This method can block while reading database files, so it must be inside spawn_blocking()
 /// in async code.
 ///
 /// TODO:
-/// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
-/// Zebra's state, and we can retrieve the tree size ourselves.
-/// - Add prior block metadata once we have access to Zebra's state.
+/// - Pass the real `sapling_tree_size` parameter from the state.
+/// - Add other prior block metadata.
 pub fn scan_block<K: ScanningKey>(
     network: Network,
     block: &Arc<Block>,
