@@ -64,11 +64,6 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    // The fake block has the following transactions in this order:
-    // 1. a transparent coinbase tx,
-    // 2. a V4 tx containing a random Sapling output,
-    // 3. a V4 tx containing a Sapling output decryptable by `dfvk`,
-    // 4. another V4 tx containing a random Sapling output.
     assert_eq!(block.transactions.len(), 4);
 
     let res = scan_block(
@@ -210,11 +205,6 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let nf = Nullifier([7; 32]);
 
-    // The fake block has the following transactions in this order:
-    // 1. a transparent coinbase tx,
-    // 2. a V4 tx containing a random Sapling output,
-    // 3. a V4 tx containing a Sapling output decryptable by `dfvk`,
-    // 4. another V4 tx containing a random Sapling output.
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
     let res = scan_block(
@@ -249,6 +239,12 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 }
 
 /// Generates a fake block containing a Sapling output decryptable by `dfvk`.
+///
+/// The fake block has the following transactions in this order:
+/// 1. a transparent coinbase tx,
+/// 2. a V4 tx containing a random Sapling output,
+/// 3. a V4 tx containing a Sapling output decryptable by `dfvk`,
+/// 4. depending on the value of `tx_after`, another V4 tx containing a random Sapling output.
 fn fake_block(
     height: BlockHeight,
     nf: Nullifier,
