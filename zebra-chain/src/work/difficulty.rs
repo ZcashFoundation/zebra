@@ -62,7 +62,7 @@ mod tests;
 /// > (see equations in the Zcash Specification [section 7.7.4])
 ///
 /// [section 7.7.4]: https://zips.z.cash/protocol/protocol.pdf#nbits
-#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct CompactDifficulty(pub(crate) u32);
 
 /// An invalid CompactDifficulty value, for testing.
