@@ -559,7 +559,7 @@ impl AddressBook {
     /// Return an iterator over all peers.
     ///
     /// Returns peers in reconnection attempt order, including recently connected peers.
-    pub fn peers(&'_ self) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
+    pub fn peers(&'_ self) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
         self.by_addr.descending_values().cloned()
     }
@@ -590,7 +590,7 @@ impl AddressBook {
         &'_ self,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
+    ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         // Skip live peers, and peers pending a reconnect attempt.
@@ -609,7 +609,7 @@ impl AddressBook {
     pub fn state_peers(
         &'_ self,
         state: PeerAddrState,
-    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
+    ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
@@ -624,7 +624,7 @@ impl AddressBook {
         &'_ self,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
+    ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
         self.by_addr
