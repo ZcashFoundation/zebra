@@ -55,7 +55,7 @@ use crate::{
 /// This test:
 /// - Creates a viewing key and a fake block containing a Sapling output decryptable by the key.
 /// - Scans the block.
-/// - Checks that the result contains the txid of the tx containin the Sapling output.
+/// - Checks that the result contains the txid of the tx containing the Sapling output.
 #[tokio::test]
 async fn scanning_from_fake_generated_blocks() -> Result<()> {
     let extsk = ExtendedSpendingKey::master(&[]);
@@ -121,7 +121,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let ivk = fvk.vk.ivk();
     let ivks = vec![ivk];
 
-    let network = zebra_chain::parameters::Network::Mainnet;
+    let network = Network::Mainnet;
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
