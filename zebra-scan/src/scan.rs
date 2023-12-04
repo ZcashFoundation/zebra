@@ -151,6 +151,8 @@ pub async fn start(
             // And we can't set them close to 0, because the scanner subtracts the number of notes
             // in the block, and panics with "attempt to subtract with overflow". The number of
             // notes in a block must be less than this value, this is a consensus rule.
+            //
+            // TODO: use the real sapling tree size: `zs::Response::SaplingTree().position() + 1`
             let sapling_tree_size = 1 << 16;
 
             tokio::task::spawn_blocking(move || {
