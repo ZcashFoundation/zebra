@@ -191,28 +191,28 @@ impl<V: OrchardFlavour> AuthorizedAction<V> {
 }
 
 // TODO: FIXME: Consider moving it to transaction.rs as it's not used here. Or move its usage here from transaction.rs.
-/// A struct that contains references to several fields of an `Action` struct.
+/// A struct that contains values of several fields of an `Action` struct.
 /// Those fields are used in other parts of the code that call the `orchard_actions()` method of the `Transaction`.
-/// The goal of using `ActionRef` is that it's not a generic, unlike `Action`, so it can be returned from Transaction methods
-/// (the fields of `ActionRef` do not depend on the generic parameter `Version` of `Action`).
-pub struct ActionRef<'a> {
+/// The goal of using `ActionCopy` is that it's not a generic, unlike `Action`, so it can be returned from Transaction methods
+/// (the fields of `ActionCopy` do not depend on the generic parameter `Version` of `Action`).
+pub struct ActionCopy {
     /// A reference to the value commitment to the net value of the input note minus the output note.
-    pub cv: &'a super::commitment::ValueCommitment,
+    pub cv: super::commitment::ValueCommitment,
     /// A reference to the nullifier of the input note being spent.
-    pub nullifier: &'a super::note::Nullifier,
+    pub nullifier: super::note::Nullifier,
     /// A reference to the randomized validating key for `spendAuthSig`.
-    pub rk: &'a reddsa::VerificationKeyBytes<SpendAuth>,
+    pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
     /// A reference to the x-coordinate of the note commitment for the output note.
-    pub cm_x: &'a pallas::Base,
+    pub cm_x: pallas::Base,
 }
 
-impl<'a, V: OrchardFlavour> From<&'a Action<V>> for ActionRef<'a> {
-    fn from(action: &'a Action<V>) -> Self {
+impl<V: OrchardFlavour> From<&Action<V>> for ActionCopy {
+    fn from(action: &Action<V>) -> Self {
         Self {
-            cv: &action.cv,
-            nullifier: &action.nullifier,
-            rk: &action.rk,
-            cm_x: &action.cm_x,
+            cv: action.cv,
+            nullifier: action.nullifier,
+            rk: action.rk,
+            cm_x: action.cm_x,
         }
     }
 }

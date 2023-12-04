@@ -24,7 +24,7 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use shielded_data::{ActionRef, AuthorizedAction, Flags, ShieldedData};
+pub use shielded_data::{ActionCopy, AuthorizedAction, Flags, ShieldedData};
 
 pub use orchard_flavour::{Orchard, OrchardFlavour};
 

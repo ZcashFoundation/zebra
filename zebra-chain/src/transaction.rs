@@ -946,7 +946,7 @@ impl Transaction {
 
     /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionRef> + '_> {
+    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionCopy> + '_> {
         match self {
             Transaction::V5 {
                 orchard_shielded_data,
@@ -955,7 +955,7 @@ impl Transaction {
                 orchard_shielded_data
                     .iter()
                     .flat_map(orchard::ShieldedData::actions)
-                    .map(orchard::ActionRef::from),
+                    .map(orchard::ActionCopy::from),
             ),
 
             #[cfg(feature = "tx-v6")]
@@ -966,7 +966,7 @@ impl Transaction {
                 orchard_shielded_data
                     .iter()
                     .flat_map(orchard::ShieldedData::actions)
-                    .map(orchard::ActionRef::from),
+                    .map(orchard::ActionCopy::from),
             ),
 
             _ => Box::new(std::iter::empty()),
