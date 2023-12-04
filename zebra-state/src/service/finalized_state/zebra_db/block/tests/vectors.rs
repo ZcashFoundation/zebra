@@ -26,7 +26,9 @@ use zebra_chain::{
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb},
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    request::{FinalizedBlock, Treestate},
+    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
     CheckpointVerifiedBlock, Config,
 };
 
@@ -79,9 +81,14 @@ fn test_block_db_round_trip_with(
 
     let state = ZebraDb::new(
         &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
         network,
         // The raw database accesses in this test create invalid database formats.
         true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
     );
 
     // Check that each block round-trips to the database
@@ -108,7 +115,7 @@ fn test_block_db_round_trip_with(
 
         // Now, use the database
         let original_block = Arc::new(original_block);
-        let finalized = if original_block.coinbase_height().is_some() {
+        let checkpoint_verified = if original_block.coinbase_height().is_some() {
             original_block.clone().into()
         } else {
             // Fake a zero height
@@ -118,6 +125,10 @@ fn test_block_db_round_trip_with(
                 Height(0),
             )
         };
+
+        let dummy_treestate = Treestate::default();
+        let finalized =
+            FinalizedBlock::from_checkpoint_verified(checkpoint_verified, dummy_treestate);
 
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();

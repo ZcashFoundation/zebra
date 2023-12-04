@@ -131,8 +131,10 @@ The end of support height is calculated from the current blockchain height:
 
 ## Test the Pre-Release
 
-- [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
-- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml)
+- [ ] Wait until the Docker binaries have been built on `main`, and the quick tests have passed:
+    - [ ] [ci-unit-tests-docker.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-docker.yml?query=branch%3Amain)
+    - [ ] [ci-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml?query=branch%3Amain)
+- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release
 
@@ -148,7 +150,7 @@ The end of support height is calculated from the current blockchain height:
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
-- [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
+- [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Remove `do-not-merge` from the PRs you added it to
 

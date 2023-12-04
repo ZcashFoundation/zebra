@@ -37,7 +37,7 @@ impl Runnable for GenerateCmd {
 #
 # The config format (including a complete list of sections and fields) is
 # documented here:
-# https://doc.zebra.zfnd.org/zebrad/config/struct.ZebradConfig.html
+# https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
 #
 # zebrad attempts to load configs in the following order:
 #

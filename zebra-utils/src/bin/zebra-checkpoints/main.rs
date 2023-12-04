@@ -164,8 +164,7 @@ async fn main() -> Result<()> {
 
     // Checkpoints must be on the main chain, so we skip blocks that are within the
     // Zcash reorg limit.
-    let height_limit = height_limit
-        - HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY).expect("constant fits in i32");
+    let height_limit = height_limit - HeightDiff::from(MIN_TRANSPARENT_COINBASE_MATURITY);
     let height_limit = height_limit
         .ok_or_else(|| {
             eyre!(

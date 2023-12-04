@@ -87,17 +87,12 @@ impl PartialEq<[u8; 11]> for Diversifier {
     }
 }
 
-impl TryFrom<Diversifier> for pallas::Affine {
-    type Error = &'static str;
-
+impl From<Diversifier> for pallas::Affine {
     /// Get a diversified base point from a diversifier value in affine
     /// representation.
-    fn try_from(d: Diversifier) -> Result<Self, Self::Error> {
-        if let Ok(projective_point) = pallas::Point::try_from(d) {
-            Ok(projective_point.into())
-        } else {
-            Err("Invalid Diversifier -> pallas::Affine")
-        }
+    fn from(d: Diversifier) -> Self {
+        let projective_point = pallas::Point::from(d);
+        projective_point.into()
     }
 }
 

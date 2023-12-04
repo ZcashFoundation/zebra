@@ -27,14 +27,13 @@ consensus-compatible implementation of a Zcash node.
 Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
 the features required to reach Zcash network consensus, including the validation
 of all the consensus rules for the NU5 network upgrade.
-[Here](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages) are some
+[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are some
 benefits of Zebra.
 
 Zebra validates blocks and transactions, but needs extra software to generate
 them:
 
-- To generate transactions, [run Zebra with
-  `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
+- To generate transactions, [run Zebra with `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
 - To generate blocks, use a mining pool or miner with Zebra's mining JSON-RPCs.
   Currently Zebra can only send mining rewards to a single fixed address.
   To distribute rewards, use mining software that creates its own distribution transactions,
@@ -149,8 +148,7 @@ You can combine multiple features by listing them as parameters of the `--featur
 cargo install --features="<feature1> <feature2> ..." ...
 ```
 
-Our full list of experimental and developer features is in [the API
-documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags).
+Our full list of experimental and developer features is in [the API documentation](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags).
 
 Some debugging and monitoring features are disabled in release builds to increase
 performance.
@@ -159,13 +157,13 @@ performance.
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- [The `getpeerinfo` RPC shows current and recent outbound connections](https://github.com/ZcashFoundation/zebra/issues/7893), rather than current inbound and outbound connections.
+
 - [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). We're waiting on a fix in the progress bar library.
 
 - Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
-
-- Rust 1.70 [causes crashes during shutdown on macOS x86_64 (#6812)](https://github.com/ZcashFoundation/zebra/issues/6812). The state cache should stay valid despite the crash.
 
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
@@ -179,10 +177,12 @@ We will continue to add new features as part of future network upgrades, and in 
 
 The [Zebra website](https://zebra.zfnd.org/) contains user documentation, such
 as how to run or configure Zebra, set up metrics integrations, etc., as well as
-developer documentation, such as design documents. We also render [API
-documentation](https://doc.zebra.zfnd.org) for the external API of our crates,
-as well as [internal documentation](https://doc-internal.zebra.zfnd.org) for
-private APIs.
+developer documentation, such as design documents. It also renders
+[internal documentation](https://doc-internal.zebra.zfnd.org) for private APIs
+on the `main` branch.
+
+`docs.rs` renders [API documentation](https://docs.rs/releases/search?query=zebra)
+for the external API of the latest releases of our crates.
 
 ## User support
 

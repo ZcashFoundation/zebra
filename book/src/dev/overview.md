@@ -86,7 +86,7 @@ other functionality, without requiring a full node.
 At a high level, the fullnode functionality required by `zebrad` is factored
 into several components:
 
-- [`zebra-chain`](https://doc.zebra.zfnd.org/zebra_chain/index.html), providing
+- [`zebra-chain`](https://docs.rs/zebra_chain), providing
   definitions of core data structures for Zcash, such as blocks, transactions,
   addresses, etc., and related functionality.  It also contains the
   implementation of the consensus-critical serialization formats used in Zcash.
@@ -100,7 +100,7 @@ into several components:
   towards verifying transactions, but will be extended to support creating them
   in the future.
 
-- [`zebra-network`](https://doc.zebra.zfnd.org/zebra_network/index.html),
+- [`zebra-network`](https://docs.rs/zebra_network),
   providing an asynchronous, multithreaded implementation of the Zcash network
   protocol inherited from Bitcoin. In contrast to `zcashd`, each peer
   connection has a separate state machine, and the crate translates the
@@ -113,21 +113,21 @@ into several components:
     isolated from all other node state.  This can be used, for instance, to
     safely relay data over Tor, without revealing distinguishing information.
 
-- [`zebra-script`](https://doc.zebra.zfnd.org/zebra_script/index.html) provides
+- [`zebra-script`](https://docs.rs/zebra_script) provides
   script validation. Currently, this is implemented by linking to the C++
   script verification code from `zcashd`, but in the future we may implement a
   pure-Rust script implementation.
 
-- [`zebra-consensus`](https://doc.zebra.zfnd.org/zebra_consensus/index.html)
+- [`zebra-consensus`](https://docs.rs/zebra_consensus)
   performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts. Internally, the library
-  uses [`tower-batch-control`](https://doc.zebra.zfnd.org/tower_batch_control/index.html) to
+  uses [`tower-batch-control`](https://docs.rs/tower_batch_control) to
   perform automatic, transparent batch processing of contemporaneous
   verification requests.
 
-- [`zebra-state`](https://doc.zebra.zfnd.org/zebra_state/index.html) is
+- [`zebra-state`](https://docs.rs/zebra_state) is
   responsible for storing, updating, and querying the chain state. The state
   service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
   all consensus rules
@@ -135,7 +135,7 @@ into several components:
   such as updating the nullifier set or checking that transaction inputs remain
   unspent.
 
-- [`zebrad`](https://doc.zebra.zfnd.org/zebrad/index.html) contains the full
+- [`zebrad`](https://docs.rs/zebrad) contains the full
   node, which connects these components together and implements logic to handle
   inbound requests from peers and the chain sync process.
 

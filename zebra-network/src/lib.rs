@@ -131,7 +131,7 @@
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
-#![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_network")]
+#![doc(html_root_url = "https://docs.rs/zebra_network")]
 //
 // Rust 1.72 has a false positive when nested generics are used inside Arc.
 // This makes the `arc_with_non_send_sync` lint trigger on a lot of proptest code.
@@ -159,11 +159,12 @@ extern crate bitflags;
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-mod address_book;
 pub mod address_book_peers;
-mod address_book_updater;
-mod config;
+pub mod config;
 pub mod constants;
+
+mod address_book;
+mod address_book_updater;
 mod isolated;
 mod meta_addr;
 mod peer;

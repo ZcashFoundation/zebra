@@ -1,6 +1,6 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{cmp::max, net::SocketAddr, sync::Arc};
 
 use thiserror::Error;
 use tokio::{
@@ -12,6 +12,9 @@ use tracing::{Level, Span};
 use crate::{
     address_book::AddressMetrics, meta_addr::MetaAddrChange, AddressBook, BoxError, Config,
 };
+
+/// The minimum size of the address book updater channel.
+pub const MIN_CHANNEL_SIZE: usize = 10;
 
 /// The `AddressBookUpdater` hooks into incoming message streams for each peer
 /// and lets the owner of the sender handle update the address book. For
@@ -46,7 +49,10 @@ impl AddressBookUpdater {
     ) {
         // Create an mpsc channel for peerset address book updates,
         // based on the maximum number of inbound and outbound peers.
-        let (worker_tx, mut worker_rx) = mpsc::channel(config.peerset_total_connection_limit());
+        let (worker_tx, mut worker_rx) = mpsc::channel(max(
+            config.peerset_total_connection_limit(),
+            MIN_CHANNEL_SIZE,
+        ));
 
         let address_book = AddressBook::new(
             local_listener,
@@ -100,10 +106,9 @@ impl AddressBookUpdater {
                         .set_pos(u64::try_from(address_info.num_addresses).expect("fits in u64"));
                     // .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
 
-                    let never_attempted = address_info.never_attempted_alternate
-                        + address_info.never_attempted_gossiped;
-
-                    never_bar.set_pos(u64::try_from(never_attempted).expect("fits in u64"));
+                    never_bar.set_pos(
+                        u64::try_from(address_info.never_attempted_gossiped).expect("fits in u64"),
+                    );
                     // .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
 
                     failed_bar.set_pos(u64::try_from(address_info.failed).expect("fits in u64"));

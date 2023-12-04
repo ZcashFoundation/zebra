@@ -159,7 +159,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::{constants::LOCK_FILE_ERROR, database_format_version_in_code};
+use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 use zebra_test::{
     args,
@@ -1167,8 +1167,6 @@ fn create_cached_database(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height,
-        // We don't need the ZK parameters, we're only using checkpoints
-        true,
         // Use checkpoints to increase sync performance while caching the database
         true,
         // Check that we're still using checkpoints when we finish the cached sync
@@ -1185,8 +1183,6 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
-        // We need the ZK parameters for full validation
-        false,
         // Test full validation by turning checkpoints off
         false,
         // Check that we're doing full validation when we finish the cached sync
@@ -1216,8 +1212,6 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             network,
             // Just keep going until we reach the chain tip
             block::Height::MAX,
-            // We need the ZK parameters for full validation
-            false,
             // Use the checkpoints to sync quickly, then do full validation until the chain tip
             true,
             // Finish when we reach the chain tip
@@ -1862,7 +1856,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             [format!(
                 "Opened RPC endpoint at {}",
                 zebra_rpc_address.expect("lightwalletd test must have RPC port")
@@ -1872,7 +1866,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             None,
         )?;
     }
@@ -1984,7 +1978,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                     wait_for_state_version_upgrade(
                         &mut zebrad,
                         &state_version_message,
-                        database_format_version_in_code(),
+                        state_database_format_version_in_code(),
                         None,
                     )?;
                 }
@@ -2010,7 +2004,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
                 wait_for_state_version_upgrade(
                     &mut zebrad,
                     &state_version_message,
-                    database_format_version_in_code(),
+                    state_database_format_version_in_code(),
                     None,
                 )?;
             }
@@ -2198,7 +2192,7 @@ fn zebra_state_conflict() -> Result<()> {
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
-            zebra_state::database_format_version_in_code().major,
+            zebra_state::state_database_format_version_in_code().major,
         ));
         dir_conflict_full.push(config.network.network.to_string().to_lowercase());
         format!(
@@ -2337,8 +2331,8 @@ async fn fully_synced_rpc_test() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn delete_old_databases() -> Result<()> {
+#[test]
+fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 
     let _init_guard = zebra_test::init();
@@ -2385,7 +2379,7 @@ async fn delete_old_databases() -> Result<()> {
 
     // inside dir was deleted
     child.expect_stdout_line_matches(format!(
-        "deleted outdated state directory deleted_state={canonicalized_inside_dir:?}"
+        "deleted outdated state database directory.*deleted_db.*=.*{canonicalized_inside_dir:?}"
     ))?;
     assert!(!inside_dir.as_path().exists());
 
@@ -2532,7 +2526,7 @@ async fn new_state_format() -> Result<()> {
 ///       (or just add a delay during tests)
 #[tokio::test]
 async fn update_state_format() -> Result<()> {
-    let mut fake_version = database_format_version_in_code();
+    let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = 0;
     fake_version.patch = 0;
 
@@ -2549,7 +2543,7 @@ async fn update_state_format() -> Result<()> {
 /// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
 #[tokio::test]
 async fn downgrade_state_format() -> Result<()> {
-    let mut fake_version = database_format_version_in_code();
+    let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = u16::MAX.into();
     fake_version.patch = 0;
 
@@ -2631,13 +2625,17 @@ async fn state_format_test(
             .zebrad_config(test_name, false, Some(dir.path()), network)
             .expect("already checked config")?;
 
-        zebra_state::write_database_format_version_to_disk(fake_version, &config.state, network)
-            .expect("can't write fake database version to disk");
+        zebra_state::write_state_database_format_version_to_disk(
+            &config.state,
+            fake_version,
+            network,
+        )
+        .expect("can't write fake database version to disk");
 
         // Give zebra_state enough time to actually write the database version to disk.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let running_version = database_format_version_in_code();
+        let running_version = state_database_format_version_in_code();
 
         match fake_version.cmp(&running_version) {
             Ordering::Less => expect_older_version = true,
@@ -2743,7 +2741,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     wait_for_state_version_upgrade(
         &mut zebrad,
         &state_version_message,
-        database_format_version_in_code(),
+        state_database_format_version_in_code(),
         None,
     )?;
 
@@ -2802,6 +2800,49 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     output
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+/// Test that the scanner gets started when the node starts.
+#[cfg(feature = "zebra-scan")]
+#[test]
+fn scan_task_starts() -> Result<()> {
+    use indexmap::IndexMap;
+
+    const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+
+    let _init_guard = zebra_test::init();
+
+    let mut config = default_test_config(Mainnet)?;
+    let mut keys = IndexMap::new();
+    keys.insert(ZECPAGES_VIEWING_KEY.to_string(), 1);
+    config.shielded_scan.sapling_keys_to_scan = keys;
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let testdir = &testdir;
+
+    let mut child = testdir.spawn_child(args!["start"])?;
+
+    // Run the program and kill it after the scanner starts and the first scanning is done.
+    std::thread::sleep(LAUNCH_DELAY * 2);
+    child.kill(false)?;
+
+    // Check that scan task started and the first scanning is done.
+    let output = child.wait_with_output()?;
+
+    output.stdout_line_contains("spawning zebra_scanner")?;
+    output.stdout_line_contains(
+        format!(
+            "Scanning the blockchain for key {} from block 1 to",
+            ZECPAGES_VIEWING_KEY
+        )
+        .as_str(),
+    )?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+    output.assert_failure()?;
 
     Ok(())
 }

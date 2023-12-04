@@ -44,7 +44,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v39.2.4
+        uses: tj-actions/changed-files@v40.1.1
         with:
           files: |
             **/*.rs
@@ -56,7 +56,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v39.2.4
+        uses: tj-actions/changed-files@v40.1.1
         with:
           files: |
             .github/workflows/*.yml
@@ -155,7 +155,10 @@ jobs:
         with:
           level: warning
           fail_on_error: false
+      # This gives an error when run on PRs from external repositories, so we skip it.
       - name: validate-dependabot
+        # If this is a PR, check that the PR source is a local branch. Always runs on non-PRs.
+        if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
         uses: marocchino/validate-dependabot@v2.1.0
 
   codespell:

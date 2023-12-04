@@ -20,7 +20,6 @@ These fixes disable mining pool operator payments and miner payments: they just 
     ```console
     [consensus]
     checkpoint_sync = true
-    debug_skip_parameter_preload = false
 
     [mempool]
     eviction_memory_time = '1h'
@@ -111,18 +110,18 @@ These fixes disable mining pool operator payments and miner payments: they just 
 1. `git clone https://github.com/ZcashFoundation/s-nomp`
 2. `cd s-nomp`
 3. Use the Zebra fixes: `git checkout zebra-mining`
-4. Use node 8.11.0:
+4. Use node 10:
 
     ```sh
-    nodenv install 8.11.0
-    nodenv local 8.11.0
+    nodenv install 10
+    nodenv local 10
     ```
 
     or
 
     ```sh
-    nvm install 8.11.0
-    nvm use 8.11.0
+    nvm install 10
+    nvm use 10
     ```
 
 5. Update dependencies and install:

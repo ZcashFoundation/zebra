@@ -5,15 +5,65 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - TODO: DATE
+## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - 2023-11-07
 
-Zebra's mining RPCs are now available in release builds. Our Docker images are significantly smaller,
-because the smaller Zcash verification parameters are now built into the `zebrad` binary.
-TODO: rest of intro
+Zebra's mining RPCs are now available in release builds. Our Docker images are significantly
+smaller, because the smaller Zcash verification parameters are now built into the `zebrad` binary.
+Zebra has updated to the shared Rust dependencies from the `zcashd` 5.7.0 release.
 
-This release contains the following changes:
+Zebra recovers better from brief network interruptions, and avoids some network and verification
+denial of service and performance issues. We have restored our macOS tests in CI, and now support
+macOS on a best-effort basis.
 
-### Mining RPCs in Production Builds
+We have changed our documentation website URL, and we are considering deprecating some Docker image
+tags in release 1.5.0 and later.
+
+### Deprecation Warnings
+
+This release has the following deprecation warnings:
+
+#### Warning: Deprecation of DockerHub Image Tags in a future release
+
+Zebra currently publishes 11 [DockerHub tags](https://hub.docker.com/r/zfnd/zebra/tags) for each new release.
+We want to reduce the number of DockerHub tags we publish in a future minor Zebra release.
+
+Based on usage and user feedback, we could stop publishing:
+- The `1` tag, which updates each release until NU6
+- The `1.x` tag, which updates each patch release until the next minor release
+- The `1.x.y` tag, which is the same as `v1.x.y`
+- The `sha-xxxxxxx` tag, which is the same as `v1.x.y` (for production releases)
+
+We also want to standardise experimental image tags to `-experimental`, rather than `.experimental`.
+
+So for release 1.5.0, we might only publish these tags:
+- `latest`
+- `latest-experimental` (a new tag)
+- `v1.5.0`
+- `v1.5.0-experimental`
+
+Please let us know if you need any other tags by [opening a GitHub ticket](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+).
+
+We recommend using the `latest` tag to always get the most recent Zebra release.
+
+#### Warning: Documentation Website URL Change
+
+We have replaced the API documentation on the [doc.zebra.zfnd.org](https://doc.zebra.zfnd.org)
+website with [docs.rs](https://docs.rs/releases/search?query=zebra). All links have been updated.
+
+Zebra's API documentation can be found on:
+- [`docs.rs`](https://docs.rs/releases/search?query=zebra), which renders documentation for the
+  public API of the latest crate releases;
+- [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/), which renders
+  documentation for the internal API on the `main` branch.
+
+[doc.zebra.zfnd.org](https://doc.zebra.zfnd.org) stopped being updated a few days before this release,
+and it will soon be shut down.
+
+### Significant Changes
+
+This release contains the following significant changes:
+
+#### Mining RPCs in Production Builds
 
 Zebra's mining RPCs are now available in release builds (#7740). Any Zebra instance can be used
 by a solo miner or mining pool. This stabilises 12 RPCs, including  `getblocktemplate`, `submitblock`,
@@ -23,7 +73,7 @@ read our [mining blog post](https://zfnd.org/experimental-mining-support-in-zebr
 Please [let us know](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-enhancement%2CS-needs-triage&projects=&template=feature_request.yml&title=feature%3A+)
 if your mining pool needs extra RPC methods or fields.
 
-### Zcash Parameters in `zebrad` Binary
+#### Zcash Parameters in `zebrad` Binary
 
 `zebrad` now bundles zk-SNARK parameters directly into its binary. This increases the binary size
 by a few megabytes, but reduces the size of the Docker image by around 600 MB because
@@ -44,9 +94,44 @@ so it can't be used to retry failed downloads in `zebrad` 1.3.0 and earlier.
 
 We recommend upgrading to the latest Zebra release to avoid download issues in new installs.
 
+#### macOS Support
+
+macOS x86_64 is now supported on a best-effort basis. macOS builds and some tests run in Zebra's CI.
+
 ### Security
 
-TODO: rest of changelog
+- Reconnect with peers after brief network interruption ([#7853](https://github.com/ZcashFoundation/zebra/pull/7853))
+- Add outer timeouts for critical network operations to avoid hangs ([#7869](https://github.com/ZcashFoundation/zebra/pull/7869))
+- Set iterator read bounds where possible in DiskDb, to avoid a known RocksDB denial of service issue ([#7731](https://github.com/ZcashFoundation/zebra/pull/7731), [#7732](https://github.com/ZcashFoundation/zebra/pull/7732))
+- Fix concurrency issues in tree key formats, and CPU usage in genesis tree roots ([#7392](https://github.com/ZcashFoundation/zebra/pull/7392))
+
+### Removed
+
+- Remove the `zebrad download` command, because it no longer does anything ([#7819](https://github.com/ZcashFoundation/zebra/pull/7819))
+
+### Added
+
+- Enable mining RPCs by default in production builds ([#7740](https://github.com/ZcashFoundation/zebra/pull/7740))
+- Re-enable macOS builds and tests in CI ([#7834](https://github.com/ZcashFoundation/zebra/pull/7834))
+- Make macOS x86_64 a tier 2 supported platform in the docs ([#7843](https://github.com/ZcashFoundation/zebra/pull/7843))
+- Add macOS M1 as a tier 3 supported platform ([#7851](https://github.com/ZcashFoundation/zebra/pull/7851))
+
+### Changed
+
+- Build Sprout and Sapling parameters into the zebrad binary, so a download server isn't needed ([#7800](https://github.com/ZcashFoundation/zebra/pull/7800), [#7844](https://github.com/ZcashFoundation/zebra/pull/7844))
+- Bump ECC dependencies for `zcashd` 5.7.0 ([#7784](https://github.com/ZcashFoundation/zebra/pull/7784))
+- Refactor the installation instructions for the `s-nomp` mining pool software ([#7835](https://github.com/ZcashFoundation/zebra/pull/7835))
+
+### Fixed
+
+- Make the `latest` Docker tag point to the production build, rather than the build with experimental features ([#7817](https://github.com/ZcashFoundation/zebra/pull/7817))
+- Fix an incorrect consensus-critical ZIP 212 comment ([#7774](https://github.com/ZcashFoundation/zebra/pull/7774))
+- Fix broken links to `zebra_network` and `zebra_state` `Config` structs on doc-internal.zebra.zfnd.org ([#7838](https://github.com/ZcashFoundation/zebra/pull/7838))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @mpguerra, @oxarbitrage, @rex4539, @teor2345, @upbqdn, and @vuittont60.
 
 ## [Zebra 1.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.3.0) - 2023-10-16
 
@@ -996,12 +1081,12 @@ When there are a lot of large user-generated transactions on the network, Zebra 
 
 ### Configuration Changes
 
-- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726, #4758):
+- Split the checkpoint and full verification [`sync` concurrency options](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html) (#4726, #4758):
   - Add a new `full_verify_concurrency_limit`
   - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
   - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
   For backwards compatibility, the old names are still accepted as aliases.
-- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4776).
+- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html) (#4776).
   This option sets the number of threads to use for CPU-bound tasks, such as proof and signature verification.
   By default, Zebra uses all available CPU cores.
 

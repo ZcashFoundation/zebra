@@ -1,4 +1,6 @@
-# Docker Unit Tests Workflow
+# Google Cloud unit tests that run when Rust code or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
+#
 # This workflow is designed for running various unit tests within Docker containers.
 # Jobs:
 # 1. Builds a Docker image for tests, adaptable to the specified network (Mainnet or Testnet).
@@ -32,6 +34,7 @@ on:
         default: false
 
   pull_request:
+    # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -55,6 +58,7 @@ on:
   push:
     branches:
       - main
+    # Skip main branch updates where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -86,6 +90,10 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
+# IMPORTANT
+#
+# The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
+# `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
   # Build the docker image used by the tests.
   #
@@ -94,6 +102,8 @@ jobs:
   # testnet when running the image.
   build:
     name: Build CI Docker
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -248,7 +258,7 @@ jobs:
     with:
       test_id: 'custom-conf'
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "v1.0.0-rc.2.toml"'
+      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 

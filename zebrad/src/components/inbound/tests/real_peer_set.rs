@@ -59,6 +59,9 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         listen_addr,
     ) = setup(None).await;
 
+    // yield and sleep until the address book lock is released.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
     // Send a request to inbound directly
     let request = inbound_service.clone().oneshot(Request::Peers);
     let response = request.await;

@@ -2,8 +2,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ pub mod upgrade;
 #[cfg(test)]
 mod tests;
 
-pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
+pub use block::{TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::{OutputIndex, OutputLocation};
 
 /// Helper type for writing types to disk as raw bytes.

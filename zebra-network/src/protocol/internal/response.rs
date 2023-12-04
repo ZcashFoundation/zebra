@@ -142,4 +142,10 @@ impl Response {
     pub fn is_inventory_download(&self) -> bool {
         matches!(self, Response::Blocks(_) | Response::Transactions(_))
     }
+
+    /// Returns true if self is the [`Response::Nil`] variant.
+    #[allow(dead_code)]
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Self::Nil)
+    }
 }

@@ -74,25 +74,6 @@ fn new_local_listener_is_gossipable() {
     assert!(peer.is_active_for_gossip(chrono_now));
 }
 
-/// Test if a recently received alternate peer address is not gossipable.
-///
-/// Such [`MetaAddr`] is only considered gossipable after Zebra has tried to connect to it and
-/// confirmed that the address is reachable.
-#[test]
-fn new_alternate_peer_address_is_not_gossipable() {
-    let _init_guard = zebra_test::init();
-
-    let instant_now = Instant::now();
-    let chrono_now = Utc::now();
-    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
-
-    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
-
-    assert!(!peer.is_active_for_gossip(chrono_now));
-}
-
 /// Test if recently received gossiped peer is gossipable.
 #[test]
 fn gossiped_peer_reportedly_to_be_seen_recently_is_gossipable() {
@@ -166,11 +147,10 @@ fn recently_responded_peer_is_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -187,11 +167,10 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -218,11 +197,10 @@ fn responded_long_ago_peer_is_not_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let mut peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -249,11 +227,10 @@ fn long_delayed_change_is_not_applied() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -293,11 +270,10 @@ fn later_revert_change_is_applied() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -336,11 +312,10 @@ fn concurrent_state_revert_change_is_not_applied() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -396,11 +371,10 @@ fn concurrent_state_progress_change_is_applied() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_alternate(address, &PeerServices::NODE_NETWORK)
-        .into_new_meta_addr(instant_now, local_now);
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, &PeerServices::NODE_NETWORK)
+    let peer = MetaAddr::new_responded(address)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 

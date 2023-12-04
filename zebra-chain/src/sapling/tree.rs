@@ -305,6 +305,10 @@ pub enum NoteCommitmentTreeError {
 }
 
 /// Sapling Incremental Note Commitment Tree.
+///
+/// Note that the default value of the [`Root`] type is `[0, 0, 0, 0]`. However, this value differs
+/// from the default value of the root of the default tree which is the hash of the root's child
+/// nodes. The default tree is the empty tree which has all leaves empty.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(into = "LegacyNoteCommitmentTree")]
 #[serde(from = "LegacyNoteCommitmentTree")]

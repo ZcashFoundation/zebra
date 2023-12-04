@@ -18,7 +18,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
-    constants,
+    constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     types::MetaAddr,
@@ -111,9 +111,6 @@ pub struct AddressMetrics {
 
     /// The number of addresses in the `NeverAttemptedGossiped` state.
     pub never_attempted_gossiped: usize,
-
-    /// The number of addresses in the `NeverAttemptedAlternate` state.
-    pub never_attempted_alternate: usize,
 
     /// The number of addresses in the `Failed` state.
     pub failed: usize,
@@ -268,7 +265,20 @@ impl AddressBook {
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
     /// including our local listener address.
-    pub fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+    ///
+    /// Limited to a the number of peer addresses Zebra should give out per `GetAddr` request.
+    pub fn fresh_get_addr_response(&self) -> Vec<MetaAddr> {
+        let now = Utc::now();
+        let mut peers = self.sanitized(now);
+        let address_limit = peers.len().div_ceil(ADDR_RESPONSE_LIMIT_DENOMINATOR);
+        peers.truncate(MAX_ADDRS_IN_MESSAGE.min(address_limit));
+
+        peers
+    }
+
+    /// Get the active addresses in `self` in random order with sanitized timestamps,
+    /// including our local listener address.
+    pub(crate) fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
 
@@ -654,9 +664,6 @@ impl AddressBook {
         let never_attempted_gossiped = self
             .state_peers(PeerAddrState::NeverAttemptedGossiped)
             .count();
-        let never_attempted_alternate = self
-            .state_peers(PeerAddrState::NeverAttemptedAlternate)
-            .count();
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
@@ -670,7 +677,6 @@ impl AddressBook {
         AddressMetrics {
             responded,
             never_attempted_gossiped,
-            never_attempted_alternate,
             failed,
             attempt_pending,
             recently_live,
@@ -692,10 +698,6 @@ impl AddressBook {
         // TODO: rename to address_book.[state_name]
         metrics::gauge!("candidate_set.responded", m.responded as f64);
         metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
-        metrics::gauge!(
-            "candidate_set.alternate",
-            m.never_attempted_alternate as f64,
-        );
         metrics::gauge!("candidate_set.failed", m.failed as f64);
         metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
 
@@ -741,12 +743,7 @@ impl AddressBook {
 
         self.last_address_log = Some(now);
         // if all peers have failed
-        if m.responded
-            + m.attempt_pending
-            + m.never_attempted_gossiped
-            + m.never_attempted_alternate
-            == 0
-        {
+        if m.responded + m.attempt_pending + m.never_attempted_gossiped == 0 {
             warn!(
                 address_metrics = ?m,
                 "all peer addresses have failed. Hint: check your network connection"

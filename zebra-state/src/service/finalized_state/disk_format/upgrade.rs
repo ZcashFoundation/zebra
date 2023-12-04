@@ -15,17 +15,13 @@ use zebra_chain::{
         task::{CheckForPanics, WaitForPanics},
         CodeTimer,
     },
-    parameters::Network,
 };
 
 use DbFormatChange::*;
 
 use crate::{
-    config::write_database_format_version_to_disk,
-    constants::{latest_version_for_adding_subtrees, DATABASE_FORMAT_VERSION},
-    database_format_version_in_code, database_format_version_on_disk,
+    constants::latest_version_for_adding_subtrees,
     service::finalized_state::{DiskWriteBatch, ZebraDb},
-    Config,
 };
 
 pub(crate) mod add_subtrees;
@@ -113,7 +109,9 @@ impl DbFormatChange {
     /// Also logs that change at info level.
     ///
     /// If `disk_version` is `None`, Zebra is creating a new database.
-    pub fn open_database(running_version: Version, disk_version: Option<Version>) -> Self {
+    pub fn open_database(running_version: &Version, disk_version: Option<Version>) -> Self {
+        let running_version = running_version.clone();
+
         let Some(disk_version) = disk_version else {
             info!(
                 %running_version,
@@ -160,8 +158,8 @@ impl DbFormatChange {
     /// This check makes sure the upgrade and new block code produce the same data.
     ///
     /// Also logs the check at info level.
-    pub fn check_new_blocks() -> Self {
-        let running_version = database_format_version_in_code();
+    pub fn check_new_blocks(db: &ZebraDb) -> Self {
+        let running_version = db.format_version_in_code();
 
         info!(%running_version, "checking new blocks were written in current database format");
         CheckNewBlocksCurrent { running_version }
@@ -219,14 +217,12 @@ impl DbFormatChange {
     /// Launch a `std::thread` that applies this format change to the database,
     /// then continues running to perform periodic format checks.
     ///
-    /// `initial_tip_height` is the database height when it was opened, and `upgrade_db` is the
+    /// `initial_tip_height` is the database height when it was opened, and `db` is the
     /// database instance to upgrade or check.
     pub fn spawn_format_change(
         self,
-        config: Config,
-        network: Network,
+        db: ZebraDb,
         initial_tip_height: Option<Height>,
-        upgrade_db: ZebraDb,
     ) -> DbFormatChangeThreadHandle {
         // # Correctness
         //
@@ -237,13 +233,7 @@ impl DbFormatChange {
         let span = Span::current();
         let update_task = thread::spawn(move || {
             span.in_scope(move || {
-                self.format_change_run_loop(
-                    config,
-                    network,
-                    initial_tip_height,
-                    upgrade_db,
-                    cancel_receiver,
-                )
+                self.format_change_run_loop(db, initial_tip_height, cancel_receiver)
             })
         });
 
@@ -264,21 +254,13 @@ impl DbFormatChange {
     /// newly added blocks matches the current format. It will run until it is cancelled or panics.
     fn format_change_run_loop(
         self,
-        config: Config,
-        network: Network,
+        db: ZebraDb,
         initial_tip_height: Option<Height>,
-        upgrade_db: ZebraDb,
         cancel_receiver: mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        self.run_format_change_or_check(
-            &config,
-            network,
-            initial_tip_height,
-            &upgrade_db,
-            &cancel_receiver,
-        )?;
+        self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
 
-        let Some(debug_validity_check_interval) = config.debug_validity_check_interval else {
+        let Some(debug_validity_check_interval) = db.config().debug_validity_check_interval else {
             return Ok(());
         };
 
@@ -292,11 +274,9 @@ impl DbFormatChange {
                 return Err(CancelFormatChange);
             }
 
-            Self::check_new_blocks().run_format_change_or_check(
-                &config,
-                network,
+            Self::check_new_blocks(&db).run_format_change_or_check(
+                &db,
                 initial_tip_height,
-                &upgrade_db,
                 &cancel_receiver,
             )?;
         }
@@ -306,24 +286,16 @@ impl DbFormatChange {
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn run_format_change_or_check(
         &self,
-        config: &Config,
-        network: Network,
+        db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        upgrade_db: &ZebraDb,
         cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
-            Upgrade { .. } => self.apply_format_upgrade(
-                config,
-                network,
-                initial_tip_height,
-                upgrade_db,
-                cancel_receiver,
-            )?,
+            Upgrade { .. } => self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?,
 
             NewlyCreated { .. } => {
-                Self::mark_as_newly_created(config, network);
+                Self::mark_as_newly_created(db);
             }
 
             Downgrade { .. } => {
@@ -332,7 +304,7 @@ impl DbFormatChange {
                 // At the start of a format downgrade, the database must be marked as partially or
                 // fully downgraded. This lets newer Zebra versions know that some blocks with older
                 // formats have been added to the database.
-                Self::mark_as_downgraded(config, network);
+                Self::mark_as_downgraded(db);
 
                 // Older supported versions just assume they can read newer formats,
                 // because they can't predict all changes a newer Zebra version could make.
@@ -373,10 +345,10 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(upgrade_db, cancel_receiver)?.unwrap_or_else(|_| {
+        Self::format_validity_checks_detailed(db, cancel_receiver)?.unwrap_or_else(|_| {
             panic!(
                 "unexpected invalid database format: delete and re-sync the database at '{:?}'",
-                upgrade_db.path()
+                db.path()
             )
         });
 
@@ -392,6 +364,8 @@ impl DbFormatChange {
         Ok(())
     }
 
+    // TODO: Move state-specific upgrade code to a finalized_state/* module.
+
     /// Apply any required format updates to the database.
     /// Format changes should be launched in an independent `std::thread`.
     ///
@@ -405,10 +379,8 @@ impl DbFormatChange {
     #[allow(clippy::unwrap_in_result)]
     fn apply_format_upgrade(
         &self,
-        config: &Config,
-        network: Network,
-        initial_tip_height: Option<Height>,
         db: &ZebraDb,
+        initial_tip_height: Option<Height>,
         cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
@@ -430,7 +402,7 @@ impl DbFormatChange {
                 "marking empty database as upgraded"
             );
 
-            Self::mark_as_upgraded_to(&database_format_version_in_code(), config, network);
+            Self::mark_as_upgraded_to(db, newer_running_version);
 
             info!(
                 %newer_running_version,
@@ -510,7 +482,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&version_for_pruning_trees, config, network);
+            Self::mark_as_upgraded_to(db, &version_for_pruning_trees);
 
             timer.finish(module_path!(), line!(), "deduplicate trees upgrade");
         }
@@ -538,7 +510,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&latest_version_for_adding_subtrees, config, network);
+            Self::mark_as_upgraded_to(db, &latest_version_for_adding_subtrees);
 
             timer.finish(module_path!(), line!(), "add subtrees upgrade");
         }
@@ -564,7 +536,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(&version_for_tree_keys_and_caches, config, network);
+            Self::mark_as_upgraded_to(db, &version_for_tree_keys_and_caches);
 
             timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
         }
@@ -721,12 +693,13 @@ impl DbFormatChange {
     /// # Panics
     ///
     /// If the format should not have been upgraded, because the database is not newly created.
-    fn mark_as_newly_created(config: &Config, network: Network) {
-        let disk_version = database_format_version_on_disk(config, network)
+    fn mark_as_newly_created(db: &ZebraDb) {
+        let running_version = db.format_version_in_code();
+        let disk_version = db
+            .format_version_on_disk()
             .expect("unable to read database format version file path");
-        let running_version = database_format_version_in_code();
 
-        let default_new_version = Some(Version::new(DATABASE_FORMAT_VERSION, 0, 0));
+        let default_new_version = Some(Version::new(running_version.major, 0, 0));
 
         // The database version isn't empty any more, because we've created the RocksDB database
         // and acquired its lock. (If it is empty, we have a database locking bug.)
@@ -737,7 +710,7 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
-        write_database_format_version_to_disk(&running_version, config, network)
+        db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");
 
         info!(
@@ -768,11 +741,12 @@ impl DbFormatChange {
     /// - older or the same as the disk version
     ///   (multiple upgrades to the same version are not allowed)
     /// - greater than the running version (that's a logic bug)
-    fn mark_as_upgraded_to(format_upgrade_version: &Version, config: &Config, network: Network) {
-        let disk_version = database_format_version_on_disk(config, network)
+    fn mark_as_upgraded_to(db: &ZebraDb, format_upgrade_version: &Version) {
+        let running_version = db.format_version_in_code();
+        let disk_version = db
+            .format_version_on_disk()
             .expect("unable to read database format version file")
             .expect("tried to upgrade a newly created database");
-        let running_version = database_format_version_in_code();
 
         assert!(
             running_version > disk_version,
@@ -798,7 +772,7 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
-        write_database_format_version_to_disk(format_upgrade_version, config, network)
+        db.update_format_version_on_disk(format_upgrade_version)
             .expect("unable to write database format version file to disk");
 
         info!(
@@ -826,11 +800,12 @@ impl DbFormatChange {
     /// If the state is newly created, because the running version should be the same.
     ///
     /// Multiple downgrades are allowed, because they all downgrade to the same running version.
-    fn mark_as_downgraded(config: &Config, network: Network) {
-        let disk_version = database_format_version_on_disk(config, network)
+    fn mark_as_downgraded(db: &ZebraDb) {
+        let running_version = db.format_version_in_code();
+        let disk_version = db
+            .format_version_on_disk()
             .expect("unable to read database format version file")
             .expect("can't downgrade a newly created database");
-        let running_version = database_format_version_in_code();
 
         assert!(
             disk_version >= running_version,
@@ -839,7 +814,7 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
-        write_database_format_version_to_disk(&running_version, config, network)
+        db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");
 
         info!(
@@ -883,7 +858,7 @@ impl DbFormatChangeThreadHandle {
     ///
     /// This method should be called regularly, so that panics are detected as soon as possible.
     pub fn check_for_panics(&mut self) {
-        self.update_task.check_for_panics();
+        self.update_task.panic_if_task_has_panicked();
     }
 
     /// Wait for the spawned thread to finish. If it exited with a panic, resume that panic.

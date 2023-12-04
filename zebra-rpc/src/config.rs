@@ -34,7 +34,7 @@ pub struct Config {
     ///
     /// Zebra's RPC server has a separate thread pool and a `tokio` executor for each thread.
     /// State queries are run concurrently using the shared thread pool controlled by
-    /// the [`SyncSection.parallel_cpu_threads`](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html#structfield.parallel_cpu_threads) config.
+    /// the [`SyncSection.parallel_cpu_threads`](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.parallel_cpu_threads) config.
     ///
     /// We recommend setting both configs to `0` (automatic scaling) for the best performance.
     /// This uses one thread per available CPU core.
