@@ -179,8 +179,8 @@ pub async fn start(
     }
 }
 
-/// Returns transactions belonging to the given `ScanningKey`. This list of keys should come from
-/// a single configured `SaplingScanningKey`.
+/// Returns the transactions from `block` belonging to the given `scanning_keys`.
+/// This list of keys should come from a single configured `SaplingScanningKey`.
 ///
 /// For example, there are two individual viewing keys for most shielded transfers:
 /// - the payment (external) key, and
