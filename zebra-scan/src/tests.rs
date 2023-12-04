@@ -247,6 +247,75 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     Ok(())
 }
 
+/// Generates a fake block containing a Sapling output decryptable by `dfvk`.
+fn fake_block(
+    height: BlockHeight,
+    nf: Nullifier,
+    dfvk: &DiversifiableFullViewingKey,
+    value: u64,
+    tx_after: bool,
+    initial_sapling_tree_size: Option<u32>,
+) -> (Block, u32) {
+    let header = Header {
+        version: 4,
+        previous_block_hash: block::Hash::default(),
+        merkle_root: merkle::Root::default(),
+        commitment_bytes: HexDebug::default(),
+        time: DateTime::<Utc>::default(),
+        difficulty_threshold: CompactDifficulty::default(),
+        nonce: HexDebug::default(),
+        solution: Solution::default(),
+    };
+
+    let block = fake_compact_block(
+        height,
+        BlockHash([0; 32]),
+        nf,
+        dfvk,
+        value,
+        tx_after,
+        initial_sapling_tree_size,
+    );
+
+    let mut transactions: Vec<Arc<Transaction>> = block
+        .vtx
+        .iter()
+        .map(|tx| compact_to_v4(tx).expect("A fake compact tx should be convertible to V4."))
+        .map(Arc::new)
+        .collect();
+
+    let coinbase_input = Input::Coinbase {
+        height: Height(1),
+        data: CoinbaseData::new(vec![]),
+        sequence: u32::MAX,
+    };
+
+    let coinbase = Transaction::V4 {
+        inputs: vec![coinbase_input],
+        outputs: vec![],
+        lock_time: LockTime::Height(Height(1)),
+        expiry_height: Height(1),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    transactions.insert(0, Arc::new(coinbase));
+
+    let sapling_tree_size = block
+        .chain_metadata
+        .as_ref()
+        .unwrap()
+        .sapling_commitment_tree_size;
+
+    (
+        Block {
+            header: Arc::new(header),
+            transactions,
+        },
+        sapling_tree_size,
+    )
+}
+
 /// Create a fake compact block with provided fake account data.
 // This is a copy of zcash_primitives `fake_compact_block` where the `value` argument was changed to
 // be a number for easier conversion:
