@@ -67,7 +67,7 @@ impl ZcashSerialize for NoBurn {
 
 impl ZcashDeserialize for NoBurn {
     fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
-        Ok(Self {})
+        Ok(Self)
     }
 }
 
