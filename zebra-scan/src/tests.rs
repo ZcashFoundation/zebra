@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use color_eyre::Result;
+use color_eyre::{Report, Result};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, thread_rng, RngCore};
 
 use zcash_client_backend::{
     encoding::decode_extended_full_viewing_key,
@@ -28,15 +28,21 @@ use zcash_primitives::{
         value::NoteValue,
         Note, Nullifier, SaplingIvk,
     },
-    zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
+    zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
 };
 
 use zebra_chain::{
-    block::{Block, Height},
+    amount::{Amount, NegativeAllowed},
+    block::{self, merkle, Block, Header, Height},
     chain_tip::ChainTip,
+    fmt::HexDebug,
     parameters::Network,
-    serialization::ZcashDeserializeInto,
-    transaction::Hash,
+    primitives::{redjubjub, Groth16Proof},
+    sapling::{self, PerSpendAnchor, Spend, TransferData},
+    serialization::{AtLeastOne, ZcashDeserializeInto},
+    transaction::{self, LockTime, Transaction},
+    transparent::{CoinbaseData, Input},
+    work::{difficulty::CompactDifficulty, equihash::Solution},
 };
 
 use crate::{
@@ -365,4 +371,86 @@ fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     ctx.spends.push(cspend);
     ctx.outputs.push(cout);
     ctx
+}
+
+/// Converts [`CompactTx`] to [`Transaction::V4`].
+fn compact_to_v4(tx: &CompactTx) -> Result<Transaction> {
+    let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(thread_rng());
+    let vk = redjubjub::VerificationKey::from(&sk);
+    let dummy_rk = sapling::keys::ValidatingKey::try_from(vk)
+        .expect("Internally generated verification key should be convertible to a validating key.");
+
+    let spends = tx
+        .spends
+        .iter()
+        .map(|spend| {
+            Ok(Spend {
+                cv: sapling::NotSmallOrderValueCommitment::default(),
+                per_spend_anchor: sapling::tree::Root::default(),
+                nullifier: sapling::Nullifier::from(
+                    spend.nf().map_err(|_| Report::msg("Invalid nullifier."))?.0,
+                ),
+                rk: dummy_rk.clone(),
+                zkproof: Groth16Proof([0; 192]),
+                spend_auth_sig: redjubjub::Signature::<redjubjub::SpendAuth>::from([0; 64]),
+            })
+        })
+        .collect::<Result<Vec<Spend<PerSpendAnchor>>>>()?;
+
+    let spends = AtLeastOne::<Spend<PerSpendAnchor>>::try_from(spends)?;
+
+    let maybe_outputs = tx
+        .outputs
+        .iter()
+        .map(|output| {
+            let mut ciphertext = output.ciphertext.clone();
+            ciphertext.resize(580, 0);
+            let ciphertext: [u8; 580] = ciphertext
+                .try_into()
+                .map_err(|_| Report::msg("Could not convert ciphertext to `[u8; 580]`"))?;
+            let enc_ciphertext = sapling::EncryptedNote::from(ciphertext);
+
+            Ok(sapling::Output {
+                cv: sapling::NotSmallOrderValueCommitment::default(),
+                cm_u: Option::from(jubjub::Fq::from_bytes(
+                    &output
+                        .cmu()
+                        .map_err(|_| Report::msg("Invalid commitment."))?
+                        .to_bytes(),
+                ))
+                .ok_or(Report::msg("Invalid commitment."))?,
+                ephemeral_key: sapling::keys::EphemeralPublicKey::try_from(
+                    output
+                        .ephemeral_key()
+                        .map_err(|_| Report::msg("Invalid ephemeral key."))?
+                        .0,
+                )
+                .map_err(Report::msg)?,
+                enc_ciphertext,
+                out_ciphertext: sapling::WrappedNoteKey::from([0; 80]),
+                zkproof: Groth16Proof([0; 192]),
+            })
+        })
+        .collect::<Result<Vec<sapling::Output>>>()?;
+
+    let transfers = TransferData::SpendsAndMaybeOutputs {
+        shared_anchor: sapling::FieldNotPresent,
+        spends,
+        maybe_outputs,
+    };
+
+    let shielded_data = sapling::ShieldedData {
+        value_balance: Amount::<NegativeAllowed>::default(),
+        transfers,
+        binding_sig: redjubjub::Signature::<redjubjub::Binding>::from([0; 64]),
+    };
+
+    Ok(Transaction::V4 {
+        inputs: vec![],
+        outputs: vec![],
+        lock_time: LockTime::Height(Height(0)),
+        expiry_height: Height(0),
+        joinsplit_data: None,
+        sapling_shielded_data: (Some(shielded_data)),
+    })
 }
