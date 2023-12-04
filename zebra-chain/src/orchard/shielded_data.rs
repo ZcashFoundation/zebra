@@ -44,7 +44,7 @@ pub struct ShieldedData<V: OrchardFlavour> {
 
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
-    /// TODO: FIXME: Add ref to spec
+    /// Denoted as `vAssetBurn` in the spec (ZIP 230).
     pub burn: V::BurnType,
 }
 

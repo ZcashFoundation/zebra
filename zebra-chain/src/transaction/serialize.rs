@@ -371,8 +371,8 @@ impl<V: OrchardFlavour> ZcashSerialize for orchard::ShieldedData<V> {
         // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
 
-        // TODO: FIXME: add a proper comment
         #[cfg(feature = "tx-v6")]
+        // Denoted as `vAssetBurn` in the spec (ZIP 230).
         self.burn.zcash_serialize(&mut writer)?;
 
         Ok(())
