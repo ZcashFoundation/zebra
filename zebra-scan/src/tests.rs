@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use color_eyre::{Report, Result};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
@@ -26,7 +28,7 @@ use zcash_primitives::{
         note_encryption::{sapling_note_encryption, SaplingDomain},
         util::generate_random_rseed,
         value::NoteValue,
-        Note, Nullifier, SaplingIvk,
+        Note, Nullifier,
     },
     zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
 };
@@ -50,49 +52,51 @@ use crate::{
     scan::{block_to_compact, scan_block},
 };
 
-/// Prove that we can create fake blocks with fake notes and scan them using the
-/// `zcash_client_backend::scanning::scan_block` function:
-/// - Function `fake_compact_block` will generate 1 block with one pre created fake nullifier in
-/// the transaction and one additional random transaction without it.
-/// - Verify one relevant transaction is found in the chain when scanning for the pre created fake
-/// account's nullifier.
-#[test]
-fn scanning_from_fake_generated_blocks() -> Result<()> {
-    let account = AccountId::from(12);
+/// This test:
+/// - Creates a viewing key and a fake block containing a Sapling output decryptable by the key.
+/// - Scans the block.
+/// - Checks that the result contains the txid of the tx containin the Sapling output.
+#[tokio::test]
+async fn scanning_from_fake_generated_blocks() -> Result<()> {
     let extsk = ExtendedSpendingKey::master(&[]);
     let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
 
-    let cb = fake_compact_block(
-        1u32.into(),
-        BlockHash([0; 32]),
-        nf,
-        &dfvk,
-        1,
-        false,
-        Some(0),
-    );
+    let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    // The fake block function will have our transaction and a random one.
-    assert_eq!(cb.vtx.len(), 2);
+    // The fake block has the following transactions in this order:
+    // 1. a transparent coinbase tx,
+    // 2. a V4 tx containing a random Sapling output,
+    // 3. a V4 tx containing a Sapling output decryptable by `dfvk`,
+    // 4. another V4 tx containing a random Sapling output.
+    assert_eq!(block.transactions.len(), 4);
 
-    let res = zcash_client_backend::scanning::scan_block(
-        &zcash_primitives::consensus::MainNetwork,
-        cb.clone(),
-        &vks[..],
-        &[(account, nf)],
-        None,
+    let res = scan_block(
+        Network::Mainnet,
+        &Arc::new(block.clone()),
+        sapling_tree_size,
+        &[&dfvk],
     )
     .unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
-    // The transaction should be the one we provided, second one in the block.
-    // (random transaction is added before ours in `fake_compact_block` function)
-    assert_eq!(res.transactions()[0].txid, cb.vtx[1].txid());
+
+    // Check that the original block contains the txid in the scanning result.
+    assert!(block
+        .transactions
+        .iter()
+        .map(|tx| tx.hash().bytes_in_display_order())
+        .any(|txid| &txid == res.transactions()[0].txid.as_ref()));
+
+    // Check that the txid in the scanning result matches the third tx in the original block.
+    assert_eq!(
+        res.transactions()[0].txid.as_ref(),
+        &block.transactions[2].hash().bytes_in_display_order()
+    );
+
     // The block hash of the response should be the same as the one provided.
-    assert_eq!(res.block_hash(), cb.hash());
+    assert_eq!(res.block_hash().0, block.hash().0);
 
     Ok(())
 }
@@ -176,13 +180,14 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     Ok(())
 }
 
-/// In this test we generate a viewing key and manually add it to the database. Also we send results to the Storage database.
+/// Creates a viewing key and a fake block containing a Sapling output decryptable by the key, scans
+/// the block using the key, and adds the results to the database.
+///
 /// The purpose of this test is to check if our database and our scanning code are compatible.
 #[test]
 #[allow(deprecated)]
 fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     // Generate a key
-    let account = AccountId::from(12);
     let extsk = ExtendedSpendingKey::master(&[]);
     // TODO: find out how to do it with `to_diversifiable_full_viewing_key` as `to_extended_full_viewing_key` is deprecated.
     let extfvk = extsk.to_extended_full_viewing_key();
@@ -203,33 +208,29 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         Some(&s.min_sapling_birthday_height())
     );
 
-    let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
     let nf = Nullifier([7; 32]);
 
-    // Add key to fake block
-    let cb = fake_compact_block(
-        1u32.into(),
-        BlockHash([0; 32]),
-        nf,
-        &dfvk,
-        1,
-        false,
-        Some(0),
-    );
+    // The fake block has the following transactions in this order:
+    // 1. a transparent coinbase tx,
+    // 2. a V4 tx containing a random Sapling output,
+    // 3. a V4 tx containing a Sapling output decryptable by `dfvk`,
+    // 4. another V4 tx containing a random Sapling output.
+    let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    // Scan with our key
-    let res = zcash_client_backend::scanning::scan_block(
-        &zcash_primitives::consensus::MainNetwork,
-        cb.clone(),
-        &vks[..],
-        &[(account, nf)],
-        None,
+    let res = scan_block(
+        Network::Mainnet,
+        &Arc::new(block),
+        sapling_tree_size,
+        &[&dfvk],
     )
     .unwrap();
 
+    // The response should have one transaction relevant to the key we provided.
+    assert_eq!(res.transactions().len(), 1);
+
     // Get transaction hash
-    let found_transaction = res.transactions()[0].txid.as_ref();
-    let found_transaction_hash = Hash::from_bytes_in_display_order(found_transaction);
+    let found_txid = res.transactions()[0].txid.as_ref();
+    let found_transaction_hash = transaction::Hash::from_bytes_in_display_order(found_txid);
 
     // Add result to database
     s.add_sapling_result(
