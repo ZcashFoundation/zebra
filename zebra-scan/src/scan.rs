@@ -236,7 +236,7 @@ pub async fn scan_height_and_store_results(
 /// - Add other prior block metadata.
 pub fn scan_block<K: ScanningKey>(
     network: Network,
-    block: &Arc<Block>,
+    block: &Block,
     sapling_tree_size: u32,
     scanning_keys: &[K],
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
@@ -300,7 +300,7 @@ pub fn sapling_key_to_scan_block_keys(
 }
 
 /// Converts a zebra block and meta data into a compact block.
-pub fn block_to_compact(block: &Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
+pub fn block_to_compact(block: &Block, chain_metadata: ChainMetadata) -> CompactBlock {
     CompactBlock {
         height: block
             .coinbase_height()
@@ -389,6 +389,6 @@ fn scanned_block_to_db_result<Nf>(scanned_block: ScannedBlock<Nf>) -> Vec<Saplin
     scanned_block
         .transactions()
         .iter()
-        .map(|tx| transaction::Hash::from_bytes_in_display_order(tx.txid.as_ref()))
+        .map(|tx| SaplingScannedResult::from(tx.txid.as_ref()))
         .collect()
 }
