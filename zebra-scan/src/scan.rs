@@ -27,7 +27,7 @@ use zebra_chain::{
     diagnostic::task::WaitForPanics,
     parameters::Network,
     serialization::ZcashSerialize,
-    transaction::{self, Transaction},
+    transaction::Transaction,
 };
 use zebra_state::{ChainTipChange, SaplingScannedResult};
 
