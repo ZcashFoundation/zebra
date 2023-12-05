@@ -6,7 +6,9 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
 };
-use zebra_state::{SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex};
+use zebra_state::{
+    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, TransactionIndex, TransactionLocation,
+};
 
 use crate::config::Config;
 
@@ -56,8 +58,8 @@ impl Storage {
     pub fn new(config: &Config, network: Network) -> Self {
         let mut storage = Self::new_db(config, network);
 
-        for (key, birthday) in config.sapling_keys_to_scan.iter() {
-            storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
+        for (sapling_key, birthday) in config.sapling_keys_to_scan.iter() {
+            storage.add_sapling_key(sapling_key, Some(zebra_chain::block::Height(*birthday)));
         }
 
         storage
@@ -69,12 +71,12 @@ impl Storage {
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_key(&mut self, key: SaplingScanningKey, birthday: Option<Height>) {
+    pub fn add_sapling_key(&mut self, sapling_key: &SaplingScanningKey, birthday: Option<Height>) {
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
         let mut batch = ScannerWriteBatch::default();
 
-        batch.insert_sapling_key(self, key, birthday);
+        batch.insert_sapling_key(self, sapling_key, birthday);
 
         self.write_batch(batch);
     }
@@ -91,33 +93,35 @@ impl Storage {
         self.sapling_keys_and_birthday_heights()
     }
 
-    /// Add a sapling result to the storage.
+    /// Add the sapling results for `height` to the storage.
     ///
     /// # Performance / Hangs
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_result(
+    pub fn add_sapling_results(
         &mut self,
         sapling_key: SaplingScanningKey,
         height: Height,
-        sapling_result: Vec<SaplingScannedResult>,
+        sapling_results: BTreeMap<TransactionIndex, SaplingScannedResult>,
     ) {
-        // It's ok to write some results and not others during shutdown, so each result can get its
-        // own batch. (They will be re-scanned on startup anyway.)
+        // We skip heights that have one or more results, so the results for each height must be
+        // in a single batch.
         let mut batch = ScannerWriteBatch::default();
 
-        let index = SaplingScannedDatabaseIndex {
-            sapling_key,
-            height,
-        };
+        for (index, sapling_result) in sapling_results {
+            let index = SaplingScannedDatabaseIndex {
+                sapling_key: sapling_key.clone(),
+                tx_loc: TransactionLocation::from_parts(height, index),
+            };
 
-        let entry = SaplingScannedDatabaseEntry {
-            index,
-            value: sapling_result,
-        };
+            let entry = SaplingScannedDatabaseEntry {
+                index,
+                value: Some(sapling_result),
+            };
 
-        batch.insert_sapling_result(self, entry);
+            batch.insert_sapling_result(self, entry);
+        }
 
         self.write_batch(batch);
     }
