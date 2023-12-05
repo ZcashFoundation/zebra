@@ -282,24 +282,26 @@ impl StartCmd {
             peer_set,
             mempool.clone(),
             sync_status,
-            chain_tip_change,
+            chain_tip_change.clone(),
         );
 
         info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        #[cfg(feature = "zebra-scan")]
+        #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task.
         let scan_task_handle = {
-            info!("spawning zebra_scanner");
-            let mut storage = zebra_scan::storage::Storage::new();
-            for (key, birthday) in config.shielded_scan.sapling_keys_to_scan.iter() {
-                storage.add_sapling_key(key.clone(), Some(zebra_chain::block::Height(*birthday)));
-            }
-
-            tokio::spawn(zebra_scan::scan::start(state, storage).in_current_span())
+            // TODO: log the number of keys and update the scan_task_starts() test
+            info!("spawning shielded scanner with configured viewing keys");
+            zebra_scan::spawn_init(
+                &config.shielded_scan,
+                config.network.network,
+                state,
+                chain_tip_change,
+            )
         };
-        #[cfg(not(feature = "zebra-scan"))]
+
+        #[cfg(not(feature = "shielded-scan"))]
         // Spawn a dummy scan task which doesn't do anything and never finishes.
         let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
             tokio::spawn(std::future::pending().in_current_span());

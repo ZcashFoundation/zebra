@@ -150,7 +150,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.1.1
+        uses: google-github-actions/auth@v2.0.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
@@ -188,8 +188,8 @@ jobs:
           NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
           LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
           ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
-          DISK_PREFIX: ${{ inputs.zebra_state_dir || inputs.disk_prefix }}
-          NETWORK: ${{ inputs.network }}
+          DISK_PREFIX: ${{ inputs.disk_prefix }}
+          NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
           PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
@@ -442,7 +442,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.1.1
+        uses: google-github-actions/auth@v2.0.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -719,7 +719,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.1.1
+        uses: google-github-actions/auth@v2.0.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'

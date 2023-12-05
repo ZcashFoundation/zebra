@@ -1,5 +1,7 @@
 //! Arbitrary value generation and test harnesses for high-level typed database access.
 
+#![allow(unused_imports)]
+
 use std::ops::Deref;
 
 use zebra_chain::{amount::NonNegative, block::Block, sprout, value_balance::ValueBalance};
@@ -21,13 +23,14 @@ impl Deref for ZebraDb {
 impl ZebraDb {
     /// Returns the inner database.
     ///
-    /// This is a test-only method, because it allows write access
+    /// This is a test-only and shielded-scan-only method, because it allows write access
     /// and raw read access to the RocksDB instance.
     pub fn db(&self) -> &DiskDb {
         &self.db
     }
 
     /// Allow to set up a fake value pool in the database for testing purposes.
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn set_finalized_value_pool(&self, fake_value_pool: ValueBalance<NonNegative>) {
         let mut batch = DiskWriteBatch::new();
         let value_pool_cf = self.db().cf_handle("tip_chain_value_pool").unwrap();
@@ -38,6 +41,7 @@ impl ZebraDb {
 
     /// Artificially prime the note commitment tree anchor sets with anchors
     /// referenced in a block, for testing purposes _only_.
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn populate_with_anchors(&self, block: &Block) {
         let mut batch = DiskWriteBatch::new();
 

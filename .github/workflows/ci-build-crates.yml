@@ -111,7 +111,8 @@ jobs:
     name: Build ${{ matrix.crate }} crate
     timeout-minutes: 90
     needs: [ matrix, check-matrix ]
-    runs-on: ubuntu-latest
+    # Some of these builds take more than 14GB disk space
+    runs-on: ubuntu-latest-m
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time
       max-parallel: 2
@@ -142,15 +143,18 @@ jobs:
         # Some Zebra crates do not have any features, and most don't have any default features.
       - name: Build ${{ matrix.crate }} crate with no default features
         run: |
-          cargo build --package ${{ matrix.crate }} --no-default-features
+          cargo clippy --package ${{ matrix.crate }} --no-default-features --all-targets -- -D warnings
+          cargo build --package ${{ matrix.crate }} --no-default-features --all-targets
 
-      - name: Build ${{ matrix.crate }} crate normally
+      - name: Build ${{ matrix.crate }} crate with default features
         run: |
-          cargo build --package ${{ matrix.crate }}
+          cargo clippy --package ${{ matrix.crate }} --all-targets -- -D warnings
+          cargo build --package ${{ matrix.crate }} --all-targets
 
       - name: Build ${{ matrix.crate }} crate with all features
         run: |
-          cargo build --package ${{ matrix.crate }} --all-features
+          cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
+          cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
   failure-issue:
     name: Open or update issues for building crates individually failures
