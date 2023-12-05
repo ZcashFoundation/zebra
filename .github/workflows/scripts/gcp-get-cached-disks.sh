@@ -16,13 +16,14 @@ find_cached_disk_image() {
 
     disk_name=$(gcloud compute images list --filter="status=READY AND name~${search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
 
+    # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
-        echo "Found ${git_source} Disk: ${disk_name}"
+        echo "Found ${git_source} Disk: ${disk_name}" >&2
         disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
-        echo "Description: ${disk_description}"
+        echo "Description: ${disk_description}" >&2
         echo "${disk_name}"  # This is the actual return value when a disk is found
     else
-        echo "No ${git_source} disk found." >&2  # Log the message to stderr instead
+        echo "No ${git_source} disk found." >&2
     fi
 
     echo "${disk_name}"
