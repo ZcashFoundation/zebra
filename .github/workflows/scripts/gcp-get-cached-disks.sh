@@ -6,22 +6,22 @@
 # and finally checks other branches if needed. The selected image is used for
 # setting up the environment in a CI/CD pipeline.
 
-set -euxo pipefail
+set -euo pipefail
 
 # Function to find and report a cached disk image
 find_cached_disk_image() {
     local search_pattern="${1}"
-    local description="${2}"
+    local git_source="${2}"
     local disk_name
 
-    echo "Searching for ${description} disk..."
     disk_name=$(gcloud compute images list --filter="status=READY AND name~${search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
 
     if [[ -n "${disk_name}" ]]; then
-        echo "Found ${description} Disk: ${disk_name}"
-        echo "Description: $(gcloud compute images describe ${disk_name} --format='value(DESCRIPTION)')"
+        echo "Found ${git_source} Disk: ${disk_name}"
+        disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
+        echo "Description: ${disk_description}"
     else
-        echo "No ${description} disk found."
+        echo "No ${git_source} disk found."
     fi
 
     echo "${disk_name}"
