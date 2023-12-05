@@ -26,8 +26,24 @@ pub const SAPLING_SCANNING_RESULT_LENGTH: usize = 32;
 /// It can represent a full viewing key or an individual viewing key.
 pub type SaplingScanningKey = String;
 
-/// The type used in Zebra to store Sapling scanning results.
-pub type SaplingScannedResult = transaction::Hash;
+/// Stores a scanning result.
+///
+/// Currently contains a TXID in "display order", which is big-endian byte order following the u256
+/// convention set by Bitcoin and zcashd.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SaplingScannedResult([u8; 32]);
+
+impl From<SaplingScannedResult> for transaction::Hash {
+    fn from(scanned_result: SaplingScannedResult) -> Self {
+        transaction::Hash::from_bytes_in_display_order(&scanned_result.0)
+    }
+}
+
+impl From<&[u8; 32]> for SaplingScannedResult {
+    fn from(bytes: &[u8; 32]) -> Self {
+        Self(*bytes)
+    }
+}
 
 /// A database column family entry for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +136,20 @@ impl FromDisk for SaplingScannedDatabaseIndex {
             sapling_key: SaplingScanningKey::from_bytes(sapling_key),
             height: Height::from_bytes(height),
         }
+    }
+}
+
+impl IntoDisk for SaplingScannedResult {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0
+    }
+}
+
+impl FromDisk for SaplingScannedResult {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        SaplingScannedResult(bytes.as_ref().try_into().unwrap())
     }
 }
 
