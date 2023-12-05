@@ -20,8 +20,8 @@ use proptest_derive::Arbitrary;
 ///
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
 /// following the u256 convention set by Bitcoin and zcashd.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

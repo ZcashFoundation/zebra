@@ -157,7 +157,8 @@ impl NoteCommitment {
 /// [`NotSmallOrderValueCommitment`].
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize, Default)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
@@ -301,7 +302,8 @@ lazy_static! {
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
 /// <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct NotSmallOrderValueCommitment(ValueCommitment);
 
 impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {

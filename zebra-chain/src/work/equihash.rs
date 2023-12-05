@@ -93,6 +93,7 @@ impl Clone for Solution {
 
 impl Eq for Solution {}
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl Default for Solution {
     fn default() -> Self {
         Self([0; SOLUTION_SIZE])
