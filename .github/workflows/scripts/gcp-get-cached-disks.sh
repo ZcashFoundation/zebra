@@ -20,8 +20,9 @@ find_cached_disk_image() {
         echo "Found ${git_source} Disk: ${disk_name}"
         disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
         echo "Description: ${disk_description}"
+        echo "${disk_name}"  # This is the actual return value when a disk is found
     else
-        echo "No ${git_source} disk found."
+        echo "No ${git_source} disk found." >&2  # Log the message to stderr instead
     fi
 
     echo "${disk_name}"
