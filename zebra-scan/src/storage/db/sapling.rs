@@ -18,10 +18,13 @@
 //! this mechanism to store key birthday heights, by storing the height before the birthday as the
 //! "last scanned" block.
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeBounds,
+};
 
 use itertools::Itertools;
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction};
 use zebra_state::{
     AsColumnFamilyRef, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
     SaplingScannedResult, SaplingScanningKey, TransactionIndex, WriteDisk,
@@ -54,12 +57,11 @@ impl Storage {
         &self,
         sapling_key: &SaplingScanningKey,
         height: Height,
-    ) -> BTreeMap<TransactionIndex, SaplingScannedResult> {
+    ) -> BTreeMap<TransactionIndex, Option<SaplingScannedResult>> {
         let kh_min = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
         let kh_max = SaplingScannedDatabaseIndex::max_for_key_and_height(sapling_key, height);
 
-        self.db
-            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), kh_min..=kh_max)
+        self.sapling_results_in_range(kh_min..=kh_max)
             .into_iter()
             .map(|(result_index, txid)| (result_index.tx_loc.index, txid))
             .collect()
@@ -73,15 +75,19 @@ impl Storage {
         let k_min = SaplingScannedDatabaseIndex::min_for_key(sapling_key);
         let k_max = SaplingScannedDatabaseIndex::max_for_key(sapling_key);
 
-        self.db
-            // Returns an iterator of individual transaction results
-            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), k_min..=k_max)
+        // Get an iterator of individual transaction results, and turn it into a HashMap by height
+        let results: HashMap<Height, Vec<Option<SaplingScannedResult>>> = self
+            .sapling_results_in_range(k_min..=k_max)
             .into_iter()
-            // Returns a HashMap of Vec<result> by height
             .map(|(index, result)| (index.tx_loc.height, result))
-            .into_group_map()
-            // But we want a BTreeMap
+            .into_group_map();
+
+        // But we want Vec<SaplingScannedResult>, with empty Vecs instead of [None, None, ...]
+        results
             .into_iter()
+            .map(|(index, vector)| -> (Height, Vec<transaction::Hash>) {
+                (index, vector.into_iter().flatten().collect())
+            })
             .collect()
     }
 
@@ -109,14 +115,14 @@ impl Storage {
 
             let sapling_key = entry.0.sapling_key;
             let mut height = entry.0.tx_loc.height;
-            let _first_result: SaplingScannedResult = entry.1;
+            let _first_result: Option<SaplingScannedResult> = entry.1;
 
             let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
 
             // If there are no results for this block, then it's a "skip up to height" marker, and
             // the birthday height is the next height. If there are some results, it's the actual
             // birthday height.
-            if height_results.is_empty() {
+            if height_results.values().all(Option::is_none) {
                 height = height
                     .next()
                     .expect("results should only be stored for validated block heights");
@@ -129,6 +135,17 @@ impl Storage {
         }
 
         keys
+    }
+
+    /// Returns the Sapling indexes and results in the supplied range.
+    ///
+    /// Convenience method for accessing raw data with the correct types.
+    fn sapling_results_in_range(
+        &self,
+        range: impl RangeBounds<SaplingScannedDatabaseIndex>,
+    ) -> BTreeMap<SaplingScannedDatabaseIndex, Option<SaplingScannedResult>> {
+        self.db
+            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), range)
     }
 
     // Column family convenience methods
