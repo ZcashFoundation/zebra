@@ -42,10 +42,11 @@ use zebra_chain::{
     primitives::{redjubjub, Groth16Proof},
     sapling::{self, PerSpendAnchor, Spend, TransferData},
     serialization::{AtLeastOne, ZcashDeserializeInto},
-    transaction::{self, LockTime, Transaction},
+    transaction::{LockTime, Transaction},
     transparent::{CoinbaseData, Input},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
+use zebra_state::SaplingScannedResult;
 
 use crate::{
     config::Config,
@@ -66,13 +67,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     assert_eq!(block.transactions.len(), 4);
 
-    let res = scan_block(
-        Network::Mainnet,
-        &Arc::new(block.clone()),
-        sapling_tree_size,
-        &[&dfvk],
-    )
-    .unwrap();
+    let res = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
@@ -207,32 +202,20 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    let res = scan_block(
-        Network::Mainnet,
-        &Arc::new(block),
-        sapling_tree_size,
-        &[&dfvk],
-    )
-    .unwrap();
+    let result = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
-    assert_eq!(res.transactions().len(), 1);
+    assert_eq!(result.transactions().len(), 1);
 
-    // Get transaction hash
-    let found_txid = res.transactions()[0].txid.as_ref();
-    let found_transaction_hash = transaction::Hash::from_bytes_in_display_order(found_txid);
+    let result = SaplingScannedResult::from(result.transactions()[0].txid.as_ref());
 
     // Add result to database
-    s.add_sapling_result(
-        key_to_be_stored.clone(),
-        Height(1),
-        vec![found_transaction_hash],
-    );
+    s.add_sapling_result(key_to_be_stored.clone(), Height(1), vec![result]);
 
     // Check the result was added
     assert_eq!(
         s.sapling_results(&key_to_be_stored).get(&Height(1)),
-        Some(&vec![found_transaction_hash])
+        Some(&vec![result])
     );
 
     Ok(())
