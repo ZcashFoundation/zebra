@@ -36,8 +36,8 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::Hash,
 };
+use zebra_state::SaplingScannedResult;
 
 use crate::{
     config::Config,
@@ -109,6 +109,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     // Build a vector of viewing keys `vks` to scan for.
     let fvk = efvk.fvk;
     let ivk = fvk.vk.ivk();
+    let ivks = vec![ivk];
 
     let network = zebra_chain::parameters::Network::Mainnet;
 
@@ -143,9 +144,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
             orchard_commitment_tree_size,
         };
 
-        let compact_block = block_to_compact(block.clone(), chain_metadata);
+        let compact_block = block_to_compact(&block, chain_metadata);
 
-        let res = scan_block(network, block, sapling_commitment_tree_size, &ivk)
+        let res = scan_block(network, &block, sapling_commitment_tree_size, &ivks)
             .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
@@ -210,8 +211,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         Some(0),
     );
 
-    // Scan with our key
-    let res = zcash_client_backend::scanning::scan_block(
+    let result = zcash_client_backend::scanning::scan_block(
         &zcash_primitives::consensus::MainNetwork,
         cb.clone(),
         &vks[..],
@@ -220,21 +220,18 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     )
     .unwrap();
 
-    // Get transaction hash
-    let found_transaction = res.transactions()[0].txid.as_ref();
-    let found_transaction_hash = Hash::from_bytes_in_display_order(found_transaction);
+    // The response should have one transaction relevant to the key we provided.
+    assert_eq!(result.transactions().len(), 1);
+
+    let result = SaplingScannedResult::from(result.transactions()[0].txid.as_ref());
 
     // Add result to database
-    s.add_sapling_result(
-        key_to_be_stored.clone(),
-        Height(1),
-        vec![found_transaction_hash],
-    );
+    s.add_sapling_result(key_to_be_stored.clone(), Height(1), vec![result]);
 
     // Check the result was added
     assert_eq!(
         s.sapling_results(&key_to_be_stored).get(&Height(1)),
-        Some(&vec![found_transaction_hash])
+        Some(&vec![result])
     );
 
     Ok(())
