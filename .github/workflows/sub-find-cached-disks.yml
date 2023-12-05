@@ -85,9 +85,11 @@ jobs:
             if [[ -z "${disk_image}" ]]; then
               echo "No ${disk_type^^} disk found for ${base_name} on network: ${NETWORK}"
               echo "${output_var}=${{ toJSON(false) }}" >> "${GITHUB_OUTPUT}"
+              echo JSON false: "${{ toJSON(false) }}"
             else
               echo "Disk: ${disk_image}"
               echo "${output_var}=${{ toJSON(true) }}" >> "${GITHUB_OUTPUT}"
+              echo JSON true: "${{ toJSON(false) }}"
             fi
           }
 
