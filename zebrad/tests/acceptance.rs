@@ -2804,9 +2804,9 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     Ok(())
 }
 
-/// Test that the scanner gets started when the node starts.
-#[cfg(feature = "zebra-scan")]
+/// Test that the scanner task gets started when the node starts.
 #[test]
+#[cfg(feature = "shielded-scan")]
 fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
 
@@ -2831,14 +2831,17 @@ fn scan_task_starts() -> Result<()> {
     // Check that scan task started and the first scanning is done.
     let output = child.wait_with_output()?;
 
-    output.stdout_line_contains("spawning zebra_scanner")?;
+    output.stdout_line_contains("spawning shielded scanner with configured viewing keys")?;
+    /*
+    TODO: these lines only happen when we reach sapling activation height
+    output.stdout_line_contains("Scanning the blockchain: now at block")?;
     output.stdout_line_contains(
         format!(
-            "Scanning the blockchain for key {} from block 1 to",
-            ZECPAGES_VIEWING_KEY
+            "Scanning the blockchain for key 0, started at block",
         )
         .as_str(),
     )?;
+    */
 
     // Make sure the command was killed
     output.assert_was_killed()?;

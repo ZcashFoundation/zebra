@@ -19,26 +19,32 @@ categories = ["cryptography::cryptocurrencies"]
 # Production features that activate extra dependencies, or extra features in dependencies
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31" }
 
 color-eyre = "0.6.2"
 indexmap = { version = "2.0.1", features = ["serde"] }
+itertools = "0.12.0"
+semver = "1.0.20"
 serde = { version = "1.0.193", features = ["serde_derive"] }
-tokio = { version = "1.34.0", features = ["test-util"] }
+tokio = { version = "1.34.0", features = ["time"] }
 tower = "0.4.13"
 tracing = "0.1.39"
 
-[dev-dependencies]
-
 zcash_client_backend = "0.10.0-rc.1"
 zcash_primitives = "0.13.0-rc.1"
-zcash_note_encryption = "0.4.0"
 
-rand = "0.8.5"
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31", features = ["shielded-scan"] }
+
+[dev-dependencies]
+
 bls12_381 = "0.8.0"
-jubjub = "0.10.0"
 ff = "0.13.0"
 group = "0.13.0"
+jubjub = "0.10.0"
+rand = "0.8.5"
+tokio = { version = "1.34.0", features = ["test-util"] }
 
+zcash_note_encryption = "0.4.0"
+
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test" }
