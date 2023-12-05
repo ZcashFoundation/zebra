@@ -189,7 +189,7 @@ jobs:
           LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
           ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
           DISK_PREFIX: ${{ inputs.disk_prefix }}
-          NETWORK: ${{ env.network }} # use lowercase version from env, not input
+          NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
           PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
