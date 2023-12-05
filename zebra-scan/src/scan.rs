@@ -22,12 +22,8 @@ use zcash_primitives::{
 };
 
 use zebra_chain::{
-    block::Block,
-    chain_tip::ChainTip,
-    diagnostic::task::WaitForPanics,
-    parameters::Network,
-    serialization::ZcashSerialize,
-    transaction::{self, Transaction},
+    block::Block, chain_tip::ChainTip, diagnostic::task::WaitForPanics, parameters::Network,
+    serialization::ZcashSerialize, transaction::Transaction,
 };
 use zebra_state::{ChainTipChange, SaplingScannedResult};
 
@@ -344,6 +340,6 @@ fn scanned_block_to_db_result<Nf>(scanned_block: ScannedBlock<Nf>) -> Vec<Saplin
     scanned_block
         .transactions()
         .iter()
-        .map(|tx| transaction::Hash::from_bytes_in_display_order(tx.txid.as_ref()))
+        .map(|tx| SaplingScannedResult::from(tx.txid.as_ref()))
         .collect()
 }
