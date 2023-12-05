@@ -61,6 +61,6 @@ jobs:
         id: get-available-disks
         env:
           GITHUB_WORKSPACE: ${{ env.GITHUB_WORKSPACE }}
-          NETWORK: ${{ inputs.network }}
+          NETWORK: ${{ env.network }} # use lowercase version from env, not input
         run: |
           ./.github/workflows/scripts/gcp-get-available-disks.sh
