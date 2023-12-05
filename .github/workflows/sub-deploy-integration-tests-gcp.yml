@@ -188,7 +188,7 @@ jobs:
           NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
           LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
           ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
-          DISK_PREFIX: ${{ inputs.zebra_state_dir || inputs.disk_prefix }}
+          DISK_PREFIX: ${{ inputs.disk_prefix }}
           NETWORK: ${{ inputs.network }}
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
           PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}

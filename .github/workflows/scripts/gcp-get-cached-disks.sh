@@ -32,8 +32,12 @@ echo "Extracting local state version..."
 LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
 echo "STATE_VERSION: ${LOCAL_STATE_VERSION}"
 
-# Define DISK_PREFIX based on NEEDS_LWD_STATE
-DISK_PREFIX=${NEEDS_LWD_STATE:-${DISK_PREFIX}}
+# Define DISK_PREFIX based on the requiring state directory
+if [[ "${NEEDS_LWD_STATE}" == "true" ]]; then
+    DISK_PREFIX="${LWD_STATE_DIR}"
+else
+    DISK_PREFIX="${ZEBRA_STATE_DIR:-${DISK_PREFIX}}"
+fi
 
 # Find the most suitable cached disk image
 echo "Finding the most suitable cached disk image..."
