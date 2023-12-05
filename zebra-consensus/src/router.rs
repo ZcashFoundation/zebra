@@ -264,6 +264,7 @@ where
             //
             // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
             let full_checkpoints = CheckpointList::new(network);
+            let mut already_warned = false;
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
                 let checkpoint_state_service = checkpoint_state_service.clone();
@@ -298,20 +299,14 @@ where
                         unreachable!("unexpected response type: {response:?} from state request")
                     }
                     Err(e) => {
-                        #[cfg(not(test))]
-                        tracing::warn!(
-                            "unexpected error: {e:?} in state request while verifying previous \
-                             state checkpoints. Is Zebra shutting down?"
-                        );
-                        // This error happens a lot in some tests.
-                        //
-                        // TODO: fix the tests so they don't cause this error,
-                        //       or change the tracing filter
-                        #[cfg(test)]
-                        tracing::debug!(
-                            "unexpected error: {e:?} in state request while verifying previous \
-                             state checkpoints. Is Zebra shutting down?"
-                        );
+                        // This error happens a lot in some tests, and it could happen to users.
+                        if !already_warned {
+                            tracing::warn!(
+                                "unexpected error: {e:?} in state request while verifying previous \
+                                 state checkpoints. Is Zebra shutting down?"
+                            );
+                            already_warned = true;
+                        }
                     }
                 }
             }
