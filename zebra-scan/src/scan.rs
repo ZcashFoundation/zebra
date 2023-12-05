@@ -114,7 +114,7 @@ pub async fn start(
 ///
 /// Returns:
 /// - `Ok(Some(height))` if the height was scanned,
-/// - `Ok(None)` if the height was not in the database, and
+/// - `Ok(None)` if the height was not in the state, and
 /// - `Err(error)` on fatal errors.
 pub async fn scan_height_and_store_results(
     height: Height,
