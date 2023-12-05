@@ -4,17 +4,19 @@
 //!
 //! | name             | key                           | value                    |
 //! |------------------|-------------------------------|--------------------------|
-//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `Vec<transaction::Hash>` |
+//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `transaction::Hash`      |
 //!
 //! And types:
-//! SaplingScannedDatabaseIndex = `SaplingScanningKey` | `Height`
+//! `SaplingScannedDatabaseIndex` = `SaplingScanningKey` | `TransactionLocation`
+//! `TransactionLocation` = `Height` | `TransactionIndex`
 //!
 //! This format allows us to efficiently find all the results for each key, and the latest height
 //! for each key.
 //!
-//! If there are no results for a height, we store an empty list of results. This allows is to scan
-//! each key from the next height after we restart. We also use this mechanism to store key
-//! birthday heights, by storing the height before the birthday as the "last scanned" block.
+//! If there are no results for a height, we store an empty list of results for the coinbase
+//! transaction. This allows is to scan each key from the next height after we restart. We also use
+//! this mechanism to store key birthday heights, by storing the height before the birthday as the
+//! "last scanned" block.
 
 use std::collections::{BTreeMap, HashMap};
 
