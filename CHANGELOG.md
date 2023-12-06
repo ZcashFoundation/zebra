@@ -36,7 +36,7 @@ shielded scanning support. Ongoing development is tracked in issue [#7728](https
 
 - change(state): Expose ZebraDb methods that can create different kinds of databases ([#8002](https://github.com/ZcashFoundation/zebra/pull/8002))
 - change(state): Make the types for finalized blocks consistent ([#7923](https://github.com/ZcashFoundation/zebra/pull/7923))
-- change(scan): Create a scanner storage database, but don't use it yet ([#8031](https://github.com/ZcashFoundation/zebra/pull/8031))
+- change(scan): Create a scanner storage database ([#8031](https://github.com/ZcashFoundation/zebra/pull/8031))
 - change(scan): Use the on-disk database for keys and results ([#8036](https://github.com/ZcashFoundation/zebra/pull/8036))
 - change(scan): Store scanned TXIDs in "display order" ([#8057](https://github.com/ZcashFoundation/zebra/pull/8057))
 - change(scan): Create a function that scans one block by height, and stores the results in the database ([#8045](https://github.com/ZcashFoundation/zebra/pull/8045))
