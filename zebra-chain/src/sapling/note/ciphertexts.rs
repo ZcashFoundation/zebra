@@ -12,6 +12,12 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 #[derive(Deserialize, Serialize)]
 pub struct EncryptedNote(#[serde(with = "BigArray")] pub(crate) [u8; 580]);
 
+impl From<[u8; 580]> for EncryptedNote {
+    fn from(byte_array: [u8; 580]) -> Self {
+        Self(byte_array)
+    }
+}
+
 impl fmt::Debug for EncryptedNote {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("EncryptedNote")
@@ -58,6 +64,12 @@ impl ZcashDeserialize for EncryptedNote {
 /// Corresponds to Sapling's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
 pub struct WrappedNoteKey(#[serde(with = "BigArray")] pub(crate) [u8; 80]);
+
+impl From<[u8; 80]> for WrappedNoteKey {
+    fn from(byte_array: [u8; 80]) -> Self {
+        Self(byte_array)
+    }
+}
 
 impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

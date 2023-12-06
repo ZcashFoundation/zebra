@@ -35,6 +35,8 @@ zcash_primitives = "0.13.0-rc.1"
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31", features = ["shielded-scan"] }
 
+chrono = { version = "0.4.31", default-features = false, features = ["clock", "std", "serde"] }
+
 [dev-dependencies]
 
 bls12_381 = "0.8.0"
