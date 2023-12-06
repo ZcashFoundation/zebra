@@ -13,7 +13,9 @@ limits the ability of synthetic nodes to spread throughout the network through Z
 address some of the Ziggurat red team report.
 
 Finally, we've added an experimental "shielded-scan" feature and the zebra-scan crate as steps
-towards supporting shielded scanning in Zebra.
+towards supporting shielded scanning in Zebra. There are still known security issues with this
+feature, it is not recommended to use important private keys when testing Zebra's experimental
+shielded scanning support. Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
 
 ### Security
 
@@ -24,18 +26,27 @@ towards supporting shielded scanning in Zebra.
 ### Added
 
 - feat(config): Add config field for the viewing keys used by zebra-scan ([#7949](https://github.com/ZcashFoundation/zebra/pull/7949))
-- feat(scanner): Add basic RAM database to store keys and scan results ([#7942](https://github.com/ZcashFoundation/zebra/pull/7942))
-- feat(scanner): Spawn zebra-scan task from zebrad with configured viewing keys ([#7989](https://github.com/ZcashFoundation/zebra/pull/7989))
+- feat(scan): Add basic RAM database to store keys and scan results ([#7942](https://github.com/ZcashFoundation/zebra/pull/7942))
+- feat(scan): Spawn zebra-scan task from zebrad with configured viewing keys ([#7989](https://github.com/ZcashFoundation/zebra/pull/7989))
+- feat(scan): Create a scan_block function to use across scanning tasks ([#7994](https://github.com/ZcashFoundation/zebra/pull/7994))
+- feat(scan): Scan blocks with Sapling keys and write the results to the database ([#8040](https://github.com/ZcashFoundation/zebra/pull/8040))
+- poc(scan): Proof of concept for shielded scanning ([#7758](https://github.com/ZcashFoundation/zebra/pull/7758))
 
 ### Changed
 
 - change(state): Expose ZebraDb methods that can create different kinds of databases ([#8002](https://github.com/ZcashFoundation/zebra/pull/8002))
 - change(state): Make the types for finalized blocks consistent ([#7923](https://github.com/ZcashFoundation/zebra/pull/7923))
+- change(scan): Create a scanner storage database, but don't use it yet ([#8031](https://github.com/ZcashFoundation/zebra/pull/8031))
+- change(scan): Use the on-disk database for keys and results ([#8036](https://github.com/ZcashFoundation/zebra/pull/8036))
+- change(scan): Store scanned TXIDs in "display order" ([#8057](https://github.com/ZcashFoundation/zebra/pull/8057))
+- change(scan): Create a function that scans one block by height, and stores the results in the database ([#8045](https://github.com/ZcashFoundation/zebra/pull/8045))
+- change(scan): Store one transaction ID per database row, to make queries easier ([#8062](https://github.com/ZcashFoundation/zebra/pull/8062)
 
 ### Fixed
 
 - fix(db): Fix a sprout/history tree read panic in Zebra v1.4.0, which only happens before the 25.3.0 state upgrade completes ([#7972](https://github.com/ZcashFoundation/zebra/pull/7972))
 - fix(net): Fix potential network hangs, and reduce code complexity ([#7859](https://github.com/ZcashFoundation/zebra/pull/7859))
+- fix(scan): Start scanning task only if there are keys to scan ([#8059](https://github.com/ZcashFoundation/zebra/pull/8059))
 
 ### Contributors
 
