@@ -65,7 +65,7 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, Default, Serialize, Deserialize)
 )]
 pub struct TransactionIndex(pub(super) u16);
 
@@ -126,7 +126,7 @@ impl TransactionIndex {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, Default, Serialize, Deserialize)
 )]
 pub struct TransactionLocation {
     /// The block height of the transaction.

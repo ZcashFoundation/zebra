@@ -26,12 +26,15 @@ use crate::service::finalized_state::{
 
 // Common
 
-// TODO: turn this into a unit test, it has a fixed value
+/// This test has a fixed value, so testing it once is sufficient.
 #[test]
 fn roundtrip_unit_type() {
     let _init_guard = zebra_test::init();
 
-    proptest!(|(val in any::<()>())| assert_value_properties(val));
+    // The unit type `()` is serialized to the empty (zero-length) array `[]`.
+    #[allow(clippy::let_unit_value)]
+    let value = ();
+    assert_value_properties(value);
 }
 
 // Block
