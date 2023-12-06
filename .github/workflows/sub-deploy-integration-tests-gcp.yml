@@ -193,7 +193,12 @@ jobs:
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
           PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
-          ./.github/workflows/scripts/gcp-get-cached-disks.sh
+          source ./.github/workflows/scripts/gcp-get-cached-disks.sh
+          echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
+          echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
+          echo "DISK_OPTION=image=${CACHED_DISK_NAME,}" >> "${GITHUB_ENV}"
+
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state

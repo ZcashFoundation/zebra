@@ -67,7 +67,5 @@ echo "Selected Disk: ${CACHED_DISK_NAME}"
 
 # Exporting variables for subsequent steps
 echo "Exporting variables for subsequent steps..."
-echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
-echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
-echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
-echo "DISK_OPTION=image=${CACHED_DISK_NAME,}" >> "${GITHUB_ENV}"
+export CACHED_DISK_NAME="${CACHED_DISK_NAME}"
+export LOCAL_STATE_VERSION="${LOCAL_STATE_VERSION}"
