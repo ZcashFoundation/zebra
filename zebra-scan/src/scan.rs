@@ -1,6 +1,10 @@
 //! The scanner task and scanning APIs.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
@@ -29,7 +33,7 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::Transaction,
 };
-use zebra_state::{ChainTipChange, SaplingScannedResult};
+use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::storage::{SaplingScanningKey, Storage};
 
@@ -207,8 +211,8 @@ pub async fn scan_height_and_store_results(
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
 
-            storage.add_sapling_result(sapling_key.clone(), height, dfvk_res);
-            storage.add_sapling_result(sapling_key, height, ivk_res);
+            storage.add_sapling_results(sapling_key.clone(), height, dfvk_res);
+            storage.add_sapling_results(sapling_key, height, ivk_res);
 
             Ok::<_, Report>(())
         })
@@ -385,10 +389,17 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
 }
 
 /// Convert a scanned block to a list of scanner database results.
-fn scanned_block_to_db_result<Nf>(scanned_block: ScannedBlock<Nf>) -> Vec<SaplingScannedResult> {
+fn scanned_block_to_db_result<Nf>(
+    scanned_block: ScannedBlock<Nf>,
+) -> BTreeMap<TransactionIndex, SaplingScannedResult> {
     scanned_block
         .transactions()
         .iter()
-        .map(|tx| SaplingScannedResult::from(tx.txid.as_ref()))
+        .map(|tx| {
+            (
+                TransactionIndex::from_usize(tx.index),
+                SaplingScannedResult::from(tx.txid.as_ref()),
+            )
+        })
         .collect()
 }

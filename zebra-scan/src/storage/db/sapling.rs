@@ -4,24 +4,34 @@
 //!
 //! | name             | key                           | value                    |
 //! |------------------|-------------------------------|--------------------------|
-//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `Vec<transaction::Hash>` |
+//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `Option<SaplingScannedResult>`      |
 //!
 //! And types:
-//! SaplingScannedDatabaseIndex = `SaplingScanningKey` | `Height`
+//! `SaplingScannedResult`: same as `transaction::Hash`, but with bytes in display order.
+//! `None` is stored as a zero-length array of bytes.
+//!
+//! `SaplingScannedDatabaseIndex` = `SaplingScanningKey` | `TransactionLocation`
+//! `TransactionLocation` = `Height` | `TransactionIndex`
 //!
 //! This format allows us to efficiently find all the results for each key, and the latest height
 //! for each key.
 //!
-//! If there are no results for a height, we store an empty list of results. This allows is to scan
-//! each key from the next height after we restart. We also use this mechanism to store key
-//! birthday heights, by storing the height before the birthday as the "last scanned" block.
+//! If there are no results for a height, we store `None` as the result for the coinbase
+//! transaction. This allows is to scan each key from the next height after we restart. We also use
+//! this mechanism to store key birthday heights, by storing the height before the birthday as the
+//! "last scanned" block.
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeBounds,
+};
+
+use itertools::Itertools;
 
 use zebra_chain::block::Height;
 use zebra_state::{
     AsColumnFamilyRef, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
-    SaplingScannedResult, SaplingScanningKey, WriteDisk,
+    SaplingScannedResult, SaplingScanningKey, TransactionIndex, WriteDisk,
 };
 
 use crate::storage::Storage;
@@ -36,16 +46,29 @@ pub const SAPLING_TX_IDS: &str = "sapling_tx_ids";
 impl Storage {
     // Reading Sapling database entries
 
-    /// Returns the results for a specific key and block height.
+    /// Returns the result for a specific database index (key, block height, transaction index).
     //
     // TODO: add tests for this method
-    pub fn sapling_result_for_key_and_block(
+    pub fn sapling_result_for_index(
         &self,
         index: &SaplingScannedDatabaseIndex,
-    ) -> Vec<SaplingScannedResult> {
-        self.db
-            .zs_get(&self.sapling_tx_ids_cf(), &index)
-            .unwrap_or_default()
+    ) -> Option<SaplingScannedResult> {
+        self.db.zs_get(&self.sapling_tx_ids_cf(), &index)
+    }
+
+    /// Returns the results for a specific key and block height.
+    pub fn sapling_results_for_key_and_height(
+        &self,
+        sapling_key: &SaplingScanningKey,
+        height: Height,
+    ) -> BTreeMap<TransactionIndex, Option<SaplingScannedResult>> {
+        let kh_min = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
+        let kh_max = SaplingScannedDatabaseIndex::max_for_key_and_height(sapling_key, height);
+
+        self.sapling_results_in_range(kh_min..=kh_max)
+            .into_iter()
+            .map(|(result_index, txid)| (result_index.tx_loc.index, txid))
+            .collect()
     }
 
     /// Returns all the results for a specific key, indexed by height.
@@ -56,10 +79,19 @@ impl Storage {
         let k_min = SaplingScannedDatabaseIndex::min_for_key(sapling_key);
         let k_max = SaplingScannedDatabaseIndex::max_for_key(sapling_key);
 
-        self.db
-            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), k_min..=k_max)
+        // Get an iterator of individual transaction results, and turn it into a HashMap by height
+        let results: HashMap<Height, Vec<Option<SaplingScannedResult>>> = self
+            .sapling_results_in_range(k_min..=k_max)
             .into_iter()
-            .map(|(index, result)| (index.height, result))
+            .map(|(index, result)| (index.tx_loc.height, result))
+            .into_group_map();
+
+        // But we want Vec<SaplingScannedResult>, with empty Vecs instead of [None, None, ...]
+        results
+            .into_iter()
+            .map(|(index, vector)| -> (Height, Vec<SaplingScannedResult>) {
+                (index, vector.into_iter().flatten().collect())
+            })
             .collect()
     }
 
@@ -85,16 +117,16 @@ impl Storage {
                 break;
             };
 
-            let (index, results): (_, Vec<SaplingScannedResult>) = entry;
-            let SaplingScannedDatabaseIndex {
-                sapling_key,
-                mut height,
-            } = index;
+            let sapling_key = entry.0.sapling_key;
+            let mut height = entry.0.tx_loc.height;
+            let _first_result: Option<SaplingScannedResult> = entry.1;
 
-            // If there are no results, then it's a "skip up to height" marker, and the birthday
-            // height is the next height. If there are some results, it's the actual birthday
-            // height.
-            if results.is_empty() {
+            let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
+
+            // If there are no results for this block, then it's a "skip up to height" marker, and
+            // the birthday height is the next height. If there are some results, it's the actual
+            // birthday height.
+            if height_results.values().all(Option::is_none) {
                 height = height
                     .next()
                     .expect("results should only be stored for validated block heights");
@@ -107,6 +139,17 @@ impl Storage {
         }
 
         keys
+    }
+
+    /// Returns the Sapling indexes and results in the supplied range.
+    ///
+    /// Convenience method for accessing raw data with the correct types.
+    fn sapling_results_in_range(
+        &self,
+        range: impl RangeBounds<SaplingScannedDatabaseIndex>,
+    ) -> BTreeMap<SaplingScannedDatabaseIndex, Option<SaplingScannedResult>> {
+        self.db
+            .zs_items_in_range_ordered(&self.sapling_tx_ids_cf(), range)
     }
 
     // Column family convenience methods
@@ -122,7 +165,7 @@ impl Storage {
 
     /// Write `batch` to the database for this storage.
     pub(crate) fn write_batch(&self, batch: ScannerWriteBatch) {
-        // Just panic on errors for now
+        // Just panic on errors for now.
         self.db
             .write_batch(batch.0)
             .expect("unexpected database error")
@@ -147,12 +190,15 @@ impl ScannerWriteBatch {
     /// Insert a sapling scanning `key`, and mark all heights before `birthday_height` so they
     /// won't be scanned.
     ///
-    /// If a result already exists for the height before the birthday, it is replaced with an empty
-    /// result.
+    /// If a result already exists for the coinbase transaction at the height before the birthday,
+    /// it is replaced with an empty result. This can happen if the user increases the birthday
+    /// height.
+    ///
+    /// TODO: ignore incorrect changes to birthday heights
     pub(crate) fn insert_sapling_key(
         &mut self,
         storage: &Storage,
-        sapling_key: SaplingScanningKey,
+        sapling_key: &SaplingScanningKey,
         birthday_height: Option<Height>,
     ) {
         let min_birthday_height = storage.min_sapling_birthday_height();
@@ -162,13 +208,10 @@ impl ScannerWriteBatch {
             .unwrap_or(min_birthday_height)
             .max(min_birthday_height);
         // And we want to skip up to the height before it.
-        let skip_up_to_height = birthday_height.previous().unwrap_or(Height(0));
+        let skip_up_to_height = birthday_height.previous().unwrap_or(Height::MIN);
 
-        let index = SaplingScannedDatabaseIndex {
-            sapling_key,
-            height: skip_up_to_height,
-        };
-
-        self.zs_insert(&storage.sapling_tx_ids_cf(), index, Vec::new());
+        let index =
+            SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, skip_up_to_height);
+        self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
     }
 }

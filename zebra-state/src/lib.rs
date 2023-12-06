@@ -56,7 +56,7 @@ pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
     check, init, spawn_init,
     watch_receiver::WatchReceiver,
-    OutputIndex, OutputLocation, TransactionLocation,
+    OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
 };
 
 #[cfg(feature = "shielded-scan")]

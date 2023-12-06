@@ -46,7 +46,7 @@ use zebra_chain::{
     transparent::{CoinbaseData, Input},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
-use zebra_state::SaplingScannedResult;
+use zebra_state::{SaplingScannedResult, TransactionIndex};
 
 use crate::{
     config::Config,
@@ -189,7 +189,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let mut s = crate::storage::Storage::new(&Config::ephemeral(), Network::Mainnet);
 
     // Insert the generated key to the database
-    s.add_sapling_key(key_to_be_stored.clone(), None);
+    s.add_sapling_key(&key_to_be_stored, None);
 
     // Check key was added
     assert_eq!(s.sapling_keys().len(), 1);
@@ -210,7 +210,11 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let result = SaplingScannedResult::from(result.transactions()[0].txid.as_ref());
 
     // Add result to database
-    s.add_sapling_result(key_to_be_stored.clone(), Height(1), vec![result]);
+    s.add_sapling_results(
+        key_to_be_stored.clone(),
+        Height(1),
+        [(TransactionIndex::from_usize(0), result)].into(),
+    );
 
     // Check the result was added
     assert_eq!(

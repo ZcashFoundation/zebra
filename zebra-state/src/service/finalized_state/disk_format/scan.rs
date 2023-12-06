@@ -4,23 +4,14 @@
 //!
 //! # Correctness
 //!
-//! Once format versions are implemented for the scanner database,
 //! `zebra_scan::Storage::database_format_version_in_code()` must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
 use zebra_chain::{block::Height, transaction};
 
-use crate::{FromDisk, IntoDisk};
+use crate::{FromDisk, IntoDisk, TransactionLocation};
 
-use super::block::HEIGHT_DISK_BYTES;
-
-/// The fixed length of the scanning result.
-///
-/// TODO: If the scanning result doesn't have a fixed length, either:
-/// - deserialize using internal length or end markers,
-/// - prefix it with a length, or
-/// - stop storing vectors of results on disk, instead store each result with a unique key.
-pub const SAPLING_SCANNING_RESULT_LENGTH: usize = 32;
+use super::block::TRANSACTION_LOCATION_DISK_BYTES;
 
 /// The type used in Zebra to store Sapling scanning keys.
 /// It can represent a full viewing key or an individual viewing key.
@@ -52,7 +43,7 @@ pub struct SaplingScannedDatabaseEntry {
     pub index: SaplingScannedDatabaseIndex,
 
     /// The database column family value.
-    pub value: Vec<SaplingScannedResult>,
+    pub value: Option<SaplingScannedResult>,
 }
 
 /// A database column family key for a block scanned with a Sapling vieweing key.
@@ -61,39 +52,62 @@ pub struct SaplingScannedDatabaseIndex {
     /// The Sapling viewing key used to scan the block.
     pub sapling_key: SaplingScanningKey,
 
-    /// The height of the block.
-    pub height: Height,
+    /// The transaction location: block height and transaction index.
+    pub tx_loc: TransactionLocation,
 }
 
 impl SaplingScannedDatabaseIndex {
     /// The minimum value of a sapling scanned database index.
+    ///
     /// This value is guarateed to be the minimum, and not correspond to a valid key.
+    //
+    // Note: to calculate the maximum value, we need a key length.
     pub const fn min() -> Self {
         Self {
             // The empty string is the minimum value in RocksDB lexicographic order.
             sapling_key: String::new(),
-            // Genesis is the minimum height, and never has valid shielded transfers.
-            height: Height(0),
+            tx_loc: TransactionLocation::MIN,
         }
     }
 
     /// The minimum value of a sapling scanned database index for `sapling_key`.
-    /// This value is guarateed to be the minimum, and not correspond to a valid entry.
+    ///
+    /// This value does not correspond to a valid entry.
+    /// (The genesis coinbase transaction does not have shielded transfers.)
     pub fn min_for_key(sapling_key: &SaplingScanningKey) -> Self {
         Self {
             sapling_key: sapling_key.clone(),
-            // Genesis is the minimum height, and never has valid shielded transfers.
-            height: Height(0),
+            tx_loc: TransactionLocation::MIN,
         }
     }
 
     /// The maximum value of a sapling scanned database index for `sapling_key`.
-    /// This value is guarateed to be the maximum, and not correspond to a valid entry.
+    ///
+    /// This value may correspond to a valid entry, but it won't be mined for many decades.
     pub fn max_for_key(sapling_key: &SaplingScanningKey) -> Self {
         Self {
             sapling_key: sapling_key.clone(),
-            // The maximum height will never be mined - we'll increase it before that happens.
-            height: Height::MAX,
+            tx_loc: TransactionLocation::MAX,
+        }
+    }
+
+    /// The minimum value of a sapling scanned database index for `sapling_key` and `height`.
+    ///
+    /// This value can be a valid entry for shielded coinbase.
+    pub fn min_for_key_and_height(sapling_key: &SaplingScanningKey, height: Height) -> Self {
+        Self {
+            sapling_key: sapling_key.clone(),
+            tx_loc: TransactionLocation::min_for_height(height),
+        }
+    }
+
+    /// The maximum value of a sapling scanned database index for `sapling_key` and `height`.
+    ///
+    /// This value can be a valid entry, but it won't fit in a 2MB block.
+    pub fn max_for_key_and_height(sapling_key: &SaplingScanningKey, height: Height) -> Self {
+        Self {
+            sapling_key: sapling_key.clone(),
+            tx_loc: TransactionLocation::max_for_height(height),
         }
     }
 }
@@ -120,7 +134,7 @@ impl IntoDisk for SaplingScannedDatabaseIndex {
         let mut bytes = Vec::new();
 
         bytes.extend(self.sapling_key.as_bytes());
-        bytes.extend(self.height.as_bytes());
+        bytes.extend(self.tx_loc.as_bytes());
 
         bytes
     }
@@ -130,11 +144,11 @@ impl FromDisk for SaplingScannedDatabaseIndex {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let bytes = bytes.as_ref();
 
-        let (sapling_key, height) = bytes.split_at(bytes.len() - HEIGHT_DISK_BYTES);
+        let (sapling_key, tx_loc) = bytes.split_at(bytes.len() - TRANSACTION_LOCATION_DISK_BYTES);
 
         Self {
             sapling_key: SaplingScanningKey::from_bytes(sapling_key),
-            height: Height::from_bytes(height),
+            tx_loc: TransactionLocation::from_bytes(tx_loc),
         }
     }
 }
@@ -153,22 +167,28 @@ impl FromDisk for SaplingScannedResult {
     }
 }
 
-impl IntoDisk for Vec<SaplingScannedResult> {
+impl IntoDisk for Option<SaplingScannedResult> {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.iter()
-            .flat_map(SaplingScannedResult::as_bytes)
-            .collect()
+        let mut bytes = Vec::new();
+
+        if let Some(result) = self.as_ref() {
+            bytes.extend(result.as_bytes());
+        }
+
+        bytes
     }
 }
 
-impl FromDisk for Vec<SaplingScannedResult> {
+impl FromDisk for Option<SaplingScannedResult> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bytes
-            .as_ref()
-            .chunks(SAPLING_SCANNING_RESULT_LENGTH)
-            .map(SaplingScannedResult::from_bytes)
-            .collect()
+        let bytes = bytes.as_ref();
+
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(SaplingScannedResult::from_bytes(bytes))
+        }
     }
 }
