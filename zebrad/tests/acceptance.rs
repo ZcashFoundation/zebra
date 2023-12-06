@@ -204,6 +204,9 @@ pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_
 /// The test config file prefix for `--feature getblocktemplate-rpcs` configs.
 pub const GET_BLOCK_TEMPLATE_CONFIG_PREFIX: &str = "getblocktemplate-";
 
+/// The test config file prefix for `--feature shielded-scan` configs.
+pub const SHIELDED_SCAN_CONFIG_PREFIX: &str = "shieldedscan-";
+
 #[test]
 fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -806,18 +809,18 @@ fn last_config_is_stored() -> Result<()> {
          zebrad generate | \n\
          sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
          zebrad/tests/common/configs/{}<next-release-tag>.toml",
-        if cfg!(feature = "getblocktemplate-rpcs") {
-            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        if cfg!(feature = "shielded-scan") {
+            SHIELDED_SCAN_CONFIG_PREFIX
         } else {
             ""
         },
-        if cfg!(feature = "getblocktemplate-rpcs") {
-            "--features=getblocktemplate-rpcs "
+        if cfg!(feature = "shielded-scan") {
+            "--features=shielded-scan "
         } else {
             ""
         },
-        if cfg!(feature = "getblocktemplate-rpcs") {
-            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        if cfg!(feature = "shielded-scan") {
+            SHIELDED_SCAN_CONFIG_PREFIX
         } else {
             ""
         },
@@ -943,6 +946,14 @@ fn stored_configs_work() -> Result<()> {
                 ?config_file_path,
                 "skipping getblocktemplate-rpcs config file path"
             );
+            continue;
+        }
+
+        // ignore files starting with shieldedscan prefix
+        // if we were not built with the shielded-scan feature.
+        #[cfg(not(feature = "shielded-scan"))]
+        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
+            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
         }
 
