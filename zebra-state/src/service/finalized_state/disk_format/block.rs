@@ -114,7 +114,7 @@ impl TransactionIndex {
     /// This value corresponds to the coinbase transaction.
     pub const MIN: Self = Self(u16::MIN);
 
-    /// The maximun value of a transaction index.
+    /// The maximum value of a transaction index.
     ///
     /// This value corresponds to the highest possible transaction index.
     pub const MAX: Self = Self(u16::MAX);
@@ -174,7 +174,7 @@ impl TransactionLocation {
         index: TransactionIndex::MIN,
     };
 
-    /// The maximun value of a transaction location.
+    /// The maximum value of a transaction location.
     ///
     /// This value corresponds to the last transaction in the highest possible block.
     pub const MAX: Self = Self {

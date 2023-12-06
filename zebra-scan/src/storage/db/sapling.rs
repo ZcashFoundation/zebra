@@ -4,16 +4,19 @@
 //!
 //! | name             | key                           | value                    |
 //! |------------------|-------------------------------|--------------------------|
-//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `transaction::Hash`      |
+//! | `sapling_tx_ids` | `SaplingScannedDatabaseIndex` | `Option<SaplingScannedResult>`      |
 //!
 //! And types:
+//! `SaplingScannedResult`: same as `transaction::Hash`, but with bytes in display order.
+//! `None` is stored as a zero-length array of bytes.
+//!
 //! `SaplingScannedDatabaseIndex` = `SaplingScanningKey` | `TransactionLocation`
 //! `TransactionLocation` = `Height` | `TransactionIndex`
 //!
 //! This format allows us to efficiently find all the results for each key, and the latest height
 //! for each key.
 //!
-//! If there are no results for a height, we store an empty list of results for the coinbase
+//! If there are no results for a height, we store `None` as the result for the coinbase
 //! transaction. This allows is to scan each key from the next height after we restart. We also use
 //! this mechanism to store key birthday heights, by storing the height before the birthday as the
 //! "last scanned" block.
