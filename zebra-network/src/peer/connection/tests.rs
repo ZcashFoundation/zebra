@@ -83,6 +83,7 @@ fn new_test_connection<A>() -> (
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),
         Arc::new(connection_info),
+        Vec::new(),
     );
 
     (

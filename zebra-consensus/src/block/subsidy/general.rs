@@ -44,8 +44,8 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
         Some(halving_div)
     } else {
         let pre_blossom_height = blossom_height - SLOW_START_SHIFT;
-        let scaled_pre_blossom_height = pre_blossom_height
-            * HeightDiff::try_from(BLOSSOM_POW_TARGET_SPACING_RATIO).expect("constant is positive");
+        let scaled_pre_blossom_height =
+            pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
 
         let post_blossom_height = height - blossom_height;
 

@@ -40,10 +40,10 @@ mod service;
 mod tests;
 
 pub use config::{
-    check_and_delete_old_databases, database_format_version_in_code,
-    database_format_version_on_disk, Config,
+    check_and_delete_old_databases, check_and_delete_old_state_databases,
+    database_format_version_on_disk, state_database_format_version_on_disk, Config,
 };
-pub use constants::MAX_BLOCK_REORG_HEIGHT;
+pub use constants::{state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT};
 pub use error::{
     BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
     ValidateContextError,
@@ -59,6 +59,17 @@ pub use service::{
     OutputIndex, OutputLocation, TransactionLocation,
 };
 
+#[cfg(feature = "shielded-scan")]
+pub use rocksdb::AsColumnFamilyRef;
+#[cfg(feature = "shielded-scan")]
+pub use service::finalized_state::{
+    FromDisk, IntoDisk, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
+    SaplingScannedResult, SaplingScanningKey, ZebraDb,
+};
+
+#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+pub use service::finalized_state::{DiskWriteBatch, WriteDisk};
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
 
@@ -66,12 +77,20 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::{DiskWriteBatch, MAX_ON_DISK_HEIGHT},
+    finalized_state::MAX_ON_DISK_HEIGHT,
     init_test, init_test_services, ReadStateService,
 };
 
+#[cfg(not(any(test, feature = "proptest-impl")))]
+#[allow(unused_imports)]
+pub(crate) use config::hidden::{
+    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+};
+
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use config::hidden::write_database_format_version_to_disk;
+pub use config::hidden::{
+    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use constants::latest_version_for_adding_subtrees;

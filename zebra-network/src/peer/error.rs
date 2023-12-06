@@ -82,6 +82,10 @@ pub enum PeerError {
     #[error("Internal services over capacity")]
     Overloaded,
 
+    /// There are no ready remote peers.
+    #[error("No ready peers available")]
+    NoReadyPeers,
+
     /// This peer request's caused an internal service timeout, so the connection was dropped
     /// to shed load or prevent attacks.
     #[error("Internal services timed out")]
@@ -147,6 +151,7 @@ impl PeerError {
             PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
+            PeerError::NoReadyPeers => "NoReadyPeers".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),

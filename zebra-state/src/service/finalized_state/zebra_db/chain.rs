@@ -8,8 +8,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
@@ -19,12 +19,13 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, SemanticallyVerifiedBlock,
+    BoxError,
 };
 
 impl ZebraDb {
@@ -58,11 +59,13 @@ impl ZebraDb {
         let mut history_tree: Option<Arc<HistoryTree>> = self.db.zs_get(&history_tree_cf, &());
 
         if history_tree.is_none() {
-            let tip_height = self
-                .finalized_tip_height()
-                .expect("just checked for an empty database");
-
-            history_tree = self.db.zs_get(&history_tree_cf, &tip_height);
+            // In Zebra 1.4.0 and later, we only update the history tip tree when it has changed (for every block after heartwood).
+            // But we write with a `()` key, not a height key.
+            // So we need to look for the most recent update height if the `()` key has never been written.
+            history_tree = self
+                .db
+                .zs_last_key_value(&history_tree_cf)
+                .map(|(_key, tree_value): (Height, _)| tree_value);
         }
 
         history_tree.unwrap_or_default()
@@ -128,13 +131,13 @@ impl DiskWriteBatch {
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &DiskDb,
-        finalized: &SemanticallyVerifiedBlock,
+        finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let SemanticallyVerifiedBlock { block, .. } = finalized;
+        let FinalizedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);

@@ -195,7 +195,7 @@ impl StartCmd {
             block_download_peer_set: peer_set.clone(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
-            state,
+            state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
         };
         setup_tx
@@ -249,8 +249,10 @@ impl StartCmd {
         );
 
         info!("spawning delete old databases task");
-        let mut old_databases_task_handle =
-            zebra_state::check_and_delete_old_databases(config.state.clone());
+        let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
+            &config.state,
+            config.network.network,
+        );
 
         info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(
@@ -262,6 +264,7 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        // Spawn never ending end of support task.
         info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
             sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
@@ -279,11 +282,31 @@ impl StartCmd {
             peer_set,
             mempool.clone(),
             sync_status,
-            chain_tip_change,
+            chain_tip_change.clone(),
         );
 
         info!("spawning syncer task");
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
+
+        #[cfg(feature = "shielded-scan")]
+        // Spawn never ending scan task only if we have keys to scan for.
+        let scan_task_handle = if !config.shielded_scan.sapling_keys_to_scan.is_empty() {
+            // TODO: log the number of keys and update the scan_task_starts() test
+            info!("spawning shielded scanner with configured viewing keys");
+            zebra_scan::spawn_init(
+                &config.shielded_scan,
+                config.network.network,
+                state,
+                chain_tip_change,
+            )
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
+        };
+
+        #[cfg(not(feature = "shielded-scan"))]
+        // Spawn a dummy scan task which doesn't do anything and never finishes.
+        let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
+            tokio::spawn(std::future::pending().in_current_span());
 
         info!("spawned initial Zebra tasks");
 
@@ -299,6 +322,7 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
+        pin!(scan_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -385,6 +409,10 @@ impl StartCmd {
                     exit_when_task_finishes = false;
                     Ok(())
                 }
+
+                scan_result = &mut scan_task_handle => scan_result
+                    .expect("unexpected panic in the scan task")
+                    .map(|_| info!("scan task exited")),
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -410,6 +438,7 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
+        scan_task_handle.abort();
 
         // startup tasks
         state_checkpoint_verify_handle.abort();

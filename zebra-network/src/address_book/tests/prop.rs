@@ -9,7 +9,10 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::Duration32};
 
 use crate::{
-    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_ACTIVE_FOR_GOSSIP},
+    constants::{
+        ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
+        MAX_ADDRS_IN_MESSAGE, MAX_PEER_ACTIVE_FOR_GOSSIP,
+    },
     meta_addr::{arbitrary::MAX_META_ADDR, MetaAddr, MetaAddrChange},
     AddressBook,
 };
@@ -36,8 +39,17 @@ proptest! {
             addresses
         );
 
-        for gossiped_address in address_book.sanitized(chrono_now) {
-            let duration_since_last_seen = gossiped_address
+        // Only recently reachable are sanitized
+        let sanitized = address_book.sanitized(chrono_now);
+        let gossiped = address_book.fresh_get_addr_response();
+
+        let expected_num_gossiped = sanitized.len().div_ceil(ADDR_RESPONSE_LIMIT_DENOMINATOR).min(MAX_ADDRS_IN_MESSAGE);
+        let num_gossiped = gossiped.len();
+
+        prop_assert_eq!(expected_num_gossiped, num_gossiped);
+
+        for sanitized_address in sanitized {
+            let duration_since_last_seen = sanitized_address
                 .last_seen()
                 .expect("Peer that was never seen before is being gossiped")
                 .saturating_elapsed(chrono_now)

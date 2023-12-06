@@ -1,11 +1,8 @@
 //! Check the relationship between various sync timeouts and delays.
 
-use std::{
-    convert::TryInto,
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
 };
 
 use futures::future;
@@ -79,10 +76,7 @@ fn ensure_timeouts_consistent() {
     );
 
     assert!(
-        SYNC_RESTART_DELAY.as_secs()
-            < POST_BLOSSOM_POW_TARGET_SPACING
-                .try_into()
-                .expect("not negative"),
+        SYNC_RESTART_DELAY.as_secs() < POST_BLOSSOM_POW_TARGET_SPACING.into(),
         "a syncer tip crawl should complete before most new blocks"
     );
 

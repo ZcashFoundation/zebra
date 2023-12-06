@@ -1,0 +1,65 @@
+# Workflow patches for skipping Google Cloud unit test CI on PRs from external repositories.
+name: Docker Unit Tests
+
+# Run on PRs from external repositories, let them pass, and then Mergify will check them.
+# GitHub doesn't support filtering workflows by source branch names, so we have to do it for each
+# job.
+on:
+  pull_request:
+
+# IMPORTANT
+#
+# The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
+# `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
+jobs:
+  build:
+    name: Build CI Docker / Build images
+    # Only run on PRs from external repositories.
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-all:
+    name: Test all
+    # This dependency allows all these jobs to depend on a single condition, making it easier to
+    # change.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-fake-activation-heights:
+    name: Test with fake activation heights
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-lightwalletd-integration:
+    name: Test integration with lightwalletd
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-configuration-file:
+    name: Test CI default Docker config file / Test default-conf in Docker
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  test-zebra-conf-path:
+    name: Test CI custom Docker config file / Test custom-conf in Docker
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'

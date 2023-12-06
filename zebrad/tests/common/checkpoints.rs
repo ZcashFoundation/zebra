@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_state::database_format_version_in_code;
+use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
@@ -98,7 +98,7 @@ pub async fn run(network: Network) -> Result<()> {
         wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
-            database_format_version_in_code(),
+            state_database_format_version_in_code(),
             None,
         )?;
     }
@@ -396,8 +396,7 @@ pub fn wait_for_zebra_checkpoints_generation<
     test_type: TestType,
     show_zebrad_logs: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let last_checkpoint_gap = HeightDiff::try_from(MIN_TRANSPARENT_COINBASE_MATURITY)
-        .expect("constant fits in HeightDiff")
+    let last_checkpoint_gap = HeightDiff::from(MIN_TRANSPARENT_COINBASE_MATURITY)
         + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
     let expected_final_checkpoint_height =
         (zebra_tip_height - last_checkpoint_gap).expect("network tip is high enough");

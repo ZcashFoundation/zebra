@@ -1,3 +1,6 @@
+# Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
+# but only on PRs from the ZcashFoundation/zebra repository.
+# (External PRs are tested/deployed by mergify.)
 name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -31,6 +34,7 @@ on:
 
   # TODO: Temporarily disabled to reduce network load, see #6894.
   #push:
+  #  # Skip main branch updates where Rust code and dependencies aren't modified.
   #  branches:
   #    - main
   #  paths:
@@ -52,6 +56,7 @@ on:
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
+    # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
       - '**/*.rs'
@@ -73,6 +78,10 @@ on:
     types:
       - published
 
+# IMPORTANT
+#
+# The job names in `cd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
+# `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
 jobs:
   # If a release was made we want to extract the first part of the semver from the
   # tag_name
@@ -92,7 +101,7 @@ jobs:
     steps:
       - name: Getting Zebrad Version
         id: get
-        uses: actions/github-script@v6.4.1
+        uses: actions/github-script@v7.0.1
         with:
           result-encoding: string
           script: |
@@ -107,6 +116,9 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
+    # Skip PRs from external repositories, let them pass, and then Mergify will check them.
+    # This workflow also runs on release tags, the event name check will run it on releases.
+    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -204,7 +216,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.1.1
+        uses: google-github-actions/auth@v2.0.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
@@ -306,7 +318,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.1.1
+        uses: google-github-actions/auth@v2.0.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'

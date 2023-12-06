@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// The `zebrad` config is a TOML-encoded version of this structure. The meaning
 /// of each field is described in the documentation, although it may be necessary
 /// to click through to the sub-structures for each section.
-#[derive(Clone, Default, Debug, Deserialize, Serialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
     /// Consensus configuration
@@ -43,4 +43,8 @@ pub struct ZebradConfig {
     #[serde(skip_serializing_if = "zebra_rpc::config::mining::Config::skip_getblocktemplate")]
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
+
+    #[cfg(feature = "shielded-scan")]
+    /// Scanner configuration
+    pub shielded_scan: zebra_scan::config::Config,
 }

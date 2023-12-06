@@ -8,8 +8,8 @@
 //!
 //! # Correctness
 //!
-//! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
-//! be incremented each time the database format (column, serialization, etc) changes.
+//! [`crate::constants::state_database_format_version_in_code()`] must be incremented
+//! each time the database format (column, serialization, etc) changes.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -25,6 +25,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -36,7 +37,7 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, SemanticallyVerifiedBlock,
+    BoxError,
 };
 
 impl ZebraDb {
@@ -347,13 +348,13 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         network: Network,
-        finalized: &SemanticallyVerifiedBlock,
+        finalized: &FinalizedBlock,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let SemanticallyVerifiedBlock { block, height, .. } = finalized;
+        let FinalizedBlock { block, height, .. } = finalized;
 
         // Update created and spent transparent outputs
         self.prepare_new_transparent_outputs_batch(

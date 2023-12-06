@@ -28,11 +28,6 @@ pub fn run(
     // Writing the trees back to the database automatically updates their format.
     let mut batch = DiskWriteBatch::new();
 
-    // Delete the previous `Height` tip key format, which is now a duplicate.
-    // It's ok to do a full delete, because the trees are restored before the batch is written.
-    batch.delete_range_sprout_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
-    batch.delete_range_history_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
-
     // Update the sprout tip key format in the database.
     batch.update_sprout_tree(upgrade_db, &sprout_tip_tree);
     batch.update_history_tree(upgrade_db, &history_tip_tree);
@@ -45,6 +40,24 @@ pub fn run(
     upgrade_db
         .write_batch(batch)
         .expect("updating tree key formats should always succeed");
+
+    // The deletes below can be slow due to tombstones for previously deleted keys,
+    // so we do it in a separate batch to avoid data races with syncing (#7961).
+    let mut batch = DiskWriteBatch::new();
+
+    // Delete the previous `Height` tip key format, which is now a duplicate.
+    // This doesn't delete the new `()` key format, because it serializes to an empty array.
+    batch.delete_range_sprout_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
+    batch.delete_range_history_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
+
+    // Return before we write if the upgrade is cancelled.
+    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        return Err(CancelFormatChange);
+    }
+
+    upgrade_db
+        .write_batch(batch)
+        .expect("cleaning up old tree key formats should always succeed");
 
     Ok(())
 }

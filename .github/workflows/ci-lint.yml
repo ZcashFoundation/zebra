@@ -37,7 +37,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v40.0.2
+        uses: tj-actions/changed-files@v40.2.0
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v40.0.2
+        uses: tj-actions/changed-files@v40.2.0
         with:
           files: |
             .github/workflows/*.yml
@@ -98,11 +98,11 @@ jobs:
           # GitHub displays the clippy job and its results as separate entries
           name: Clippy (stable) Results
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          args: --workspace --all-features --all-targets -- -D warnings
 
       - name: Run clippy manually without annotations
         if: ${{ !steps.check_permissions.outputs.has-permission }}
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   fmt:
     name: Rustfmt
@@ -148,8 +148,12 @@ jobs:
         with:
           level: warning
           fail_on_error: false
-      - name: validate-dependabot
-        uses: marocchino/validate-dependabot@v2.1.0
+      # This is failing with a JSON schema error, see #8028 for details.        
+      #- name: validate-dependabot
+      #  # This gives an error when run on PRs from external repositories, so we skip it.
+      #  # If this is a PR, check that the PR source is a local branch. Always runs on non-PRs.
+      #  if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
+      #  uses: marocchino/validate-dependabot@v2.1.0
 
   codespell:
     runs-on: ubuntu-latest

@@ -33,11 +33,11 @@ jobs:
       # This step is meant to dynamically create a JSON containing the values of each crate
       # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
       #
-      # The result from `cargo tree` is then transform to JSON values between double quotes, 
+      # The result from `cargo tree` is then transform to JSON values between double quotes,
       # and separated by commas, then added to a `crates.txt` and assigned to a $JSON_CRATES variable.
       #
       # A JSON object is created and assigned to a $MATRIX variable, which is use to create an output
-      # named `matrix`, which is then used as the input in following steps, 
+      # named `matrix`, which is then used as the input in following steps,
       # using ` ${{ fromJson(needs.matrix.outputs.matrix) }}`
       - id: set-matrix
         name: Dynamically build crates JSON

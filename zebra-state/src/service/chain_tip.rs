@@ -628,6 +628,11 @@ impl ChainTipChange {
             }
         }
     }
+
+    /// Returns the inner `LatestChainTip`.
+    pub fn latest_chain_tip(&self) -> LatestChainTip {
+        self.latest_chain_tip.clone()
+    }
 }
 
 impl Clone for ChainTipChange {

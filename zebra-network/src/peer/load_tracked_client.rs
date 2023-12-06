@@ -20,6 +20,7 @@ use crate::{
 /// A client service wrapper that keeps track of its load.
 ///
 /// It also keeps track of the peer's reported protocol version.
+#[derive(Debug)]
 pub struct LoadTrackedClient {
     /// A service representing a connected peer, wrapped in a load tracker.
     service: PeakEwma<Client>,

@@ -221,7 +221,7 @@ impl CachedFfiTransaction {
         };
 
         if err == zcash_script_error_t_zcash_script_ERR_OK {
-            let ret = ret.try_into().expect("c_uint fits in a u64");
+            let ret = ret.into();
             Ok(ret)
         } else {
             Err(Error::from(err))
