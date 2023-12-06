@@ -17,6 +17,8 @@ towards supporting shielded scanning in Zebra. There are still known security is
 feature, it is not recommended to use important private keys when testing Zebra's experimental
 shielded scanning support. Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
 
+As of this release, Zebra requires Rust 1.73 to build.
+
 ### Security
 
 - security(net): Stop sending peer addresses from version messages directly to the address book ([#7977](https://github.com/ZcashFoundation/zebra/pull/7977))
