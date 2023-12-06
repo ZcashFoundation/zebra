@@ -24,7 +24,8 @@ use std::{
 };
 
 use itertools::Itertools;
-use zebra_chain::{block::Height, transaction};
+
+use zebra_chain::block::Height;
 use zebra_state::{
     AsColumnFamilyRef, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
     SaplingScannedResult, SaplingScanningKey, TransactionIndex, WriteDisk,
@@ -85,7 +86,7 @@ impl Storage {
         // But we want Vec<SaplingScannedResult>, with empty Vecs instead of [None, None, ...]
         results
             .into_iter()
-            .map(|(index, vector)| -> (Height, Vec<transaction::Hash>) {
+            .map(|(index, vector)| -> (Height, Vec<SaplingScannedResult>) {
                 (index, vector.into_iter().flatten().collect())
             })
             .collect()
