@@ -6,7 +6,7 @@
 # and finally checks other branches if needed. The selected image is used for
 # setting up the environment in a CI/CD pipeline.
 
-set -euo pipefail
+set -eo pipefail
 
 # Function to find and report a cached disk image
 find_cached_disk_image() {
