@@ -289,8 +289,8 @@ impl StartCmd {
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         #[cfg(feature = "shielded-scan")]
-        // Spawn never ending scan task.
-        let scan_task_handle = {
+        // Spawn never ending scan task only if we have keys to scan for.
+        let scan_task_handle = if !config.shielded_scan.sapling_keys_to_scan.is_empty() {
             // TODO: log the number of keys and update the scan_task_starts() test
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
@@ -299,6 +299,8 @@ impl StartCmd {
                 state,
                 chain_tip_change,
             )
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
         };
 
         #[cfg(not(feature = "shielded-scan"))]
