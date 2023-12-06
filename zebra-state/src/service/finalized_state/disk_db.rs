@@ -156,7 +156,7 @@ impl WriteDisk for DiskWriteBatch {
     }
 
     // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-    //       see zs_range_iter() for an example of the edge cases
+    //       see zs_forward_range_iter() for an example of the edge cases
     fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -329,7 +329,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, .., false).next()
+        self.zs_forward_range_iter(cf, ..).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -340,7 +340,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, .., true).next()
+        self.zs_reverse_range_iter(cf, ..).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -351,7 +351,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, lower_bound.., false).next()
+        self.zs_forward_range_iter(cf, lower_bound..).next()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -362,7 +362,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
     {
         // Reading individual values from iterators does not seem to cause database hangs.
-        self.zs_range_iter(cf, ..=upper_bound, true).next()
+        self.zs_reverse_range_iter(cf, ..=upper_bound).next()
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>
@@ -372,7 +372,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range, false).collect()
+        self.zs_forward_range_iter(cf, range).collect()
     }
 
     fn zs_items_in_range_unordered<C, K, V, R>(&self, cf: &C, range: R) -> HashMap<K, V>
@@ -382,7 +382,7 @@ impl ReadDisk for DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter(cf, range, false).collect()
+        self.zs_forward_range_iter(cf, range).collect()
     }
 }
 
@@ -402,18 +402,13 @@ impl DiskWriteBatch {
 }
 
 impl DiskDb {
-    /// Returns an iterator over the items in `cf` in `range`.
-    ///
-    /// Accepts a `reverse` argument. If it is `true`, creates the iterator with an
-    /// [`IteratorMode`](rocksdb::IteratorMode) of [`End`](rocksdb::IteratorMode::End), or
-    /// [`From`](rocksdb::IteratorMode::From) with [`Direction::Reverse`](rocksdb::Direction::Reverse).
+    /// Returns a forward iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
-    pub fn zs_range_iter<C, K, V, R>(
+    pub fn zs_forward_range_iter<C, K, V, R>(
         &self,
         cf: &C,
         range: R,
-        reverse: bool,
     ) -> impl Iterator<Item = (K, V)> + '_
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -421,14 +416,12 @@ impl DiskDb {
         V: FromDisk,
         R: RangeBounds<K>,
     {
-        self.zs_range_iter_with_direction(cf, range, reverse)
+        self.zs_range_iter_with_direction(cf, range, false)
     }
 
     /// Returns a reverse iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
-    ///
-    /// This code is copied from `zs_range_iter()`, but with the mode reversed.
     pub fn zs_reverse_range_iter<C, K, V, R>(
         &self,
         cf: &C,
