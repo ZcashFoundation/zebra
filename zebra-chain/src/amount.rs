@@ -491,7 +491,7 @@ impl Error {
 ///     -MAX_MONEY..=MAX_MONEY,
 /// );
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub struct NegativeAllowed;
 
 impl Constraint for NegativeAllowed {

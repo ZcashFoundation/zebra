@@ -63,6 +63,7 @@ mod tests;
 ///
 /// [section 7.7.4]: https://zips.z.cash/protocol/protocol.pdf#nbits
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct CompactDifficulty(pub(crate) u32);
 
 /// An invalid CompactDifficulty value, for testing.
