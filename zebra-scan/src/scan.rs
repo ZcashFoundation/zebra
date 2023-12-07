@@ -1,4 +1,4 @@
-//! The scanner task and scanning APIs.
+//! The scanner task and scanning APIs, including conversion between Zebra and scanning dependency block formats.
 
 use std::{
     collections::{BTreeMap, HashMap},
