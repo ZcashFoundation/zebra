@@ -48,6 +48,7 @@ RUN apt-get -qq update && \
     ca-certificates \
     protobuf-compiler \
     rsync \
+    rocksdb-tools \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -181,7 +182,8 @@ COPY --from=release /entrypoint.sh /
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    ca-certificates
+    ca-certificates \
+    rocksdb-tools
 
 # Config settings for zebrad
 ARG FEATURES
