@@ -16,11 +16,14 @@ pub mod upgrade;
 #[cfg(feature = "shielded-scan")]
 pub mod scan;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 mod tests;
 
 pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::{OutputIndex, OutputLocation};
+
+#[allow(unused_imports)]
+pub use tests::KV;
 
 #[cfg(feature = "shielded-scan")]
 pub use scan::{

@@ -42,8 +42,8 @@ mod tests;
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
-    FromDisk, IntoDisk, OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
-    MAX_ON_DISK_HEIGHT,
+    FromDisk, IntoDisk, OutputIndex, OutputLocation, RawBytes, TransactionIndex,
+    TransactionLocation, KV, MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
 
