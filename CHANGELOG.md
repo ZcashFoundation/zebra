@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) - 2023-11-28
 
-This release fixes a panic that was introduced in Zebra v1.4.0, which happens in rare circumstances when reading cached sprout or history trees. 
-improves how Zebra recovers from network interruptions, avoids potential network hangs, and
-limits the ability of synthetic nodes to spread throughout the network through Zebra to
-address some of the Ziggurat red team report.
+This release:
+- fixes a panic that was introduced in Zebra v1.4.0, which happens in rare circumstances when reading cached sprout or history trees. 
+- further improves how Zebra recovers from network interruptions and prevents potential network hangs.
+- limits the ability of synthetic nodes to spread throughout the network through Zebra to address some of the Ziggurat red team report.
 
 As of this release, Zebra requires Rust 1.73 to build.
 
