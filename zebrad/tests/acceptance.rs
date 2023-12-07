@@ -2821,7 +2821,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
 
-    use zebra_scan::test::ZECPAGES_SAPLING_VIEWING_KEY;
+    use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
 
     let _init_guard = zebra_test::init();
 
