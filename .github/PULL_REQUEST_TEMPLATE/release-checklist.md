@@ -83,7 +83,8 @@ Check that the release will work:
 - [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
 
 ```sh
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan beta
+cargo release version --verbose --execute --allow-branch '*' --package zebra-scan alpha # Increment version manually if this doesn't work
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
 cargo release replace --verbose --execute --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --allow-branch '*'
