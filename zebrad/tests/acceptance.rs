@@ -2821,13 +2821,13 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
 
-    const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+    use zebra_scan::test::ZECPAGES_SAPLING_VIEWING_KEY;
 
     let _init_guard = zebra_test::init();
 
     let mut config = default_test_config(Mainnet)?;
     let mut keys = IndexMap::new();
-    keys.insert(ZECPAGES_VIEWING_KEY.to_string(), 1);
+    keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
     config.shielded_scan.sapling_keys_to_scan = keys;
 
     let testdir = testdir()?.with_config(&mut config)?;
