@@ -13,6 +13,12 @@ use crate::{FromDisk, IntoDisk, TransactionLocation};
 
 use super::block::TRANSACTION_LOCATION_DISK_BYTES;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
+#[cfg(test)]
+mod tests;
+
 /// The type used in Zebra to store Sapling scanning keys.
 /// It can represent a full viewing key or an individual viewing key.
 pub type SaplingScanningKey = String;
@@ -22,6 +28,7 @@ pub type SaplingScanningKey = String;
 /// Currently contains a TXID in "display order", which is big-endian byte order following the u256
 /// convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedResult([u8; 32]);
 
 impl From<SaplingScannedResult> for transaction::Hash {
@@ -38,6 +45,7 @@ impl From<&[u8; 32]> for SaplingScannedResult {
 
 /// A database column family entry for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedDatabaseEntry {
     /// The database column family key. Must be unique for each scanning key and scanned block.
     pub index: SaplingScannedDatabaseIndex,
@@ -48,6 +56,7 @@ pub struct SaplingScannedDatabaseEntry {
 
 /// A database column family key for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedDatabaseIndex {
     /// The Sapling viewing key used to scan the block.
     pub sapling_key: SaplingScanningKey,
