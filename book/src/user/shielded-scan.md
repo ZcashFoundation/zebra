@@ -1,5 +1,17 @@
 # Zebra Shielded Scanning
 
+This document describes how expert users can try Zebra's shielded scanning feature.
+
+For now, we only support Sapling, and only store transaction IDs in the scanner results database.
+Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
+
+## Important Security Warning
+
+Zebra's shielded scanning feature has known security issues. It is for experimental use only.
+
+Do not use regular or sensitive viewing keys with Zebra's experimental scanning feature. Do not use this
+feature on a shared machine. We suggest generating new keys for experimental use.
+
 ## Build & Install
 
 Using the `shielded-scan` feature. TODO: add examples, document the feature in zebrad/src/lib.rs.
