@@ -71,7 +71,13 @@ impl Storage {
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_key(&mut self, sapling_key: &SaplingScanningKey, birthday: Option<Height>) {
+    pub fn add_sapling_key(
+        &mut self,
+        sapling_key: &SaplingScanningKey,
+        birthday: impl Into<Option<Height>>,
+    ) {
+        let birthday = birthday.into();
+
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
         let mut batch = ScannerWriteBatch::default();
@@ -93,18 +99,21 @@ impl Storage {
         self.sapling_keys_and_birthday_heights()
     }
 
-    /// Add the sapling results for `height` to the storage.
+    /// Add the sapling results for `height` to the storage. The results can be any map of
+    /// [`TransactionIndex`] to [`SaplingScannedResult`].
     ///
     /// # Performance / Hangs
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_results(
+    pub fn add_sapling_results<'iter>(
         &mut self,
         sapling_key: SaplingScanningKey,
         height: Height,
-        sapling_results: BTreeMap<TransactionIndex, SaplingScannedResult>,
+        sapling_results: impl IntoIterator<Item = &'iter (TransactionIndex, SaplingScannedResult)>,
     ) {
+        let sapling_results = sapling_results.into_iter();
+
         // We skip heights that have one or more results, so the results for each height must be
         // in a single batch.
         let mut batch = ScannerWriteBatch::default();
@@ -112,12 +121,12 @@ impl Storage {
         for (index, sapling_result) in sapling_results {
             let index = SaplingScannedDatabaseIndex {
                 sapling_key: sapling_key.clone(),
-                tx_loc: TransactionLocation::from_parts(height, index),
+                tx_loc: TransactionLocation::from_parts(height, *index),
             };
 
             let entry = SaplingScannedDatabaseEntry {
                 index,
-                value: Some(sapling_result),
+                value: Some(*sapling_result),
             };
 
             batch.insert_sapling_result(self, entry);
