@@ -32,7 +32,7 @@ feature on a shared machine. We suggest generating new keys for experimental use
 ### Added
 
 - feat(config): Add config field for the viewing keys used by zebra-scan ([#7949](https://github.com/ZcashFoundation/zebra/pull/7949))
-- feat(scan): Add basic RAM database to store keys and scan results ([#7942](https://github.com/ZcashFoundation/zebra/pull/7942))
+- feat(scan): Add on-disk database to store keys and scan results ([#7942](https://github.com/ZcashFoundation/zebra/pull/7942), [#8036](https://github.com/ZcashFoundation/zebra/pull/8036))
 - feat(scan): Spawn zebra-scan task from zebrad with configured viewing keys ([#7989](https://github.com/ZcashFoundation/zebra/pull/7989))
 - feat(scan): Create a scan_block function to use across scanning tasks ([#7994](https://github.com/ZcashFoundation/zebra/pull/7994))
 - feat(scan): Scan blocks with Sapling keys and write the results to the database ([#8040](https://github.com/ZcashFoundation/zebra/pull/8040))
@@ -43,10 +43,9 @@ feature on a shared machine. We suggest generating new keys for experimental use
 - change(state): Expose ZebraDb methods that can create different kinds of databases ([#8002](https://github.com/ZcashFoundation/zebra/pull/8002))
 - change(state): Make the types for finalized blocks consistent ([#7923](https://github.com/ZcashFoundation/zebra/pull/7923))
 - change(scan): Create a scanner storage database ([#8031](https://github.com/ZcashFoundation/zebra/pull/8031))
-- change(scan): Use the on-disk database for keys and results ([#8036](https://github.com/ZcashFoundation/zebra/pull/8036))
 - change(scan): Store scanned TXIDs in "display order" ([#8057](https://github.com/ZcashFoundation/zebra/pull/8057))
 - change(scan): Create a function that scans one block by height, and stores the results in the database ([#8045](https://github.com/ZcashFoundation/zebra/pull/8045))
-- change(scan): Store one transaction ID per database row, to make queries easier ([#8062](https://github.com/ZcashFoundation/zebra/pull/8062)
+- change(scan): Store one transaction ID per database row, to make queries easier ([#8062](https://github.com/ZcashFoundation/zebra/pull/8062))
 
 ### Fixed
 
