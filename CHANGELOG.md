@@ -7,17 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) - 2023-11-28
 
-This release avoids a panic when reading cached sprout or history trees in Zebra v1.4.0, 
+This release fixes a panic that was introduced in Zebra v1.4.0, which happens in rare circumstances when reading cached sprout or history trees. 
 improves how Zebra recovers from network interruptions, avoids potential network hangs, and
 limits the ability of synthetic nodes to spread throughout the network through Zebra to
 address some of the Ziggurat red team report.
 
-Finally, we've added an experimental "shielded-scan" feature and the zebra-scan crate as steps
-towards supporting shielded scanning in Zebra. There are still known security issues with this
-feature, it is not recommended to use important private keys when testing Zebra's experimental
-shielded scanning support. Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
-
 As of this release, Zebra requires Rust 1.73 to build.
+
+Finally, we've added an experimental "shielded-scan" feature and the zebra-scan crate as steps
+towards supporting shielded scanning in Zebra. This feature has known security issues.
+It is for experimental use only. Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
+
+### Important Security Warning
+
+Do not use regular or sensitive viewing keys with Zebra's experimental scanning feature. Do not use this
+feature on a shared machine. We suggest generating new keys for experimental use.
 
 ### Security
 
@@ -53,7 +57,7 @@ As of this release, Zebra requires Rust 1.73 to build.
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
-@arya2, @dependabot[bot], @oxarbitrage, @teor2345 and @upbqdn
+@arya2, @oxarbitrage, @teor2345 and @upbqdn
 
 ## [Zebra 1.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.4.0) - 2023-11-07
 
