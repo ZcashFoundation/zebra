@@ -37,9 +37,21 @@ impl From<SaplingScannedResult> for transaction::Hash {
     }
 }
 
-impl From<&[u8; 32]> for SaplingScannedResult {
-    fn from(bytes: &[u8; 32]) -> Self {
-        Self(*bytes)
+impl From<transaction::Hash> for SaplingScannedResult {
+    fn from(hash: transaction::Hash) -> Self {
+        SaplingScannedResult(hash.bytes_in_display_order())
+    }
+}
+
+impl SaplingScannedResult {
+    /// Creates a `SaplingScannedResult` from bytes in display order.
+    pub fn from_bytes_in_display_order(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the inner bytes in display order.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        self.0
     }
 }
 
@@ -166,13 +178,13 @@ impl IntoDisk for SaplingScannedResult {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0
+        self.bytes_in_display_order()
     }
 }
 
 impl FromDisk for SaplingScannedResult {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        SaplingScannedResult(bytes.as_ref().try_into().unwrap())
+        SaplingScannedResult::from_bytes_in_display_order(bytes.as_ref().try_into().unwrap())
     }
 }
 

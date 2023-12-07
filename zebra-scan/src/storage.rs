@@ -106,14 +106,12 @@ impl Storage {
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_results<'iter>(
+    pub fn add_sapling_results(
         &mut self,
-        sapling_key: SaplingScanningKey,
+        sapling_key: &SaplingScanningKey,
         height: Height,
-        sapling_results: impl IntoIterator<Item = &'iter (TransactionIndex, SaplingScannedResult)>,
+        sapling_results: BTreeMap<TransactionIndex, SaplingScannedResult>,
     ) {
-        let sapling_results = sapling_results.into_iter();
-
         // We skip heights that have one or more results, so the results for each height must be
         // in a single batch.
         let mut batch = ScannerWriteBatch::default();
@@ -121,12 +119,12 @@ impl Storage {
         for (index, sapling_result) in sapling_results {
             let index = SaplingScannedDatabaseIndex {
                 sapling_key: sapling_key.clone(),
-                tx_loc: TransactionLocation::from_parts(height, *index),
+                tx_loc: TransactionLocation::from_parts(height, index),
             };
 
             let entry = SaplingScannedDatabaseEntry {
                 index,
-                value: Some(*sapling_result),
+                value: Some(sapling_result),
             };
 
             batch.insert_sapling_result(self, entry);

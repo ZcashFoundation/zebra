@@ -178,13 +178,14 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(result.transactions().len(), 1);
 
-    let result = SaplingScannedResult::from(result.transactions()[0].txid.as_ref());
+    let result =
+        SaplingScannedResult::from_bytes_in_display_order(*result.transactions()[0].txid.as_ref());
 
     // Add result to database
     s.add_sapling_results(
-        key_to_be_stored.clone(),
+        &key_to_be_stored,
         Height(1),
-        &[(TransactionIndex::from_usize(0), result)],
+        [(TransactionIndex::from_usize(0), result)].into(),
     );
 
     // Check the result was added
