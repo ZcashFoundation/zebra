@@ -13,8 +13,9 @@ structure, and documentation for all of the config options can be found
 
 You can run Zebra as a:
 
-- [`lightwalletd` backend](https://zebra.zfnd.org/user/lightwalletd.html), and
-- experimental [mining backend](https://zebra.zfnd.org/user/mining.html).
+- [`lightwalletd` backend](https://zebra.zfnd.org/user/lightwalletd.html),
+- [mining backend](https://zebra.zfnd.org/user/mining.html), or
+- experimental [Sapling shielded transaction scanner](https://zebra.zfnd.org/user/shielded-scan.html).
 
 ## Supported versions
 
