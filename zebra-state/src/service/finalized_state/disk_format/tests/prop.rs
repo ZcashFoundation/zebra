@@ -49,7 +49,7 @@ fn roundtrip_block_height() {
             // Limit the random height to the valid on-disk range.
             // Blocks outside this range are rejected before they reach the state.
             // (It would take decades to generate a valid chain this high.)
-            val = val.clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.0 %= MAX_ON_DISK_HEIGHT.0 + 1;
             assert_value_properties(val)
         }
     );
@@ -77,7 +77,7 @@ fn roundtrip_transaction_location() {
 
     proptest!(
         |(mut val in any::<TransactionLocation>())| {
-            val.height = val.height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.height.0 %= MAX_ON_DISK_HEIGHT.0 + 1;
             assert_value_properties(val)
         }
     );
@@ -145,7 +145,7 @@ fn roundtrip_output_location() {
 
     proptest!(
         |(mut val in any::<OutputLocation>())| {
-            *val.height_mut() = val.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
             assert_value_properties(val)
         }
     );
@@ -157,7 +157,7 @@ fn roundtrip_address_location() {
 
     proptest!(
         |(mut val in any::<AddressLocation>())| {
-            *val.height_mut() = val.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
             assert_value_properties(val)
         }
     );
@@ -169,7 +169,7 @@ fn roundtrip_address_balance_location() {
 
     proptest!(
         |(mut val in any::<AddressBalanceLocation>())| {
-            *val.height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
             assert_value_properties(val)
         }
     );
@@ -188,8 +188,8 @@ fn roundtrip_address_unspent_output() {
 
     proptest!(
         |(mut val in any::<AddressUnspentOutput>())| {
-            *val.address_location_mut().height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
-            *val.unspent_output_location_mut().height_mut() = val.unspent_output_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.address_location_mut().height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
+            val.unspent_output_location_mut().height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
 
             assert_value_properties(val)
         }
@@ -202,8 +202,8 @@ fn roundtrip_address_transaction() {
 
     proptest!(
         |(mut val in any::<AddressTransaction>())| {
-            *val.address_location_mut().height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
-            val.transaction_location_mut().height = val.transaction_location().height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.address_location_mut().height_mut().0 %= MAX_ON_DISK_HEIGHT.0 + 1;
+            val.transaction_location_mut().height.0 %= MAX_ON_DISK_HEIGHT.0 + 1;
 
             assert_value_properties(val)
         }
@@ -464,7 +464,6 @@ fn roundtrip_orchard_subtree_data() {
     let _init_guard = zebra_test::init();
 
     proptest!(|(mut val in any::<NoteCommitmentSubtreeData<orchard::tree::Node>>())| {
-        val.end_height = val.end_height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
         val.end_height.0 %= MAX_ON_DISK_HEIGHT.0 + 1;
         assert_value_properties(val)
     });
