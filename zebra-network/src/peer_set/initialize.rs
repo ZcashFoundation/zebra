@@ -864,10 +864,7 @@ where
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
                 let outbound_connections = active_outbound_connections.update_count();
-                debug!(
-                    ?outbound_connections,
-                    "opening an outbound peer connection"
-                );
+                debug!(?outbound_connections, "opening an outbound peer connection");
 
                 // Spawn each handshake or crawl into an independent task, so handshakes can make
                 // progress while crawls are running.
@@ -1052,7 +1049,8 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
-    // The maximum number of open or pending connections before we log an info-level message.
+    // If Zebra only has a few connections, we log connection failures at info level,
+    // so users can diagnose and fix the problem. This defines the threshold for info logs.
     const MAX_CONNECTIONS_FOR_INFO_LOG: usize = 5;
 
     // # Correctness
