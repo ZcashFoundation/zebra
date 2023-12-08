@@ -141,6 +141,54 @@ impl Storage {
         keys
     }
 
+    /// Returns all the keys and their last scanned heights.
+    pub fn sapling_keys_and_last_scanned_heights(&self) -> HashMap<SaplingScanningKey, Height> {
+        let sapling_tx_ids = self.sapling_tx_ids_cf();
+        let mut keys = HashMap::new();
+
+        let last_stored_record: Option<(SaplingScannedDatabaseIndex, SaplingScannedResult)> =
+            self.db.zs_last_key_value(&sapling_tx_ids);
+        if last_stored_record.is_none() {
+            return keys;
+        }
+
+        let mut last_stored_record_index = last_stored_record
+            .expect("checked this is `Some` in the code branch above")
+            .0;
+
+        loop {
+            // Find the previous key, and the last height we have for it.
+            let Some(entry) = self
+                .db
+                .zs_prev_key_value_back_from(&sapling_tx_ids, &last_stored_record_index)
+            else {
+                break;
+            };
+
+            let sapling_key = entry.0.sapling_key;
+            let mut height = entry.0.tx_loc.height;
+            let _last_result: Option<SaplingScannedResult> = entry.1;
+
+            let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
+
+            // If there are no results for this block, then it's a "skip up to height" marker, and
+            // the birthday height is the next height. If there are some results, it's the actual
+            // birthday height.
+            if height_results.values().all(Option::is_none) {
+                height = height
+                    .next()
+                    .expect("results should only be stored for validated block heights");
+            }
+
+            keys.insert(sapling_key.clone(), height);
+
+            // Skip all the results after the next key.
+            last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
+        }
+
+        keys
+    }
+
     /// Returns the Sapling indexes and results in the supplied range.
     ///
     /// Convenience method for accessing raw data with the correct types.
@@ -212,6 +260,17 @@ impl ScannerWriteBatch {
 
         let index =
             SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, skip_up_to_height);
+        self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
+    }
+
+    /// Insert sapling height with no results
+    pub(crate) fn insert_sapling_height(
+        &mut self,
+        storage: &Storage,
+        sapling_key: &SaplingScanningKey,
+        height: Height,
+    ) {
+        let index = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
         self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
     }
 }

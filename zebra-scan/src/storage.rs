@@ -19,6 +19,10 @@ pub use db::{SaplingScannedResult, SaplingScanningKey};
 
 use self::db::ScannerWriteBatch;
 
+/// We insert an empty results entry to the database every 1000 blocks for each stored key,
+/// so we can track progress.
+const INSERT_CONTROL_INTERVAL: u32 = 1_000;
+
 /// Store key info and results of the scan.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,
@@ -89,8 +93,18 @@ impl Storage {
     ///
     /// This method can block while reading database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn sapling_keys(&self) -> HashMap<SaplingScanningKey, Height> {
+    pub fn sapling_keys_birthdays(&self) -> HashMap<SaplingScanningKey, Height> {
         self.sapling_keys_and_birthday_heights()
+    }
+
+    /// Returns all the keys and their last scanned heights.
+    ///
+    /// # Performance / Hangs
+    ///
+    /// This method can block while reading database files, so it must be inside spawn_blocking()
+    /// in async code.
+    pub fn sapling_keys_last_heights(&self) -> HashMap<SaplingScanningKey, Height> {
+        self.sapling_keys_and_last_scanned_heights()
     }
 
     /// Add the sapling results for `height` to the storage.
@@ -109,6 +123,10 @@ impl Storage {
         // in a single batch.
         let mut batch = ScannerWriteBatch::default();
 
+        // Every `INSERT_CONTROL_INTERVAL` we add a new control result to the scanner database so we can track progress
+        // made in the last interval even if no result was found.
+        let is_control_time = height.0 % INSERT_CONTROL_INTERVAL == 0 && sapling_results.is_empty();
+
         for (index, sapling_result) in sapling_results {
             let index = SaplingScannedDatabaseIndex {
                 sapling_key: sapling_key.clone(),
@@ -121,6 +139,10 @@ impl Storage {
             };
 
             batch.insert_sapling_result(self, entry);
+        }
+
+        if is_control_time {
+            batch.insert_sapling_height(self, &sapling_key, height);
         }
 
         self.write_batch(batch);

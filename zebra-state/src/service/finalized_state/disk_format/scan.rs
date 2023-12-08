@@ -163,7 +163,8 @@ impl IntoDisk for SaplingScannedResult {
 
 impl FromDisk for SaplingScannedResult {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        SaplingScannedResult(bytes.as_ref().try_into().unwrap())
+        // TODO: Change of confirm the `unwrap_or` is good enough.
+        SaplingScannedResult(bytes.as_ref().try_into().unwrap_or([0; 32]))
     }
 }
 
