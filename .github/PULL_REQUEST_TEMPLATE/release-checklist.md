@@ -43,7 +43,7 @@ Update the README to:
 - [ ] Update the "Build and Run Instructions" with any new dependencies.
       Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 - [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known working Rust version in the README, book, and `Cargo.toml`s
-\d
+
 You can use a command like:
 ```sh
 fastmod --fixed-strings '1.58' '1.65'
@@ -84,8 +84,8 @@ Check that the release will work:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan beta
-fastmod -d zebra-scan -e toml -F '0.1.0-alpha.1' '0.1.0-alpha.2' # Update this command if zebra-scan is still in alpha and alpha version bumps won't work with cargo-release
-# cargo release version --verbose --execute --allow-branch '*' --package zebra-scan beta # [ major | minor | patch ]
+# Due to a bug in cargo-release, we need to pass an exact version here
+cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.1
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
 cargo release replace --verbose --execute --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --allow-branch '*'
