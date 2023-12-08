@@ -156,7 +156,7 @@ zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.32" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.32" }
 
 # Experimental shielded-scan feature
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-beta.1", optional = true }
+zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.1", optional = true }
 
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.32", optional = true }
