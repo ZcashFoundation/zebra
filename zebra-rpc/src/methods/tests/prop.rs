@@ -446,7 +446,7 @@ proptest! {
                 NoChainTip,
             );
 
-            let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, 0));
+            let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, Some(0)));
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -505,7 +505,7 @@ proptest! {
                 NoChainTip,
             );
 
-            let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), 0));
+            let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), Some(0)));
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
