@@ -55,8 +55,8 @@ impl Storage {
     ///
     /// This method can block while creating or reading database files, so it must be inside
     /// spawn_blocking() in async code.
-    pub fn new(config: &Config, network: Network) -> Self {
-        let mut storage = Self::new_db(config, network);
+    pub fn new(config: &Config, network: Network, read_only: bool) -> Self {
+        let mut storage = Self::new_db(config, network, read_only);
 
         for (sapling_key, birthday) in config.sapling_keys_to_scan.iter() {
             storage.add_sapling_key(sapling_key, Some(zebra_chain::block::Height(*birthday)));

@@ -143,6 +143,7 @@ impl FinalizedState {
             false,
             #[cfg(feature = "elasticsearch")]
             elastic_db,
+            false,
         )
     }
 
@@ -155,6 +156,7 @@ impl FinalizedState {
         network: Network,
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
+        read_only: bool,
     ) -> Self {
         let db = ZebraDb::new(
             config,
@@ -165,6 +167,7 @@ impl FinalizedState {
             STATE_COLUMN_FAMILIES_IN_CODE
                 .iter()
                 .map(ToString::to_string),
+            read_only,
         );
 
         #[cfg(feature = "elasticsearch")]
