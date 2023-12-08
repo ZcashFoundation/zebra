@@ -18,15 +18,13 @@ find_cached_disk_image() {
 
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
-        # echo "Found ${git_source} Disk: ${disk_name}" >&2
-        # disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
-        # echo "Description: ${disk_description}" >&2
+        echo "Found ${git_source} Disk: ${disk_name}" >&2
+        disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
+        echo "Description: ${disk_description}" >&2
         echo "${disk_name}"  # This is the actual return value when a disk is found
     else
         echo "No ${git_source} disk found." >&2
     fi
-
-    echo "${disk_name}"
 }
 
 # Extract local state version
@@ -44,12 +42,15 @@ fi
 # Find the most suitable cached disk image
 echo "Finding the most suitable cached disk image..."
 if [[ -z "${CACHED_DISK_NAME}" ]]; then
+    # Try to find a cached disk image from the current commit
     COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
     CACHED_DISK_NAME=$(find_cached_disk_image "${COMMIT_DISK_PREFIX}" "commit")
+    # If no cached disk image is found, try to find one from the main branch
     if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
         MAIN_DISK_PREFIX="${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
         CACHED_DISK_NAME=$(find_cached_disk_image "${MAIN_DISK_PREFIX}" "main branch")
-    elif [[ "${PREFER_MAIN_CACHED_STATE}" == "false" ]]; then
+    # Else, try to find one from any branch
+    else
         ANY_DISK_PREFIX="${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
         CACHED_DISK_NAME=$(find_cached_disk_image "${ANY_DISK_PREFIX}" "any branch")
     fi

@@ -194,7 +194,6 @@ jobs:
           PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
           source ./.github/workflows/scripts/gcp-get-cached-disks.sh
-          set -x
           echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
           echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
           echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
