@@ -43,6 +43,12 @@ impl From<&[u8; 32]> for SaplingScannedResult {
     }
 }
 
+impl From<SaplingScannedResult> for [u8; 32] {
+    fn from(scanned_result: SaplingScannedResult) -> Self {
+        scanned_result.0
+    }
+}
+
 /// A database column family entry for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
