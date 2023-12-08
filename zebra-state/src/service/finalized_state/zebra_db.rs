@@ -96,6 +96,7 @@ impl ZebraDb {
         network: Network,
         debug_skip_format_upgrades: bool,
         column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
     ) -> ZebraDb {
         let disk_version = database_format_version_on_disk(
             config,
@@ -129,6 +130,7 @@ impl ZebraDb {
                 format_version_in_code,
                 network,
                 column_families_in_code,
+                read_only,
             ),
         };
 

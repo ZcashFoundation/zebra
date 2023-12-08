@@ -46,11 +46,11 @@ impl Storage {
     /// If there is no existing database, creates a new database on disk.
     ///
     /// New keys in `config` are not inserted into the database.
-    pub(crate) fn new_db(config: &Config, network: Network) -> Self {
+    pub(crate) fn new_db(config: &Config, network: Network, read_only: bool) -> Self {
         Self::new_with_debug(
             config, network,
             // TODO: make format upgrades work with any database, then change this to `false`
-            true,
+            true, read_only,
         )
     }
 
@@ -64,6 +64,7 @@ impl Storage {
         config: &Config,
         network: Network,
         debug_skip_format_upgrades: bool,
+        read_only: bool,
     ) -> Self {
         let db = ScannerDb::new(
             config.db_config(),
@@ -74,6 +75,7 @@ impl Storage {
             SCANNER_COLUMN_FAMILIES_IN_CODE
                 .iter()
                 .map(ToString::to_string),
+            read_only,
         );
 
         let new_storage = Self { db };

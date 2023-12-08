@@ -377,5 +377,6 @@ fn new_ephemeral_db() -> ZebraDb {
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string),
+        false,
     )
 }
