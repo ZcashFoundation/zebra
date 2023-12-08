@@ -54,7 +54,9 @@ pub use request::{
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    check, init, spawn_init,
+    check,
+    finalized_state::ReadDisk,
+    init, spawn_init,
     watch_receiver::WatchReceiver,
     OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
 };
@@ -77,7 +79,7 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::{RawBytes, ReadDisk, KV, MAX_ON_DISK_HEIGHT},
+    finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services, ReadStateService,
 };
 
