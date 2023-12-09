@@ -19,7 +19,7 @@ pub use db::{SaplingScannedResult, SaplingScanningKey};
 
 use self::db::ScannerWriteBatch;
 
-/// We insert an empty results entry to the database every 1000 blocks for each stored key,
+/// We insert an empty results entry to the database every this interval for each stored key,
 /// so we can track progress.
 const INSERT_CONTROL_INTERVAL: u32 = 1_000;
 
@@ -123,8 +123,8 @@ impl Storage {
         // in a single batch.
         let mut batch = ScannerWriteBatch::default();
 
-        // Every `INSERT_CONTROL_INTERVAL` we add a new control result to the scanner database so we can track progress
-        // made in the last interval even if no result was found.
+        // Every `INSERT_CONTROL_INTERVAL` we add a new entry to the scanner database for each key
+        // so we can track progress made in the last interval even if no transaction was yet found.
         let is_control_time = height.0 % INSERT_CONTROL_INTERVAL == 0 && sapling_results.is_empty();
 
         for (index, sapling_result) in sapling_results {
@@ -141,6 +141,7 @@ impl Storage {
             batch.insert_sapling_result(self, entry);
         }
 
+        // Add tracking entry for key.
         if is_control_time {
             batch.insert_sapling_height(self, &sapling_key, height);
         }

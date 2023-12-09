@@ -172,8 +172,8 @@ impl Storage {
             let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
 
             // If there are no results for this block, then it's a "skip up to height" marker, and
-            // the birthday height is the next height. If there are some results, it's the actual
-            // birthday height.
+            // the target height is the next height. If there are some results, it's the actual
+            // target height.
             if height_results.values().all(Option::is_none) {
                 height = height
                     .next()
