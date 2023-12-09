@@ -2860,3 +2860,100 @@ fn scan_task_starts() -> Result<()> {
 
     Ok(())
 }
+
+/// Test that the scanner can continue scanning where it was left when zebrad restarts.
+///
+/// Needs a cache state close to the tip. A possible way to run it locally is:
+///
+/// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
+/// cargo test scan_start_where_left --features="shielded-scan" -- --ignored --nocapture
+///
+/// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
+/// Then it will restart zebrad and check that it resumes scanning where it was left.
+///
+/// Note: This test will remove all the contents you may have in the ZEBRA_CACHED_STATE_DIR/private-scan directory
+/// so it can start with an empty scanning state.
+#[ignore]
+#[test]
+#[cfg(feature = "shielded-scan")]
+fn scan_start_where_left() -> Result<()> {
+    use indexmap::IndexMap;
+    use zebra_scan::storage::db::SCANNER_DATABASE_KIND;
+
+    let _init_guard = zebra_test::init();
+
+    // use `UpdateZebraCachedStateNoRpc` as the test type to make sure a zebrad cache state is available.
+    let test_type = TestType::UpdateZebraCachedStateNoRpc;
+    if let Some(cache_dir) = test_type.zebrad_state_path("scan test") {
+        // Add a key to the config
+        const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+        let mut config = default_test_config(Mainnet)?;
+        let mut keys = IndexMap::new();
+        keys.insert(ZECPAGES_VIEWING_KEY.to_string(), 1);
+        config.shielded_scan.sapling_keys_to_scan = keys;
+
+        // Add the cache dir to shielded scan, make it the same as the zebrad cache state.
+        config.shielded_scan.db_config_mut().cache_dir = cache_dir.clone();
+        config.shielded_scan.db_config_mut().ephemeral = false;
+
+        // Add the cache dir to state.
+        config.state.cache_dir = cache_dir.clone();
+        config.state.ephemeral = false;
+
+        // Remove the scan directory before starting.
+        let scan_db_path = cache_dir.join(SCANNER_DATABASE_KIND);
+        fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
+
+        // Start zebra with the config.
+        let mut zebrad = testdir()?
+            .with_exact_config(&config)?
+            .spawn_child(args!["start"])?
+            .with_timeout(test_type.zebrad_timeout());
+
+        // Check scanner was started.
+        zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
+
+        // The first time
+        zebrad.expect_stdout_line_matches(
+            r"Scanning the blockchain for key 0, started at block 419200, now at block 420000",
+        )?;
+
+        // Make sure scanner scans a few blocks.
+        zebrad.expect_stdout_line_matches(
+            r"Scanning the blockchain for key 0, started at block 419200, now at block 421000",
+        )?;
+        zebrad.expect_stdout_line_matches(
+            r"Scanning the blockchain for key 0, started at block 419200, now at block 422000",
+        )?;
+
+        // Kill the node.
+        zebrad.kill(false)?;
+        let output = zebrad.wait_with_output()?;
+
+        // Make sure the command was killed
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+
+        // Start the node again.
+        let mut zebrad = testdir()?
+            .with_exact_config(&config)?
+            .spawn_child(args!["start"])?
+            .with_timeout(test_type.zebrad_timeout());
+
+        // Resuming message.
+        zebrad.expect_stdout_line_matches(
+            "Last scanned height for key number 0 is 421000, resuming at 421001",
+        )?;
+        zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
+
+        // Start scanning where it was left.
+        zebrad.expect_stdout_line_matches(
+            r"Scanning the blockchain for key 0, started at block 421001, now at block 422000",
+        )?;
+        zebrad.expect_stdout_line_matches(
+            r"canning the blockchain for key 0, started at block 421001, now at block 423000",
+        )?;
+    }
+
+    Ok(())
+}

@@ -82,7 +82,7 @@ impl Storage {
         let keys = new_storage.sapling_keys_last_heights();
         for (key_num, (_key, height)) in keys.iter().enumerate() {
             tracing::info!(
-                "last scanned height for key number {} is {}, resuming at {}",
+                "Last scanned height for key number {} is {}, resuming at {}",
                 key_num,
                 height.0 - 1,
                 height.0

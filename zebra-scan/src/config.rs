@@ -47,4 +47,9 @@ impl Config {
     pub fn db_config(&self) -> &DbConfig {
         &self.db_config
     }
+
+    /// Returns the database-specific config as mutable.
+    pub fn db_config_mut(&mut self) -> &mut DbConfig {
+        &mut self.db_config
+    }
 }
