@@ -84,8 +84,8 @@ impl Storage {
             tracing::info!(
                 "Last scanned height for key number {} is {}, resuming at {}",
                 key_num,
-                height.0 - 1,
-                height.0
+                height.previous().expect("height is not genesis").as_usize(),
+                height.as_usize(),
             );
         }
 
