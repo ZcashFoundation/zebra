@@ -54,9 +54,7 @@ pub use request::{
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    check,
-    finalized_state::ReadDisk,
-    init, spawn_init,
+    check, init, spawn_init,
     watch_receiver::WatchReceiver,
     OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
 };
@@ -70,7 +68,7 @@ pub use service::finalized_state::{
 };
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
-pub use service::finalized_state::{DiskWriteBatch, WriteDisk};
+pub use service::finalized_state::{DiskWriteBatch, ReadDisk, WriteDisk};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
