@@ -423,7 +423,7 @@ async fn rpc_getrawtransaction() {
                         conventional_fee: Amount::zero(),
                     }]));
                 });
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 0u8);
+            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
             let (response, _) = futures::join!(get_tx_req, mempool_req);
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
@@ -454,8 +454,8 @@ async fn rpc_getrawtransaction() {
     let run_state_test_case = |block_idx: usize, block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
         let tx_hash = tx.hash();
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(tx_hash.encode_hex(), 0u8);
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(tx_hash.encode_hex(), 1u8);
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(0u8));
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(1u8));
 
         async move {
             let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(tx_hash));
