@@ -30,13 +30,6 @@ fn roundtrip_sapling_db_index() {
 }
 
 #[test]
-fn roundtrip_sapling_result() {
-    let _init_guard = zebra_test::init();
-
-    proptest!(|(val in any::<SaplingScannedResult>())| assert_value_properties(val));
-}
-
-#[test]
 fn roundtrip_option_sapling_result() {
     let _init_guard = zebra_test::init();
 
