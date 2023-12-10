@@ -47,13 +47,15 @@ impl Storage {
     // Reading Sapling database entries
 
     /// Returns the result for a specific database index (key, block height, transaction index).
+    /// Returns `None` if the result is missing or an empty marker for a birthday or progress
+    /// height.
     //
     // TODO: add tests for this method
     pub fn sapling_result_for_index(
         &self,
         index: &SaplingScannedDatabaseIndex,
     ) -> Option<SaplingScannedResult> {
-        self.db.zs_get(&self.sapling_tx_ids_cf(), &index)
+        self.db.zs_get(&self.sapling_tx_ids_cf(), &index).flatten()
     }
 
     /// Returns the results for a specific key and block height.
