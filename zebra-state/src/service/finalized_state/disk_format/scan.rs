@@ -174,19 +174,8 @@ impl FromDisk for SaplingScannedDatabaseIndex {
     }
 }
 
-impl IntoDisk for SaplingScannedResult {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.bytes_in_display_order()
-    }
-}
-
-impl FromDisk for SaplingScannedResult {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        SaplingScannedResult::from_bytes_in_display_order(bytes.as_ref().try_into().unwrap())
-    }
-}
+// We can't implement IntoDisk or FromDisk for SaplingScannedResult,
+// because the format is actually Option<SaplingScannedResult>.
 
 impl IntoDisk for Option<SaplingScannedResult> {
     type Bytes = Vec<u8>;
@@ -195,7 +184,7 @@ impl IntoDisk for Option<SaplingScannedResult> {
         let mut bytes = Vec::new();
 
         if let Some(result) = self.as_ref() {
-            bytes.extend(result.as_bytes());
+            bytes.extend(result.bytes_in_display_order());
         }
 
         bytes
@@ -203,13 +192,18 @@ impl IntoDisk for Option<SaplingScannedResult> {
 }
 
 impl FromDisk for Option<SaplingScannedResult> {
+    #[allow(clippy::unwrap_in_result)]
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let bytes = bytes.as_ref();
 
         if bytes.is_empty() {
             None
         } else {
-            Some(SaplingScannedResult::from_bytes(bytes))
+            Some(SaplingScannedResult::from_bytes_in_display_order(
+                bytes
+                    .try_into()
+                    .expect("unexpected incorrect SaplingScannedResult data length"),
+            ))
         }
     }
 }
