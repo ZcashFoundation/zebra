@@ -154,9 +154,16 @@ fn snapshot_typed_result_data(storage: &Storage) {
     //
     // TODO: update this after PR #8080
     let sapling_keys_and_birthday_heights = storage.sapling_keys();
-    insta::assert_ron_snapshot!("sapling_keys", sapling_keys_and_birthday_heights);
-
     // HashMap has an unstable order across Rust releases, so we need to sort it here.
+    insta::assert_ron_snapshot!(
+        "sapling_keys",
+        sapling_keys_and_birthday_heights,
+        {
+                "." => insta::sorted_redaction()
+        }
+    );
+
+    // HashMap has an unstable order across Rust releases, so we need to sort it here as well.
     for (key_index, (sapling_key, _birthday_height)) in sapling_keys_and_birthday_heights
         .iter()
         .sorted()
