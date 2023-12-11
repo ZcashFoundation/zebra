@@ -7,6 +7,9 @@
 //! `zebra_scan::Storage::database_format_version_in_code()` must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
+use std::fmt;
+
+use hex::{FromHex, ToHex};
 use zebra_chain::{block::Height, transaction};
 
 use crate::{FromDisk, IntoDisk, TransactionLocation};
@@ -27,12 +30,58 @@ pub type SaplingScanningKey = String;
 ///
 /// Currently contains a TXID in "display order", which is big-endian byte order following the u256
 /// convention set by Bitcoin and zcashd.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(Arbitrary, Default, serde::Serialize, serde::Deserialize)
 )]
-pub struct SaplingScannedResult([u8; 32]);
+pub struct SaplingScannedResult(
+    #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))] [u8; 32],
+);
+
+impl fmt::Display for SaplingScannedResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
+impl fmt::Debug for SaplingScannedResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("SaplingScannedResult")
+            .field(&self.encode_hex::<String>())
+            .finish()
+    }
+}
+
+impl ToHex for &SaplingScannedResult {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for SaplingScannedResult {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for SaplingScannedResult {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let result = <[u8; 32]>::from_hex(hex)?;
+
+        Ok(Self::from_bytes_in_display_order(result))
+    }
+}
 
 impl From<SaplingScannedResult> for transaction::Hash {
     fn from(scanned_result: SaplingScannedResult) -> Self {
