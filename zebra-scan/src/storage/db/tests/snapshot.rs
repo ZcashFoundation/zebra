@@ -24,22 +24,17 @@
 //! Due to `serde` limitations, some object types can't be represented exactly,
 //! so RON uses the closest equivalent structure.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::Height,
     parameters::Network::{self, *},
-    serialization::ZcashDeserializeInto,
 };
-use zebra_state::{RawBytes, ReadDisk, TransactionIndex, KV};
+use zebra_state::{RawBytes, ReadDisk, SaplingScannedDatabaseIndex, TransactionLocation, KV};
 
-use crate::{
-    storage::{db::ScannerDb, Storage},
-    tests::{FAKE_SAPLING_VIEWING_KEY, ZECPAGES_SAPLING_VIEWING_KEY},
-    Config,
-};
+use crate::storage::{db::ScannerDb, Storage};
 
-/// Snapshot test for RocksDB column families, and their key-value data.
+/// Snapshot test for RocksDB column families, and their raw key-value data.
 ///
 /// These snapshots contain the `default` column family, but it is not used by Zebra.
 #[test]
@@ -57,7 +52,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
 
-    let mut storage = Storage::new(&Config::ephemeral(), network);
+    let mut storage = super::new_test_storage(network);
 
     // Snapshot the column family names
     let mut cf_names = storage.db.list_cf().expect("empty database is valid");
@@ -76,47 +71,28 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
     settings.set_snapshot_suffix("empty");
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
 
-    // Snapshot a birthday that is automatically set to activation height
-    storage.add_sapling_key(&ZECPAGES_SAPLING_VIEWING_KEY.to_string(), None);
-    // Snapshot a birthday above activation height
-    storage.add_sapling_key(&FAKE_SAPLING_VIEWING_KEY.to_string(), Height(1_000_000));
+    super::add_fake_keys(&mut storage);
 
+    // Assert that the key format doesn't change.
     settings.set_snapshot_suffix(format!("{net_suffix}_keys"));
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
 
     // Snapshot raw database data for:
     // - mainnet and testnet
     // - genesis, block 1, and block 2
-    let blocks = match network {
-        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-    };
-
-    // We limit the number of blocks, because the serialized data is a few kilobytes per block.
+    //
+    // We limit the number of blocks, because we create 2 snapshots per block, one for each network.
     for height in 0..=2 {
-        let block: Arc<Block> = blocks
-            .get(&height)
-            .expect("block height has test data")
-            .zcash_deserialize_into()
-            .expect("test data deserializes");
-
-        // Fake results from the first few blocks
-        storage.add_sapling_results(
-            &ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
-            Height(height),
-            block
-                .transactions
-                .iter()
-                .enumerate()
-                .map(|(index, tx)| (TransactionIndex::from_usize(index), tx.hash().into()))
-                .collect(),
-        );
+        super::add_fake_results(&mut storage, network, Height(height));
 
         let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_suffix(format!("{net_suffix}_{height}"));
 
+        // Assert that the result format doesn't change.
         settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
     }
+
+    // TODO: add an empty marker result after PR #8080 merges
 }
 
 /// Snapshot the data in each column family, using `cargo insta` and RON serialization.
