@@ -37,6 +37,7 @@ feature on a shared machine. We suggest generating new keys for experimental use
 - feat(scan): Create a scan_block function to use across scanning tasks ([#7994](https://github.com/ZcashFoundation/zebra/pull/7994))
 - feat(scan): Scan blocks with Sapling keys and write the results to the database ([#8040](https://github.com/ZcashFoundation/zebra/pull/8040))
 - poc(scan): Proof of concept for shielded scanning ([#7758](https://github.com/ZcashFoundation/zebra/pull/7758))
+- add(docker): Add `ldb` RocksDB query tool to the Dockerfile ([#8074](https://github.com/ZcashFoundation/zebra/pull/8074))
 
 ### Changed
 
@@ -46,12 +47,14 @@ feature on a shared machine. We suggest generating new keys for experimental use
 - change(scan): Store scanned TXIDs in "display order" ([#8057](https://github.com/ZcashFoundation/zebra/pull/8057))
 - change(scan): Create a function that scans one block by height, and stores the results in the database ([#8045](https://github.com/ZcashFoundation/zebra/pull/8045))
 - change(scan): Store one transaction ID per database row, to make queries easier ([#8062](https://github.com/ZcashFoundation/zebra/pull/8062))
+- change(log): Silence verbose failed connection logs ([#8072](https://github.com/ZcashFoundation/zebra/pull/8072))
 
 ### Fixed
 
 - fix(db): Fix a sprout/history tree read panic in Zebra v1.4.0, which only happens before the 25.3.0 state upgrade completes ([#7972](https://github.com/ZcashFoundation/zebra/pull/7972))
 - fix(net): Fix potential network hangs, and reduce code complexity ([#7859](https://github.com/ZcashFoundation/zebra/pull/7859))
 - fix(scan): Start scanning task only if there are keys to scan ([#8059](https://github.com/ZcashFoundation/zebra/pull/8059))
+- fix(rpc): Make the `verbose` argument of the `getrawtransaction` RPC optional ([#8076](https://github.com/ZcashFoundation/zebra/pull/8076))
 
 ### Contributors
 
