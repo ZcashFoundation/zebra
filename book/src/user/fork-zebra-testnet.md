@@ -67,7 +67,7 @@ After the changes, check that the library can be built with `cargo build --relea
 
 ## Zebra
 
-Here we are making changes to create an isolated network version of Zebra. In addition to your own changes, this Zebra version needs to have the followings: 
+Here we are making changes to create an isolated network version of Zebra. In addition to your own changes, this Zebra version needs to have the following:
 
 - Add a `Nu6` variant to the `NetworkUpgrade` enum located in `zebra-chain/src/parameters/network_upgrade.rs`.
 - Add consensus branch id, a random non-repeated string. We used `00000006` in our tests when writing this tutorial.

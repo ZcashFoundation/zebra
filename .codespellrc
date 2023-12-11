@@ -1,3 +1,3 @@
 [codespell]
-ignore-words-list=crate,Sur,inout
+ignore-words-list=crate,Sur,inout,Groth,groth,re-use,
 exclude-file=book/mermaid.min.js
