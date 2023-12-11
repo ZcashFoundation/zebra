@@ -192,9 +192,9 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     s.add_sapling_key(&key_to_be_stored, None);
 
     // Check key was added
-    assert_eq!(s.sapling_keys_birthdays().len(), 1);
+    assert_eq!(s.sapling_keys_last_heights().len(), 1);
     assert_eq!(
-        s.sapling_keys_birthdays().get(&key_to_be_stored),
+        s.sapling_keys_last_heights().get(&key_to_be_stored),
         Some(&s.min_sapling_birthday_height())
     );
 

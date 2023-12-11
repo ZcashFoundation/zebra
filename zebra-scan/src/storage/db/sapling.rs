@@ -95,52 +95,6 @@ impl Storage {
             .collect()
     }
 
-    /// Returns all the keys and their birthday heights.
-    pub fn sapling_keys_and_birthday_heights(&self) -> HashMap<SaplingScanningKey, Height> {
-        // This code is a bit complex because we don't have a separate column family for keys
-        // and their birthday heights.
-        //
-        // TODO: make a separate column family after the MVP.
-
-        let sapling_tx_ids = self.sapling_tx_ids_cf();
-        let mut keys = HashMap::new();
-
-        // The minimum key is invalid or a dummy key, so we will never have an entry for it.
-        let mut find_next_key_index = SaplingScannedDatabaseIndex::min();
-
-        loop {
-            // Find the next key, and the first height we have for it.
-            let Some(entry) = self
-                .db
-                .zs_next_key_value_from(&sapling_tx_ids, &find_next_key_index)
-            else {
-                break;
-            };
-
-            let sapling_key = entry.0.sapling_key;
-            let mut height = entry.0.tx_loc.height;
-            let _first_result: Option<SaplingScannedResult> = entry.1;
-
-            let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
-
-            // If there are no results for this block, then it's a "skip up to height" marker, and
-            // the birthday height is the next height. If there are some results, it's the actual
-            // birthday height.
-            if height_results.values().all(Option::is_none) {
-                height = height
-                    .next()
-                    .expect("results should only be stored for validated block heights");
-            }
-
-            keys.insert(sapling_key.clone(), height);
-
-            // Skip all the results before the next key.
-            find_next_key_index = SaplingScannedDatabaseIndex::max_for_key(&sapling_key);
-        }
-
-        keys
-    }
-
     /// Returns all the keys and their last scanned heights.
     pub fn sapling_keys_and_last_scanned_heights(&self) -> HashMap<SaplingScanningKey, Height> {
         let sapling_tx_ids = self.sapling_tx_ids_cf();

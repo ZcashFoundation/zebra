@@ -85,18 +85,6 @@ impl Storage {
         self.write_batch(batch);
     }
 
-    /// Returns all the keys and their birthdays.
-    ///
-    /// Birthdays are adjusted to sapling activation if they are too low or missing.
-    ///
-    /// # Performance / Hangs
-    ///
-    /// This method can block while reading database files, so it must be inside spawn_blocking()
-    /// in async code.
-    pub fn sapling_keys_birthdays(&self) -> HashMap<SaplingScanningKey, Height> {
-        self.sapling_keys_and_birthday_heights()
-    }
-
     /// Returns all the keys and their last scanned heights.
     ///
     /// # Performance / Hangs
