@@ -93,6 +93,13 @@ impl Clone for Solution {
 
 impl Eq for Solution {}
 
+#[cfg(any(test, feature = "proptest-impl"))]
+impl Default for Solution {
+    fn default() -> Self {
+        Self([0; SOLUTION_SIZE])
+    }
+}
+
 impl ZcashSerialize for Solution {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_bytes(&self.0.to_vec(), writer)

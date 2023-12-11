@@ -863,10 +863,8 @@ where
 
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
-                debug!(
-                    outbound_connections = ?active_outbound_connections.update_count(),
-                    "opening an outbound peer connection"
-                );
+                let outbound_connections = active_outbound_connections.update_count();
+                debug!(?outbound_connections, "opening an outbound peer connection");
 
                 // Spawn each handshake or crawl into an independent task, so handshakes can make
                 // progress while crawls are running.
@@ -892,6 +890,7 @@ where
                                 candidate,
                                 outbound_connector,
                                 outbound_connection_tracker,
+                                outbound_connections,
                                 peerset_tx,
                                 address_book_updater,
                                 demand_tx,
@@ -1026,6 +1025,7 @@ where
 #[instrument(skip(
     outbound_connector,
     outbound_connection_tracker,
+    outbound_connections,
     peerset_tx,
     address_book_updater,
     demand_tx
@@ -1034,6 +1034,7 @@ async fn dial<C>(
     candidate: MetaAddr,
     mut outbound_connector: C,
     outbound_connection_tracker: ConnectionTracker,
+    outbound_connections: usize,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
@@ -1048,6 +1049,10 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
+    // If Zebra only has a few connections, we log connection failures at info level,
+    // so users can diagnose and fix the problem. This defines the threshold for info logs.
+    const MAX_CONNECTIONS_FOR_INFO_LOG: usize = 5;
+
     // # Correctness
     //
     // To avoid hangs, the dialer must only await:
@@ -1076,7 +1081,13 @@ where
         }
         // The connection was never opened, or it failed the handshake and was dropped.
         Err(error) => {
-            info!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            // Silence verbose info logs in production, but keep logs if the number of connections is low.
+            // Also silence them completely in tests.
+            if outbound_connections <= MAX_CONNECTIONS_FOR_INFO_LOG && !cfg!(test) {
+                info!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            } else {
+                debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
+            }
             report_failed(address_book_updater.clone(), candidate).await;
 
             // The demand signal that was taken out of the queue to attempt to connect to the

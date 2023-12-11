@@ -35,6 +35,10 @@ pub const SCANNER_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // TODO: add Orchard support
 ];
 
+/// The major version number of the scanner database. This must be updated whenever the database
+/// format changes.
+const SCANNER_DATABASE_FORMAT_MAJOR_VERSION: u64 = 1;
+
 impl Storage {
     // Creation
 
@@ -96,8 +100,8 @@ impl Storage {
 
     /// The database format version in the running scanner code.
     pub fn database_format_version_in_code() -> Version {
-        // TODO: implement scanner database versioning
-        Version::new(0, 0, 0)
+        // TODO: implement in-place scanner database format upgrades
+        Version::new(SCANNER_DATABASE_FORMAT_MAJOR_VERSION, 0, 0)
     }
 
     /// Check for panics in code running in spawned threads.

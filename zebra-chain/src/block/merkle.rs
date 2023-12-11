@@ -70,7 +70,7 @@ use proptest_derive::Arbitrary;
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {
