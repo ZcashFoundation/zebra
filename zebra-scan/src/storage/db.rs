@@ -49,7 +49,7 @@ impl Storage {
     pub(crate) fn new_db(config: &Config, network: Network, read_only: bool) -> Self {
         Self::new_with_debug(
             config, network,
-            // TODO: make format upgrades work with any database, then change this to `false`
+            // TODO: make format upgrades work with any database, then change debug_skip_format_upgrades to `false`
             true, read_only,
         )
     }
