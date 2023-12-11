@@ -28,7 +28,10 @@ pub type SaplingScanningKey = String;
 /// Currently contains a TXID in "display order", which is big-endian byte order following the u256
 /// convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Default, serde::Serialize, serde::Deserialize)
+)]
 pub struct SaplingScannedResult([u8; 32]);
 
 impl From<SaplingScannedResult> for transaction::Hash {
