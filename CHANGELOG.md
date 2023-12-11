@@ -1623,7 +1623,7 @@ Zebra's latest beta fixes a `cargo install` build failure in the previous beta r
 
 #### Logging
 
-- Log hashes as hex strings in block committment errors (#4021)
+- Log hashes as hex strings in block commitment errors (#4021)
 
 #### Tests
 
@@ -1665,7 +1665,7 @@ As part of the RPC changes, we made performance improvements to cached state acc
 #### Others
 
 - Added `TransactionsByMinedId` to mempool (#3907)
-- Added code owners and automatic review assigment to the repository (#3677 #3708 #3718)
+- Added code owners and automatic review assignment to the repository (#3677 #3708 #3718)
 - Validate ZIP-212 grace period blocks using checkpoints (#3889)
 - Store Sapling and Orchard note commitment trees in finalized and non-finalized state (#3818)
 - Get addresses from transparent outputs (#3802)
@@ -2388,7 +2388,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 
 - Test consensus-critical Amount deserialization (#2487)
 - Update to use new GitHub action names in Google Cloud workflows (#2533)
-- Add test intialization helper function for tests (#2539)
+- Add test initialization helper function for tests (#2539)
 
 ### Changed
 
@@ -2981,7 +2981,7 @@ Some notable changes include:
 
 ### Changed
 - Export new precompute api in zebra-script (#1493)
-- Rewrite peer block request hander to match the zcashd implementation (#1518)
+- Rewrite peer block request handler to match the zcashd implementation (#1518)
 
 ### Fixed
 - Avoid panics when there are multiple failures on the same connection (#1600)
