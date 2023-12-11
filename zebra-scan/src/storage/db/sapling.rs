@@ -136,7 +136,7 @@ impl Storage {
 
             keys.insert(sapling_key.clone(), height);
 
-            // Skip all the results after the next key.
+            // Skip all the results until the next key.
             last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
         }
 
