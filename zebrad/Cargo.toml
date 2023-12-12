@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "1.4.0"
+version = "1.5.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -19,7 +19,7 @@ edition = "2021"
 
 # Zebra is only supported on the latest stable Rust version. See the README for details.
 # Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.70"
+rust-version = "1.73"
 
 # Settings that impact runtime behaviour
 
@@ -148,18 +148,18 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.31" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.31" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.31" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.31" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.31" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.32" }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.32" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.32" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.32" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.32" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.32" }
 
 # Experimental shielded-scan feature
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.0", optional = true }
+zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.1", optional = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.31", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.32", optional = true }
 
 abscissa_core = "0.7.0"
 clap = { version = "4.4.10", features = ["cargo"] }
