@@ -85,10 +85,9 @@ impl FromHex for Hash {
     type Error = <[u8; 32] as FromHex>::Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        let mut hash = <[u8; 32]>::from_hex(hex)?;
-        hash.reverse();
+        let hash = <[u8; 32]>::from_hex(hex)?;
 
-        Ok(hash.into())
+        Ok(Self::from_bytes_in_display_order(&hash))
     }
 }
 
@@ -148,12 +147,6 @@ impl ZcashDeserialize for Hash {
 impl std::str::FromStr for Hash {
     type Err = SerializationError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut bytes = [0; 32];
-        if hex::decode_to_slice(s, &mut bytes[..]).is_err() {
-            Err(SerializationError::Parse("hex decoding error"))
-        } else {
-            bytes.reverse();
-            Ok(Hash(bytes))
-        }
+        Ok(Self::from_hex(s)?)
     }
 }
