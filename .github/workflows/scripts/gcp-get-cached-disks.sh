@@ -6,7 +6,7 @@
 # and finally checks other branches if needed. The selected image is used for
 # setting up the environment in a CI/CD pipeline.
 
-set -euo pipefail
+set -eo pipefail
 
 # Function to find and report a cached disk image
 find_cached_disk_image() {
@@ -16,15 +16,15 @@ find_cached_disk_image() {
 
     disk_name=$(gcloud compute images list --filter="status=READY AND name~${search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
 
+    # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
-        echo "Found ${git_source} Disk: ${disk_name}"
+        echo "Found ${git_source} Disk: ${disk_name}" >&2
         disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
-        echo "Description: ${disk_description}"
+        echo "Description: ${disk_description}" >&2
+        echo "${disk_name}"  # This is the actual return value when a disk is found
     else
-        echo "No ${git_source} disk found."
+        echo "No ${git_source} disk found." >&2
     fi
-
-    echo "${disk_name}"
 }
 
 # Extract local state version
@@ -41,17 +41,19 @@ fi
 
 # Find the most suitable cached disk image
 echo "Finding the most suitable cached disk image..."
-COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
-CACHED_DISK_NAME=$(find_cached_disk_image "${COMMIT_DISK_PREFIX}" "commit")
-
-if [[ -z "${CACHED_DISK_NAME}" && "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
-    MAIN_DISK_PREFIX="${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
-    CACHED_DISK_NAME=$(find_cached_disk_image "${MAIN_DISK_PREFIX}" "main branch")
-fi
-
 if [[ -z "${CACHED_DISK_NAME}" ]]; then
-    ANY_DISK_PREFIX="${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
-    CACHED_DISK_NAME=$(find_cached_disk_image "${ANY_DISK_PREFIX}" "any branch")
+    # Try to find a cached disk image from the current commit
+    COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+    CACHED_DISK_NAME=$(find_cached_disk_image "${COMMIT_DISK_PREFIX}" "commit")
+    # If no cached disk image is found, try to find one from the main branch
+    if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
+        MAIN_DISK_PREFIX="${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+        CACHED_DISK_NAME=$(find_cached_disk_image "${MAIN_DISK_PREFIX}" "main branch")
+    # Else, try to find one from any branch
+    else
+        ANY_DISK_PREFIX="${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+        CACHED_DISK_NAME=$(find_cached_disk_image "${ANY_DISK_PREFIX}" "any branch")
+    fi
 fi
 
 # Handle case where no suitable disk image is found
@@ -66,7 +68,5 @@ echo "Selected Disk: ${CACHED_DISK_NAME}"
 
 # Exporting variables for subsequent steps
 echo "Exporting variables for subsequent steps..."
-echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
-echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
-echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
-echo "DISK_OPTION=image=${CACHED_DISK_NAME,}" >> "${GITHUB_ENV}"
+export CACHED_DISK_NAME="${CACHED_DISK_NAME}"
+export LOCAL_STATE_VERSION="${LOCAL_STATE_VERSION}"

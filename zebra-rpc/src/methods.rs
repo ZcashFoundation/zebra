@@ -226,7 +226,7 @@ pub trait Rpc {
     fn get_raw_transaction(
         &self,
         txid_hex: String,
-        verbose: u8,
+        verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>>;
 
     /// Returns the transaction ids made by the provided transparent addresses.
@@ -945,10 +945,11 @@ where
     fn get_raw_transaction(
         &self,
         txid_hex: String,
-        verbose: u8,
+        verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
+        let verbose = verbose.unwrap_or(0);
         let verbose = verbose != 0;
 
         async move {

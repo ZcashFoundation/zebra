@@ -135,17 +135,26 @@ jobs:
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
       #
       # TODO: move this test command into entrypoint.sh
-      #       add a separate experimental workflow job if this job is slow
       - name: Run zebrad tests
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
           docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --workspace -- --include-ignored
-          # Currently GitHub doesn't allow empty variables
-          if [[ -n "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" && "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" != " " ]]; then
-            docker run -e NETWORK --name zebrad-tests-experimental --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.EXPERIMENTAL_FEATURES }} " --workspace -- --include-ignored
-          fi
+
+      # Run unit, basic acceptance tests, and ignored tests with experimental features.
+      #
+      # TODO: move this test command into entrypoint.sh
+      - name: Run zebrad tests with experimental features
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+        run: |
+          # GitHub doesn't allow empty variables
+          if [[ -n "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" && "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" != " " ]]; then
+            docker run -e NETWORK --name zebrad-tests-experimental --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.EXPERIMENTAL_FEATURES }} " --workspace -- --include-ignored
+          else
+            echo "Experimental builds are disabled, set RUST_EXPERIMENTAL_FEATURES in GitHub actions variables to enable them"
+          fi
 
   # Run state tests with fake activation heights.
   #

@@ -85,7 +85,7 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
+pub use finalized_state::{OutputIndex, OutputLocation, TransactionIndex, TransactionLocation};
 
 use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, SentHashes};
 

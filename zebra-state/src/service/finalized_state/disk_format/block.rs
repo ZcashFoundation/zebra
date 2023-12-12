@@ -65,7 +65,7 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, Default, Serialize, Deserialize)
 )]
 pub struct TransactionIndex(pub(super) u16);
 
@@ -89,7 +89,7 @@ impl TransactionIndex {
         )
     }
 
-    /// Returns this index as a `usize`
+    /// Returns this index as a `usize`.
     pub fn as_usize(&self) -> usize {
         self.0.into()
     }
@@ -103,11 +103,21 @@ impl TransactionIndex {
         )
     }
 
-    /// Returns this index as a `u64`
+    /// Returns this index as a `u64`.
     #[allow(dead_code)]
     pub fn as_u64(&self) -> u64 {
         self.0.into()
     }
+
+    /// The minimum value of a transaction index.
+    ///
+    /// This value corresponds to the coinbase transaction.
+    pub const MIN: Self = Self(u16::MIN);
+
+    /// The maximum value of a transaction index.
+    ///
+    /// This value corresponds to the highest possible transaction index.
+    pub const MAX: Self = Self(u16::MAX);
 }
 
 /// A transaction's location in the chain, by block height and transaction index.
@@ -116,7 +126,7 @@ impl TransactionIndex {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, Default, Serialize, Deserialize)
 )]
 pub struct TransactionLocation {
     /// The block height of the transaction.
@@ -127,6 +137,11 @@ pub struct TransactionLocation {
 }
 
 impl TransactionLocation {
+    /// Creates a transaction location from a block height and transaction index.
+    pub fn from_parts(height: Height, index: TransactionIndex) -> TransactionLocation {
+        TransactionLocation { height, index }
+    }
+
     /// Creates a transaction location from a block height and transaction index.
     pub fn from_index(height: Height, transaction_index: u16) -> TransactionLocation {
         TransactionLocation {
@@ -148,6 +163,42 @@ impl TransactionLocation {
         TransactionLocation {
             height,
             index: TransactionIndex::from_u64(transaction_index),
+        }
+    }
+
+    /// The minimum value of a transaction location.
+    ///
+    /// This value corresponds to the genesis coinbase transaction.
+    pub const MIN: Self = Self {
+        height: Height::MIN,
+        index: TransactionIndex::MIN,
+    };
+
+    /// The maximum value of a transaction location.
+    ///
+    /// This value corresponds to the last transaction in the highest possible block.
+    pub const MAX: Self = Self {
+        height: Height::MAX,
+        index: TransactionIndex::MAX,
+    };
+
+    /// The minimum value of a transaction location for `height`.
+    ///
+    /// This value is the coinbase transaction.
+    pub const fn min_for_height(height: Height) -> Self {
+        Self {
+            height,
+            index: TransactionIndex::MIN,
+        }
+    }
+
+    /// The maximum value of a transaction location for `height`.
+    ///
+    /// This value can be a valid entry, but it won't fit in a 2MB block.
+    pub const fn max_for_height(height: Height) -> Self {
+        Self {
+            height,
+            index: TransactionIndex::MAX,
         }
     }
 }

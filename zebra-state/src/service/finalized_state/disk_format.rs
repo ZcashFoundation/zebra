@@ -19,7 +19,7 @@ pub mod scan;
 #[cfg(test)]
 mod tests;
 
-pub use block::{TransactionLocation, MAX_ON_DISK_HEIGHT};
+pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::{OutputIndex, OutputLocation};
 
 #[cfg(feature = "shielded-scan")]

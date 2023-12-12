@@ -1,6 +1,10 @@
 //! The scanner task and scanning APIs.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
@@ -22,14 +26,14 @@ use zcash_primitives::{
 };
 
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
     parameters::Network,
     serialization::ZcashSerialize,
-    transaction::{self, Transaction},
+    transaction::Transaction,
 };
-use zebra_state::{ChainTipChange, SaplingScannedResult};
+use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::storage::{SaplingScanningKey, Storage};
 
@@ -55,7 +59,7 @@ const INFO_LOG_INTERVAL: u32 = 100_000;
 /// Start a scan task that reads blocks from `state`, scans them with the configured keys in
 /// `storage`, and then writes the results to `storage`.
 pub async fn start(
-    mut state: State,
+    state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
 ) -> Result<(), Report> {
@@ -67,6 +71,7 @@ pub async fn start(
     let key_birthdays = tokio::task::spawn_blocking(move || key_storage.sapling_keys())
         .wait_for_panics()
         .await;
+    let key_birthdays = Arc::new(key_birthdays);
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
@@ -80,95 +85,26 @@ pub async fn start(
             Ok::<_, Report>((key.clone(), parsed_keys))
         })
         .try_collect()?;
+    let parsed_keys = Arc::new(parsed_keys);
 
     // Give empty states time to verify some blocks before we start scanning.
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        // Get a block from the state.
-        // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().
-        let block = state
-            .ready()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Block(height.into()))
-            .await
-            .map_err(|e| eyre!(e))?;
+        let scanned_height = scan_height_and_store_results(
+            height,
+            state.clone(),
+            chain_tip_change.clone(),
+            storage.clone(),
+            key_birthdays.clone(),
+            parsed_keys.clone(),
+        )
+        .await?;
 
-        let block = match block {
-            zebra_state::Response::Block(Some(block)) => block,
-            zebra_state::Response::Block(None) => {
-                // If we've reached the tip, sleep for a while then try and get the same block.
-                tokio::time::sleep(CHECK_INTERVAL).await;
-                continue;
-            }
-            _ => unreachable!("unmatched response to a state::Tip request"),
-        };
-
-        // Only log at info level every 100,000 blocks
-        let is_info_log =
-            height == storage.min_sapling_birthday_height() || height.0 % INFO_LOG_INTERVAL == 0;
-
-        // TODO: add debug logs?
-        if is_info_log {
-            info!(
-                "Scanning the blockchain: now at block {:?}, current tip {:?}",
-                height,
-                chain_tip_change
-                    .latest_chain_tip()
-                    .best_tip_height_and_hash(),
-            );
-        }
-
-        for (key_num, (sapling_key, birthday_height)) in key_birthdays.iter().enumerate() {
-            // # Security
-            //
-            // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
-            // the logs could use the key to view those transactions.
-            if is_info_log {
-                info!(
-                    "Scanning the blockchain for key {}, started at block {:?}",
-                    key_num, birthday_height,
-                );
-            }
-
-            // Get the pre-parsed keys for this configured key.
-            let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
-
-            // Scan the block, which blocks async execution until the scan is complete.
-            //
-            // TODO: skip scanning before birthday height (#8022)
-            // TODO: scan each key in parallel (after MVP?)
-            let sapling_key = sapling_key.clone();
-            let block = block.clone();
-            let mut storage = storage.clone();
-
-            // We use a dummy size of the Sapling note commitment tree.
-            //
-            // We can't set the size to zero, because the underlying scanning function would return
-            // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
-            //
-            // And we can't set them close to 0, because the scanner subtracts the number of notes
-            // in the block, and panics with "attempt to subtract with overflow". The number of
-            // notes in a block must be less than this value, this is a consensus rule.
-            let sapling_tree_size = 1 << 16;
-
-            tokio::task::spawn_blocking(move || {
-                let dfvk_res =
-                    scan_block(network, &block, sapling_tree_size, &dfvks).map_err(|e| eyre!(e))?;
-                let ivk_res =
-                    scan_block(network, &block, sapling_tree_size, &ivks).map_err(|e| eyre!(e))?;
-
-                let dfvk_res = scanned_block_to_db_result(dfvk_res);
-                let ivk_res = scanned_block_to_db_result(ivk_res);
-
-                storage.add_sapling_result(sapling_key.clone(), height, dfvk_res);
-                storage.add_sapling_result(sapling_key, height, ivk_res);
-
-                Ok::<_, Report>(())
-            })
-            .wait_for_panics()
-            .await?;
+        // If we've reached the tip, sleep for a while then try and get the same block.
+        if scanned_height.is_none() {
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
         }
 
         height = height
@@ -177,8 +113,122 @@ pub async fn start(
     }
 }
 
-/// Returns transactions belonging to the given `ScanningKey`. This list of keys should come from
-/// a single configured `SaplingScanningKey`.
+/// Get the block at `height` from `state`, scan it with the keys in `parsed_keys`, and store the
+/// results in `storage`. If `height` is lower than the `key_birthdays` for that key, skip it.
+///
+/// Returns:
+/// - `Ok(Some(height))` if the height was scanned,
+/// - `Ok(None)` if the height was not in the state, and
+/// - `Err(error)` on fatal errors.
+pub async fn scan_height_and_store_results(
+    height: Height,
+    mut state: State,
+    chain_tip_change: ChainTipChange,
+    storage: Storage,
+    key_birthdays: Arc<HashMap<SaplingScanningKey, Height>>,
+    parsed_keys: Arc<
+        HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+    >,
+) -> Result<Option<Height>, Report> {
+    let network = storage.network();
+
+    // Only log at info level every 100,000 blocks.
+    //
+    // TODO: also log progress every 5 minutes once we reach the tip?
+    let is_info_log =
+        height == storage.min_sapling_birthday_height() || height.0 % INFO_LOG_INTERVAL == 0;
+
+    // TODO: add debug logs?
+    if is_info_log {
+        info!(
+            "Scanning the blockchain: now at block {:?}, current tip {:?}",
+            height,
+            chain_tip_change
+                .latest_chain_tip()
+                .best_tip_height_and_hash(),
+        );
+    }
+
+    // Get a block from the state.
+    // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().
+    let block = state
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(zebra_state::Request::Block(height.into()))
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    let block = match block {
+        zebra_state::Response::Block(Some(block)) => block,
+        zebra_state::Response::Block(None) => return Ok(None),
+        _ => unreachable!("unmatched response to a state::Tip request"),
+    };
+
+    // Scan it with all the keys.
+    //
+    // TODO: scan each key in parallel (after MVP?)
+    for (key_num, (sapling_key, birthday_height)) in key_birthdays.iter().enumerate() {
+        // # Security
+        //
+        // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
+        // the logs could use the key to view those transactions.
+        if is_info_log {
+            info!(
+                "Scanning the blockchain for key {}, started at block {:?}",
+                key_num, birthday_height,
+            );
+        }
+
+        // Get the pre-parsed keys for this configured key.
+        let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
+
+        // Scan the block, which blocks async execution until the scan is complete.
+        //
+        // TODO: skip scanning before birthday height (#8022)
+        let sapling_key = sapling_key.clone();
+        let block = block.clone();
+        let mut storage = storage.clone();
+
+        // We use a dummy size of the Sapling note commitment tree.
+        //
+        // We can't set the size to zero, because the underlying scanning function would return
+        // `zcash_client_backeng::scanning::ScanError::TreeSizeUnknown`.
+        //
+        // And we can't set them close to 0, because the scanner subtracts the number of notes
+        // in the block, and panics with "attempt to subtract with overflow". The number of
+        // notes in a block must be less than this value, this is a consensus rule.
+        //
+        // TODO: use the real sapling tree size: `zs::Response::SaplingTree().position() + 1`
+        let sapling_tree_size = 1 << 16;
+
+        tokio::task::spawn_blocking(move || {
+            let dfvk_res =
+                scan_block(network, &block, sapling_tree_size, &dfvks).map_err(|e| eyre!(e))?;
+            let ivk_res =
+                scan_block(network, &block, sapling_tree_size, &ivks).map_err(|e| eyre!(e))?;
+
+            let dfvk_res = scanned_block_to_db_result(dfvk_res);
+            let ivk_res = scanned_block_to_db_result(ivk_res);
+
+            storage.add_sapling_results(sapling_key.clone(), height, dfvk_res);
+            storage.add_sapling_results(sapling_key, height, ivk_res);
+
+            Ok::<_, Report>(())
+        })
+        .wait_for_panics()
+        .await?;
+    }
+
+    Ok(Some(height))
+}
+
+/// Returns the transactions from `block` belonging to the given `scanning_keys`.
+/// This list of keys should come from a single configured `SaplingScanningKey`.
+///
+/// For example, there are two individual viewing keys for most shielded transfers:
+/// - the payment (external) key, and
+/// - the change (internal) key.
 ///
 /// # Performance / Hangs
 ///
@@ -186,12 +236,11 @@ pub async fn start(
 /// in async code.
 ///
 /// TODO:
-/// - Remove the `sapling_tree_size` parameter or turn it into an `Option` once we have access to
-/// Zebra's state, and we can retrieve the tree size ourselves.
-/// - Add prior block metadata once we have access to Zebra's state.
+/// - Pass the real `sapling_tree_size` parameter from the state.
+/// - Add other prior block metadata.
 pub fn scan_block<K: ScanningKey>(
     network: Network,
-    block: &Arc<Block>,
+    block: &Block,
     sapling_tree_size: u32,
     scanning_keys: &[K],
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
@@ -255,7 +304,7 @@ pub fn sapling_key_to_scan_block_keys(
 }
 
 /// Converts a zebra block and meta data into a compact block.
-pub fn block_to_compact(block: &Arc<Block>, chain_metadata: ChainMetadata) -> CompactBlock {
+pub fn block_to_compact(block: &Block, chain_metadata: ChainMetadata) -> CompactBlock {
     CompactBlock {
         height: block
             .coinbase_height()
@@ -340,10 +389,17 @@ fn transaction_to_compact((index, tx): (usize, Arc<Transaction>)) -> CompactTx {
 }
 
 /// Convert a scanned block to a list of scanner database results.
-fn scanned_block_to_db_result<Nf>(scanned_block: ScannedBlock<Nf>) -> Vec<SaplingScannedResult> {
+fn scanned_block_to_db_result<Nf>(
+    scanned_block: ScannedBlock<Nf>,
+) -> BTreeMap<TransactionIndex, SaplingScannedResult> {
     scanned_block
         .transactions()
         .iter()
-        .map(|tx| transaction::Hash::from_bytes_in_display_order(tx.txid.as_ref()))
+        .map(|tx| {
+            (
+                TransactionIndex::from_usize(tx.index),
+                SaplingScannedResult::from(tx.txid.as_ref()),
+            )
+        })
         .collect()
 }

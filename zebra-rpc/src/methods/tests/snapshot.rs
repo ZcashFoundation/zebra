@@ -252,7 +252,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     // make the api call
     let get_raw_transaction =
-        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), 0u8);
+        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), Some(0u8));
     let (response, _) = futures::join!(get_raw_transaction, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 
@@ -269,7 +269,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     // make the api call
     let get_raw_transaction =
-        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), 1u8);
+        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), Some(1u8));
     let (response, _) = futures::join!(get_raw_transaction, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 

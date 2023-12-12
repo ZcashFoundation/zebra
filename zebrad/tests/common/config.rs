@@ -80,6 +80,26 @@ pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
         mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
     }
 
+    #[cfg(feature = "shielded_scan")]
+    {
+        let mut shielded_scan = zebra_scan::Config::default();
+        shielded_scan.ephemeral = true;
+
+        let config = ZebradConfig {
+            network,
+            state,
+            sync,
+            mempool,
+            consensus,
+            tracing,
+            mining,
+            shielded_scan,
+            ..ZebradConfig::default()
+        };
+
+        return Ok(config);
+    }
+
     let config = ZebradConfig {
         network,
         state,
