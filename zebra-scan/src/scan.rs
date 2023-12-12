@@ -54,7 +54,7 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// We log an info log with progress after this many blocks.
-const INFO_LOG_INTERVAL: u32 = 1_000;
+const INFO_LOG_INTERVAL: u32 = 10_000;
 
 /// Start a scan task that reads blocks from `state`, scans them with the configured keys in
 /// `storage`, and then writes the results to `storage`.
@@ -135,8 +135,7 @@ pub async fn scan_height_and_store_results(
     // Only log at info level every 100,000 blocks.
     //
     // TODO: also log progress every 5 minutes once we reach the tip?
-    let is_info_log =
-        height == storage.min_sapling_birthday_height() || height.0 % INFO_LOG_INTERVAL == 0;
+    let is_info_log = height.0 % INFO_LOG_INTERVAL == 0;
 
     // Get a block from the state.
     // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().

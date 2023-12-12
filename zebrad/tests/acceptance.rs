@@ -2920,10 +2920,10 @@ fn scan_start_where_left() -> Result<()> {
 
         // Make sure scanner scans a few blocks.
         zebrad.expect_stdout_line_matches(
-            r"Scanning the blockchain for key 0, started at block 419200, now at block 421000",
+            r"Scanning the blockchain for key 0, started at block 419200, now at block 430000",
         )?;
         zebrad.expect_stdout_line_matches(
-            r"Scanning the blockchain for key 0, started at block 419200, now at block 422000",
+            r"Scanning the blockchain for key 0, started at block 419200, now at block 440000",
         )?;
 
         // Kill the node.
@@ -2942,16 +2942,16 @@ fn scan_start_where_left() -> Result<()> {
 
         // Resuming message.
         zebrad.expect_stdout_line_matches(
-            "Last scanned height for key number 0 is 421000, resuming at 421001",
+            "Last scanned height for key number 0 is 439000, resuming at 439001",
         )?;
         zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
 
         // Start scanning where it was left.
         zebrad.expect_stdout_line_matches(
-            r"Scanning the blockchain for key 0, started at block 421001, now at block 422000",
+            r"Scanning the blockchain for key 0, started at block 439001, now at block 440000",
         )?;
         zebrad.expect_stdout_line_matches(
-            r"Scanning the blockchain for key 0, started at block 421001, now at block 423000",
+            r"Scanning the blockchain for key 0, started at block 439001, now at block 450000",
         )?;
     }
 
