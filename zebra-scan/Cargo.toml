@@ -25,6 +25,7 @@ proptest-impl = [
     "proptest-derive",
     "zebra-state/proptest-impl",
     "zebra-chain/proptest-impl",
+    "zebra-test",
     "bls12_381",
     "ff",
     "group",
@@ -63,6 +64,8 @@ jubjub = { version = "0.10.0", optional = true }
 rand = { version = "0.8.5", optional = true }
 zcash_note_encryption = { version = "0.4.0", optional = true }
 
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.31", optional = true }
+
 [dev-dependencies]
 
 insta = { version = "1.33.0", features = ["ron", "redactions"] }
@@ -78,4 +81,4 @@ rand = "0.8.5"
 zcash_note_encryption = "0.4.0"
 
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test" }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.31" }
