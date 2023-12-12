@@ -171,7 +171,7 @@ pub async fn scan_height_and_store_results(
         if is_info_log {
             info!(
                 "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
-                key_num, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                key_num, last_scanned_height.as_usize(),
                 height.as_usize(),
                 chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
             );

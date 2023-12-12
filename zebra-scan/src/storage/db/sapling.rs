@@ -202,11 +202,9 @@ impl ScannerWriteBatch {
         let birthday_height = birthday_height
             .unwrap_or(min_birthday_height)
             .max(min_birthday_height);
-        // And we want to skip up to the height before it.
-        let skip_up_to_height = birthday_height.previous().unwrap_or(Height::MIN);
 
         let index =
-            SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, skip_up_to_height);
+            SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, birthday_height);
         self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
     }
 

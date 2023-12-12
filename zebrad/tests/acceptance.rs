@@ -2948,10 +2948,10 @@ fn scan_start_where_left() -> Result<()> {
 
         // Start scanning where it was left.
         zebrad.expect_stdout_line_matches(
-            r"Scanning the blockchain for key 0, started at block 421001, now at block 422000",
+            r"Scanning the blockchain for key 0, started at block 421000, now at block 422000",
         )?;
         zebrad.expect_stdout_line_matches(
-            r"canning the blockchain for key 0, started at block 421001, now at block 423000",
+            r"canning the blockchain for key 0, started at block 421000, now at block 423000",
         )?;
     }
 
