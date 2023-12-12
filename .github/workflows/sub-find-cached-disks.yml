@@ -1,3 +1,10 @@
+# Check if Cached State Disks Exist Workflow
+# This workflow is designed to check the availability of cached state disks in Google Cloud Platform (GCP) for different types of Zcash applications.
+# - Accepts network type as input to determine which disks to search for.
+# - Checks for the existence of three types of disks: lightwalletd tip, Zebra tip, and Zebra checkpoint.
+# - Uses Google Cloud SDK to query and identify available disks based on network and version.
+# - Outputs the availability of each disk type, which can be utilized in subsequent workflows.
+# The workflow streamlines the process of verifying disk availability, crucial for optimizing and speeding up integration tests and deployments.
 name: Check if cached state disks exist
 
 on:

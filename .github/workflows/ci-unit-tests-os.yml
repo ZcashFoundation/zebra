@@ -1,3 +1,9 @@
+# This workflow performs unit tests across different operating systems and Rust versions. It includes steps for:
+# - Testing on Ubuntu and macOS with stable and beta Rust toolchains.
+# - Installing Zebra from the lockfile without cache on Ubuntu.
+# - Verifying that Cargo.lock is up-to-date with Cargo.toml changes.
+# - Running cargo-deny checks for dependencies.
+# - Checking for unused dependencies in the code.
 name: Multi-OS Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
