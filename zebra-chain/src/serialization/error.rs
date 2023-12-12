@@ -2,6 +2,7 @@
 
 use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
 
+use hex::FromHexError;
 use thiserror::Error;
 
 /// A serialization error.
@@ -30,6 +31,10 @@ pub enum SerializationError {
     /// The length of a vec is too large to convert to a usize (and thus, too large to allocate on this platform)
     #[error("CompactSize too large: {0}")]
     TryFromIntError(#[from] TryFromIntError),
+
+    /// A string was not valid hexadecimal.
+    #[error("string was not hex: {0}")]
+    FromHexError(#[from] FromHexError),
 
     /// An error caused when validating a zatoshi `Amount`
     #[error("input couldn't be parsed as a zatoshi `Amount`: {source}")]

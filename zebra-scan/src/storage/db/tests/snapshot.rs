@@ -24,40 +24,39 @@
 //! Due to `serde` limitations, some object types can't be represented exactly,
 //! so RON uses the closest equivalent structure.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
+
+use itertools::Itertools;
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::Height,
     parameters::Network::{self, *},
-    serialization::ZcashDeserializeInto,
 };
-use zebra_state::{RawBytes, ReadDisk, TransactionIndex, KV};
+use zebra_state::{RawBytes, ReadDisk, SaplingScannedDatabaseIndex, TransactionLocation, KV};
 
-use crate::{
-    storage::{db::ScannerDb, Storage},
-    tests::{FAKE_SAPLING_VIEWING_KEY, ZECPAGES_SAPLING_VIEWING_KEY},
-    Config,
-};
+use crate::storage::{db::ScannerDb, Storage};
 
-/// Snapshot test for RocksDB column families, and their key-value data.
+/// Snapshot test for:
+/// - RocksDB column families, and their raw key-value data, and
+/// - typed scanner result data using high-level storage methods.
 ///
 /// These snapshots contain the `default` column family, but it is not used by Zebra.
 #[test]
-fn test_raw_rocksdb_column_families() {
+fn test_database_format() {
     let _init_guard = zebra_test::init();
 
-    test_raw_rocksdb_column_families_with_network(Mainnet);
-    test_raw_rocksdb_column_families_with_network(Testnet);
+    test_database_format_with_network(Mainnet);
+    test_database_format_with_network(Testnet);
 }
 
-/// Snapshot raw column families for `network`.
+/// Snapshot raw and typed database formats for `network`.
 ///
-/// See [`test_raw_rocksdb_column_families`].
-fn test_raw_rocksdb_column_families_with_network(network: Network) {
+/// See [`test_database_format()`] for details.
+fn test_database_format_with_network(network: Network) {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
 
-    let mut storage = Storage::new(&Config::ephemeral(), network, false);
+    let mut storage = super::new_test_storage(network);
 
     // Snapshot the column family names
     let mut cf_names = storage.db.list_cf().expect("empty database is valid");
@@ -75,48 +74,32 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
 
     settings.set_snapshot_suffix("empty");
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
+    settings.bind(|| snapshot_typed_result_data(&storage));
 
-    // Snapshot a birthday that is automatically set to activation height
-    storage.add_sapling_key(&ZECPAGES_SAPLING_VIEWING_KEY.to_string(), None);
-    // Snapshot a birthday above activation height
-    storage.add_sapling_key(&FAKE_SAPLING_VIEWING_KEY.to_string(), Height(1_000_000));
+    super::add_fake_keys(&mut storage);
 
+    // Assert that the key format doesn't change.
     settings.set_snapshot_suffix(format!("{net_suffix}_keys"));
     settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
+    settings.bind(|| snapshot_typed_result_data(&storage));
 
     // Snapshot raw database data for:
     // - mainnet and testnet
     // - genesis, block 1, and block 2
-    let blocks = match network {
-        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-    };
-
-    // We limit the number of blocks, because the serialized data is a few kilobytes per block.
+    //
+    // We limit the number of blocks, because we create 2 snapshots per block, one for each network.
     for height in 0..=2 {
-        let block: Arc<Block> = blocks
-            .get(&height)
-            .expect("block height has test data")
-            .zcash_deserialize_into()
-            .expect("test data deserializes");
-
-        // Fake results from the first few blocks
-        storage.add_sapling_results(
-            &ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
-            Height(height),
-            block
-                .transactions
-                .iter()
-                .enumerate()
-                .map(|(index, tx)| (TransactionIndex::from_usize(index), tx.hash().into()))
-                .collect(),
-        );
+        super::add_fake_results(&mut storage, network, Height(height));
 
         let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_suffix(format!("{net_suffix}_{height}"));
 
+        // Assert that the result format doesn't change.
         settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
+        settings.bind(|| snapshot_typed_result_data(&storage));
     }
+
+    // TODO: add an empty marker result after PR #8080 merges
 }
 
 /// Snapshot the data in each column family, using `cargo insta` and RON serialization.
@@ -150,15 +133,70 @@ fn snapshot_raw_rocksdb_column_family_data(db: &ScannerDb, original_cf_names: &[
         if cf_name == "default" {
             assert_eq!(cf_data.len(), 0, "default column family is never used");
         } else if cf_data.is_empty() {
-            // distinguish column family names from empty column families
+            // Distinguish column family names from empty column families
             empty_column_families.push(format!("{cf_name}: no entries"));
         } else {
-            // The note commitment tree snapshots will change if the trees do not have cached roots.
-            // But we expect them to always have cached roots,
-            // because those roots are used to populate the anchor column families.
+            // Make sure the raw format doesn't accidentally change.
             insta::assert_ron_snapshot!(format!("{cf_name}_raw_data"), cf_data);
         }
     }
 
     insta::assert_ron_snapshot!("empty_column_families", empty_column_families);
+}
+
+/// Snapshot typed scanner result data using high-level storage methods,
+/// using `cargo insta` and RON serialization.
+fn snapshot_typed_result_data(storage: &Storage) {
+    // TODO: snapshot the latest scanned heights after PR #8080 merges
+    //insta::assert_ron_snapshot!("latest_heights", latest_scanned_heights);
+
+    // Make sure the typed key format doesn't accidentally change.
+    //
+    // TODO: update this after PR #8080
+    let sapling_keys_and_birthday_heights = storage.sapling_keys();
+    // HashMap has an unstable order across Rust releases, so we need to sort it here.
+    insta::assert_ron_snapshot!(
+        "sapling_keys",
+        sapling_keys_and_birthday_heights,
+        {
+                "." => insta::sorted_redaction()
+        }
+    );
+
+    // HashMap has an unstable order across Rust releases, so we need to sort it here as well.
+    for (key_index, (sapling_key, _birthday_height)) in sapling_keys_and_birthday_heights
+        .iter()
+        .sorted()
+        .enumerate()
+    {
+        let sapling_results = storage.sapling_results(sapling_key);
+
+        // Check internal database method consistency
+        for (height, results) in sapling_results.iter() {
+            let sapling_index_and_results =
+                storage.sapling_results_for_key_and_height(sapling_key, *height);
+
+            // The list of results for each height must match the results queried by that height.
+            let sapling_results_for_height: Vec<_> = sapling_index_and_results
+                .values()
+                .flatten()
+                .cloned()
+                .collect();
+            assert_eq!(results, &sapling_results_for_height);
+
+            for (index, result) in sapling_index_and_results {
+                let index = SaplingScannedDatabaseIndex {
+                    sapling_key: sapling_key.clone(),
+                    tx_loc: TransactionLocation::from_parts(*height, index),
+                };
+
+                // The result for each index must match the result queried by that index.
+                let sapling_result_for_index = storage.sapling_result_for_index(&index);
+                assert_eq!(result, sapling_result_for_index);
+            }
+        }
+
+        // Make sure the typed result format doesn't accidentally change.
+        insta::assert_ron_snapshot!(format!("sapling_key_{key_index}_results"), sapling_results);
+    }
 }
