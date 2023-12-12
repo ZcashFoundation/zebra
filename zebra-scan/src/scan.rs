@@ -205,8 +205,8 @@ pub async fn scan_height_and_store_results(
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
 
-            storage.add_sapling_results(sapling_key.clone(), height, dfvk_res);
-            storage.add_sapling_results(sapling_key, height, ivk_res);
+            storage.add_sapling_results(&sapling_key, height, dfvk_res);
+            storage.add_sapling_results(&sapling_key, height, ivk_res);
 
             Ok::<_, Report>(())
         })
@@ -392,7 +392,7 @@ fn scanned_block_to_db_result<Nf>(
         .map(|tx| {
             (
                 TransactionIndex::from_usize(tx.index),
-                SaplingScannedResult::from(tx.txid.as_ref()),
+                SaplingScannedResult::from_bytes_in_display_order(*tx.txid.as_ref()),
             )
         })
         .collect()

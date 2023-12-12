@@ -420,13 +420,13 @@ impl AddressTransaction {
     /// address. Starts at the first UTXO, or at the `query` start height, whichever is greater.
     /// Ends at the maximum possible transaction index for the end height.
     ///
-    /// Used to look up transactions with [`DiskDb::zs_range_iter`][1].
+    /// Used to look up transactions with [`DiskDb::zs_forward_range_iter`][1].
     ///
     /// The transaction locations in the:
     /// - start bound might be invalid, if it is based on the `query` start height.
     /// - end bound will always be invalid.
     ///
-    /// But this is not an issue, since [`DiskDb::zs_range_iter`][1] will fetch all existing
+    /// But this is not an issue, since [`DiskDb::zs_forward_range_iter`][1] will fetch all existing
     /// (valid) values in the range.
     ///
     /// [1]: super::super::disk_db::DiskDb

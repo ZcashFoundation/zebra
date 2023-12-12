@@ -6,7 +6,6 @@ Follow the [Docker or compilation instructions](https://zebra.zfnd.org/index.htm
 
 To compile Zebra from source, you will need to [install some dependencies.](https://zebra.zfnd.org/index.html#building-zebra).
 
-
 ## Alternative Compilation Methods
 
 ### Compiling Manually from git
@@ -20,7 +19,7 @@ To compile Zebra directly from GitHub, or from a GitHub release source archive:
 ```sh
 git clone https://github.com/ZcashFoundation/zebra.git
 cd zebra
-git checkout v1.4.0
+git checkout v1.5.0
 ```
 
 3. Build and Run `zebrad`
@@ -33,7 +32,7 @@ target/release/zebrad start
 ### Compiling from git using cargo install
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.4.0 zebrad
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v1.5.0 zebrad
 ```
 
 ### Compiling on ARM
@@ -58,7 +57,12 @@ If you're having trouble with:
 
 - use `cargo install` without `--locked` to build with the latest versions of each dependency
 
-#### Optional Tor feature
+## Experimental Shielded Scanning feature
+
+- install the `rocksdb-tools` or `rocksdb` packages to get the `ldb` binary, which allows expert users to
+  [query the scanner database](https://zebra.zfnd.org/user/shielded-scan.html). This binary is sometimes called `rocksdb_ldb`.
+
+## Optional Tor feature
 
 - **sqlite linker errors:** libsqlite3 is an optional dependency of the `zebra-network/tor` feature.
   If you don't have it installed, you might see errors like `note: /usr/bin/ld: cannot find -lsqlite3`.

@@ -13,6 +13,12 @@ use crate::{FromDisk, IntoDisk, TransactionLocation};
 
 use super::block::TRANSACTION_LOCATION_DISK_BYTES;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
+#[cfg(test)]
+mod tests;
+
 /// The type used in Zebra to store Sapling scanning keys.
 /// It can represent a full viewing key or an individual viewing key.
 pub type SaplingScanningKey = String;
@@ -22,6 +28,7 @@ pub type SaplingScanningKey = String;
 /// Currently contains a TXID in "display order", which is big-endian byte order following the u256
 /// convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedResult([u8; 32]);
 
 impl From<SaplingScannedResult> for transaction::Hash {
@@ -30,14 +37,27 @@ impl From<SaplingScannedResult> for transaction::Hash {
     }
 }
 
-impl From<&[u8; 32]> for SaplingScannedResult {
-    fn from(bytes: &[u8; 32]) -> Self {
-        Self(*bytes)
+impl From<transaction::Hash> for SaplingScannedResult {
+    fn from(hash: transaction::Hash) -> Self {
+        SaplingScannedResult(hash.bytes_in_display_order())
+    }
+}
+
+impl SaplingScannedResult {
+    /// Creates a `SaplingScannedResult` from bytes in display order.
+    pub fn from_bytes_in_display_order(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the inner bytes in display order.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        self.0
     }
 }
 
 /// A database column family entry for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedDatabaseEntry {
     /// The database column family key. Must be unique for each scanning key and scanned block.
     pub index: SaplingScannedDatabaseIndex,
@@ -48,6 +68,7 @@ pub struct SaplingScannedDatabaseEntry {
 
 /// A database column family key for a block scanned with a Sapling vieweing key.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct SaplingScannedDatabaseIndex {
     /// The Sapling viewing key used to scan the block.
     pub sapling_key: SaplingScanningKey,
@@ -153,20 +174,8 @@ impl FromDisk for SaplingScannedDatabaseIndex {
     }
 }
 
-impl IntoDisk for SaplingScannedResult {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0
-    }
-}
-
-impl FromDisk for SaplingScannedResult {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        // TODO: Change of confirm the `unwrap_or` is good enough.
-        SaplingScannedResult(bytes.as_ref().try_into().unwrap_or([0; 32]))
-    }
-}
+// We can't implement IntoDisk or FromDisk for SaplingScannedResult,
+// because the format is actually Option<SaplingScannedResult>.
 
 impl IntoDisk for Option<SaplingScannedResult> {
     type Bytes = Vec<u8>;
@@ -175,7 +184,7 @@ impl IntoDisk for Option<SaplingScannedResult> {
         let mut bytes = Vec::new();
 
         if let Some(result) = self.as_ref() {
-            bytes.extend(result.as_bytes());
+            bytes.extend(result.bytes_in_display_order());
         }
 
         bytes
@@ -183,13 +192,18 @@ impl IntoDisk for Option<SaplingScannedResult> {
 }
 
 impl FromDisk for Option<SaplingScannedResult> {
+    #[allow(clippy::unwrap_in_result)]
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let bytes = bytes.as_ref();
 
         if bytes.is_empty() {
             None
         } else {
-            Some(SaplingScannedResult::from_bytes(bytes))
+            Some(SaplingScannedResult::from_bytes_in_display_order(
+                bytes
+                    .try_into()
+                    .expect("unexpected incorrect SaplingScannedResult data length"),
+            ))
         }
     }
 }

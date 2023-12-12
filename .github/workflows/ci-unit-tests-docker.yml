@@ -43,6 +43,7 @@ on:
       - '.github/workflows/sub-deploy-integration-tests-gcp.yml'
       - '.github/workflows/sub-build-docker-image.yml'
       - '.github/workflows/sub-find-cached-disks.yml'
+      - '.github/workflows/sub-test-zebra-config.yml'
 
   push:
     branches:

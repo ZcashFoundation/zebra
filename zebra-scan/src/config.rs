@@ -1,5 +1,7 @@
 //! Configuration for blockchain scanning tasks.
 
+use std::fmt::Debug;
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +9,7 @@ use zebra_state::Config as DbConfig;
 
 use crate::storage::SaplingScanningKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 /// Configuration for scanning.
 pub struct Config {
@@ -23,6 +25,16 @@ pub struct Config {
     // TODO: Remove fields that are only used by the state, and create a common database config.
     #[serde(flatten)]
     db_config: DbConfig,
+}
+
+impl Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            // Security: don't log private keys, birthday heights might also be private
+            .field("sapling_keys_to_scan", &self.sapling_keys_to_scan.len())
+            .field("db_config", &self.db_config)
+            .finish()
+    }
 }
 
 impl Default for Config {

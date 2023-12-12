@@ -27,7 +27,7 @@
 //!
 //! Test shielded data, and data activated in Overwinter and later network upgrades.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
     block::Block,
@@ -37,11 +37,11 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        disk_db::{DiskDb, DB},
-        disk_format::tests::KV,
+        disk_db::DiskDb,
+        disk_format::{tests::KV, RawBytes},
         FinalizedState,
     },
-    Config,
+    Config, ReadDisk,
 };
 
 /// Snapshot test for RocksDB column families, and their key-value data.
@@ -133,13 +133,12 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             .expect("RocksDB API provides correct names");
 
         // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
-        let mut cf_iter = db.full_iterator_cf(&cf_handle, rocksdb::IteratorMode::Start);
+        let cf_items: BTreeMap<RawBytes, RawBytes> = db.zs_items_in_range_ordered(&cf_handle, ..);
 
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
-        let cf_data: Vec<KV> = cf_iter
-            .by_ref()
-            .map(|result| result.expect("unexpected database error"))
-            .map(|(key, value)| KV::new(key, value))
+        let cf_data: Vec<KV> = cf_items
+            .iter()
+            .map(|(key, value)| KV::new(key.raw_bytes(), value.raw_bytes()))
             .collect();
 
         if cf_name == "default" {
@@ -153,14 +152,6 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             // because those roots are used to populate the anchor column families.
             insta::assert_ron_snapshot!(format!("{cf_name}_raw_data"), cf_data);
         }
-
-        let raw_cf_iter: rocksdb::DBRawIteratorWithThreadMode<DB> = cf_iter.into();
-
-        assert_eq!(
-            raw_cf_iter.status(),
-            Ok(()),
-            "unexpected column family iterator error",
-        );
     }
 
     insta::assert_ron_snapshot!("empty_column_families", empty_column_families);

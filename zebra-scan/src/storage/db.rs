@@ -19,6 +19,9 @@ pub use zebra_state::{
 
 pub mod sapling;
 
+#[cfg(test)]
+mod tests;
+
 /// The directory name used to distinguish the scanner database from Zebra's other databases or
 /// flat files.
 ///

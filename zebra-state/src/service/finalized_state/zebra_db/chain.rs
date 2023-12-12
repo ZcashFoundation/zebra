@@ -78,7 +78,7 @@ impl ZebraDb {
     ) -> impl Iterator<Item = (RawBytes, Arc<HistoryTree>)> + '_ {
         let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
 
-        self.db.zs_range_iter(&history_tree_cf, .., false)
+        self.db.zs_forward_range_iter(&history_tree_cf, ..)
     }
 
     // Value pool methods

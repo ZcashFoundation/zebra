@@ -1,0 +1,5 @@
+---
+source: zebra-scan/src/storage/db/tests/snapshot.rs
+expression: empty_column_families
+---
+[]

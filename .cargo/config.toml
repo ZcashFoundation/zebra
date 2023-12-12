@@ -56,6 +56,9 @@ rustflags = [
     "-Wmissing_docs",
 
     # TODOs:
+    # Fix this lint eventually.
+    "-Aclippy::result_large_err",
+
     # `cargo fix` might help do these fixes,
     # or add a config.toml to sub-directories which should allow these lints,
     # or try allowing the lint in the specific module (lib.rs doesn't seem to work in some cases)
