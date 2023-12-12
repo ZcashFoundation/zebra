@@ -1,6 +1,12 @@
+# This workflow manages the automatic addition of new issues to specific GitHub projects.
+#
+# 1. Newly opened issues are added to the "Zebra Backlog" Github project.
+# 2. They are also added to the "ZF Engineering Backlog" Github project.
+#
+# The action makes use of the `add-to-project` action and requires a Github token
+# (currently sourced from secrets) to authenticate and perform the addition.
 name: Add new issues to GitHub projects
 
-# Configuration for automatically adding issues to various Github projects for Project Management purposes
 on:
   issues:
     types:
