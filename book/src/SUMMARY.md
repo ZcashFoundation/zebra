@@ -16,6 +16,7 @@
   - [Mining](user/mining.md)
     - [Testnet Mining with s-nomp](user/mining-testnet-s-nomp.md)
     - [Mining with Zebra in Docker](user/mining-docker.md)
+  - [Shielded Scanning](user/shielded-scan.md)
   - [Kibana blockchain explorer](user/elasticsearch.md)
   - [Forking the Zcash Testnet with Zebra](user/fork-zebra-testnet.md)
   - [Troubleshooting](user/troubleshooting.md)
