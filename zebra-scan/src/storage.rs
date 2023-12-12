@@ -138,7 +138,7 @@ impl Storage {
 
         // Add tracking entry for key.
         if is_control_time {
-            batch.insert_sapling_height(self, &sapling_key, height);
+            batch.insert_sapling_height(self, sapling_key, height);
         }
 
         self.write_batch(batch);
