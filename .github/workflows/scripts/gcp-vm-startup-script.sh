@@ -1,4 +1,4 @@
-#! /bin/bash
+#!/usr/bin/env bash
 # Increase the Google Cloud instance sshd connection limit
 #
 # This script appends 'MaxStartups 500' to /etc/ssh/sshd_config allowing up to 500
