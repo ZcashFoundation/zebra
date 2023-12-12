@@ -115,7 +115,13 @@ impl Storage {
             .0;
 
         loop {
-            // Find the previous key, and the last height we have for it.
+            let sapling_key = last_stored_record_index.sapling_key;
+            let height = last_stored_record_index.tx_loc.height;
+
+            keys.insert(sapling_key.clone(), height);
+
+            // Skip all the results until the next key.
+            last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
             let Some(entry) = self
                 .db
                 .zs_prev_key_value_back_from(&sapling_tx_ids, &last_stored_record_index)
@@ -123,25 +129,8 @@ impl Storage {
                 break;
             };
 
-            let sapling_key = entry.0.sapling_key;
-            let mut height = entry.0.tx_loc.height;
+            // Needed annotation.
             let _last_result: Option<SaplingScannedResult> = entry.1;
-
-            let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
-
-            // If there are no results for this block, then it's a "skip up to height" marker, and
-            // the target height is the next height. If there are some results, it's the actual
-            // target height.
-            if height_results.values().all(Option::is_none) {
-                height = height
-                    .next()
-                    .expect("results should only be stored for validated block heights");
-            }
-
-            keys.insert(sapling_key.clone(), height);
-
-            // Skip all the results until the next key.
-            last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
         }
 
         keys
