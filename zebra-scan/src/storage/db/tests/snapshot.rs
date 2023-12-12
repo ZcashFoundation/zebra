@@ -153,7 +153,7 @@ fn snapshot_typed_result_data(storage: &Storage) {
     // Make sure the typed key format doesn't accidentally change.
     //
     // TODO: update this after PR #8080
-    let sapling_keys_and_birthday_heights = storage.sapling_keys();
+    let sapling_keys_and_birthday_heights = storage.sapling_keys_last_heights();
     // HashMap has an unstable order across Rust releases, so we need to sort it here.
     insta::assert_ron_snapshot!(
         "sapling_keys",
