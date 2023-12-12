@@ -71,7 +71,13 @@ impl Storage {
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
     /// in async code.
-    pub fn add_sapling_key(&mut self, sapling_key: &SaplingScanningKey, birthday: Option<Height>) {
+    pub fn add_sapling_key(
+        &mut self,
+        sapling_key: &SaplingScanningKey,
+        birthday: impl Into<Option<Height>>,
+    ) {
+        let birthday = birthday.into();
+
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
         let mut batch = ScannerWriteBatch::default();
@@ -93,7 +99,8 @@ impl Storage {
         self.sapling_keys_and_birthday_heights()
     }
 
-    /// Add the sapling results for `height` to the storage.
+    /// Add the sapling results for `height` to the storage. The results can be any map of
+    /// [`TransactionIndex`] to [`SaplingScannedResult`].
     ///
     /// # Performance / Hangs
     ///
@@ -101,7 +108,7 @@ impl Storage {
     /// in async code.
     pub fn add_sapling_results(
         &mut self,
-        sapling_key: SaplingScanningKey,
+        sapling_key: &SaplingScanningKey,
         height: Height,
         sapling_results: BTreeMap<TransactionIndex, SaplingScannedResult>,
     ) {

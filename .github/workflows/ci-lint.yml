@@ -160,7 +160,7 @@ jobs:
     needs: changed-files
     steps:
       - uses: actions/checkout@v4.1.1
-      - uses: plettich/action-codespell@master
+      - uses: codespell-project/actions-codespell@v2.0
         with:
-          github_token: ${{ secrets.github_token }}
-          level: warning
+          only_warn: 1
+

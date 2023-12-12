@@ -9,8 +9,8 @@ pub mod init;
 pub mod scan;
 pub mod storage;
 
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod tests;
 
 pub use config::Config;
 pub use init::{init, spawn_init};
