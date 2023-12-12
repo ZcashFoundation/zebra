@@ -63,12 +63,12 @@ pub use service::{
 pub use rocksdb::AsColumnFamilyRef;
 #[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
-    FromDisk, IntoDisk, ReadDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
+    FromDisk, IntoDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
     SaplingScannedResult, SaplingScanningKey, ZebraDb,
 };
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
-pub use service::finalized_state::{DiskWriteBatch, WriteDisk};
+pub use service::finalized_state::{DiskWriteBatch, ReadDisk, WriteDisk};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
@@ -77,7 +77,7 @@ pub use response::GetBlockTemplateChainInfo;
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    finalized_state::MAX_ON_DISK_HEIGHT,
+    finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services, ReadStateService,
 };
 
