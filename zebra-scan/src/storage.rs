@@ -104,6 +104,8 @@ impl Storage {
     /// Add the sapling results for `height` to the storage. The results can be any map of
     /// [`TransactionIndex`] to [`SaplingScannedResult`].
     ///
+    /// Also adds empty progress tracking entries every `INSERT_CONTROL_INTERVAL` blocks if needed.
+    ///
     /// # Performance / Hangs
     ///
     /// This method can block while writing database files, so it must be inside spawn_blocking()
@@ -120,7 +122,15 @@ impl Storage {
 
         // Every `INSERT_CONTROL_INTERVAL` we add a new entry to the scanner database for each key
         // so we can track progress made in the last interval even if no transaction was yet found.
-        let is_control_time = height.0 % INSERT_CONTROL_INTERVAL == 0 && sapling_results.is_empty();
+        let needs_control_entry =
+            height.0 % INSERT_CONTROL_INTERVAL == 0 && sapling_results.is_empty();
+
+        // Add scanner progress tracking entry for key.
+        // Defensive programming: add the tracking entry first, so that we don't accidentally
+        // overwrite real results with it. (This is currently prevented by the empty check.)
+        if needs_control_entry {
+            batch.insert_sapling_height(self, sapling_key, height);
+        }
 
         for (index, sapling_result) in sapling_results {
             let index = SaplingScannedDatabaseIndex {
@@ -134,11 +144,6 @@ impl Storage {
             };
 
             batch.insert_sapling_result(self, entry);
-        }
-
-        // Add tracking entry for key.
-        if is_control_time {
-            batch.insert_sapling_height(self, sapling_key, height);
         }
 
         self.write_batch(batch);
