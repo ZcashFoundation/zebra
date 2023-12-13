@@ -102,22 +102,21 @@ impl Storage {
         let sapling_tx_ids = self.sapling_tx_ids_cf();
         let mut keys = HashMap::new();
 
-        let last_stored_record: Option<(
+        tracing::info!("searching backwards for last entry");
+        let mut last_stored_record: Option<(
             SaplingScannedDatabaseIndex,
             Option<SaplingScannedResult>,
         )> = self.db.zs_last_key_value(&sapling_tx_ids);
-        if last_stored_record.is_none() {
-            return keys;
-        }
-
-        let mut last_stored_record_index = last_stored_record
-            .expect("checked this is `Some` in the code branch above")
-            .0;
 
         loop {
+            let Some((mut last_stored_record_index, _result)) = last_stored_record else {
+                return keys;
+            };
+
             let sapling_key = last_stored_record_index.sapling_key.clone();
             let height = last_stored_record_index.tx_loc.height;
 
+            tracing::info!(?sapling_key, ?height, "inserting key and last height");
             let prev_height = keys.insert(sapling_key.clone(), height);
             assert_eq!(
                 prev_height, None,
@@ -127,18 +126,15 @@ impl Storage {
 
             // Skip all the results until the next key.
             last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
-            let Some(entry) = self
+            tracing::info!(
+                ?last_stored_record_index,
+                "searching backwards strictly before"
+            );
+            last_stored_record = self
                 .db
-                .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index)
-            else {
-                break;
-            };
-
-            // Needed annotation.
-            let _last_result: Option<SaplingScannedResult> = entry.1;
+                .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index);
+            tracing::info!(?last_stored_record_index, "found last storede");
         }
-
-        keys
     }
 
     /// Returns the Sapling indexes and results in the supplied range.

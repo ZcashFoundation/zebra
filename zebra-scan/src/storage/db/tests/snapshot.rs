@@ -147,8 +147,11 @@ fn snapshot_raw_rocksdb_column_family_data(db: &ScannerDb, original_cf_names: &[
 /// Snapshot typed scanner result data using high-level storage methods,
 /// using `cargo insta` and RON serialization.
 fn snapshot_typed_result_data(storage: &Storage) {
+    tracing::info!("about to call sapling_keys_last_heights()");
     // Make sure the typed key format doesn't accidentally change.
     let sapling_keys_last_heights = storage.sapling_keys_last_heights();
+    tracing::info!("called sapling_keys_last_heights()");
+
     // HashMap has an unstable order across Rust releases, so we need to sort it here.
     insta::assert_ron_snapshot!(
         "sapling_keys",
