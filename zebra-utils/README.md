@@ -1,17 +1,16 @@
 # Zebra Utilities
 
-This crate contains tools for zebra maintainers.
-
-## Programs
+Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
+- [scanning-results-reader](#scanning-results-reader)
 
 Binaries are easier to use if they are located in your system execution path.
 
-### zebra-checkpoints
+## zebra-checkpoints
 
 This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
@@ -93,7 +92,7 @@ Then use the commands above to regenerate the checkpoints.
 - Open a pull request with the updated Mainnet and Testnet lists at:
   https://github.com/ZcashFoundation/zebra/pulls
 
-### zebrad-hash-lookup
+## zebrad-hash-lookup
 
 Given a block hash the script will get additional information using `zcash-cli`.
 
@@ -108,7 +107,7 @@ $
 ```
 This program is commonly used as part of `zebrad-log-filter` where hashes will be captured from `zebrad` output.
 
-### zebrad-log-filter
+## zebrad-log-filter
 
 The program is designed to filter the output from the zebra terminal or log file. Each time a hash is seen the script will capture it and get the additional information using `zebrad-hash-lookup`.
 
@@ -127,7 +126,7 @@ next: 00000001436277884eef900772f0fcec9566becccebaab4713fd665b60fab309
 ...
 ```
 
-### zcash-rpc-diff
+## zcash-rpc-diff
 
 This program compares `zebrad` and `zcashd` RPC responses.
 
