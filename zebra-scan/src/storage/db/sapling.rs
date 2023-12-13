@@ -107,27 +107,25 @@ impl Storage {
             Option<SaplingScannedResult>,
         )> = self.db.zs_last_key_value(&sapling_tx_ids);
 
-        loop {
-            let Some((mut last_stored_record_index, _result)) = last_stored_record else {
-                return keys;
-            };
-
+        while let Some((last_stored_record_index, _result)) = last_stored_record {
             let sapling_key = last_stored_record_index.sapling_key.clone();
             let height = last_stored_record_index.tx_loc.height;
 
             let prev_height = keys.insert(sapling_key.clone(), height);
             assert_eq!(
                 prev_height, None,
-                "unexpected duplicate key: keys must only be inserted once\
+                "unexpected duplicate key: keys must only be inserted once \
                  last_stored_record_index: {last_stored_record_index:?}",
             );
 
             // Skip all the results until the next key.
-            last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
-            last_stored_record = self
-                .db
-                .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index);
+            last_stored_record = self.db.zs_prev_key_value_strictly_before(
+                &sapling_tx_ids,
+                &SaplingScannedDatabaseIndex::min_for_key(&sapling_key),
+            );
         }
+
+        keys
     }
 
     /// Returns the Sapling indexes and results in the supplied range.
