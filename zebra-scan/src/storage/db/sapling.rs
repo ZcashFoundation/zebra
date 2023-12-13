@@ -115,10 +115,15 @@ impl Storage {
             .0;
 
         loop {
-            let sapling_key = last_stored_record_index.sapling_key;
+            let sapling_key = last_stored_record_index.sapling_key.clone();
             let height = last_stored_record_index.tx_loc.height;
 
-            keys.insert(sapling_key.clone(), height);
+            let prev_height = keys.insert(sapling_key.clone(), height);
+            assert_eq!(
+                prev_height, None,
+                "unexpected duplicate key: keys must only be inserted once\
+                 last_stored_record_index: {last_stored_record_index:?}",
+            );
 
             // Skip all the results until the next key.
             last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
