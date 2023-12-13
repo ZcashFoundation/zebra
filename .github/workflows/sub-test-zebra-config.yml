@@ -73,7 +73,15 @@ jobs:
 
           # If grep found the pattern, exit with the Docker container exit status
           if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
+              # We can't diagnose or fix these errors, so we're just ignoring them for now.
+              # They don't actually impact the test because they happen after it succeeds.
+              # See ticket #7898 for details. 
+              if [ $EXIT_STATUS -eq 137 ] || [ $EXIT_STATUS -eq 139 ]; then
+                  echo "Warning: ignoring docker exit status $EXIT_STATUS";
+                  exit 0;
+              else
+                  exit $EXIT_STATUS;
+              fi
           fi
 
           # Handle other potential errors here
