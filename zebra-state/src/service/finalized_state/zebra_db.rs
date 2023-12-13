@@ -96,6 +96,7 @@ impl ZebraDb {
         network: Network,
         debug_skip_format_upgrades: bool,
         column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
     ) -> ZebraDb {
         let disk_version = database_format_version_on_disk(
             config,
@@ -108,16 +109,20 @@ impl ZebraDb {
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
-        // Always do format upgrades in production, but allow them to be skipped by the scanner
-        // (because it doesn't support them yet).
+        // Format upgrades try to write to the database, so we always skip them if `read_only` is
+        // `true`.
+        //
+        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
+        // also allow skipping them when we are running tests.
         //
         // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
-        let can_skip_format_upgrades = cfg!(test) || cfg!(feature = "shielded-scan");
+        let debug_skip_format_upgrades = read_only
+            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
-            debug_skip_format_upgrades: can_skip_format_upgrades && debug_skip_format_upgrades,
+            debug_skip_format_upgrades,
             format_change_handle: None,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
@@ -129,6 +134,7 @@ impl ZebraDb {
                 format_version_in_code,
                 network,
                 column_families_in_code,
+                read_only,
             ),
         };
 

@@ -89,6 +89,7 @@ fn test_block_db_round_trip_with(
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string),
+        false,
     );
 
     // Check that each block round-trips to the database
