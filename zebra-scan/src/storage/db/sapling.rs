@@ -124,7 +124,7 @@ impl Storage {
             last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
             let Some(entry) = self
                 .db
-                .zs_prev_key_value_back_from(&sapling_tx_ids, &last_stored_record_index)
+                .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index)
             else {
                 break;
             };
