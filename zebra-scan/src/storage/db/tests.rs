@@ -20,7 +20,7 @@ mod snapshot;
 
 /// Returns an empty `Storage` suitable for testing.
 pub fn new_test_storage(network: Network) -> Storage {
-    Storage::new(&Config::ephemeral(), network)
+    Storage::new(&Config::ephemeral(), network, false)
 }
 
 /// Add fake keys to `storage` for testing purposes.
