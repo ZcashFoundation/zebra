@@ -226,7 +226,7 @@ A utility for displaying Zebra's scanning results.
 
 3. Compile and run Zebra with `--features "shielded-scan"` and your config file.
    Zebra will start scanning the block chain and inform you about its progress
-   each 100 000 blocks in the log.
+   each 10 000 blocks in the log.
 
 #### Run the Reader
 
