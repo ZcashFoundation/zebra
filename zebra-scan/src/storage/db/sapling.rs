@@ -97,50 +97,37 @@ impl Storage {
             .collect()
     }
 
-    /// Returns all the keys and their birthday heights.
-    pub fn sapling_keys_and_birthday_heights(&self) -> HashMap<SaplingScanningKey, Height> {
-        // This code is a bit complex because we don't have a separate column family for keys
-        // and their birthday heights.
-        //
-        // TODO: make a separate column family after the MVP.
-
+    /// Returns all the keys and their last scanned heights.
+    pub fn sapling_keys_and_last_scanned_heights(&self) -> HashMap<SaplingScanningKey, Height> {
         let sapling_tx_ids = self.sapling_tx_ids_cf();
         let mut keys = HashMap::new();
 
-        // The minimum key is invalid or a dummy key, so we will never have an entry for it.
-        let mut find_next_key_index = SaplingScannedDatabaseIndex::min();
+        let mut last_stored_record: Option<(
+            SaplingScannedDatabaseIndex,
+            Option<SaplingScannedResult>,
+        )> = self.db.zs_last_key_value(&sapling_tx_ids);
 
         loop {
-            // Find the next key, and the first height we have for it.
-            let Some(entry) = self
-                .db
-                .zs_next_key_value_from(&sapling_tx_ids, &find_next_key_index)
-            else {
-                break;
+            let Some((mut last_stored_record_index, _result)) = last_stored_record else {
+                return keys;
             };
 
-            let sapling_key = entry.0.sapling_key;
-            let mut height = entry.0.tx_loc.height;
-            let _first_result: Option<SaplingScannedResult> = entry.1;
+            let sapling_key = last_stored_record_index.sapling_key.clone();
+            let height = last_stored_record_index.tx_loc.height;
 
-            let height_results = self.sapling_results_for_key_and_height(&sapling_key, height);
+            let prev_height = keys.insert(sapling_key.clone(), height);
+            assert_eq!(
+                prev_height, None,
+                "unexpected duplicate key: keys must only be inserted once\
+                 last_stored_record_index: {last_stored_record_index:?}",
+            );
 
-            // If there are no results for this block, then it's a "skip up to height" marker, and
-            // the birthday height is the next height. If there are some results, it's the actual
-            // birthday height.
-            if height_results.values().all(Option::is_none) {
-                height = height
-                    .next()
-                    .expect("results should only be stored for validated block heights");
-            }
-
-            keys.insert(sapling_key.clone(), height);
-
-            // Skip all the results before the next key.
-            find_next_key_index = SaplingScannedDatabaseIndex::max_for_key(&sapling_key);
+            // Skip all the results until the next key.
+            last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
+            last_stored_record = self
+                .db
+                .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index);
         }
-
-        keys
     }
 
     /// Returns the Sapling indexes and results in the supplied range.
@@ -214,6 +201,17 @@ impl ScannerWriteBatch {
 
         let index =
             SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, skip_up_to_height);
+        self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
+    }
+
+    /// Insert sapling height with no results
+    pub(crate) fn insert_sapling_height(
+        &mut self,
+        storage: &Storage,
+        sapling_key: &SaplingScanningKey,
+        height: Height,
+    ) {
+        let index = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
         self.zs_insert(&storage.sapling_tx_ids_cf(), index, None);
     }
 }

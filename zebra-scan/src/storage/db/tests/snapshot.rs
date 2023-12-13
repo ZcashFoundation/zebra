@@ -147,29 +147,25 @@ fn snapshot_raw_rocksdb_column_family_data(db: &ScannerDb, original_cf_names: &[
 /// Snapshot typed scanner result data using high-level storage methods,
 /// using `cargo insta` and RON serialization.
 fn snapshot_typed_result_data(storage: &Storage) {
-    // TODO: snapshot the latest scanned heights after PR #8080 merges
-    //insta::assert_ron_snapshot!("latest_heights", latest_scanned_heights);
-
     // Make sure the typed key format doesn't accidentally change.
-    //
-    // TODO: update this after PR #8080
-    let sapling_keys_and_birthday_heights = storage.sapling_keys();
+    let sapling_keys_last_heights = storage.sapling_keys_last_heights();
+
     // HashMap has an unstable order across Rust releases, so we need to sort it here.
     insta::assert_ron_snapshot!(
         "sapling_keys",
-        sapling_keys_and_birthday_heights,
+        sapling_keys_last_heights,
         {
                 "." => insta::sorted_redaction()
         }
     );
 
     // HashMap has an unstable order across Rust releases, so we need to sort it here as well.
-    for (key_index, (sapling_key, _birthday_height)) in sapling_keys_and_birthday_heights
-        .iter()
-        .sorted()
-        .enumerate()
+    for (key_index, (sapling_key, last_height)) in
+        sapling_keys_last_heights.iter().sorted().enumerate()
     {
         let sapling_results = storage.sapling_results(sapling_key);
+
+        assert_eq!(sapling_results.keys().max(), Some(last_height));
 
         // Check internal database method consistency
         for (height, results) in sapling_results.iter() {
