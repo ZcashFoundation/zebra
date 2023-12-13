@@ -22,8 +22,8 @@ use zebra_chain::{
 use zebra_state::{SaplingScannedResult, TransactionIndex};
 
 use crate::{
-    config::Config,
     scan::{block_to_compact, scan_block},
+    storage::db::tests::new_test_storage,
     tests::{fake_block, ZECPAGES_SAPLING_VIEWING_KEY},
 };
 
@@ -157,7 +157,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         zcash_client_backend::encoding::encode_extended_full_viewing_key("zxviews", &extfvk);
 
     // Create a database
-    let mut s = crate::storage::tests::new_test_storage(Network::Mainnet);
+    let mut s = new_test_storage(Network::Mainnet);
 
     // Insert the generated key to the database
     s.add_sapling_key(&key_to_be_stored, None);
