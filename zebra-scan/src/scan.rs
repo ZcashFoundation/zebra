@@ -64,14 +64,14 @@ pub async fn start(
     storage: Storage,
 ) -> Result<(), Report> {
     let network = storage.network();
-    let mut height = storage.min_sapling_birthday_height();
-
     // Read keys from the storage on disk, which can block async execution.
     let key_storage = storage.clone();
     let key_heights = tokio::task::spawn_blocking(move || key_storage.sapling_keys_last_heights())
         .wait_for_panics()
         .await;
     let key_heights = Arc::new(key_heights);
+
+    let mut height = get_min_height(&key_heights).unwrap_or(storage.min_sapling_birthday_height());
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
@@ -395,4 +395,9 @@ fn scanned_block_to_db_result<Nf>(
             )
         })
         .collect()
+}
+
+/// Get the minimal height available in a key_heights map.
+fn get_min_height(map: &HashMap<String, Height>) -> Option<Height> {
+    map.values().cloned().min()
 }
