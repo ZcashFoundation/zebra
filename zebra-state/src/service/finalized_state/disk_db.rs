@@ -220,11 +220,31 @@ pub trait ReadDisk {
         K: IntoDisk + FromDisk,
         V: FromDisk;
 
+    /// Returns the first key strictly greater than `lower_bound` in `cf`,
+    /// and the corresponding value.
+    ///
+    /// Returns `None` if there are no keys greater than `lower_bound`.
+    fn zs_next_key_value_strictly_after<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk;
+
     /// Returns the first key less than or equal to `upper_bound` in `cf`,
     /// and the corresponding value.
     ///
     /// Returns `None` if there are no keys less than or equal to `upper_bound`.
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk;
+
+    /// Returns the first key strictly less than `upper_bound` in `cf`,
+    /// and the corresponding value.
+    ///
+    /// Returns `None` if there are no keys less than `upper_bound`.
+    fn zs_prev_key_value_strictly_before<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
@@ -321,7 +341,6 @@ impl ReadDisk for DiskDb {
             .is_some()
     }
 
-    #[allow(clippy::unwrap_in_result)]
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -332,7 +351,6 @@ impl ReadDisk for DiskDb {
         self.zs_forward_range_iter(cf, ..).next()
     }
 
-    #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -343,26 +361,44 @@ impl ReadDisk for DiskDb {
         self.zs_reverse_range_iter(cf, ..).next()
     }
 
-    #[allow(clippy::unwrap_in_result)]
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
         self.zs_forward_range_iter(cf, lower_bound..).next()
     }
 
-    #[allow(clippy::unwrap_in_result)]
+    fn zs_next_key_value_strictly_after<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+    {
+        use std::ops::Bound::*;
+
+        // There is no standard syntax for an excluded start bound.
+        self.zs_forward_range_iter(cf, (Excluded(lower_bound), Unbounded))
+            .next()
+    }
+
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + FromDisk,
         V: FromDisk,
     {
-        // Reading individual values from iterators does not seem to cause database hangs.
         self.zs_reverse_range_iter(cf, ..=upper_bound).next()
+    }
+
+    fn zs_prev_key_value_strictly_before<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + FromDisk,
+        V: FromDisk,
+    {
+        self.zs_reverse_range_iter(cf, ..upper_bound).next()
     }
 
     fn zs_items_in_range_ordered<C, K, V, R>(&self, cf: &C, range: R) -> BTreeMap<K, V>

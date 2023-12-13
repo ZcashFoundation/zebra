@@ -54,7 +54,7 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// We log an info log with progress after this many blocks.
-const INFO_LOG_INTERVAL: u32 = 100_000;
+const INFO_LOG_INTERVAL: u32 = 10_000;
 
 /// Start a scan task that reads blocks from `state`, scans them with the configured keys in
 /// `storage`, and then writes the results to `storage`.
@@ -64,21 +64,21 @@ pub async fn start(
     storage: Storage,
 ) -> Result<(), Report> {
     let network = storage.network();
-    let mut height = storage.min_sapling_birthday_height();
-
     // Read keys from the storage on disk, which can block async execution.
     let key_storage = storage.clone();
-    let key_birthdays = tokio::task::spawn_blocking(move || key_storage.sapling_keys())
+    let key_heights = tokio::task::spawn_blocking(move || key_storage.sapling_keys_last_heights())
         .wait_for_panics()
         .await;
-    let key_birthdays = Arc::new(key_birthdays);
+    let key_heights = Arc::new(key_heights);
+
+    let mut height = get_min_height(&key_heights).unwrap_or(storage.min_sapling_birthday_height());
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
     let parsed_keys: HashMap<
         SaplingScanningKey,
         (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
-    > = key_birthdays
+    > = key_heights
         .keys()
         .map(|key| {
             let parsed_keys = sapling_key_to_scan_block_keys(key, network)?;
@@ -96,7 +96,7 @@ pub async fn start(
             state.clone(),
             chain_tip_change.clone(),
             storage.clone(),
-            key_birthdays.clone(),
+            key_heights.clone(),
             parsed_keys.clone(),
         )
         .await?;
@@ -125,7 +125,7 @@ pub async fn scan_height_and_store_results(
     mut state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
-    key_birthdays: Arc<HashMap<SaplingScanningKey, Height>>,
+    key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: Arc<
         HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
     >,
@@ -135,19 +135,7 @@ pub async fn scan_height_and_store_results(
     // Only log at info level every 100,000 blocks.
     //
     // TODO: also log progress every 5 minutes once we reach the tip?
-    let is_info_log =
-        height == storage.min_sapling_birthday_height() || height.0 % INFO_LOG_INTERVAL == 0;
-
-    // TODO: add debug logs?
-    if is_info_log {
-        info!(
-            "Scanning the blockchain: now at block {:?}, current tip {:?}",
-            height,
-            chain_tip_change
-                .latest_chain_tip()
-                .best_tip_height_and_hash(),
-        );
-    }
+    let is_info_log = height.0 % INFO_LOG_INTERVAL == 0;
 
     // Get a block from the state.
     // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().
@@ -168,24 +156,29 @@ pub async fn scan_height_and_store_results(
     // Scan it with all the keys.
     //
     // TODO: scan each key in parallel (after MVP?)
-    for (key_num, (sapling_key, birthday_height)) in key_birthdays.iter().enumerate() {
+    for (key_num, (sapling_key, last_scanned_height)) in key_last_scanned_heights.iter().enumerate()
+    {
+        // Only scan what was not scanned for each key
+        if height <= *last_scanned_height {
+            continue;
+        }
+
         // # Security
         //
         // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
         // the logs could use the key to view those transactions.
         if is_info_log {
             info!(
-                "Scanning the blockchain for key {}, started at block {:?}",
-                key_num, birthday_height,
+                "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
+                key_num, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                height.as_usize(),
+                chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
             );
         }
 
         // Get the pre-parsed keys for this configured key.
         let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
 
-        // Scan the block, which blocks async execution until the scan is complete.
-        //
-        // TODO: skip scanning before birthday height (#8022)
         let sapling_key = sapling_key.clone();
         let block = block.clone();
         let mut storage = storage.clone();
@@ -402,4 +395,9 @@ fn scanned_block_to_db_result<Nf>(
             )
         })
         .collect()
+}
+
+/// Get the minimal height available in a key_heights map.
+fn get_min_height(map: &HashMap<String, Height>) -> Option<Height> {
+    map.values().cloned().min()
 }
