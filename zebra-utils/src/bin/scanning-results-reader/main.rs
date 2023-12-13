@@ -42,6 +42,7 @@ use zebra_scan::{storage::Storage, Config};
 pub fn main() {
     let network = zcash_primitives::consensus::Network::MainNetwork;
     let storage = Storage::new(&Config::default(), zebra_network(&network), true);
+    // If the first memo is empty, it doesn't get printed. But we never print empty memos anyway.
     let mut prev_memo = "".to_owned();
 
     for (key, _) in storage.sapling_keys_last_heights().iter() {
