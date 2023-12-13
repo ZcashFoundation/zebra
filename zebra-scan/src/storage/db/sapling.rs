@@ -102,7 +102,6 @@ impl Storage {
         let sapling_tx_ids = self.sapling_tx_ids_cf();
         let mut keys = HashMap::new();
 
-        tracing::info!("searching backwards for last entry");
         let mut last_stored_record: Option<(
             SaplingScannedDatabaseIndex,
             Option<SaplingScannedResult>,
@@ -116,7 +115,6 @@ impl Storage {
             let sapling_key = last_stored_record_index.sapling_key.clone();
             let height = last_stored_record_index.tx_loc.height;
 
-            tracing::info!(?sapling_key, ?height, "inserting key and last height");
             let prev_height = keys.insert(sapling_key.clone(), height);
             assert_eq!(
                 prev_height, None,
@@ -126,14 +124,9 @@ impl Storage {
 
             // Skip all the results until the next key.
             last_stored_record_index = SaplingScannedDatabaseIndex::min_for_key(&sapling_key);
-            tracing::info!(
-                ?last_stored_record_index,
-                "searching backwards strictly before"
-            );
             last_stored_record = self
                 .db
                 .zs_prev_key_value_strictly_before(&sapling_tx_ids, &last_stored_record_index);
-            tracing::info!(?last_stored_record_index, "found last storede");
         }
     }
 
