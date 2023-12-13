@@ -187,3 +187,52 @@ You can override the binaries the script calls using these environmental variabl
 - `$ZCASH_CLI`
 - `$DIFF`
 - `$JQ`
+
+## Scanning Results Reader
+
+A utility for displaying Zebra's scanning results.
+
+### How It Works
+
+1. Opens Zebra's scanning storage and reads the results containing scanning keys
+   and TXIDs.
+2. Fetches the transactions by their TXIDs from Zebra using the
+   `getrawtransaction` RPC.
+3. Decrypts the tx outputs using the corresponding scanning key.
+4. Prints the memos in the outputs.
+
+### How to Try It
+
+#### Scan the Block Chain with Zebra
+
+1. Add a viewing key to your Zebra config file. For example:
+
+   ``` toml
+   [shielded_scan.sapling_keys_to_scan]
+   "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz" = 1
+   ```
+   This key is from [ZECpages](https://zecpages.com/boardinfo).
+
+2. Make sure Zebra runs on Mainnet and listens on the default RPC port by having
+   the following in the same config file:
+
+    ``` toml
+    [network]
+    network = 'Mainnet'
+
+    [rpc]
+    listen_addr = "127.0.0.1:8232"
+    ```
+
+3. Compile and run Zebra with `--features "shielded-scan"` and your config file.
+   Zebra will start scanning the block chain and inform you about its progress
+   each 100 000 blocks in the log.
+
+#### Run the Reader
+
+4. To print the memos in outputs decryptable by the provided scanning key, run
+   the reader while also running Zebra. For example:
+
+   ``` bash
+   cargo run --release --features shielded-scan --bin scanning-results-reader
+   ```
