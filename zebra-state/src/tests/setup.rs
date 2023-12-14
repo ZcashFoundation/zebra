@@ -99,6 +99,7 @@ pub(crate) fn new_state_with_mainnet_genesis(
         true,
         #[cfg(feature = "elasticsearch")]
         None,
+        false,
     );
     let non_finalized_state = NonFinalizedState::new(network);
 

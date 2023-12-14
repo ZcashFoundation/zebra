@@ -658,6 +658,7 @@ impl DiskDb {
         format_version_in_code: &Version,
         network: Network,
         column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
     ) -> DiskDb {
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
@@ -680,7 +681,11 @@ impl DiskDb {
             .unique()
             .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
 
-        let db_result = DB::open_cf_descriptors(&db_options, &path, column_families);
+        let db_result = if read_only {
+            DB::open_cf_descriptors_read_only(&db_options, &path, column_families, false)
+        } else {
+            DB::open_cf_descriptors(&db_options, &path, column_families)
+        };
 
         match db_result {
             Ok(db) => {

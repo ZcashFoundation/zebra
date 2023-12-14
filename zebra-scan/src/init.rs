@@ -33,7 +33,7 @@ pub async fn init(
     state: scan::State,
     chain_tip_change: ChainTipChange,
 ) -> Result<(), Report> {
-    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network))
+    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
         .wait_for_panics()
         .await;
 
