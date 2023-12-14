@@ -89,7 +89,8 @@ fn test_database_format_with_network(network: Network) {
     //
     // We limit the number of blocks, because we create 2 snapshots per block, one for each network.
     for height in 0..=2 {
-        super::add_fake_results(&mut storage, network, Height(height));
+        super::add_fake_results(&mut storage, network, Height(height), true);
+        super::add_fake_results(&mut storage, network, Height(height), false);
 
         let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_suffix(format!("{net_suffix}_{height}"));
@@ -98,8 +99,6 @@ fn test_database_format_with_network(network: Network) {
         settings.bind(|| snapshot_raw_rocksdb_column_family_data(&storage.db, &cf_names));
         settings.bind(|| snapshot_typed_result_data(&storage));
     }
-
-    // TODO: add an empty marker result after PR #8080 merges
 }
 
 /// Snapshot the data in each column family, using `cargo insta` and RON serialization.

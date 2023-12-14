@@ -3,5 +3,6 @@ source: zebra-scan/src/storage/db/tests/snapshot.rs
 expression: sapling_results
 ---
 {
+  Height(0): [],
   Height(999999): [],
 }

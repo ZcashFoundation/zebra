@@ -1,6 +1,6 @@
 //! General scanner database tests.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
     block::{Block, Height},
@@ -10,7 +10,7 @@ use zebra_chain::{
 use zebra_state::TransactionIndex;
 
 use crate::{
-    storage::Storage,
+    storage::{Storage, INSERT_CONTROL_INTERVAL},
     tests::{FAKE_SAPLING_VIEWING_KEY, ZECPAGES_SAPLING_VIEWING_KEY},
     Config,
 };
@@ -32,7 +32,15 @@ pub fn add_fake_keys(storage: &mut Storage) {
 }
 
 /// Add fake results to `storage` for testing purposes.
-pub fn add_fake_results(storage: &mut Storage, network: Network, height: Height) {
+///
+/// If `add_progress_marker` is `true`, adds a progress marker.
+/// If it is `false`, adds the transaction hashes from `height`.
+pub fn add_fake_results(
+    storage: &mut Storage,
+    network: Network,
+    height: Height,
+    add_progress_marker: bool,
+) {
     let blocks = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
         Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
@@ -44,15 +52,25 @@ pub fn add_fake_results(storage: &mut Storage, network: Network, height: Height)
         .zcash_deserialize_into()
         .expect("test data deserializes");
 
-    // Fake results from the first few blocks
-    storage.add_sapling_results(
-        &ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
-        height,
-        block
-            .transactions
-            .iter()
-            .enumerate()
-            .map(|(index, tx)| (TransactionIndex::from_usize(index), tx.hash().into()))
-            .collect(),
-    );
+    if add_progress_marker {
+        // Fake a progress marker.
+        let next_progress_height = height.0.next_multiple_of(INSERT_CONTROL_INTERVAL);
+        storage.add_sapling_results(
+            &FAKE_SAPLING_VIEWING_KEY.to_string(),
+            Height(next_progress_height),
+            BTreeMap::new(),
+        );
+    } else {
+        // Fake results from the block at `height`.
+        storage.add_sapling_results(
+            &ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
+            height,
+            block
+                .transactions
+                .iter()
+                .enumerate()
+                .map(|(index, tx)| (TransactionIndex::from_usize(index), tx.hash().into()))
+                .collect(),
+        );
+    }
 }
