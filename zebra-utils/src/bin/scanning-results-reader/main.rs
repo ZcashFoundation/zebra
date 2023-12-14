@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use jsonrpc::simple_http::SimpleHttpTransport;
 use jsonrpc::Client;
 use serde_json::value::RawValue;
@@ -50,7 +51,7 @@ pub fn main() {
             .expect("Scanning key from the storage should be valid")
             .0
             .into_iter()
-            .next()
+            .exactly_one()
             .expect("There should be exactly one dfvk");
 
         let ufvk_with_acc_id = HashMap::from([(

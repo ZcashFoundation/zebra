@@ -67,6 +67,7 @@ getblocktemplate-rpcs = [
 ]
 
 shielded-scan = [
+    "itertools",
     "jsonrpc",
     "zcash_primitives",
     "zcash_client_backend",
