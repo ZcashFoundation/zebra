@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use hex::ToHex;
 use itertools::Itertools;
 use jsonrpc::simple_http::SimpleHttpTransport;
 use jsonrpc::Client;
@@ -42,12 +43,12 @@ use zebra_scan::{storage::Storage, Config};
 #[allow(clippy::print_stdout)]
 pub fn main() {
     let network = zcash_primitives::consensus::Network::MainNetwork;
-    let storage = Storage::new(&Config::default(), zebra_network(&network), true);
+    let storage = Storage::new(&Config::default(), network.into(), true);
     // If the first memo is empty, it doesn't get printed. But we never print empty memos anyway.
     let mut prev_memo = "".to_owned();
 
     for (key, _) in storage.sapling_keys_last_heights().iter() {
-        let dfvk = sapling_key_to_scan_block_keys(key, zebra_network(&network))
+        let dfvk = sapling_key_to_scan_block_keys(key, network.into())
             .expect("Scanning key from the storage should be valid")
             .0
             .into_iter()
@@ -60,11 +61,11 @@ pub fn main() {
         )]);
 
         for (height, txids) in storage.sapling_results(key) {
-            let height = BlockHeight::from_u32(height.0);
+            let height = BlockHeight::from(height);
 
             for txid in txids.iter() {
                 let tx = Transaction::read(
-                    &hex::decode(&get_tx_via_rpc(hex::encode(txid.bytes_in_display_order())))
+                    &hex::decode(&get_tx_via_rpc(txid.encode_hex()))
                         .expect("RPC response should be decodable from hex string to bytes")[..],
                     BranchId::for_height(&network, height),
                 )
@@ -88,10 +89,10 @@ pub fn main() {
     }
 }
 
-/// Trims trailing zeroes from a memo, and returns the memo as a string.
+/// Trims trailing zeroes from a memo, and returns the memo as a [`String`].
 fn memo_bytes_to_string(memo: &[u8; 512]) -> String {
     match memo.iter().rposition(|&byte| byte != 0) {
-        Some(i) => std::str::from_utf8(&memo[..=i]).unwrap_or("").to_owned(),
+        Some(i) => String::from_utf8_lossy(&memo[..=i]).into_owned(),
         None => "".to_owned(),
     }
 }
@@ -114,18 +115,4 @@ fn get_tx_via_rpc(txid: String) -> String {
     response
         .result()
         .expect("Zebra's RPC response should contain a valid result")
-}
-
-/// Converts [`zcash_primitives::consensus::Network`] to [`zebra_chain::parameters::Network`].
-fn zebra_network(
-    network: &zcash_primitives::consensus::Network,
-) -> zebra_chain::parameters::Network {
-    match network {
-        zcash_primitives::consensus::Network::MainNetwork => {
-            zebra_chain::parameters::Network::Mainnet
-        }
-        zcash_primitives::consensus::Network::TestNetwork => {
-            zebra_chain::parameters::Network::Testnet
-        }
-    }
 }
