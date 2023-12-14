@@ -112,6 +112,15 @@ impl From<Height> for BlockHeight {
     }
 }
 
+impl TryFrom<BlockHeight> for Height {
+    type Error = &'static str;
+
+    /// Checks that the `height` is within the valid [`Height`] range.
+    fn try_from(height: BlockHeight) -> Result<Self, Self::Error> {
+        Self::try_from(u32::from(height))
+    }
+}
+
 /// A difference between two [`Height`]s, possibly negative.
 ///
 /// This can represent the difference between any height values,
