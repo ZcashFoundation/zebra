@@ -345,3 +345,12 @@ impl From<Network> for zcash_primitives::consensus::Network {
         }
     }
 }
+
+impl From<zcash_primitives::consensus::Network> for Network {
+    fn from(network: zcash_primitives::consensus::Network) -> Self {
+        match network {
+            zcash_primitives::consensus::Network::MainNetwork => Network::Mainnet,
+            zcash_primitives::consensus::Network::TestNetwork => Network::Testnet,
+        }
+    }
+}

@@ -1,17 +1,16 @@
 # Zebra Utilities
 
-This crate contains tools for zebra maintainers.
-
-## Programs
+Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
+- [scanning-results-reader](#scanning-results-reader)
 
 Binaries are easier to use if they are located in your system execution path.
 
-### zebra-checkpoints
+## zebra-checkpoints
 
 This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
@@ -93,7 +92,7 @@ Then use the commands above to regenerate the checkpoints.
 - Open a pull request with the updated Mainnet and Testnet lists at:
   https://github.com/ZcashFoundation/zebra/pulls
 
-### zebrad-hash-lookup
+## zebrad-hash-lookup
 
 Given a block hash the script will get additional information using `zcash-cli`.
 
@@ -108,7 +107,7 @@ $
 ```
 This program is commonly used as part of `zebrad-log-filter` where hashes will be captured from `zebrad` output.
 
-### zebrad-log-filter
+## zebrad-log-filter
 
 The program is designed to filter the output from the zebra terminal or log file. Each time a hash is seen the script will capture it and get the additional information using `zebrad-hash-lookup`.
 
@@ -127,7 +126,7 @@ next: 00000001436277884eef900772f0fcec9566becccebaab4713fd665b60fab309
 ...
 ```
 
-### zcash-rpc-diff
+## zcash-rpc-diff
 
 This program compares `zebrad` and `zcashd` RPC responses.
 
@@ -188,3 +187,52 @@ You can override the binaries the script calls using these environmental variabl
 - `$ZCASH_CLI`
 - `$DIFF`
 - `$JQ`
+
+## Scanning Results Reader
+
+A utility for displaying Zebra's scanning results.
+
+### How It Works
+
+1. Opens Zebra's scanning storage and reads the results containing scanning keys
+   and TXIDs.
+2. Fetches the transactions by their TXIDs from Zebra using the
+   `getrawtransaction` RPC.
+3. Decrypts the tx outputs using the corresponding scanning key.
+4. Prints the memos in the outputs.
+
+### How to Try It
+
+#### Scan the Block Chain with Zebra
+
+1. Add a viewing key to your Zebra config file. For example:
+
+   ``` toml
+   [shielded_scan.sapling_keys_to_scan]
+   "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz" = 1
+   ```
+   This key is from [ZECpages](https://zecpages.com/boardinfo).
+
+2. Make sure Zebra runs on Mainnet and listens on the default RPC port by having
+   the following in the same config file:
+
+    ``` toml
+    [network]
+    network = 'Mainnet'
+
+    [rpc]
+    listen_addr = "127.0.0.1:8232"
+    ```
+
+3. Compile and run Zebra with `--features "shielded-scan"` and your config file.
+   Zebra will start scanning the block chain and inform you about its progress
+   each 10 000 blocks in the log.
+
+#### Run the Reader
+
+4. To print the memos in outputs decryptable by the provided scanning key, run
+   the reader while also running Zebra. For example:
+
+   ``` bash
+   cargo run --release --features shielded-scan --bin scanning-results-reader
+   ```

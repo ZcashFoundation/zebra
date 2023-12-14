@@ -2,6 +2,7 @@
 
 use std::ops::{Add, Sub};
 use thiserror::Error;
+use zcash_primitives::consensus::BlockHeight;
 
 use crate::{serialization::SerializationError, BoxError};
 
@@ -102,6 +103,12 @@ impl Height {
     /// Returns the value as a `usize`.
     pub fn as_usize(self) -> usize {
         self.0.try_into().expect("fits in usize")
+    }
+}
+
+impl From<Height> for BlockHeight {
+    fn from(height: Height) -> Self {
+        BlockHeight::from_u32(height.0)
     }
 }
 
