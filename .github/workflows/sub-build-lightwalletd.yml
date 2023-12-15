@@ -119,7 +119,7 @@ jobs:
           token_format: 'access_token'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.1.1
+        uses: google-github-actions/setup-gcloud@v2.0.0
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v3.0.0
