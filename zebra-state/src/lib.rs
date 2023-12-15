@@ -64,7 +64,7 @@ pub use rocksdb::AsColumnFamilyRef;
 #[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
     FromDisk, IntoDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
-    SaplingScannedResult, SaplingScanningKey, ZebraDb,
+    SaplingScannedResult, SaplingScanningKey, TypedColumnFamily, WriteTypedBatch, ZebraDb,
 };
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
