@@ -1,5 +1,11 @@
 //! Type-safe column family access.
 
+// When these types aren't exported, they become dead code.
+#![cfg_attr(
+    not(any(test, feature = "proptest-impl", feature = "shielded-scan")),
+    allow(dead_code)
+)]
+
 use std::{
     any::type_name,
     collections::{BTreeMap, HashMap},
