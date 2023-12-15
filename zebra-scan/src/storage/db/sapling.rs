@@ -153,6 +153,9 @@ impl Storage {
     }
 
     // Writing database entries
+    //
+    // To avoid exposing internal types, and accidentally forgetting to write a batch,
+    // each pub(crate) write method should write an entire batch.
 
     /// Inserts a batch of scanned sapling result for a key and height.
     /// If a result already exists for that key, height, and index, it is replaced.
