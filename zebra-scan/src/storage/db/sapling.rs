@@ -178,7 +178,7 @@ impl Storage {
         // Defensive programming: add the tracking entry first, so that we don't accidentally
         // overwrite real results with it. (This is currently prevented by the empty check.)
         if needs_control_entry {
-            batch = Self::insert_sapling_height(batch, sapling_key, height);
+            batch = batch.insert_sapling_height(sapling_key, height);
         }
 
         for (index, sapling_result) in sapling_results {
@@ -225,32 +225,30 @@ impl Storage {
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
         //
-        // TODO: ignore incorrect changes to birthday heights, and redundant
-        //       birthday heights
-        Self::insert_sapling_height(
-            self.sapling_tx_ids_cf().for_writing(),
-            sapling_key,
-            skip_up_to_height,
-        )
-        .write_batch()
-        .expect("unexpected database write failure");
+        // TODO: ignore incorrect changes to birthday heights,
+        //       and redundant birthday heights
+        self.sapling_tx_ids_cf()
+            .for_writing()
+            .insert_sapling_height(sapling_key, skip_up_to_height)
+            .write_batch()
+            .expect("unexpected database write failure");
     }
+}
 
+/// Utility trait for inserting sapling heights into a WriteSaplingTxIdsBatch.
+trait InsertSaplingHeight {
+    fn insert_sapling_height(self, sapling_key: &SaplingScanningKey, height: Height) -> Self;
+}
+
+impl<'cf> InsertSaplingHeight for WriteSaplingTxIdsBatch<'cf> {
     /// Insert sapling height with no results.
     ///
     /// If a result already exists for the coinbase transaction at that height,
     /// it is replaced with an empty result. This should never happen.
-    //
-    // TODO: turn this into a method on a wrapper type for WriteSaplingTxIdsBatch
-    //       and impl Deref and DerefMut<WriteTypedBatch> on the wrapper
-    fn insert_sapling_height<'cf>(
-        write_sapling_tx_ids_batch: WriteSaplingTxIdsBatch<'cf>,
-        sapling_key: &SaplingScanningKey,
-        height: Height,
-    ) -> WriteSaplingTxIdsBatch<'cf> {
+    fn insert_sapling_height(self, sapling_key: &SaplingScanningKey, height: Height) -> Self {
         let index = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
 
         // TODO: assert that we don't overwrite any entries here.
-        write_sapling_tx_ids_batch.zs_insert(index, None)
+        self.zs_insert(index, None)
     }
 }
