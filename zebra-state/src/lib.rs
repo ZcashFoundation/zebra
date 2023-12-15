@@ -60,15 +60,19 @@ pub use service::{
 };
 
 #[cfg(feature = "shielded-scan")]
-pub use rocksdb::AsColumnFamilyRef;
-#[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
-    FromDisk, IntoDisk, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex,
-    SaplingScannedResult, SaplingScanningKey, TypedColumnFamily, WriteTypedBatch, ZebraDb,
+    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
+    SaplingScanningKey,
 };
 
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
-pub use service::finalized_state::{DiskWriteBatch, ReadDisk, WriteDisk};
+pub use service::{
+    finalized_state::{
+        DiskWriteBatch, FromDisk, IntoDisk, ReadDisk, TypedColumnFamily, WriteDisk,
+        WriteTypedBatch, ZebraDb,
+    },
+    ReadStateService,
+};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
@@ -78,8 +82,11 @@ pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
-    init_test, init_test_services, ReadStateService,
+    init_test, init_test_services,
 };
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use constants::latest_version_for_adding_subtrees;
 
 #[cfg(not(any(test, feature = "proptest-impl")))]
 #[allow(unused_imports)]
@@ -91,8 +98,5 @@ pub(crate) use config::hidden::{
 pub use config::hidden::{
     write_database_format_version_to_disk, write_state_database_format_version_to_disk,
 };
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use constants::latest_version_for_adding_subtrees;
 
 pub(crate) use request::ContextuallyVerifiedBlock;
