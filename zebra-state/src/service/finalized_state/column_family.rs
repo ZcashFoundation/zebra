@@ -252,7 +252,7 @@ where
     // Writing batches
 
     /// Writes this batch to this column family in the database.
-    pub fn write(self) -> Result<(), rocksdb::Error> {
+    pub fn write_batch(self) -> Result<(), rocksdb::Error> {
         self.inner.db.write(self.batch)
     }
 

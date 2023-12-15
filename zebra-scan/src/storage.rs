@@ -6,9 +6,7 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
 };
-use zebra_state::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, TransactionIndex, TransactionLocation,
-};
+use zebra_state::TransactionIndex;
 
 use crate::config::Config;
 
@@ -17,11 +15,9 @@ pub mod db;
 // Public types and APIs
 pub use db::{SaplingScannedResult, SaplingScanningKey};
 
-use self::db::ScannerWriteBatch;
-
 /// We insert an empty results entry to the database every this interval for each stored key,
 /// so we can track progress.
-const INSERT_CONTROL_INTERVAL: u32 = 1_000;
+pub const INSERT_CONTROL_INTERVAL: u32 = 1_000;
 
 /// Store key info and results of the scan.
 ///
@@ -84,11 +80,7 @@ impl Storage {
 
         // It's ok to write some keys and not others during shutdown, so each key can get its own
         // batch. (They will be re-written on startup anyway.)
-        let mut batch = ScannerWriteBatch::default();
-
-        batch.insert_sapling_key(self, sapling_key, birthday);
-
-        self.write_batch(batch);
+        self.insert_sapling_key(sapling_key, birthday);
     }
 
     /// Returns all the keys and their last scanned heights.
@@ -104,6 +96,9 @@ impl Storage {
     /// Add the sapling results for `height` to the storage. The results can be any map of
     /// [`TransactionIndex`] to [`SaplingScannedResult`].
     ///
+    /// All the results for the same height must be written at the same time, to avoid partial
+    /// writes during shutdown.
+    ///
     /// Also adds empty progress tracking entries every `INSERT_CONTROL_INTERVAL` blocks if needed.
     ///
     /// # Performance / Hangs
@@ -116,37 +111,7 @@ impl Storage {
         height: Height,
         sapling_results: BTreeMap<TransactionIndex, SaplingScannedResult>,
     ) {
-        // We skip heights that have one or more results, so the results for each height must be
-        // in a single batch.
-        let mut batch = ScannerWriteBatch::default();
-
-        // Every `INSERT_CONTROL_INTERVAL` we add a new entry to the scanner database for each key
-        // so we can track progress made in the last interval even if no transaction was yet found.
-        let needs_control_entry =
-            height.0 % INSERT_CONTROL_INTERVAL == 0 && sapling_results.is_empty();
-
-        // Add scanner progress tracking entry for key.
-        // Defensive programming: add the tracking entry first, so that we don't accidentally
-        // overwrite real results with it. (This is currently prevented by the empty check.)
-        if needs_control_entry {
-            batch.insert_sapling_height(self, sapling_key, height);
-        }
-
-        for (index, sapling_result) in sapling_results {
-            let index = SaplingScannedDatabaseIndex {
-                sapling_key: sapling_key.clone(),
-                tx_loc: TransactionLocation::from_parts(height, index),
-            };
-
-            let entry = SaplingScannedDatabaseEntry {
-                index,
-                value: Some(sapling_result),
-            };
-
-            batch.insert_sapling_result(self, entry);
-        }
-
-        self.write_batch(batch);
+        self.insert_sapling_results(sapling_key, height, sapling_results)
     }
 
     /// Returns all the results for a sapling key, for every scanned block height.
