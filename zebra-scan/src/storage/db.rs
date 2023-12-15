@@ -85,7 +85,7 @@ impl Storage {
         // Report where we are for each key in the database.
         let keys = new_storage.sapling_keys_last_heights();
         for (key_num, (_key, height)) in keys.iter().enumerate() {
-            tracing::info!(
+            info!(
                 "Last scanned height for key number {} is {}, resuming at {}",
                 key_num,
                 height.as_usize(),
@@ -93,7 +93,7 @@ impl Storage {
             );
         }
 
-        tracing::info!("loaded Zebra scanner cache");
+        info!("loaded Zebra scanner cache");
 
         new_storage
     }
