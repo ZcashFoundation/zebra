@@ -9,7 +9,7 @@ use std::{
     ops::RangeBounds,
 };
 
-use crate::{DiskWriteBatch, FromDisk, IntoDisk, ReadDisk, WriteDisk};
+use crate::service::finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, ReadDisk, WriteDisk};
 
 use super::DiskDb;
 
