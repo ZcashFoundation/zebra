@@ -141,6 +141,7 @@ You can also build Zebra with additional [Cargo features](https://doc.rust-lang.
 - `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
 - `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
+- `shielded-scan` for [experimental shielded scan support](https://zebra.zfnd.org/user/shielded-scan.md)
 
 You can combine multiple features by listing them as parameters of the `--features` flag:
 
