@@ -11,10 +11,17 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{borrow::Borrow, collections::HashMap, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
+    amount::NonNegative,
+    block::Height,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
+    transparent,
     value_balance::ValueBalance,
 };
 
@@ -24,11 +31,53 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
+        TypedColumnFamily,
     },
     BoxError,
 };
 
+/// The name of the History Tree column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const HISTORY_TREE: &str = "history_tree";
+
+/// The type for reading history trees from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type HistoryTreeCf<'cf> = TypedColumnFamily<'cf, (), NonEmptyHistoryTree>;
+
+/// The legacy (1.3.0 and earlier) type for reading history trees from the database.
+/// This type should not be used in new code.
+pub type LegacyHistoryTreeCf<'cf> = TypedColumnFamily<'cf, Height, NonEmptyHistoryTree>;
+
+/// A generic raw key type for reading history trees from the database, regardless of the database version.
+/// This type should not be used in new code.
+pub type RawHistoryTreeCf<'cf> = TypedColumnFamily<'cf, RawBytes, NonEmptyHistoryTree>;
+
 impl ZebraDb {
+    // Column family convenience methods
+
+    /// Returns a typed handle to the `history_tree` column family.
+    pub(crate) fn history_tree_cf(&self) -> HistoryTreeCf {
+        HistoryTreeCf::new(&self.db, HISTORY_TREE)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a legacy typed handle to the `history_tree` column family.
+    /// This should not be used in new code.
+    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreeCf {
+        LegacyHistoryTreeCf::new(&self.db, HISTORY_TREE)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a generic raw key typed handle to the `history_tree` column family.
+    /// This should not be used in new code.
+    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreeCf {
+        RawHistoryTreeCf::new(&self.db, HISTORY_TREE)
+            .expect("column family was created when database was created")
+    }
+
     // History tree methods
 
     /// Returns the ZIP-221 history tree of the finalized tip.
@@ -36,11 +85,7 @@ impl ZebraDb {
     /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
     /// returns an empty history tree.
     pub fn history_tree(&self) -> Arc<HistoryTree> {
-        if self.is_empty() {
-            return Arc::<HistoryTree>::default();
-        }
-
-        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+        let history_tree_cf = self.history_tree_cf();
 
         // # Backwards Compatibility
         //
@@ -56,29 +101,32 @@ impl ZebraDb {
         //
         // So we use the empty key `()`. Since the key has a constant value, we will always read
         // the latest tree.
-        let mut history_tree: Option<Arc<HistoryTree>> = self.db.zs_get(&history_tree_cf, &());
+        let mut history_tree = history_tree_cf.zs_get(&());
 
         if history_tree.is_none() {
+            let legacy_history_tree_cf = self.legacy_history_tree_cf();
+
             // In Zebra 1.4.0 and later, we only update the history tip tree when it has changed (for every block after heartwood).
             // But we write with a `()` key, not a height key.
             // So we need to look for the most recent update height if the `()` key has never been written.
-            history_tree = self
-                .db
-                .zs_last_key_value(&history_tree_cf)
-                .map(|(_key, tree_value): (Height, _)| tree_value);
+            history_tree = legacy_history_tree_cf
+                .zs_last_key_value()
+                .map(|(_height_key, tree_value)| tree_value);
         }
 
-        history_tree.unwrap_or_default()
+        Arc::new(HistoryTree::from(history_tree))
     }
 
     /// Returns all the history tip trees.
-    /// We only store the history tree for the tip, so this method is mainly used in tests.
-    pub fn history_trees_full_tip(
-        &self,
-    ) -> impl Iterator<Item = (RawBytes, Arc<HistoryTree>)> + '_ {
-        let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+    /// We only store the history tree for the tip, so this method is only used in tests and
+    /// upgrades.
+    pub(crate) fn history_trees_full_tip(&self) -> BTreeMap<RawBytes, Arc<HistoryTree>> {
+        let raw_history_tree_cf = self.raw_history_tree_cf();
 
-        self.db.zs_forward_range_iter(&history_tree_cf, ..)
+        raw_history_tree_cf
+            .zs_forward_range_iter(..)
+            .map(|(raw_key, history_tree)| (raw_key, Arc::new(HistoryTree::from(history_tree))))
+            .collect()
     }
 
     // Value pool methods
