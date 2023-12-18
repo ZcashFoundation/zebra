@@ -52,7 +52,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/docs.yml'
+      - '.github/workflows/docs-deploy-firebase.yml'
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
