@@ -30,6 +30,10 @@ use crate::{
     Config,
 };
 
+// Doc-only imports
+#[allow(unused_imports)]
+use super::{TypedColumnFamily, WriteTypedBatch};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 mod tests;
 
@@ -107,10 +111,30 @@ pub struct DiskWriteBatch {
     batch: rocksdb::WriteBatch,
 }
 
-/// Helper trait for inserting (Key, Value) pairs into rocksdb with a consistently
-/// defined format
+impl Debug for DiskWriteBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiskWriteBatch")
+            .field("batch", &format!("{} bytes", self.batch.size_in_bytes()))
+            .finish()
+    }
+}
+
+impl PartialEq for DiskWriteBatch {
+    fn eq(&self, other: &Self) -> bool {
+        self.batch.data() == other.batch.data()
+    }
+}
+
+impl Eq for DiskWriteBatch {}
+
+/// Helper trait for inserting serialized typed (Key, Value) pairs into rocksdb.
+///
+/// # Deprecation
+///
+/// This trait should not be used in new code, use [`WriteTypedBatch`] instead.
 //
-// TODO: just implement these methods directly on WriteBatch
+// TODO: replace uses of this trait with WriteTypedBatch,
+//       implement these methods directly on WriteTypedBatch, and delete the trait.
 pub trait WriteDisk {
     /// Serialize and insert the given key and value into a rocksdb column family,
     /// overwriting any existing `value` for `key`.
@@ -120,20 +144,29 @@ pub trait WriteDisk {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
-    /// Remove the given key from rocksdb column family if it exists.
+    /// Remove the given key from a rocksdb column family, if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
 
-    /// Deletes the given key range from rocksdb column family if it exists, including `from` and
-    /// excluding `to`.
-    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
+    /// Delete the given key range from a rocksdb column family, if it exists, including `from`
+    /// and excluding `until_strictly_before`.
+    //
+    // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+    //       see zs_range_iter() for an example of the edge cases
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, until_strictly_before: K)
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug;
 }
 
+/// # Deprecation
+///
+/// These impls should not be used in new code, use [`WriteTypedBatch`] instead.
+//
+// TODO: replace uses of these impls with WriteTypedBatch,
+//       implement these methods directly on WriteTypedBatch, and delete the trait.
 impl WriteDisk for DiskWriteBatch {
     fn zs_insert<C, K, V>(&mut self, cf: &C, key: K, value: V)
     where
@@ -156,23 +189,27 @@ impl WriteDisk for DiskWriteBatch {
     }
 
     // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-    //       see zs_forward_range_iter() for an example of the edge cases
-    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, to: K)
+    //       see zs_range_iter() for an example of the edge cases
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, until_strictly_before: K)
     where
         C: rocksdb::AsColumnFamilyRef,
         K: IntoDisk + Debug,
     {
         let from_bytes = from.as_bytes();
-        let to_bytes = to.as_bytes();
-        self.batch.delete_range_cf(cf, from_bytes, to_bytes);
+        let until_strictly_before_bytes = until_strictly_before.as_bytes();
+        self.batch
+            .delete_range_cf(cf, from_bytes, until_strictly_before_bytes);
     }
 }
 
-/// Helper trait for retrieving values from rocksdb column familys with a consistently
-/// defined format
+/// Helper trait for retrieving and deserializing values from rocksdb column families.
+///
+/// # Deprecation
+///
+/// This trait should not be used in new code, use [`TypedColumnFamily`] instead.
 //
-// TODO: just implement these methods directly on DiskDb
-//       move this trait, its methods, and support methods to another module
+// TODO: replace uses of this trait with TypedColumnFamily,
+//       implement these methods directly on DiskDb, and delete the trait.
 pub trait ReadDisk {
     /// Returns true if a rocksdb column family `cf` does not contain any entries.
     fn zs_is_empty<C>(&self, cf: &C) -> bool
@@ -292,6 +329,12 @@ impl PartialEq for DiskDb {
 
 impl Eq for DiskDb {}
 
+/// # Deprecation
+///
+/// These impls should not be used in new code, use [`TypedColumnFamily`] instead.
+//
+// TODO: replace uses of these impls with TypedColumnFamily,
+//       implement these methods directly on DiskDb, and delete the trait.
 impl ReadDisk for DiskDb {
     fn zs_is_empty<C>(&self, cf: &C) -> bool
     where
@@ -740,8 +783,18 @@ impl DiskDb {
         self.db.path()
     }
 
+    /// Returns the low-level rocksdb inner database.
+    #[allow(dead_code)]
+    fn inner(&self) -> &Arc<DB> {
+        &self.db
+    }
+
     /// Returns the column family handle for `cf_name`.
-    pub fn cf_handle(&self, cf_name: &str) -> Option<impl rocksdb::AsColumnFamilyRef + '_> {
+    pub fn cf_handle(&self, cf_name: &str) -> Option<rocksdb::ColumnFamilyRef<'_>> {
+        // Note: the lifetime returned by this method is subtly wrong. As of December 2023 it is
+        // the shorter of &self and &str, but RocksDB clones column family names internally, so it
+        // should just be &self. To avoid this restriction, clone the string before passing it to
+        // this method. Currently Zebra uses static strings, so this doesn't matter.
         self.db.cf_handle(cf_name)
     }
 

@@ -9,7 +9,6 @@ use std::{
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
-use tracing::info;
 
 use zcash_client_backend::{
     data_api::ScannedBlock,
