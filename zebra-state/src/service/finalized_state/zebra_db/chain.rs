@@ -133,9 +133,10 @@ impl ZebraDb {
 
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
-        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
-        self.db
-            .zs_get(&value_pool_cf, &())
+        let chain_value_pools_cf = self.chain_value_pools_cf();
+
+        chain_value_pools_cf
+            .zs_get(&())
             .unwrap_or_else(ValueBalance::zero)
     }
 }
@@ -144,11 +145,14 @@ impl DiskWriteBatch {
     // History tree methods
 
     /// Updates the history tree for the tip, if it is not empty.
-    pub fn update_history_tree(&mut self, zebra_db: &ZebraDb, tree: &HistoryTree) {
-        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
+    ///
+    /// The batch must be written to the database by the caller.
+    pub fn update_history_tree(&mut self, db: &ZebraDb, tree: &HistoryTree) {
+        let history_tree_cf = db.history_tree_cf().with_batch_for_writing(self);
 
         if let Some(tree) = tree.as_ref().as_ref() {
-            self.zs_insert(&history_tree_cf, (), tree);
+            // The batch is modified by this method and written by the caller.
+            let _ = history_tree_cf.zs_insert(&(), tree);
         }
     }
 
@@ -157,11 +161,20 @@ impl DiskWriteBatch {
     ///
     /// From state format 25.3.0 onwards, the history trees are indexed by an empty key,
     /// so this method does nothing.
-    pub fn delete_range_history_tree(&mut self, zebra_db: &ZebraDb, from: &Height, to: &Height) {
-        let history_tree_cf = zebra_db.db.cf_handle("history_tree").unwrap();
+    ///
+    /// The batch must be written to the database by the caller.
+    pub fn delete_range_history_tree(
+        &mut self,
+        db: &ZebraDb,
+        from: &Height,
+        until_strictly_before: &Height,
+    ) {
+        let history_tree_cf = db.legacy_history_tree_cf().with_batch_for_writing(self);
 
+        // The batch is modified by this method and written by the caller.
+        //
         // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-        self.zs_delete_range(&history_tree_cf, from, to);
+        let _ = history_tree_cf.zs_delete_range(from, until_strictly_before);
     }
 
     // Value pool methods
