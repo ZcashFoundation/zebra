@@ -28,10 +28,7 @@ use zebra_chain::{
 use crate::{
     request::FinalizedBlock,
     service::finalized_state::{
-        disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::RawBytes,
-        zebra_db::ZebraDb,
-        TypedColumnFamily,
+        disk_db::DiskWriteBatch, disk_format::RawBytes, zebra_db::ZebraDb, TypedColumnFamily,
     },
     BoxError,
 };
@@ -55,6 +52,17 @@ pub type LegacyHistoryTreeCf<'cf> = TypedColumnFamily<'cf, Height, NonEmptyHisto
 /// This type should not be used in new code.
 pub type RawHistoryTreeCf<'cf> = TypedColumnFamily<'cf, RawBytes, NonEmptyHistoryTree>;
 
+/// The name of the chain value pools column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
+
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
+
 impl ZebraDb {
     // Column family convenience methods
 
@@ -75,6 +83,12 @@ impl ZebraDb {
     /// This should not be used in new code.
     pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreeCf {
         RawHistoryTreeCf::new(&self.db, HISTORY_TREE)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a typed handle to the chain value pools column family.
+    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf {
+        ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
             .expect("column family was created when database was created")
     }
 
@@ -191,17 +205,19 @@ impl DiskWriteBatch {
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_chain_value_pools_batch(
         &mut self,
-        db: &DiskDb,
+        db: &ZebraDb,
         finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
+        let chain_value_pools_cf = db.chain_value_pools_cf().with_batch_for_writing(self);
 
         let FinalizedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
-        self.zs_insert(&tip_chain_value_pool, (), new_pool);
+
+        // The batch is modified by this method and written by the caller.
+        let _ = chain_value_pools_cf.zs_insert(&(), &new_pool);
 
         Ok(())
     }
