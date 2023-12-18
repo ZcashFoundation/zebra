@@ -4,7 +4,7 @@
 
 Zebra has extensive continuous integration tests for node syncing and `lightwalletd` integration.
 
-On every PR change, Zebra runs [these Docker tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-docker.yml):
+On every PR change, Zebra runs [these Docker tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-integration-tests-gcp.yml):
 - Zebra update syncs from a cached state Google Cloud tip image
 - lightwalletd full syncs from a cached state Google Cloud tip image
 - lightwalletd update syncs from a cached state Google Cloud tip image
@@ -21,7 +21,7 @@ which are shared by all tests. Tests prefer the latest image generated from the 
 But if a state from the same commit is not available, tests will use the latest image from
 any branch and commit, as long as the state version is the same.
 
-Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-os.yml) on tier 2 platforms using GitHub actions runners.
+Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-unit-tests-os.yml) on tier 2 platforms using GitHub actions runners.
 
 ## Automated Merges
 
@@ -240,7 +240,7 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
 
 If the Docker cached state disks are full, increase the disk sizes in:
 - [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
-- [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
+- [cd-deploy-nodes-gcp.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/cd-deploy-nodes-gcp.yml)
 
 If the GitHub Actions disks are full, follow these steps until the errors are fixed:
 
