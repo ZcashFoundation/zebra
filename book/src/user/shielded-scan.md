@@ -41,9 +41,13 @@ For example, to scan for transactions with the [public ZECpages viewing key](htt
 "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz" = 1
 ```
 
+Where the number `1` above is the birthday of the corresponding key:
+- birthday lower than the sapling activation height defaults to sapling activation height.
+- birthday greater or equal than sapling activation height will start scanning at provided height, improving scanner speed.
+
 ## Running Sapling Scanning
 
-Launch Zebra and wait. Zebra needs to be synced up to at least the Sapling activation height to start scanning. If you have an already synced-up chain, the scanner will start looking for transactions for the provided keys from the start.
+For full scanning results. launch Zebra and wait for 12-24 hours. Zebra needs to be synced up to at least the Sapling activation height to start scanning. If you have an already synced-up chain, the scanner will start looking for transactions for the provided keys from the start.
 
 ```bash
 zebrad
@@ -65,7 +69,13 @@ The Zebra scanner will resume the task if your Zebra instance went down for any 
 Last scanned height for key number 0 is 1798000, resuming at 1798001
 ```
 
+## Quering results with the `scanning-results-reader` utility.
+
+The easier way to read the results of found transactions and more is to use the utility tool named `scanning-results-reader`. Please read the [tool description](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#scanning-results-reader) to learn how to use it. Instructions are straightforward.
+
 ## Querying Raw Sapling Scanning Results
+
+A more advanced way to query results is to use `ldb` tool, requires a certain level of expertise.
 
 Install `ldb`:
 
@@ -82,9 +92,3 @@ ldb --db="$HOME/.cache/zebra/private-scan/v1/mainnet" --secondary_path= --column
 Some of the output will be markers the scanner uses to keep track of progress, however, some of them will be transactions found.
 
 To lean more about how to filter the database please refer to [RocksDB Administration and Data Access Tool](https://github.com/facebook/rocksdb/wiki/Administration-and-Data-Access-Tool)
-
-Querying results this way requires a certain level of expertise.
-
-## Quering results with the `scanning-results-reader` utility.
-
-Another easier way to read the results of found transactions and more is to use the utility tool named `scanning-results-reader`. Please read the [tool description](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#scanning-results-reader) to learn how to use it. Instructions are straightforward.
