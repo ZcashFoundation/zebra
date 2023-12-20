@@ -83,7 +83,7 @@ rustflags = [
 [build]
 rustdocflags = [
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
-    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs.yml#L61
+    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-deploy-firebase.yml#L68
 
     # Links in public docs can point to private items.
     "-Arustdoc::private_intra_doc_links",
