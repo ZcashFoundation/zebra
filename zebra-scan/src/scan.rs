@@ -70,7 +70,8 @@ pub async fn start(
         .await;
     let key_heights = Arc::new(key_heights);
 
-    let mut height = get_min_height(&key_heights).unwrap_or(storage.min_sapling_birthday_height());
+    let sapling_activation_height = storage.min_sapling_birthday_height();
+    let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
@@ -90,6 +91,14 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
+        // Do not scan and notify if we are below sapling activation height.
+        let tip_height = tip_height(state.clone()).await?;
+        if tip_height < sapling_activation_height {
+            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
@@ -149,7 +158,7 @@ pub async fn scan_height_and_store_results(
     let block = match block {
         zebra_state::Response::Block(Some(block)) => block,
         zebra_state::Response::Block(None) => return Ok(None),
-        _ => unreachable!("unmatched response to a state::Tip request"),
+        _ => unreachable!("unmatched response to a state::Block request"),
     };
 
     // Scan it with all the keys.
@@ -399,4 +408,21 @@ fn scanned_block_to_db_result<Nf>(
 /// Get the minimal height available in a key_heights map.
 fn get_min_height(map: &HashMap<String, Height>) -> Option<Height> {
     map.values().cloned().min()
+}
+
+/// Get tip height or return genesis block height if no tip is available.
+async fn tip_height(mut state: State) -> Result<Height, Report> {
+    let tip = state
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(zebra_state::Request::Tip)
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    match tip {
+        zebra_state::Response::Tip(Some((height, _hash))) => Ok(height),
+        zebra_state::Response::Tip(None) => Ok(Height(0)),
+        _ => unreachable!("unmatched response to a state::Tip request"),
+    }
 }
