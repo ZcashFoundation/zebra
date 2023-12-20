@@ -439,7 +439,7 @@ impl DiskWriteBatch {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
-        db: &ZebraDb,
+        zebra_db: &ZebraDb,
         network: Network,
         finalized: &FinalizedBlock,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
@@ -449,6 +449,8 @@ impl DiskWriteBatch {
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
+
         // Commit block, transaction, and note commitment tree data.
         self.prepare_block_header_and_transaction_data_batch(db, finalized)?;
 
@@ -459,7 +461,7 @@ impl DiskWriteBatch {
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
         self.prepare_shielded_transaction_batch(db, finalized)?;
-        self.prepare_trees_batch(db, finalized, prev_note_commitment_trees)?;
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // # Consensus
         //
@@ -485,7 +487,7 @@ impl DiskWriteBatch {
 
             // Commit UTXOs and value pools
             self.prepare_chain_value_pools_batch(
-                db,
+                zebra_db,
                 finalized,
                 spent_utxos_by_outpoint,
                 value_pool,
