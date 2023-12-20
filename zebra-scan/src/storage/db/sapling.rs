@@ -192,7 +192,7 @@ impl Storage {
                 value: Some(sapling_result),
             };
 
-            batch = batch.zs_insert(entry.index, entry.value);
+            batch = batch.zs_insert(&entry.index, &entry.value);
         }
 
         batch
@@ -249,6 +249,6 @@ impl<'cf> InsertSaplingHeight for WriteSaplingTxIdsBatch<'cf> {
         let index = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
 
         // TODO: assert that we don't overwrite any entries here.
-        self.zs_insert(index, None)
+        self.zs_insert(&index, &None)
     }
 }
