@@ -52,14 +52,15 @@ where
 /// This type is also drop-safe: unwritten batches have to be specifically ignored.
 #[must_use = "batches must be written to the database"]
 #[derive(Debug, Eq, PartialEq)]
-pub struct WriteTypedBatch<'cf, Key, Value>
+pub struct WriteTypedBatch<'cf, Key, Value, Batch>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
+    Batch: WriteDisk,
 {
     inner: TypedColumnFamily<'cf, Key, Value>,
 
-    batch: DiskWriteBatch,
+    batch: Batch,
 }
 
 impl<'cf, Key, Value> Debug for TypedColumnFamily<'cf, Key, Value>
@@ -115,15 +116,39 @@ where
         })
     }
 
-    /// Returns a new writeable typed column family for this column family.
+    // Writing
+
+    /// Returns a typed writer for this column family for a new batch.
     ///
-    /// This is the only way to get a writeable column family, which ensures
+    /// These methods are the only way to get a `WriteTypedBatch`, which ensures
     /// that the read and write types are consistent.
-    pub fn for_writing(self) -> WriteTypedBatch<'cf, Key, Value> {
+    pub fn new_batch_for_writing(self) -> WriteTypedBatch<'cf, Key, Value, DiskWriteBatch> {
         WriteTypedBatch {
             inner: self,
             batch: DiskWriteBatch::new(),
         }
+    }
+
+    /// Wraps an existing write batch, and returns a typed writer for this column family.
+    ///
+    /// These methods are the only way to get a `WriteTypedBatch`, which ensures
+    /// that the read and write types are consistent.
+    pub fn take_batch_for_writing(
+        self,
+        batch: DiskWriteBatch,
+    ) -> WriteTypedBatch<'cf, Key, Value, DiskWriteBatch> {
+        WriteTypedBatch { inner: self, batch }
+    }
+
+    /// Wraps an existing write batch reference, and returns a typed writer for this column family.
+    ///
+    /// These methods are the only way to get a `WriteTypedBatch`, which ensures
+    /// that the read and write types are consistent.
+    pub fn with_batch_for_writing(
+        self,
+        batch: &mut DiskWriteBatch,
+    ) -> WriteTypedBatch<'cf, Key, Value, &mut DiskWriteBatch> {
+        WriteTypedBatch { inner: self, batch }
     }
 
     // Reading
@@ -250,30 +275,24 @@ where
     }
 }
 
-impl<'cf, Key, Value> WriteTypedBatch<'cf, Key, Value>
+impl<'cf, Key, Value, Batch> WriteTypedBatch<'cf, Key, Value, Batch>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
+    Batch: WriteDisk,
 {
-    // Writing batches
-
-    /// Writes this batch to this column family in the database.
-    pub fn write_batch(self) -> Result<(), rocksdb::Error> {
-        self.inner.db.write(self.batch)
-    }
-
     // Batching before writing
 
     /// Serialize and insert the given key and value into this column family,
     /// overwriting any existing `value` for `key`.
-    pub fn zs_insert(mut self, key: Key, value: Value) -> Self {
+    pub fn zs_insert(mut self, key: &Key, value: &Value) -> Self {
         self.batch.zs_insert(&self.inner.cf, key, value);
 
         self
     }
 
     /// Remove the given key from this column family, if it exists.
-    pub fn zs_delete(mut self, key: Key) -> Self {
+    pub fn zs_delete(mut self, key: &Key) -> Self {
         self.batch.zs_delete(&self.inner.cf, key);
 
         self
@@ -284,10 +303,25 @@ where
     //.
     // TODO: convert zs_delete_range() to take std::ops::RangeBounds
     //       see zs_range_iter() for an example of the edge cases
-    pub fn zs_delete_range(mut self, from: Key, until_strictly_before: Key) -> Self {
+    pub fn zs_delete_range(mut self, from: &Key, until_strictly_before: &Key) -> Self {
         self.batch
             .zs_delete_range(&self.inner.cf, from, until_strictly_before);
 
         self
+    }
+}
+
+// Writing a batch to the database requires an owned batch.
+impl<'cf, Key, Value> WriteTypedBatch<'cf, Key, Value, DiskWriteBatch>
+where
+    Key: IntoDisk + FromDisk + Debug,
+    Value: IntoDisk + FromDisk,
+{
+    // Writing batches
+
+    /// Writes this batch to this column family in the database,
+    /// taking ownership and consuming it.
+    pub fn write_batch(self) -> Result<(), rocksdb::Error> {
+        self.inner.db.write(self.batch)
     }
 }

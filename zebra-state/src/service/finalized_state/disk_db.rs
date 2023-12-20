@@ -202,6 +202,37 @@ impl WriteDisk for DiskWriteBatch {
     }
 }
 
+// Allow &mut DiskWriteBatch as well as owned DiskWriteBatch
+impl<T> WriteDisk for &mut T
+where
+    T: WriteDisk,
+{
+    fn zs_insert<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
+    {
+        (*self).zs_insert(cf, key, value)
+    }
+
+    fn zs_delete<C, K>(&mut self, cf: &C, key: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+    {
+        (*self).zs_delete(cf, key)
+    }
+
+    fn zs_delete_range<C, K>(&mut self, cf: &C, from: K, until_strictly_before: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+    {
+        (*self).zs_delete_range(cf, from, until_strictly_before)
+    }
+}
+
 /// Helper trait for retrieving and deserializing values from rocksdb column families.
 ///
 /// # Deprecation

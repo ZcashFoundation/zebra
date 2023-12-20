@@ -11,23 +11,16 @@
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_state")]
-//
-// Rust 1.72 has a false positive when nested generics are used inside Arc.
-// This makes the `arc_with_non_send_sync` lint trigger on a lot of proptest code.
-//
-// TODO: remove this allow when Rust 1.73 is stable, because this lint bug is fixed in that release:
-// <https://github.com/rust-lang/rust-clippy/issues/11076>
-#![cfg_attr(
-    any(test, feature = "proptest-impl"),
-    allow(clippy::arc_with_non_send_sync)
-)]
 
 #[macro_use]
 extern crate tracing;
 
+// TODO: only export the Config struct and a few other important methods
 pub mod config;
+// Most constants are exported by default
 pub mod constants;
 
+// Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
@@ -59,12 +52,14 @@ pub use service::{
     OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
 };
 
+// Allow use in the scanner
 #[cfg(feature = "shielded-scan")]
 pub use service::finalized_state::{
     SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
     SaplingScanningKey,
 };
 
+// Allow use in the scanner and external tests
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
 pub use service::{
     finalized_state::{
@@ -77,6 +72,7 @@ pub use service::{
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use response::GetBlockTemplateChainInfo;
 
+// Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
@@ -88,14 +84,15 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use constants::latest_version_for_adding_subtrees;
 
-#[cfg(not(any(test, feature = "proptest-impl")))]
-#[allow(unused_imports)]
-pub(crate) use config::hidden::{
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use config::hidden::{
     write_database_format_version_to_disk, write_state_database_format_version_to_disk,
 };
 
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use config::hidden::{
+// Allow use only inside the crate in production
+#[cfg(not(any(test, feature = "proptest-impl")))]
+#[allow(unused_imports)]
+pub(crate) use config::hidden::{
     write_database_format_version_to_disk, write_state_database_format_version_to_disk,
 };
 

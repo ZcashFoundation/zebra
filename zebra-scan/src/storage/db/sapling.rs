@@ -30,7 +30,7 @@ use itertools::Itertools;
 
 use zebra_chain::block::Height;
 use zebra_state::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
+    DiskWriteBatch, SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
     SaplingScanningKey, TransactionIndex, TransactionLocation, TypedColumnFamily, WriteTypedBatch,
 };
 
@@ -53,7 +53,7 @@ pub type SaplingTxIdsCf<'cf> =
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
 pub type WriteSaplingTxIdsBatch<'cf> =
-    WriteTypedBatch<'cf, SaplingScannedDatabaseIndex, Option<SaplingScannedResult>>;
+    WriteTypedBatch<'cf, SaplingScannedDatabaseIndex, Option<SaplingScannedResult>, DiskWriteBatch>;
 
 impl Storage {
     // Reading Sapling database entries
@@ -167,7 +167,7 @@ impl Storage {
     ) {
         // We skip key heights that have one or more results, so the results for each key height
         // must be in a single batch.
-        let mut batch = self.sapling_tx_ids_cf().for_writing();
+        let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
 
         // Every `INSERT_CONTROL_INTERVAL` we add a new entry to the scanner database for each key
         // so we can track progress made in the last interval even if no transaction was yet found.
@@ -192,7 +192,7 @@ impl Storage {
                 value: Some(sapling_result),
             };
 
-            batch = batch.zs_insert(entry.index, entry.value);
+            batch = batch.zs_insert(&entry.index, &entry.value);
         }
 
         batch
@@ -228,7 +228,7 @@ impl Storage {
         // TODO: ignore incorrect changes to birthday heights,
         //       and redundant birthday heights
         self.sapling_tx_ids_cf()
-            .for_writing()
+            .new_batch_for_writing()
             .insert_sapling_height(sapling_key, skip_up_to_height)
             .write_batch()
             .expect("unexpected database write failure");
@@ -249,6 +249,6 @@ impl<'cf> InsertSaplingHeight for WriteSaplingTxIdsBatch<'cf> {
         let index = SaplingScannedDatabaseIndex::min_for_key_and_height(sapling_key, height);
 
         // TODO: assert that we don't overwrite any entries here.
-        self.zs_insert(index, None)
+        self.zs_insert(&index, &None)
     }
 }
