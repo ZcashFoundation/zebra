@@ -34,7 +34,7 @@ In `zebrad.toml`, use:
 
 Sapling diversifiable/extended full viewing keys strings start with `zxviews` as described in [ZIP-32](https://zips.z.cash/zip-0032#sapling-extended-full-viewing-keys).
 
-For example, to scan for transactions with the [public ZECpages viewing key](https://zecpages.com/z/all) use:
+For example, to scan for transactions with the [public ZECpages viewing key](https://zecpages.com/boardinfo) use:
 
 ```toml
 [shielded_scan.sapling_keys_to_scan]
@@ -69,7 +69,7 @@ The Zebra scanner will resume the task if your Zebra instance went down for any 
 Last scanned height for key number 0 is 1798000, resuming at 1798001
 ```
 
-## Quering results with the `scanning-results-reader` utility.
+## Querying results with the `scanning-results-reader` utility.
 
 The easier way to read the results of found transactions and more is to use the utility tool named `scanning-results-reader`. Please read the [tool description](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#scanning-results-reader) to learn how to use it. Instructions are straightforward.
 
