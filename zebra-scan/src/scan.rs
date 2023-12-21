@@ -9,7 +9,6 @@ use std::{
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
-use tracing::info;
 
 use zcash_client_backend::{
     data_api::ScannedBlock,
@@ -64,6 +63,19 @@ pub async fn start(
     storage: Storage,
 ) -> Result<(), Report> {
     let network = storage.network();
+    let sapling_activation_height = storage.min_sapling_birthday_height();
+
+    // Do not scan and notify if we are below sapling activation height.
+    loop {
+        let tip_height = tip_height(state.clone()).await?;
+        if tip_height < sapling_activation_height {
+            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+        break;
+    }
+
     // Read keys from the storage on disk, which can block async execution.
     let key_storage = storage.clone();
     let key_heights = tokio::task::spawn_blocking(move || key_storage.sapling_keys_last_heights())
@@ -71,7 +83,7 @@ pub async fn start(
         .await;
     let key_heights = Arc::new(key_heights);
 
-    let mut height = get_min_height(&key_heights).unwrap_or(storage.min_sapling_birthday_height());
+    let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
@@ -150,7 +162,7 @@ pub async fn scan_height_and_store_results(
     let block = match block {
         zebra_state::Response::Block(Some(block)) => block,
         zebra_state::Response::Block(None) => return Ok(None),
-        _ => unreachable!("unmatched response to a state::Tip request"),
+        _ => unreachable!("unmatched response to a state::Block request"),
     };
 
     // Scan it with all the keys.
@@ -400,4 +412,21 @@ fn scanned_block_to_db_result<Nf>(
 /// Get the minimal height available in a key_heights map.
 fn get_min_height(map: &HashMap<String, Height>) -> Option<Height> {
     map.values().cloned().min()
+}
+
+/// Get tip height or return genesis block height if no tip is available.
+async fn tip_height(mut state: State) -> Result<Height, Report> {
+    let tip = state
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(zebra_state::Request::Tip)
+        .await
+        .map_err(|e| eyre!(e))?;
+
+    match tip {
+        zebra_state::Response::Tip(Some((height, _hash))) => Ok(height),
+        zebra_state::Response::Tip(None) => Ok(Height(0)),
+        _ => unreachable!("unmatched response to a state::Tip request"),
+    }
 }

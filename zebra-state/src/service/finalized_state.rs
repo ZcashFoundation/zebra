@@ -28,6 +28,8 @@ use crate::{
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
 };
 
+pub mod column_family;
+
 mod disk_db;
 mod disk_format;
 mod zebra_db;
@@ -38,6 +40,8 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+#[allow(unused_imports)]
+pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 #[allow(unused_imports)]
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]

@@ -1915,9 +1915,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.27"
+version = "0.14.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb1cfd654a8219eaef89881fdb3bb3b1cdc5fa75ded05d6933b2b382e395468"
+checksum = "bf96e135eb83a2a8ddf766e426a841d8ddd7449d5f00d34ea02b41d2f19eef80"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1930,7 +1930,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -2498,9 +2498,9 @@ dependencies = [
 
 [[package]]
 name = "metrics-exporter-prometheus"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a4964177ddfdab1e3a2b37aec7cf320e14169abb0ed73999f558136409178d5"
+checksum = "1d4fa7ce7c4862db464a37b0b31d89bca874562f034bd7993895572783d02950"
 dependencies = [
  "base64 0.21.5",
  "hyper",
@@ -3828,9 +3828,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sentry"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b596ee5f4e76638de6063ca96fd3d923675416461fc7f1b77406dc2f32d1979"
+checksum = "ab18211f62fb890f27c9bb04861f76e4be35e4c2fcbfc2d98afa37aadebb16f1"
 dependencies = [
  "httpdate",
  "reqwest",
@@ -3846,9 +3846,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6510a97162c288989a6310766bcadfc83ec98ad73121674463b055c42189e85"
+checksum = "cf018ff7d5ce5b23165a9cbfee60b270a55ae219bc9eebef2a3b6039356dd7e5"
 dependencies = [
  "backtrace",
  "once_cell",
@@ -3858,9 +3858,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-contexts"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64e2552a4a578aade01bd44691e6805c32bac34fc918f1675739fbbf2add8460"
+checksum = "1d934df6f9a17b8c15b829860d9d6d39e78126b5b970b365ccbd817bc0fe82c9"
 dependencies = [
  "hostname",
  "libc",
@@ -3872,9 +3872,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-core"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebb7a6ad833035f6b36db3e61e450643eec8a3c5f2839b8e41c74a73e57c6bae"
+checksum = "5e362d3fb1c5de5124bf1681086eaca7adf6a8c4283a7e1545359c729f9128ff"
 dependencies = [
  "once_cell",
  "rand 0.8.5",
@@ -3885,9 +3885,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-tracing"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53ef38653386354058f30b3c6d0bf764c59ee6270cd769ac4620a2d2fd60c8fe"
+checksum = "087bed8c616d176a9c6b662a8155e5f23b40dc9e1fa96d0bd5fb56e8636a9275"
 dependencies = [
  "sentry-backtrace",
  "sentry-core",
@@ -3897,9 +3897,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-types"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26342e85c6b3332273b820d5be6b93027fe991ded23a2aa6fb88a5a28c845c40"
+checksum = "fb4f0e37945b7a8ce7faebc310af92442e2d7c5aa7ef5b42fe6daa98ee133f65"
 dependencies = [
  "debugid",
  "hex",
@@ -4107,16 +4107,6 @@ name = "smallvec"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
-
-[[package]]
-name = "socket2"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f7916fc008ca5542385b89a3d3ce689953c143e9304a9bf8beec1de48994c0d"
-dependencies = [
- "libc",
- "winapi",
-]
 
 [[package]]
 name = "socket2"
@@ -4329,18 +4319,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.50"
+version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9a7210f5c9a7156bb50aa36aed4c95afb51df0df00713949448cf9e97d382d2"
+checksum = "f11c217e1416d6f036b870f14e0413d480dbf28edbee1f877abaf0206af43bb7"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.50"
+version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "266b2e40bc00e5a6c09c3584011e08b06f123c00362c92b975ba9843aaaa14b8"
+checksum = "01742297787513b79cf8e29d1056ede1313e2420b7b3b15d0a768b4921f549df"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4427,7 +4417,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.5",
+ "socket2",
  "tokio-macros",
  "tracing",
  "windows-sys 0.48.0",

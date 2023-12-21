@@ -4,6 +4,9 @@
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_scan")]
 
+#[macro_use]
+extern crate tracing;
+
 pub mod config;
 pub mod init;
 pub mod scan;

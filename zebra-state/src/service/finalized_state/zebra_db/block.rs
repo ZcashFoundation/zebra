@@ -450,6 +450,7 @@ impl DiskWriteBatch {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
+
         // Commit block, transaction, and note commitment tree data.
         self.prepare_block_header_and_transaction_data_batch(db, finalized)?;
 
@@ -486,7 +487,7 @@ impl DiskWriteBatch {
 
             // Commit UTXOs and value pools
             self.prepare_chain_value_pools_batch(
-                db,
+                zebra_db,
                 finalized,
                 spent_utxos_by_outpoint,
                 value_pool,

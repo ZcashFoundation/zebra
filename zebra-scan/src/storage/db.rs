@@ -5,7 +5,6 @@ use std::path::Path;
 use semver::Version;
 
 use zebra_chain::parameters::Network;
-use zebra_state::{DiskWriteBatch, ReadDisk};
 
 use crate::Config;
 
@@ -86,7 +85,7 @@ impl Storage {
         // Report where we are for each key in the database.
         let keys = new_storage.sapling_keys_last_heights();
         for (key_num, (_key, height)) in keys.iter().enumerate() {
-            tracing::info!(
+            info!(
                 "Last scanned height for key number {} is {}, resuming at {}",
                 key_num,
                 height.as_usize(),
@@ -94,7 +93,7 @@ impl Storage {
             );
         }
 
-        tracing::info!("loaded Zebra scanner cache");
+        info!("loaded Zebra scanner cache");
 
         new_storage
     }
@@ -134,28 +133,6 @@ impl Storage {
     /// Returns true if the database is empty.
     pub fn is_empty(&self) -> bool {
         // Any column family that is populated at (or near) startup can be used here.
-        self.db.zs_is_empty(&self.sapling_tx_ids_cf())
-    }
-}
-
-// General writing
-
-/// Wrapper type for scanner database writes.
-#[must_use = "batches must be written to the database"]
-#[derive(Default)]
-pub struct ScannerWriteBatch(pub DiskWriteBatch);
-
-// Redirect method calls to DiskWriteBatch for convenience.
-impl std::ops::Deref for ScannerWriteBatch {
-    type Target = DiskWriteBatch;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for ScannerWriteBatch {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        self.sapling_tx_ids_cf().zs_is_empty()
     }
 }

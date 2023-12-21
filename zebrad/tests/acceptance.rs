@@ -2820,39 +2820,36 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 #[cfg(feature = "shielded-scan")]
 fn scan_task_starts() -> Result<()> {
     use indexmap::IndexMap;
-
     use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
 
     let _init_guard = zebra_test::init();
 
+    let test_type = TestType::LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
     let mut config = default_test_config(Mainnet)?;
     let mut keys = IndexMap::new();
     keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
     config.shielded_scan.sapling_keys_to_scan = keys;
 
-    let testdir = testdir()?.with_config(&mut config)?;
-    let testdir = &testdir;
+    // Start zebra with the config.
+    let mut zebrad = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(test_type.zebrad_timeout());
 
-    let mut child = testdir.spawn_child(args!["start"])?;
+    // Check scanner was started.
+    zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
 
-    // Run the program and kill it after the scanner starts and the first scanning is done.
-    std::thread::sleep(LAUNCH_DELAY * 2);
-    child.kill(false)?;
+    // Look for 2 scanner notices indicating we are below sapling activation.
+    zebrad.expect_stdout_line_matches("scanner is waiting for sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
+    zebrad.expect_stdout_line_matches("scanner is waiting for sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
+
+    // Kill the node.
+    zebrad.kill(false)?;
 
     // Check that scan task started and the first scanning is done.
-    let output = child.wait_with_output()?;
-
-    output.stdout_line_contains("spawning shielded scanner with configured viewing keys")?;
-    /*
-    TODO: these lines only happen when we reach sapling activation height
-    output.stdout_line_contains("Scanning the blockchain: now at block")?;
-    output.stdout_line_contains(
-        format!(
-            "Scanning the blockchain for key 0, started at block",
-        )
-        .as_str(),
-    )?;
-    */
+    let output = zebrad.wait_with_output()?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
@@ -2878,7 +2875,7 @@ fn scan_task_starts() -> Result<()> {
 #[cfg(feature = "shielded-scan")]
 fn scan_start_where_left() -> Result<()> {
     use indexmap::IndexMap;
-    use zebra_scan::storage::db::SCANNER_DATABASE_KIND;
+    use zebra_scan::{storage::db::SCANNER_DATABASE_KIND, tests::ZECPAGES_SAPLING_VIEWING_KEY};
 
     let _init_guard = zebra_test::init();
 
@@ -2886,10 +2883,9 @@ fn scan_start_where_left() -> Result<()> {
     let test_type = TestType::UpdateZebraCachedStateNoRpc;
     if let Some(cache_dir) = test_type.zebrad_state_path("scan test") {
         // Add a key to the config
-        const ZECPAGES_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
         let mut config = default_test_config(Mainnet)?;
         let mut keys = IndexMap::new();
-        keys.insert(ZECPAGES_VIEWING_KEY.to_string(), 1);
+        keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
         config.shielded_scan.sapling_keys_to_scan = keys;
 
         // Add the cache dir to shielded scan, make it the same as the zebrad cache state.

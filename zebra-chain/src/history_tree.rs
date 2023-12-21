@@ -501,6 +501,12 @@ impl From<NonEmptyHistoryTree> for HistoryTree {
     }
 }
 
+impl From<Option<NonEmptyHistoryTree>> for HistoryTree {
+    fn from(tree: Option<NonEmptyHistoryTree>) -> Self {
+        HistoryTree(tree)
+    }
+}
+
 impl Deref for HistoryTree {
     type Target = Option<NonEmptyHistoryTree>;
     fn deref(&self) -> &Self::Target {
