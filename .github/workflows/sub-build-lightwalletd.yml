@@ -76,7 +76,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.3.0
+        uses: docker/metadata-action@v5.4.0
         with:
           # list of Docker images to use as base name for tags
           images: |
