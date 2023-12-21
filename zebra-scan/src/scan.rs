@@ -63,6 +63,19 @@ pub async fn start(
     storage: Storage,
 ) -> Result<(), Report> {
     let network = storage.network();
+    let sapling_activation_height = storage.min_sapling_birthday_height();
+
+    // Do not scan and notify if we are below sapling activation height.
+    loop {
+        let tip_height = tip_height(state.clone()).await?;
+        if tip_height < sapling_activation_height {
+            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+        break;
+    }
+
     // Read keys from the storage on disk, which can block async execution.
     let key_storage = storage.clone();
     let key_heights = tokio::task::spawn_blocking(move || key_storage.sapling_keys_last_heights())
@@ -70,7 +83,6 @@ pub async fn start(
         .await;
     let key_heights = Arc::new(key_heights);
 
-    let sapling_activation_height = storage.min_sapling_birthday_height();
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
     // Parse and convert keys once, then use them to scan all blocks.
@@ -91,14 +103,6 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        // Do not scan and notify if we are below sapling activation height.
-        let tip_height = tip_height(state.clone()).await?;
-        if tip_height < sapling_activation_height {
-            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
-            tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
-        }
-
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
