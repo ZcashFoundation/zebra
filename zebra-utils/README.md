@@ -205,16 +205,12 @@ A utility for displaying Zebra's scanning results.
 
 #### Scan the Block Chain with Zebra
 
-1. Add a viewing key to your Zebra config file. For example:
-
-   ``` toml
-   [shielded_scan.sapling_keys_to_scan]
-   "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz" = 1
-   ```
-   This key is from [ZECpages](https://zecpages.com/boardinfo).
+1. Follow the [Build & Install](https://zebra.zfnd.org/user/shielded-scan.html#build--install)
+   and [Configuration](https://zebra.zfnd.org/user/shielded-scan.html#configuration)
+   instructions in the Zebra Book.
 
 2. Make sure Zebra runs on Mainnet and listens on the default RPC port by having
-   the following in the same config file:
+   the following in the config file:
 
     ``` toml
     [network]
@@ -224,13 +220,13 @@ A utility for displaying Zebra's scanning results.
     listen_addr = "127.0.0.1:8232"
     ```
 
-3. Compile and run Zebra with `--features "shielded-scan"` and your config file.
-   Zebra will start scanning the block chain and inform you about its progress
-   each 10 000 blocks in the log.
+3. Run Zebra with your config file. You can follow the
+   [Scanning the Block Chain](https://zebra.zfnd.org/user/shielded-scan.html#scanning-the-block-chain)
+   section in the book for more details.
 
 #### Run the Reader
 
-4. To print the memos in outputs decryptable by the provided scanning key, run
+4. To print the memos in outputs decryptable by the provided scanning keys, run
    the reader while also running Zebra. For example:
 
    ``` bash
