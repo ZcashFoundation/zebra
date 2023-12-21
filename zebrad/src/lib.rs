@@ -102,6 +102,8 @@
 //!
 //! * `elasticsearch`: save block data into elasticsearch database. Read the [elasticsearch](https://zebra.zfnd.org/user/elasticsearch.html)
 //! section of the book for more details.
+//! * `shielded-scan`: enable experimental support for scanning shielded transactions. Read the [shielded-scan](https://zebra.zfnd.org/user/shielded-scan.html)
+//! section of the book for more details.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
