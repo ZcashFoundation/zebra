@@ -1,6 +1,6 @@
 # Zebra Shielded Scanning
 
-This document describes how expert users can try Zebra's shielded scanning feature.
+This document describes Zebra's shielded scanning from users' perspective.
 
 For now, we only support Sapling, and only store transaction IDs in the scanner results database.
 Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
@@ -9,51 +9,68 @@ Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundati
 
 Zebra's shielded scanning feature has known security issues. It is for experimental use only.
 
-Do not use regular or sensitive viewing keys with Zebra's experimental scanning feature. Do not use this feature on a shared machine. We suggest generating new keys for experimental use.
+Do not use regular or sensitive viewing keys with Zebra's experimental scanning
+feature. Do not use this feature on a shared machine. We suggest generating new
+keys for experimental use or publicly known keys.
 
 ## Build & Install
 
-- Clone a Zebra version greater than or equal to [1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) or use the `main` branch to get the latest features.
+Use [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0)
+or greater, or the `main` branch to get the latest features, and enable the
+`shielded-scan` feature during the build. You can also use Rust's `cargo` to
+install the latest release:
 
 ```bash
 cargo install --features shielded-scan --locked --git https://github.com/ZcashFoundation/zebra zebrad
 ```
-Zebra binary will be at `~/.cargo/bin/zebrad`.
 
-- Generate a configuration file with the default settings:
+Zebra binary will be at `~/.cargo/bin/zebrad`, which should be in your `PATH`.
+
+## Configuration
+
+Generate a configuration file with the default settings:
 
 ```bash
 zebrad generate -o ~/.config/zebrad.toml
 ```
 
-## Configuration
 
-In `zebrad.toml`, use:
+In the generated `zebrad.toml` file, use:
+
 - the `[shielded_scan]` table for database settings, and
 - the `[shielded_scan.sapling_keys_to_scan]` table for diversifiable full viewing keys.
 
-Sapling diversifiable/extended full viewing keys strings start with `zxviews` as described in [ZIP-32](https://zips.z.cash/zip-0032#sapling-extended-full-viewing-keys).
+Sapling diversifiable/extended full viewing keys strings start with `zxviews` as
+described in
+[ZIP-32](https://zips.z.cash/zip-0032#sapling-extended-full-viewing-keys).
 
-For example, to scan for transactions with the [public ZECpages viewing key](https://zecpages.com/boardinfo) use:
+For example, to scan the block chain with the [public ZECpages viewing
+key](https://zecpages.com/boardinfo), use:
 
 ```toml
 [shielded_scan.sapling_keys_to_scan]
 "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz" = 419200
 ```
 
-Where the number `1` above is the birthday of the corresponding key:
-- birthday lower than the sapling activation height defaults to sapling activation height.
-- birthday greater or equal than sapling activation height will start scanning at provided height, improving scanner speed.
+Where the number 419200 is the birthday of the key:
+- birthday lower than the Sapling activation height defaults to Sapling activation height.
+- birthday greater or equal than Sapling activation height will start scanning at provided height, improving scanner speed.
 
-## Running Sapling Scanning
+## Scanning the Block Chain
 
-For full scanning results. launch Zebra and wait for 12-24 hours. Zebra needs to be synced up to at least the Sapling activation height to start scanning. If you have an already synced-up chain, the scanner will start looking for transactions for the provided keys from the start.
+Simply run
 
 ```bash
 zebrad
 ```
 
-You should see log messages in the output every 10000 blocks scanned, similar to:
+The scanning will start once Zebra syncs its state past the Sapling activation
+height. Scanning a synced state takes between 12 and 24 hours. The scanner looks
+for transactions containing Sapling notes with outputs decryptable by the
+provided viewing keys.
+
+You should see log messages in the output every 10 000 blocks scanned, similar
+to:
 
 ```
 2023-12-16T12:14:41.526740Z  INFO zebra_scan::storage::db: Last scanned height for key number 0 is 435000, resuming at 435001
@@ -63,17 +80,19 @@ You should see log messages in the output every 10000 blocks scanned, similar to
 ...
 ```
 
-The Zebra scanner will resume the task if your Zebra instance went down for any reason. In a new start, Zebra will display:
+The Zebra scanner will resume the task if your Zebra instance went down for any
+reason. In a new start, Zebra will display:
 
 ```
 Last scanned height for key number 0 is 1798000, resuming at 1798001
 ```
 
-## Querying results with the `scanning-results-reader` utility.
+## Displaying Scanning Results
 
-The easier way to read the results of found transactions and more is to use the utility tool named `scanning-results-reader`. Please read the [tool description](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#scanning-results-reader) to learn how to use it. Instructions are straightforward.
+An easy way to query the results is to use the
+[Scanning Results Reader](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#scanning-results-reader).
 
-## Querying Raw Sapling Scanning Results
+## Querying Raw Scanning Results
 
 A more advanced way to query results is to use `ldb` tool, requires a certain level of expertise.
 
