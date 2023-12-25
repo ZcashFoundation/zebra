@@ -172,9 +172,9 @@ semver = "1.0.20"
 serde = { version = "1.0.193", features = ["serde_derive"] }
 toml = "0.8.8"
 
-futures = "0.3.29"
+futures = "0.3.30"
 rayon = "1.7.0"
-tokio = { version = "1.34.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.35.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.14", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.3"
@@ -192,7 +192,7 @@ tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.39"
 
-metrics = "0.21.1"
+metrics = "0.22.0"
 
 dirs = "5.0.1"
 atty = "0.2.14"
@@ -214,7 +214,7 @@ tracing-journald = { version = "0.3.0", optional = true }
 hyper = { version = "0.14.28", features = ["http1", "http2", "server"], optional = true }
 
 # prod feature prometheus
-metrics-exporter-prometheus = { version = "0.12.2", default-features = false, features = ["http-listener"], optional = true }
+metrics-exporter-prometheus = { version = "0.13.0", default-features = false, features = ["http-listener"], optional = true }
 
 # prod feature release_max_level_info
 #
@@ -255,7 +255,7 @@ tempfile = "3.8.1"
 hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.34.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.35.1", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.14"
 
 # test feature lightwalletd-grpc-tests
