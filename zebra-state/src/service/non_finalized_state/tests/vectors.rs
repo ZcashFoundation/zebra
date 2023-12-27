@@ -327,7 +327,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     state.commit_block(short_chain_block.prepare(), &finalized_state)?;
     assert_eq!(2, state.chain_set.len());
 
-    assert_eq!(2, state.best_chain_len());
+    assert_eq!(Some(2), state.best_chain_len());
 
     Ok(())
 }
@@ -381,7 +381,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     state.commit_block(short_chain_block.prepare(), &finalized_state)?;
     assert_eq!(2, state.chain_set.len());
 
-    assert_eq!(5, state.best_chain_len());
+    assert_eq!(Some(5), state.best_chain_len());
 
     Ok(())
 }

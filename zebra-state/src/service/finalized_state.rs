@@ -255,26 +255,20 @@ impl FinalizedState {
         );
 
         if result.is_ok() {
-            metrics::counter!("state.checkpoint.finalized.block.count", 1);
-            metrics::gauge!(
-                "state.checkpoint.finalized.block.height",
-                checkpoint_verified.height.0 as f64,
-            );
+            metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
+            metrics::gauge!("state.checkpoint.finalized.block.height")
+                .set(checkpoint_verified.height.0 as f64);
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
-            metrics::gauge!(
-                "zcash.chain.verified.block.height",
-                checkpoint_verified.height.0 as f64,
-            );
-            metrics::counter!("zcash.chain.verified.block.total", 1);
+            metrics::gauge!("zcash.chain.verified.block.height")
+                .set(checkpoint_verified.height.0 as f64);
+            metrics::counter!("zcash.chain.verified.block.total").increment(1);
         } else {
-            metrics::counter!("state.checkpoint.error.block.count", 1);
-            metrics::gauge!(
-                "state.checkpoint.error.block.height",
-                checkpoint_verified.height.0 as f64,
-            );
+            metrics::counter!("state.checkpoint.error.block.count").increment(1);
+            metrics::gauge!("state.checkpoint.error.block.height")
+                .set(checkpoint_verified.height.0 as f64);
         };
 
         // Make the error cloneable, so we can send it to the block verify future,

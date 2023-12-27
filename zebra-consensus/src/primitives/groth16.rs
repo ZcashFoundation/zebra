@@ -485,10 +485,10 @@ impl Service<BatchControl<Item>> for Verifier {
 
                             if result.is_ok() {
                                 tracing::trace!(?result, "verified groth16 proof");
-                                metrics::counter!("proofs.groth16.verified", 1);
+                                metrics::counter!("proofs.groth16.verified").increment(1);
                             } else {
                                 tracing::trace!(?result, "invalid groth16 proof");
-                                metrics::counter!("proofs.groth16.invalid", 1);
+                                metrics::counter!("proofs.groth16.invalid").increment(1);
                             }
 
                             result.map_err(BoxError::from)

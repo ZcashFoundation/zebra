@@ -790,10 +790,10 @@ where
                             // Add a metric for inbound responses to outbound requests.
                             metrics::counter!(
                                 "zebra.net.in.responses",
-                                1,
                                 "command" => response.command(),
                                 "addr" => self.metrics_label.clone(),
-                            );
+                            )
+                            .increment(1);
                         } else {
                             debug!(error = ?response, "error in peer response to Zebra request");
                         }
@@ -969,15 +969,15 @@ where
         let InProgressClientRequest { request, tx, span } = req;
 
         if tx.is_canceled() {
-            metrics::counter!("peer.canceled", 1);
+            metrics::counter!("peer.canceled").increment(1);
             debug!(state = %self.state, %request, "ignoring canceled request");
 
             metrics::counter!(
                 "zebra.net.out.requests.canceled",
-                1,
                 "command" => request.command(),
                 "addr" => self.metrics_label.clone(),
-            );
+            )
+            .increment(1);
             self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
 
             return;
@@ -988,10 +988,10 @@ where
         // Add a metric for outbound requests.
         metrics::counter!(
             "zebra.net.out.requests",
-            1,
             "command" => request.command(),
             "addr" => self.metrics_label.clone(),
-        );
+        )
+        .increment(1);
         self.update_state_metrics(format!("Out::Req::{}", request.command()));
 
         let new_handler = match (&self.state, request) {
@@ -1360,10 +1360,10 @@ where
         // Add a metric for inbound requests
         metrics::counter!(
             "zebra.net.in.requests",
-            1,
             "command" => req.command(),
             "addr" => self.metrics_label.clone(),
-        );
+        )
+        .increment(1);
         self.update_state_metrics(format!("In::Req::{}", req.command()));
 
         // Give the inbound service time to clear its queue,
@@ -1431,10 +1431,10 @@ where
         // Add a metric for outbound responses to inbound requests
         metrics::counter!(
             "zebra.net.out.responses",
-            1,
             "command" => rsp.command(),
             "addr" => self.metrics_label.clone(),
-        );
+        )
+        .increment(1);
         self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
 
         // TODO: split response handler into its own method
@@ -1570,9 +1570,9 @@ where
 
         if thread_rng().gen::<f32>() < drop_connection_probability {
             if matches!(error, PeerError::Overloaded) {
-                metrics::counter!("pool.closed.loadshed", 1);
+                metrics::counter!("pool.closed.loadshed").increment(1);
             } else {
-                metrics::counter!("pool.closed.inbound.timeout", 1);
+                metrics::counter!("pool.closed.inbound.timeout").increment(1);
             }
 
             tracing::info!(
@@ -1594,9 +1594,9 @@ where
             self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Ignored", req.command()));
 
             if matches!(error, PeerError::Overloaded) {
-                metrics::counter!("pool.ignored.loadshed", 1);
+                metrics::counter!("pool.ignored.loadshed").increment(1);
             } else {
-                metrics::counter!("pool.ignored.inbound.timeout", 1);
+                metrics::counter!("pool.ignored.inbound.timeout").increment(1);
             }
         }
     }
@@ -1659,12 +1659,12 @@ where
         self.erase_state_metrics();
 
         // Set the new state
-        metrics::increment_gauge!(
+        metrics::gauge!(
             "zebra.net.connection.state",
-            1.0,
             "command" => current_metrics_state.clone(),
             "addr" => self.metrics_label.clone(),
-        );
+        )
+        .set(1.0);
 
         self.last_metrics_state = Some(current_metrics_state);
     }
@@ -1674,10 +1674,10 @@ where
         if let Some(last_metrics_state) = self.last_metrics_state.take() {
             metrics::gauge!(
                 "zebra.net.connection.state",
-                0.0,
                 "command" => last_metrics_state,
                 "addr" => self.metrics_label.clone(),
-            );
+            )
+            .set(0.0);
         }
     }
 

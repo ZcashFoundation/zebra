@@ -213,8 +213,8 @@ where
                 "block hash already queued for inbound download: ignored block",
             );
 
-            metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
-            metrics::counter!("gossip.already.queued.dropped.block.hash.count", 1);
+            metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
+            metrics::counter!("gossip.already.queued.dropped.block.hash.count").increment(1);
 
             return DownloadAction::AlreadyQueued;
         }
@@ -227,8 +227,8 @@ where
                 "too many blocks queued for inbound download: ignored block",
             );
 
-            metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
-            metrics::counter!("gossip.full.queue.dropped.block.hash.count", 1);
+            metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
+            metrics::counter!("gossip.full.queue.dropped.block.hash.count").increment(1);
 
             return DownloadAction::FullQueue;
         }
@@ -271,7 +271,7 @@ where
             } else {
                 unreachable!("wrong response to block request");
             };
-            metrics::counter!("gossip.downloaded.block.count", 1);
+            metrics::counter!("gossip.downloaded.block.count").increment(1);
 
             // # Security & Performance
             //
@@ -312,7 +312,7 @@ where
                     ?hash,
                     "gossiped block with no height: dropped downloaded block"
                 );
-                metrics::counter!("gossip.no.height.dropped.block.count", 1);
+                metrics::counter!("gossip.no.height.dropped.block.count").increment(1);
 
                 BoxError::from("gossiped block with no height")
             })?;
@@ -326,7 +326,7 @@ where
                     lookahead_limit = full_verify_concurrency_limit,
                     "gossiped block height too far ahead of the tip: dropped downloaded block",
                 );
-                metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
+                metrics::counter!("gossip.max.height.limit.dropped.block.count").increment(1);
 
                 Err("gossiped block height too far ahead")?;
             } else if block_height < min_accepted_height {
@@ -338,7 +338,7 @@ where
                     behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
                     "gossiped block height behind the finalized tip: dropped downloaded block",
                 );
-                metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+                metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
 
                 Err("gossiped block height behind the finalized tip")?;
             }
@@ -350,7 +350,7 @@ where
         }
         .map_ok(|(hash, height)| {
             info!(?height, "downloaded and verified gossiped block");
-            metrics::counter!("gossip.verified.block.count", 1);
+            metrics::counter!("gossip.verified.block.count").increment(1);
             hash
         })
         // Tack the hash onto the error so we can remove the cancel handle
@@ -364,7 +364,7 @@ where
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
-                    metrics::counter!("gossip.cancelled.count", 1);
+                    metrics::counter!("gossip.cancelled.count").increment(1);
                     Err(("canceled".into(), hash))
                 }
                 verification = fut => verification,
@@ -383,7 +383,7 @@ where
             concurrency_limit = self.full_verify_concurrency_limit,
             "queued hash for download",
         );
-        metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
+        metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
 
         DownloadAction::AddedToQueue
     }

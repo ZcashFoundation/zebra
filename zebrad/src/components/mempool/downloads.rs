@@ -253,10 +253,8 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "transaction id already queued for inbound download: ignored transaction"
             );
-            metrics::gauge!(
-                "mempool.currently.queued.transactions",
-                self.pending.len() as f64,
-            );
+            metrics::gauge!("mempool.currently.queued.transactions",)
+                .set(self.pending.len() as f64);
 
             return Err(MempoolError::AlreadyQueued);
         }
@@ -268,10 +266,8 @@ where
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many transactions queued for inbound download: ignored transaction"
             );
-            metrics::gauge!(
-                "mempool.currently.queued.transactions",
-                self.pending.len() as f64,
-            );
+            metrics::gauge!("mempool.currently.queued.transactions",)
+                .set(self.pending.len() as f64);
 
             return Err(MempoolError::FullQueue);
         }
@@ -327,17 +323,15 @@ where
 
                     metrics::counter!(
                         "mempool.downloaded.transactions.total",
-                        1,
                         "version" => format!("{}",tx.transaction.version()),
-                    );
+                    ).increment(1);
                     tx
                 }
                 Gossip::Tx(tx) => {
                     metrics::counter!(
                         "mempool.pushed.transactions.total",
-                        1,
                         "version" => format!("{}",tx.transaction.version()),
-                    );
+                    ).increment(1);
                     tx
                 }
             };
@@ -363,9 +357,8 @@ where
         .map_ok(|(tx, tip_height)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
-                1,
                 "version" => format!("{}", tx.transaction.transaction.version()),
-            );
+            ).increment(1);
             (tx, tip_height)
         })
         // Tack the hash onto the error so we can remove the cancel handle
@@ -384,7 +377,7 @@ where
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
-                    metrics::counter!("mempool.cancelled.verify.tasks.total", 1);
+                    metrics::counter!("mempool.cancelled.verify.tasks.total").increment(1);
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
@@ -405,11 +398,8 @@ where
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!(
-            "mempool.currently.queued.transactions",
-            self.pending.len() as f64,
-        );
-        metrics::counter!("mempool.queued.transactions.total", 1);
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
+        metrics::counter!("mempool.queued.transactions.total").increment(1);
 
         Ok(())
     }
@@ -446,10 +436,7 @@ where
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
-        metrics::gauge!(
-            "mempool.currently.queued.transactions",
-            self.pending.len() as f64,
-        );
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
     }
 
     /// Get the number of currently in-flight download tasks.
@@ -498,6 +485,6 @@ where
     fn drop(mut self: Pin<&mut Self>) {
         self.cancel_all();
 
-        metrics::gauge!("mempool.currently.queued.transactions", 0 as f64);
+        metrics::gauge!("mempool.currently.queued.transactions").set(0 as f64);
     }
 }
