@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     #[allow(non_snake_case)]
-    fn single_test_vector() {
+    fn sinsemilla_single_test_vector() {
         use halo2::pasta::group::Curve;
 
         let D = b"z.cash:test-Sinsemilla";
@@ -206,7 +206,7 @@ mod tests {
     // - Random message bits.
     #[test]
     #[allow(non_snake_case)]
-    fn hackworks_test_vectors() {
+    fn sinsemilla_hackworks_test_vectors() {
         use halo2::pasta::group::{ff::PrimeField, GroupEncoding};
 
         for tv in tests::vectors::SINSEMILLA.iter() {
@@ -231,7 +231,7 @@ mod tests {
     // - Random message contents.
     #[test]
     #[allow(non_snake_case)]
-    fn hackworks_group_hash_test_vectors() {
+    fn sinsemilla_hackworks_group_hash_test_vectors() {
         use halo2::pasta::group::GroupEncoding;
 
         for tv in tests::vectors::GROUP_HASHES.iter() {
