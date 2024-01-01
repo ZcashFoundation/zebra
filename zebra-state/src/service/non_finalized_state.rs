@@ -418,12 +418,12 @@ impl NonFinalizedState {
         chain_push_result.expect("scope has finished")
     }
 
-    /// Returns the length of the non-finalized portion of the current best chain.
-    pub fn best_chain_len(&self) -> u32 {
-        self.best_chain()
-            .expect("only called after inserting a block")
-            .blocks
-            .len() as u32
+    /// Returns the length of the non-finalized portion of the current best chain
+    /// or `None` if the best chain has no blocks.
+    pub fn best_chain_len(&self) -> Option<u32> {
+        // This `as` can't overflow because the number of blocks in the chain is limited to i32::MAX,
+        // and the non-finalized chain is further limited by the fork length (slightly over 100 blocks).
+        Some(self.best_chain()?.blocks.len() as u32)
     }
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
@@ -619,8 +619,8 @@ impl NonFinalizedState {
             return;
         }
 
-        metrics::counter!("state.memory.committed.block.count", 1);
-        metrics::gauge!("state.memory.committed.block.height", height.0 as f64);
+        metrics::counter!("state.memory.committed.block.count").increment(1);
+        metrics::gauge!("state.memory.committed.block.height").set(height.0 as f64);
 
         if self
             .best_chain()
@@ -628,8 +628,8 @@ impl NonFinalizedState {
             .non_finalized_tip_hash()
             == hash
         {
-            metrics::counter!("state.memory.best.committed.block.count", 1);
-            metrics::gauge!("state.memory.best.committed.block.height", height.0 as f64);
+            metrics::counter!("state.memory.best.committed.block.count").increment(1);
+            metrics::gauge!("state.memory.best.committed.block.height").set(height.0 as f64);
         }
 
         self.update_metrics_for_chains();
@@ -641,11 +641,9 @@ impl NonFinalizedState {
             return;
         }
 
-        metrics::gauge!("state.memory.chain.count", self.chain_set.len() as f64);
-        metrics::gauge!(
-            "state.memory.best.chain.length",
-            self.best_chain_len() as f64,
-        );
+        metrics::gauge!("state.memory.chain.count").set(self.chain_set.len() as f64);
+        metrics::gauge!("state.memory.best.chain.length",)
+            .set(self.best_chain_len().unwrap_or_default() as f64);
     }
 
     /// Update the progress bars after any chain is modified.

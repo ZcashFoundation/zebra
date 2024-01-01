@@ -813,8 +813,7 @@ where
     // To avoid hangs and starvation, the crawler must spawn a separate task for each crawl
     // and handshake, so they can make progress independently (and avoid deadlocking each other).
     loop {
-        metrics::gauge!(
-            "crawler.in_flight_handshakes",
+        metrics::gauge!("crawler.in_flight_handshakes").set(
             handshakes
                 .len()
                 .checked_sub(1)

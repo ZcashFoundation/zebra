@@ -615,7 +615,7 @@ impl Service<Request> for Mempool {
                     Ok(Err((txid, error))) => {
                         tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
 
-                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
+                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
                         storage.reject_if_needed(txid, error);
                     }
                     Err(_elapsed) => {
@@ -624,7 +624,7 @@ impl Service<Request> for Mempool {
 
                         tracing::info!("mempool transaction failed to verify due to timeout");
 
-                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => "timeout");
+                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
                     }
                 };
             }

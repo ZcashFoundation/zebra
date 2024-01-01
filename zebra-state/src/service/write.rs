@@ -290,7 +290,11 @@ pub fn write_blocks_from_channels(
         // Update the caller with the result.
         let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
 
-        while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
+        while non_finalized_state
+            .best_chain_len()
+            .expect("just successfully inserted a non-finalized block above")
+            > MAX_BLOCK_REORG_HEIGHT
+        {
             tracing::trace!("finalizing block past the reorg limit");
             let contextually_verified_with_trees = non_finalized_state.finalize();
             prev_finalized_note_commitment_trees = finalized_state
@@ -303,21 +307,16 @@ pub fn write_blocks_from_channels(
         // Update the metrics if semantic and contextual validation passes
         //
         // TODO: split this out into a function?
-        metrics::counter!("state.full_verifier.committed.block.count", 1);
-        metrics::counter!("zcash.chain.verified.block.total", 1);
+        metrics::counter!("state.full_verifier.committed.block.count").increment(1);
+        metrics::counter!("zcash.chain.verified.block.total").increment(1);
 
-        metrics::gauge!(
-            "state.full_verifier.committed.block.height",
-            tip_block_height.0 as f64,
-        );
+        metrics::gauge!("state.full_verifier.committed.block.height")
+            .set(tip_block_height.0 as f64);
 
         // This height gauge is updated for both fully verified and checkpoint blocks.
         // These updates can't conflict, because this block write task makes sure that blocks
         // are committed in order.
-        metrics::gauge!(
-            "zcash.chain.verified.block.height",
-            tip_block_height.0 as f64,
-        );
+        metrics::gauge!("zcash.chain.verified.block.height").set(tip_block_height.0 as f64);
 
         tracing::trace!("finished processing queued block");
     }

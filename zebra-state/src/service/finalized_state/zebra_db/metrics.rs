@@ -38,36 +38,24 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         if height.is_min() { "genesis " } else { "" }
     );
 
-    metrics::counter!("state.finalized.block.count", 1);
-    metrics::gauge!("state.finalized.block.height", height.0 as f64);
+    metrics::counter!("state.finalized.block.count").increment(1);
+    metrics::gauge!("state.finalized.block.height").set(height.0 as f64);
 
-    metrics::counter!(
-        "state.finalized.cumulative.transactions",
-        transaction_count as u64
-    );
+    metrics::counter!("state.finalized.cumulative.transactions")
+        .increment(transaction_count as u64);
 
-    metrics::counter!(
-        "state.finalized.cumulative.sprout_nullifiers",
-        sprout_nullifier_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.sapling_nullifiers",
-        sapling_nullifier_count as u64
-    );
-    metrics::counter!(
-        "state.finalized.cumulative.orchard_nullifiers",
-        orchard_nullifier_count as u64
-    );
+    metrics::counter!("state.finalized.cumulative.sprout_nullifiers")
+        .increment(sprout_nullifier_count as u64);
+    metrics::counter!("state.finalized.cumulative.sapling_nullifiers")
+        .increment(sapling_nullifier_count as u64);
+    metrics::counter!("state.finalized.cumulative.orchard_nullifiers")
+        .increment(orchard_nullifier_count as u64);
 
     // The outputs from the genesis block can't be spent, so we skip them here.
     if !height.is_min() {
-        metrics::counter!(
-            "state.finalized.cumulative.transparent_prevouts",
-            transparent_prevout_count as u64
-        );
-        metrics::counter!(
-            "state.finalized.cumulative.transparent_newouts",
-            transparent_newout_count as u64
-        );
+        metrics::counter!("state.finalized.cumulative.transparent_prevouts")
+            .increment(transparent_prevout_count as u64);
+        metrics::counter!("state.finalized.cumulative.transparent_newouts")
+            .increment(transparent_newout_count as u64);
     }
 }

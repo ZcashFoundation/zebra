@@ -1080,9 +1080,9 @@ where
         let num_ready = self.ready_services.len();
         let num_unready = self.unready_services.len();
         let num_peers = num_ready + num_unready;
-        metrics::gauge!("pool.num_ready", num_ready as f64);
-        metrics::gauge!("pool.num_unready", num_unready as f64);
-        metrics::gauge!("zcash.net.peers", num_peers as f64);
+        metrics::gauge!("pool.num_ready").set(num_ready as f64);
+        metrics::gauge!("pool.num_unready").set(num_unready as f64);
+        metrics::gauge!("zcash.net.peers").set(num_peers as f64);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {

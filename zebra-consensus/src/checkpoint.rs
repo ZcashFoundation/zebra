@@ -103,8 +103,8 @@ fn progress_from_tip(
             if height >= checkpoint_list.max_height() {
                 (None, Progress::FinalCheckpoint)
             } else {
-                metrics::gauge!("checkpoint.verified.height", height.0 as f64);
-                metrics::gauge!("checkpoint.processing.next.height", height.0 as f64);
+                metrics::gauge!("checkpoint.verified.height").set(height.0 as f64);
+                metrics::gauge!("checkpoint.processing.next.height").set(height.0 as f64);
                 (Some(hash), Progress::InitialTip(height))
             }
         }
@@ -303,7 +303,7 @@ where
             .next_back()
             .expect("queued has at least one entry");
 
-        metrics::gauge!("checkpoint.queued.max.height", max_queued_height.0 as f64);
+        metrics::gauge!("checkpoint.queued.max.height").set(max_queued_height.0 as f64);
 
         let is_checkpoint = self.checkpoint_list.contains(height);
         tracing::debug!(?height, ?hash, ?is_checkpoint, "queued block");
@@ -326,12 +326,12 @@ where
             return;
         };
 
-        metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
+        metrics::gauge!("checkpoint.verified.height").set(verified_height.0 as f64);
 
         let checkpoint_index = self.checkpoint_list.prev_checkpoint_index(verified_height);
         let checkpoint_count = self.checkpoint_list.len();
 
-        metrics::gauge!("checkpoint.verified.count", checkpoint_index as f64);
+        metrics::gauge!("checkpoint.verified.count").set(checkpoint_index as f64);
 
         tracing::debug!(
             ?verified_height,
@@ -409,7 +409,7 @@ where
             // Check if we have the genesis block as a special case, to simplify the loop
             BeforeGenesis if !self.queued.contains_key(&block::Height(0)) => {
                 tracing::trace!("Waiting for genesis block");
-                metrics::counter!("checkpoint.waiting.count", 1);
+                metrics::counter!("checkpoint.waiting.count").increment(1);
                 return WaitingForBlocks;
             }
             BeforeGenesis => block::Height(0),
@@ -444,10 +444,7 @@ where
                 break;
             }
         }
-        metrics::gauge!(
-            "checkpoint.queued.continuous.height",
-            pending_height.0 as f64,
-        );
+        metrics::gauge!("checkpoint.queued.continuous.height").set(pending_height.0 as f64);
 
         // Now find the start of the checkpoint range
         let start = self.current_start_bound().expect(
@@ -466,14 +463,11 @@ where
         );
 
         if let Some(block::Height(target_checkpoint)) = target_checkpoint {
-            metrics::gauge!(
-                "checkpoint.processing.next.height",
-                target_checkpoint as f64,
-            );
+            metrics::gauge!("checkpoint.processing.next.height").set(target_checkpoint as f64);
         } else {
             // Use the start height if there is no potential next checkpoint
-            metrics::gauge!("checkpoint.processing.next.height", start_height.0 as f64);
-            metrics::counter!("checkpoint.waiting.count", 1);
+            metrics::gauge!("checkpoint.processing.next.height").set(start_height.0 as f64);
+            metrics::counter!("checkpoint.waiting.count").increment(1);
         }
 
         target_checkpoint
@@ -541,12 +535,12 @@ where
     /// Increase the current checkpoint height to `verified_height`,
     fn update_progress(&mut self, verified_height: block::Height) {
         if let Some(max_height) = self.queued.keys().next_back() {
-            metrics::gauge!("checkpoint.queued.max.height", max_height.0 as f64);
+            metrics::gauge!("checkpoint.queued.max.height").set(max_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("checkpoint.queued.max.height", f64::NAN);
+            metrics::gauge!("checkpoint.queued.max.height").set(f64::NAN);
         }
-        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
+        metrics::gauge!("checkpoint.queued_slots").set(self.queued.len() as f64);
 
         // Ignore blocks that are below the previous checkpoint, or otherwise
         // have invalid heights.
@@ -869,7 +863,7 @@ where
 
         let block_count = rev_valid_blocks.len();
         tracing::info!(?block_count, ?current_range, "verified checkpoint range");
-        metrics::counter!("checkpoint.verified.block.count", block_count as u64);
+        metrics::counter!("checkpoint.verified.block.count").increment(block_count as u64);
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.
@@ -1058,7 +1052,7 @@ where
 
         self.process_checkpoint_range();
 
-        metrics::gauge!("checkpoint.queued_slots", self.queued.len() as f64);
+        metrics::gauge!("checkpoint.queued_slots").set(self.queued.len() as f64);
 
         // Because the checkpoint verifier duplicates state from the state
         // service (it tracks which checkpoints have been verified), we must

@@ -353,10 +353,10 @@ impl Config {
                     // (But we only make one initial connection attempt to each IP.)
                     metrics::counter!(
                         "zcash.net.peers.initial",
-                        1,
                         "seed" => host.to_string(),
                         "remote_ip" => ip.to_string()
-                    );
+                    )
+                    .increment(1);
                 }
 
                 Ok(ip_addrs.into_iter().collect())
@@ -440,10 +440,10 @@ impl Config {
             // (But we only make one initial connection attempt to each IP.)
             metrics::counter!(
                 "zcash.net.peers.initial",
-                1,
                 "cache" => peer_cache_file.display().to_string(),
                 "remote_ip" => ip.to_string()
-            );
+            )
+            .increment(1);
         }
 
         Ok(peer_list)
@@ -553,10 +553,10 @@ impl Config {
                         for ip in &peer_list {
                             metrics::counter!(
                                 "zcash.net.peers.cache",
-                                1,
                                 "cache" => peer_cache_file.display().to_string(),
                                 "remote_ip" => ip.to_string()
-                            );
+                            )
+                            .increment(1);
                         }
 
                         Ok(())

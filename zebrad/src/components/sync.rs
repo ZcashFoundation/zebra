@@ -789,7 +789,8 @@ where
                     let new_download_len = download_set.len();
                     let new_hashes = new_download_len - prev_download_len;
                     debug!(new_hashes, "added hashes to download set");
-                    metrics::histogram!("sync.obtain.response.hash.count", new_hashes as f64);
+                    metrics::histogram!("sync.obtain.response.hash.count")
+                        .record(new_hashes as f64);
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -809,7 +810,7 @@ where
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
-        metrics::gauge!("sync.obtain.queued.hash.count", new_downloads as f64);
+        metrics::gauge!("sync.obtain.queued.hash.count").set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
@@ -935,7 +936,8 @@ where
                         let new_download_len = download_set.len();
                         let new_hashes = new_download_len - prev_download_len;
                         debug!(new_hashes, "added hashes to download set");
-                        metrics::histogram!("sync.extend.response.hash.count", new_hashes as f64);
+                        metrics::histogram!("sync.extend.response.hash.count")
+                            .record(new_hashes as f64);
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -946,7 +948,7 @@ where
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
-        metrics::gauge!("sync.extend.queued.hash.count", new_downloads as f64);
+        metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
@@ -1149,14 +1151,8 @@ where
     }
 
     fn update_metrics(&mut self) {
-        metrics::gauge!(
-            "sync.prospective_tips.len",
-            self.prospective_tips.len() as f64,
-        );
-        metrics::gauge!(
-            "sync.downloads.in_flight",
-            self.downloads.in_flight() as f64,
-        );
+        metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
+        metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
     }
 
     /// Return if the sync should be restarted based on the given error

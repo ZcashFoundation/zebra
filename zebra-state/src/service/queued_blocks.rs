@@ -186,19 +186,19 @@ impl QueuedBlocks {
     /// Update metrics after the queue is modified
     fn update_metrics(&self) {
         if let Some(min_height) = self.by_height.keys().next() {
-            metrics::gauge!("state.memory.queued.min.height", min_height.0 as f64);
+            metrics::gauge!("state.memory.queued.min.height").set(min_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.memory.queued.min.height", f64::NAN);
+            metrics::gauge!("state.memory.queued.min.height").set(f64::NAN);
         }
         if let Some(max_height) = self.by_height.keys().next_back() {
-            metrics::gauge!("state.memory.queued.max.height", max_height.0 as f64);
+            metrics::gauge!("state.memory.queued.max.height").set(max_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.memory.queued.max.height", f64::NAN);
+            metrics::gauge!("state.memory.queued.max.height").set(f64::NAN);
         }
 
-        metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as f64);
+        metrics::gauge!("state.memory.queued.block.count").set(self.blocks.len() as f64);
     }
 
     /// Try to look up this UTXO in any queued block.
@@ -357,8 +357,8 @@ impl SentHashes {
 
     /// Update sent block metrics after a block is sent.
     fn update_metrics_for_block(&self, height: block::Height) {
-        metrics::counter!("state.memory.sent.block.count", 1);
-        metrics::gauge!("state.memory.sent.block.height", height.0 as f64);
+        metrics::counter!("state.memory.sent.block.count").increment(1);
+        metrics::gauge!("state.memory.sent.block.height").set(height.0 as f64);
 
         self.update_metrics_for_cache();
     }
@@ -371,30 +371,25 @@ impl SentHashes {
             .flat_map(|batch| batch.front().map(|(_hash, height)| height))
             .min()
         {
-            metrics::gauge!("state.memory.sent.cache.min.height", min_height.0 as f64);
+            metrics::gauge!("state.memory.sent.cache.min.height").set(min_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.memory.sent.cache.min.height", f64::NAN);
+            metrics::gauge!("state.memory.sent.cache.min.height").set(f64::NAN);
         }
 
         if let Some(max_height) = batch_iter()
             .flat_map(|batch| batch.back().map(|(_hash, height)| height))
             .max()
         {
-            metrics::gauge!("state.memory.sent.cache.max.height", max_height.0 as f64);
+            metrics::gauge!("state.memory.sent.cache.max.height").set(max_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
-            metrics::gauge!("state.memory.sent.cache.max.height", f64::NAN);
+            metrics::gauge!("state.memory.sent.cache.max.height").set(f64::NAN);
         }
 
-        metrics::gauge!(
-            "state.memory.sent.cache.block.count",
-            batch_iter().flatten().count() as f64,
-        );
+        metrics::gauge!("state.memory.sent.cache.block.count")
+            .set(batch_iter().flatten().count() as f64);
 
-        metrics::gauge!(
-            "state.memory.sent.cache.batch.count",
-            batch_iter().count() as f64,
-        );
+        metrics::gauge!("state.memory.sent.cache.batch.count").set(batch_iter().count() as f64);
     }
 }

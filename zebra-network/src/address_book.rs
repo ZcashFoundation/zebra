@@ -696,18 +696,15 @@ impl AddressBook {
         let _ = self.address_metrics_tx.send(m);
 
         // TODO: rename to address_book.[state_name]
-        metrics::gauge!("candidate_set.responded", m.responded as f64);
-        metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
-        metrics::gauge!("candidate_set.failed", m.failed as f64);
-        metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
+        metrics::gauge!("candidate_set.responded").set(m.responded as f64);
+        metrics::gauge!("candidate_set.gossiped").set(m.never_attempted_gossiped as f64);
+        metrics::gauge!("candidate_set.failed").set(m.failed as f64);
+        metrics::gauge!("candidate_set.pending").set(m.attempt_pending as f64);
 
         // TODO: rename to address_book.responded.recently_live
-        metrics::gauge!("candidate_set.recently_live", m.recently_live as f64);
+        metrics::gauge!("candidate_set.recently_live").set(m.recently_live as f64);
         // TODO: rename to address_book.responded.stopped_responding
-        metrics::gauge!(
-            "candidate_set.disconnected",
-            m.recently_stopped_responding as f64,
-        );
+        metrics::gauge!("candidate_set.disconnected").set(m.recently_stopped_responding as f64);
 
         std::mem::drop(_guard);
         self.log_metrics(&m, instant_now);

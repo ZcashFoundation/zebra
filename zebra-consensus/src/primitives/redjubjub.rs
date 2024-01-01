@@ -165,10 +165,10 @@ impl Service<BatchControl<Item>> for Verifier {
 
                             if result.is_ok() {
                                 tracing::trace!(?result, "validated redjubjub signature");
-                                metrics::counter!("signatures.redjubjub.validated", 1);
+                                metrics::counter!("signatures.redjubjub.validated").increment(1);
                             } else {
                                 tracing::trace!(?result, "invalid redjubjub signature");
-                                metrics::counter!("signatures.redjubjub.invalid", 1);
+                                metrics::counter!("signatures.redjubjub.invalid").increment(1);
                             }
 
                             result.map_err(BoxError::from)

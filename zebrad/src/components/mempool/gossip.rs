@@ -93,7 +93,7 @@ where
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready().await?.call(request).await;
 
-        metrics::counter!("mempool.gossiped.transactions.total", txs_len as u64);
+        metrics::counter!("mempool.gossiped.transactions.total").increment(txs_len as u64);
 
         // wait for at least the network timeout between gossips
         //
