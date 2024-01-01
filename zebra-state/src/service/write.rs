@@ -292,7 +292,7 @@ pub fn write_blocks_from_channels(
 
         while non_finalized_state
             .best_chain_len()
-            .expect("only called after inserting a block")
+            .expect("just successfully inserted a non-finalized block above")
             > MAX_BLOCK_REORG_HEIGHT
         {
             tracing::trace!("finalizing block past the reorg limit");

@@ -421,7 +421,9 @@ impl NonFinalizedState {
     /// Returns the length of the non-finalized portion of the current best chain
     /// or `None` if the best chain has no blocks.
     pub fn best_chain_len(&self) -> Option<u32> {
-        self.best_chain().map(|chain| chain.blocks.len() as u32)
+        // This `as` can't overflow because the number of blocks in the chain is limited to i32::MAX,
+        // and the non-finalized chain is further limited by the fork length (slightly over 100 blocks).
+        Some(self.best_chain()?.blocks.len() as u32)
     }
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
