@@ -34,8 +34,11 @@ getblocktemplate-rpcs = [
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
+# Support for transaction version 6
+tx-v6 = ["zebra-chain/tx-v6", "zebra-state/tx-v6"]
+
 [dependencies]
-blake2b_simd = "1.0.2"
+blake2b_simd = "=1.0.1" # Pinned to 1.0.1 for now to resolve cargo conflict with orchard_zsa
 bellman = "0.14.0"
 bls12_381 = "0.8.0"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }

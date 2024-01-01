@@ -8,7 +8,7 @@ use proptest::prelude::*;
 use zebra_chain::{
     block::{Block, Height},
     fmt::TypeNameToDebug,
-    orchard,
+    orchard::{self, Orchard},
     parameters::NetworkUpgrade::Nu5,
     primitives::Groth16Proof,
     sapling::{self, FieldNotPresent, PerSpendAnchor, TransferData::*},
@@ -700,8 +700,8 @@ proptest! {
     /// (And that the test infrastructure generally works.)
     #[test]
     fn accept_distinct_arbitrary_orchard_nullifiers_in_one_block(
-        authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        authorized_action in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
         let _init_guard = zebra_test::init();
@@ -759,9 +759,9 @@ proptest! {
     /// if they come from different AuthorizedActions in the same orchard::ShieldedData/Transaction.
     #[test]
     fn reject_duplicate_orchard_nullifiers_in_transaction(
-        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
     ) {
         let _init_guard = zebra_test::init();
 
@@ -812,10 +812,10 @@ proptest! {
     /// if they come from different transactions in the same block.
     #[test]
     fn reject_duplicate_orchard_nullifiers_in_block(
-        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
-        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
+        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
     ) {
         let _init_guard = zebra_test::init();
 
@@ -872,10 +872,10 @@ proptest! {
     /// if they come from different blocks in the same chain.
     #[test]
     fn reject_duplicate_orchard_nullifiers_in_chain(
-        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
-        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
-        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+        authorized_action1 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction<Orchard>>::arbitrary(),
+        orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
+        orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData<Orchard>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
         let _init_guard = zebra_test::init();
@@ -1126,8 +1126,8 @@ fn transaction_v4_with_sapling_shielded_data(
 ///
 /// If there are no `AuthorizedAction`s in `authorized_actions`.
 fn transaction_v5_with_orchard_shielded_data(
-    orchard_shielded_data: impl Into<Option<orchard::ShieldedData>>,
-    authorized_actions: impl IntoIterator<Item = orchard::AuthorizedAction>,
+    orchard_shielded_data: impl Into<Option<orchard::ShieldedData<Orchard>>>,
+    authorized_actions: impl IntoIterator<Item = orchard::AuthorizedAction<Orchard>>,
 ) -> Transaction {
     let mut orchard_shielded_data = orchard_shielded_data.into();
     let authorized_actions: Vec<_> = authorized_actions.into_iter().collect();

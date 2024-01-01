@@ -88,25 +88,21 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     // > earlier block’s final Orchard treestate.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#actions>
-    if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+    if let Some(anchor) = transaction.orchard_anchor() {
         tracing::debug!(
-            ?orchard_shielded_data.shared_anchor,
+            ?anchor,
             ?tx_index_in_block,
             ?height,
             "observed orchard anchor",
         );
 
         if !parent_chain
-            .map(|chain| {
-                chain
-                    .orchard_anchors
-                    .contains(&orchard_shielded_data.shared_anchor)
-            })
+            .map(|chain| chain.orchard_anchors.contains(anchor))
             .unwrap_or(false)
-            && !finalized_state.contains_orchard_anchor(&orchard_shielded_data.shared_anchor)
+            && !finalized_state.contains_orchard_anchor(anchor)
         {
             return Err(ValidateContextError::UnknownOrchardAnchor {
-                anchor: orchard_shielded_data.shared_anchor,
+                anchor: *anchor,
                 height,
                 tx_index_in_block,
                 transaction_hash,
@@ -114,7 +110,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
         }
 
         tracing::debug!(
-            ?orchard_shielded_data.shared_anchor,
+            ?anchor,
             ?tx_index_in_block,
             ?height,
             "validated orchard anchor",

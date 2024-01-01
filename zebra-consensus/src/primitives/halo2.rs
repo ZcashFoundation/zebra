@@ -97,6 +97,7 @@ impl Item {
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
+    // TODO: FIXME: take care of V5 and V6 difference
     pub fn verify_single(&self, vk: &ItemVerifyingKey) -> Result<(), halo2::plonk::Error> {
         self.proof.verify(vk, &self.instances[..])
     }
@@ -130,8 +131,10 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<&zebra_chain::orchard::ShieldedData> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData) -> Item {
+impl<V: zebra_chain::orchard::OrchardFlavour> From<&zebra_chain::orchard::ShieldedData<V>>
+    for Item
+{
+    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();

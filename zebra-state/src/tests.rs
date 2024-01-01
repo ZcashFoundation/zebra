@@ -34,6 +34,8 @@ impl FakeChainHelper for Arc<Block> {
             Transaction::V3 { inputs, .. } => &mut inputs[0],
             Transaction::V4 { inputs, .. } => &mut inputs[0],
             Transaction::V5 { inputs, .. } => &mut inputs[0],
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 { inputs, .. } => &mut inputs[0],
         };
 
         match input {

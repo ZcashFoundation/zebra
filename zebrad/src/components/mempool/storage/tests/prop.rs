@@ -9,7 +9,7 @@ use zebra_chain::{
     amount::Amount,
     at_least_one,
     fmt::{DisplayToDebug, SummaryDebug},
-    orchard,
+    orchard::{self, Orchard, OrchardFlavour},
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::AtLeastOne,
@@ -568,6 +568,9 @@ impl SpendConflictTestInput {
 
                 // No JoinSplits
                 Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 { .. } => {}
             }
         }
     }
@@ -632,6 +635,14 @@ impl SpendConflictTestInput {
                 }
 
                 Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
+                }
+
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
                     sapling_shielded_data,
                     ..
                 } => {
@@ -709,6 +720,12 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
+                    orchard_shielded_data,
+                    ..
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+
                 // No Spends
                 Transaction::V1 { .. }
                 | Transaction::V2 { .. }
@@ -722,8 +739,8 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData>,
+    fn remove_orchard_actions_with_conflicts<V: OrchardFlavour>(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData<V>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data.take() {
@@ -757,7 +774,7 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict>),
+    Orchard(Box<OrchardSpendConflict<Orchard>>),
 }
 
 /// A conflict caused by spending the same UTXO.
@@ -782,8 +799,11 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
+struct OrchardSpendConflict<V: OrchardFlavour + 'static>
+where
+    V::EncryptedNote: Arbitrary,
+{
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData<V>>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -920,7 +940,10 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     }
 }
 
-impl OrchardSpendConflict {
+impl<V: OrchardFlavour + 'static> OrchardSpendConflict<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     /// Apply a Orchard spend conflict.
     ///
     /// Ensures that a transaction's `orchard_shielded_data` has a nullifier used to represent a
@@ -929,7 +952,7 @@ impl OrchardSpendConflict {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData>) {
+    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<V>>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;

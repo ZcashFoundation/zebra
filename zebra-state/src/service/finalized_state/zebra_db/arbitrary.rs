@@ -65,8 +65,8 @@ impl ZebraDb {
             }
 
             // Orchard
-            if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-                batch.zs_insert(&orchard_anchors, orchard_shielded_data.shared_anchor, ());
+            if let Some(anchor) = transaction.orchard_anchor() {
+                batch.zs_insert(&orchard_anchors, anchor, ());
             }
         }
 

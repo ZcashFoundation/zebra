@@ -15,7 +15,6 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
-default = []
 
 # Production features that activate extra functionality
 
@@ -50,14 +49,17 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+# Support for transaction version 6
+tx-v6 = ["orchard_zsa"]
+
 [dependencies]
 
 # Cryptography
 bitvec = "1.0.1"
 bitflags = "2.4.1"
 bitflags-serde-legacy = "0.1.1"
-blake2b_simd = "1.0.2"
-blake2s_simd = "1.0.2"
+blake2b_simd = "=1.0.1" # Pinned to 1.0.1 for now to resolve cargo conflict with orchard_zsa
+blake2s_simd = "=1.0.1" # Pinned to 1.0.1 for now to resolve cargo conflict with orchard_zsa
 bridgetree = "0.4.0"
 bs58 = { version = "0.5.0", features = ["check"] }
 byteorder = "1.5.0"
@@ -128,6 +130,9 @@ rand_chacha = { version = "0.3.1", optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.32", optional = true }
 
+# ZSA deps
+orchard_zsa = { package = "orchard", version = "0.5", git = "https://github.com/QED-it/orchard", branch = "zsa1", optional = true }
+
 [dev-dependencies]
 # Benchmarks
 criterion = { version = "0.5.1", features = ["html_reports"] }
@@ -159,3 +164,4 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+

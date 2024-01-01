@@ -9,7 +9,7 @@ use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{hash::WtxId, sighash::SigHasher, txid::TxIdBuilder, Transaction},
+    transaction::{hash::WtxId, sighash::SigHasher, tx_v5_and_v6, txid::TxIdBuilder, Transaction},
     transparent::Script,
 };
 
@@ -977,10 +977,10 @@ fn binding_signatures_for_network(network: Network) {
                         .expect("must pass verification");
                     }
                 }
-                Transaction::V5 {
+                tx_v5_and_v6!({
                     sapling_shielded_data,
                     ..
-                } => {
+                }) => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
                         let shielded_sighash = tx.sighash(upgrade, HashType::ALL, &[], None);
 

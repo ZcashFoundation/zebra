@@ -18,7 +18,7 @@ use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     at_least_one,
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
-    orchard,
+    orchard::{self, Orchard, OrchardFlavour},
     parameters::{Network, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
@@ -149,7 +149,7 @@ impl Transaction {
             transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData>()),
+            option::of(any::<orchard::ShieldedData<Orchard>>()),
         )
             .prop_map(
                 move |(
@@ -705,7 +705,10 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for orchard::ShieldedData {
+impl<V: OrchardFlavour + 'static> Arbitrary for orchard::ShieldedData<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -715,7 +718,7 @@ impl Arbitrary for orchard::ShieldedData {
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
             vec(
-                any::<orchard::shielded_data::AuthorizedAction>(),
+                any::<orchard::shielded_data::AuthorizedAction<V>>(),
                 1..MAX_ARBITRARY_ITEMS,
             ),
             any::<BindingSignature>(),
@@ -730,6 +733,8 @@ impl Arbitrary for orchard::ShieldedData {
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: binding_sig.0,
+                    #[cfg(feature = "tx-v6")]
+                    burn: Default::default(),
                 },
             )
             .boxed()
@@ -926,6 +931,8 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
+        #[cfg(feature = "tx-v6")]
+        v6 @ V6 { .. } => v6.clone(), // TODO: FIXME: check how it should work for v6
     }
 }
 
@@ -1045,7 +1052,7 @@ pub fn transactions_from_blocks<'a>(
 /// Panics if the transaction to be modified is not V5.
 pub fn insert_fake_orchard_shielded_data(
     transaction: &mut Transaction,
-) -> &mut orchard::ShieldedData {
+) -> &mut orchard::ShieldedData<Orchard> {
     // Create a dummy action
     let mut runner = TestRunner::default();
     let dummy_action = orchard::Action::arbitrary()
@@ -1067,6 +1074,8 @@ pub fn insert_fake_orchard_shielded_data(
         proof: Halo2Proof(vec![]),
         actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
+        #[cfg(feature = "tx-v6")]
+        burn: Default::default(),
     };
 
     // Replace the shielded data in the transaction

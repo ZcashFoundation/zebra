@@ -19,7 +19,8 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block, orchard,
+    block,
+    orchard::{self, Orchard},
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -414,6 +415,15 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature = "tx-v6")]               
+                Transaction::V6 {
+                    sapling_shielded_data: _sapling_shielded_data,
+                    orchard_shielded_data: _orchard_shielded_data,
+                    ..
+                } => {
+                    // TODO: FIXME: Implement verify_v6_transaction
+                    AsyncChecks::new()
+                }
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -712,7 +722,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Orchard>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -1007,7 +1017,7 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Orchard>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();

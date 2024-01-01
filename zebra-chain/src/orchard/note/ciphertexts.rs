@@ -10,20 +10,20 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// Corresponds to the Orchard 'encCiphertext's
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "BigArray")] pub(crate) [u8; 580]);
+pub struct EncryptedNote<const N: usize>(#[serde(with = "BigArray")] pub(crate) [u8; N]);
 
 // These impls all only exist because of array length restrictions.
 // TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
 
-impl Copy for EncryptedNote {}
+impl<const N: usize> Copy for EncryptedNote<N> {}
 
-impl Clone for EncryptedNote {
+impl<const N: usize> Clone for EncryptedNote<N> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl fmt::Debug for EncryptedNote {
+impl<const N: usize> fmt::Debug for EncryptedNote<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("EncryptedNote")
             .field(&hex::encode(&self.0[..]))
@@ -31,36 +31,36 @@ impl fmt::Debug for EncryptedNote {
     }
 }
 
-impl Eq for EncryptedNote {}
+impl<const N: usize> Eq for EncryptedNote<N> {}
 
-impl From<[u8; 580]> for EncryptedNote {
-    fn from(bytes: [u8; 580]) -> Self {
+impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {
+    fn from(bytes: [u8; N]) -> Self {
         EncryptedNote(bytes)
     }
 }
 
-impl From<EncryptedNote> for [u8; 580] {
-    fn from(enc_ciphertext: EncryptedNote) -> Self {
+impl<const N: usize> From<EncryptedNote<N>> for [u8; N] {
+    fn from(enc_ciphertext: EncryptedNote<N>) -> Self {
         enc_ciphertext.0
     }
 }
 
-impl PartialEq for EncryptedNote {
+impl<const N: usize> PartialEq for EncryptedNote<N> {
     fn eq(&self, other: &Self) -> bool {
         self.0[..] == other.0[..]
     }
 }
 
-impl ZcashSerialize for EncryptedNote {
+impl<const N: usize> ZcashSerialize for EncryptedNote<N> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for EncryptedNote {
+impl<const N: usize> ZcashDeserialize for EncryptedNote<N> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 580];
+        let mut bytes = [0; N];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -131,7 +131,7 @@ use proptest::prelude::*;
 proptest! {
 
     #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
+    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote::<{ crate::orchard::ENCRYPTED_NOTE_SIZE_V5 }>>()) {
         let _init_guard = zebra_test::init();
 
         let mut data = Vec::new();

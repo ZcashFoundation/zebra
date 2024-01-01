@@ -10,17 +10,21 @@ use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, Verific
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
 use super::{
-    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment,
+    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, OrchardFlavour,
+    ValueCommitment,
 };
 
-impl Arbitrary for Action {
+impl<V: OrchardFlavour + 'static> Arbitrary for Action<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (
             any::<note::Nullifier>(),
             any::<SpendAuthVerificationKeyBytes>(),
-            any::<note::EncryptedNote>(),
+            any::<V::EncryptedNote>(),
             any::<note::WrappedNoteKey>(),
         )
             .prop_map(|(nullifier, rk, enc_ciphertext, out_ciphertext)| Self {
@@ -54,11 +58,14 @@ impl Arbitrary for note::Nullifier {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for AuthorizedAction {
+impl<V: OrchardFlavour + 'static> Arbitrary for AuthorizedAction<V>
+where
+    V::EncryptedNote: Arbitrary,
+{
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<Action>(), any::<SpendAuthSignature>())
+        (any::<Action<V>>(), any::<SpendAuthSignature>())
             .prop_map(|(action, spend_auth_sig)| Self {
                 action,
                 spend_auth_sig: spend_auth_sig.0,

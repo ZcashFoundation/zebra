@@ -222,6 +222,9 @@ pub fn miner_fees_are_valid(
     let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
 
+    // TODO: FIXME: check if it's needed to use burn value explicitly in the calculation below
+    //let orchard_zsa_burn_value = coinbase.orchard_zsa_burn_value().burn_amount();
+
     let block_subsidy = subsidy::general::block_subsidy(height, network)
         .expect("a valid block subsidy for this height and network");
 
@@ -233,6 +236,7 @@ pub fn miner_fees_are_valid(
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
+        //- orchard_zsa_burn_value) // TODO: FIXME: see FIXME above
         .map_err(|_| SubsidyError::SumOverflow)?;
     let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
