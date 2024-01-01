@@ -458,15 +458,11 @@ impl FinalizedState {
             let block_time = block.header.time.timestamp();
             let local_time = chrono::Utc::now().timestamp();
 
-            // Mainnet bulk size is small enough to avoid the elasticsearch 100mb content
-            // length limitation. MAX_BLOCK_BYTES = 2MB but each block use around 4.1 MB of JSON.
+            // Bulk size is small enough to avoid the elasticsearch 100mb content length limitation.
+            // MAX_BLOCK_BYTES = 2MB but each block use around 4.1 MB of JSON.
             // Each block count as 2 as we send them with a operation/header line. A value of 48
             // is 24 blocks.
-            const MAINNET_AWAY_FROM_TIP_BULK_SIZE: usize = 48;
-
-            // Testnet bulk size is larger as blocks are generally smaller in the testnet.
-            // A value of 800 is 400 blocks as we are not counting the operation line.
-            const TESTNET_AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+            const AWAY_FROM_TIP_BULK_SIZE: usize = 48;
 
             // The number of blocks the bulk will have when we are in sync.
             // A value of 2 means only 1 block as we want to insert them as soon as we get
@@ -477,10 +473,7 @@ impl FinalizedState {
             // less than this number of seconds.
             const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
-            let mut blocks_size_to_dump = match self.network() {
-                Network::Mainnet => MAINNET_AWAY_FROM_TIP_BULK_SIZE,
-                Network::Testnet => TESTNET_AWAY_FROM_TIP_BULK_SIZE,
-            };
+            let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
 
             // If we are close to the tip, index one block per bulk call.
             if local_time - block_time < CLOSE_TO_TIP_SECONDS {
