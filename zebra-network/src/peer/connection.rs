@@ -1664,7 +1664,7 @@ where
             "command" => current_metrics_state.clone(),
             "addr" => self.metrics_label.clone(),
         )
-        .set(1.0);
+        .increment(1.0);
 
         self.last_metrics_state = Some(current_metrics_state);
     }
