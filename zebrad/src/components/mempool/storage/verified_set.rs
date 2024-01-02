@@ -337,63 +337,57 @@ impl VerifiedSet {
 
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
-            unpaid_actions_with_weight_lt20pct as f64,
             "bk" => "< 0.2",
-        );
+        )
+        .set(unpaid_actions_with_weight_lt20pct as f64);
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
-            unpaid_actions_with_weight_lt40pct as f64,
             "bk" => "< 0.4",
-        );
+        )
+        .set(unpaid_actions_with_weight_lt40pct as f64);
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
-            unpaid_actions_with_weight_lt60pct as f64,
             "bk" => "< 0.6",
-        );
+        )
+        .set(unpaid_actions_with_weight_lt60pct as f64);
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
-            unpaid_actions_with_weight_lt80pct as f64,
             "bk" => "< 0.8",
-        );
+        )
+        .set(unpaid_actions_with_weight_lt80pct as f64);
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
-            unpaid_actions_with_weight_lt1 as f64,
             "bk" => "< 1",
-        );
-        metrics::gauge!("zcash.mempool.actions.paid", paid_actions as f64);
-        metrics::gauge!(
-            "zcash.mempool.size.transactions",
-            self.transaction_count() as f64,
-        );
+        )
+        .set(unpaid_actions_with_weight_lt1 as f64);
+        metrics::gauge!("zcash.mempool.actions.paid").set(paid_actions as f64);
+        metrics::gauge!("zcash.mempool.size.transactions",).set(self.transaction_count() as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
-            size_with_weight_lt1 as f64,
             "bk" => "< 1",
-        );
+        )
+        .set(size_with_weight_lt1 as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
-            size_with_weight_eq1 as f64,
             "bk" => "1",
-        );
+        )
+        .set(size_with_weight_eq1 as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
-            size_with_weight_gt1 as f64,
             "bk" => "> 1",
-        );
+        )
+        .set(size_with_weight_gt1 as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
-            size_with_weight_gt2 as f64,
             "bk" => "> 2",
-        );
+        )
+        .set(size_with_weight_gt2 as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
-            size_with_weight_gt3 as f64,
             "bk" => "> 3",
-        );
-        metrics::gauge!(
-            "zcash.mempool.size.bytes",
-            self.transactions_serialized_size as f64,
-        );
-        metrics::gauge!("zcash.mempool.cost.bytes", self.total_cost as f64);
+        )
+        .set(size_with_weight_gt3 as f64);
+        metrics::gauge!("zcash.mempool.size.bytes",).set(self.transactions_serialized_size as f64);
+        metrics::gauge!("zcash.mempool.cost.bytes").set(self.total_cost as f64);
     }
 }

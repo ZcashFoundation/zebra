@@ -520,14 +520,9 @@ impl StateService {
             self.max_finalized_queue_height = queued_height.0 as f64;
         }
 
-        metrics::gauge!(
-            "state.checkpoint.queued.max.height",
-            self.max_finalized_queue_height,
-        );
-        metrics::gauge!(
-            "state.checkpoint.queued.block.count",
-            self.finalized_state_queued_blocks.len() as f64,
-        );
+        metrics::gauge!("state.checkpoint.queued.max.height").set(self.max_finalized_queue_height);
+        metrics::gauge!("state.checkpoint.queued.block.count")
+            .set(self.finalized_state_queued_blocks.len() as f64);
 
         rsp_rx
     }
@@ -583,10 +578,8 @@ impl StateService {
                         "block commit task exited. Is Zebra shutting down?",
                     );
                 } else {
-                    metrics::gauge!(
-                        "state.checkpoint.sent.block.height",
-                        last_sent_finalized_block_height.0 as f64,
-                    );
+                    metrics::gauge!("state.checkpoint.sent.block.height")
+                        .set(last_sent_finalized_block_height.0 as f64);
                 };
             }
         }

@@ -342,8 +342,8 @@ impl InventoryRegistry {
                 Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(count)))) => {
                     // This isn't a fatal inventory error, it's expected behaviour when Zebra is
                     // under load from peers.
-                    metrics::counter!("pool.inventory.dropped", 1);
-                    metrics::counter!("pool.inventory.dropped.messages", count);
+                    metrics::counter!("pool.inventory.dropped").increment(1);
+                    metrics::counter!("pool.inventory.dropped.messages").increment(count);
 
                     // If this message happens a lot, we should improve inventory registry
                     // performance, or poll the registry or peer set in a separate task.

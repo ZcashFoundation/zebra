@@ -348,10 +348,10 @@ impl Service<BatchControl<Item>> for Verifier {
 
                             if result.is_ok() {
                                 tracing::trace!(?result, "verified halo2 proof");
-                                metrics::counter!("proofs.halo2.verified", 1);
+                                metrics::counter!("proofs.halo2.verified").increment(1);
                             } else {
                                 tracing::trace!(?result, "invalid halo2 proof");
-                                metrics::counter!("proofs.halo2.invalid", 1);
+                                metrics::counter!("proofs.halo2.invalid").increment(1);
                             }
 
                             result.map_err(BoxError::from)

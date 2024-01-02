@@ -742,10 +742,10 @@ impl Request {
     pub fn count_metric(&self) {
         metrics::counter!(
             "state.requests",
-            1,
             "service" => "state",
             "type" => self.variant_name()
-        );
+        )
+        .increment(1);
     }
 }
 
@@ -1031,10 +1031,10 @@ impl ReadRequest {
     pub fn count_metric(&self) {
         metrics::counter!(
             "state.requests",
-            1,
             "service" => "read_state",
             "type" => self.variant_name()
-        );
+        )
+        .increment(1);
     }
 }
 

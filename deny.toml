@@ -70,10 +70,16 @@ skip-tree = [
     # wait for `parking_lot` crate inside `jsonrpc-http-server` to upgrade
     { name = "redox_syscall", version = "=0.2.16" },
 
+    # wait for `color-eyre` to upgrade
+    { name = "owo-colors", version = "=3.5.0" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
+
+    # wait for zcash_script to upgrade
+    { name = "metrics", version = "=0.21.1" },
 
     # ECC crates
 

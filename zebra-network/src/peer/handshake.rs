@@ -743,19 +743,19 @@ where
         // the value is the number of rejected handshakes, by peer IP and protocol version
         metrics::counter!(
             "zcash.net.peers.obsolete",
-            1,
             "remote_ip" => their_addr.to_string(),
             "remote_version" => remote.version.to_string(),
             "min_version" => min_version.to_string(),
             "user_agent" => remote.user_agent.clone(),
-        );
+        )
+        .increment(1);
 
         // the value is the remote version of the most recent rejected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.obsolete",
-            remote.version.0 as f64,
             "remote_ip" => their_addr.to_string(),
-        );
+        )
+        .set(remote.version.0 as f64);
 
         // Disconnect if peer is using an obsolete version.
         return Err(HandshakeError::ObsoleteVersion(remote.version));
@@ -782,20 +782,20 @@ where
     // the value is the number of connected handshakes, by peer IP and protocol version
     metrics::counter!(
         "zcash.net.peers.connected",
-        1,
         "remote_ip" => their_addr.to_string(),
         "remote_version" => connection_info.remote.version.to_string(),
         "negotiated_version" => negotiated_version.to_string(),
         "min_version" => min_version.to_string(),
         "user_agent" => connection_info.remote.user_agent.clone(),
-    );
+    )
+    .increment(1);
 
     // the value is the remote version of the most recent connected handshake from each peer
     metrics::gauge!(
         "zcash.net.peers.version.connected",
-        connection_info.remote.version.0 as f64,
         "remote_ip" => their_addr.to_string(),
-    );
+    )
+    .set(connection_info.remote.version.0 as f64);
 
     peer_conn.send(Message::Verack).await?;
 
@@ -954,10 +954,10 @@ where
                 // Add a metric for outbound messages.
                 metrics::counter!(
                     "zcash.net.out.messages",
-                    1,
                     "command" => msg.command(),
                     "addr" => connected_addr.get_transient_addr_label(),
-                );
+                )
+                .increment(1);
                 // We need to use future::ready rather than an async block here,
                 // because we need the sink to be Unpin, and the With<Fut, ...>
                 // returned by .with is Unpin only if Fut is Unpin, and the
@@ -991,10 +991,10 @@ where
                             Ok(msg) => {
                                 metrics::counter!(
                                     "zcash.net.in.messages",
-                                    1,
                                     "command" => msg.command(),
                                     "addr" => connected_addr.get_transient_addr_label(),
-                                );
+                                )
+                                .increment(1);
 
                                 // # Security
                                 //
@@ -1004,10 +1004,10 @@ where
                             Err(err) => {
                                 metrics::counter!(
                                     "zebra.net.in.errors",
-                                    1,
                                     "error" => err.to_string(),
                                     "addr" => connected_addr.get_transient_addr_label(),
-                                );
+                                )
+                                .increment(1);
 
                                 // # Security
                                 //
