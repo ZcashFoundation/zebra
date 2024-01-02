@@ -1,9 +1,5 @@
-# This workflow automates the creation and updating of draft releases. It compiles PR titles into the draft release notes.
+# Creates a draft release with all the PR names since the last release.
 # https://github.com/ZcashFoundation/zebra/releases
-#
-# - Updates the draft release upon each merge into 'main'.
-# - Utilizes the release-drafter GitHub Action to accumulate PR titles since the last release into a draft release note.
-# - Suitable permissions are set for creating releases and handling pull requests.
 #
 # Workflow is based on:
 # https://github.com/marketplace/actions/release-drafter#usage

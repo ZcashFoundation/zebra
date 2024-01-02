@@ -1,13 +1,4 @@
-# This workflow is designed to delete old Google Cloud Platform (GCP) resources to save on costs.
-#
-# 1. Deletes specific instances in GCP older than a defined number of days.
-# 2. Deletes instance templates older than a set number of days.
-# 3. Deletes older disks not currently in use, with certain ones prefixed by commit hashes or "zebrad-".
-# 4. Deletes cache images from GCP, retaining a specified number of the latest images for certain types like zebrad checkpoint cache, zebrad tip cache, and lightwalletd + zebrad tip cache.
-# 5. Deletes unused artifacts from Google Artifact Registry older than a defined number of hours while retaining the latest few.
-#
-# It uses the gcloud CLI for most of its operations and also leverages specific GitHub Actions like the gcr-cleaner for deleting old images from the Google Artifact Registry.
-# The workflow is scheduled to run daily at 0700 UTC.
+# TODO: rename this action name and filename to Delete infra resources
 name: Delete GCP resources
 
 on:
@@ -65,11 +56,29 @@ jobs:
       # so it can't be shell-quoted.
       - name: Delete old instances
         run: |
-          ./.github/workflows/scripts/gcp-delete-old-instances.sh
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_INSTANCE_DAYS days ago" '+%Y%m%d')
+
+          IFS=$'\n'
+          INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,ZONE)' | \
+                      sed 's/\(.*\)\t\(.*\)/\1 --zone=\2/')
+
+          for INSTANCE_AND_ZONE in $INSTANCES
+          do
+            IFS=$' '
+            gcloud compute instances delete --verbosity=info ${INSTANCE_AND_ZONE} --delete-disks=all || continue
+            IFS=$'\n'
+          done
+
       # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
       - name: Delete old instance templates
         run: |
-          ./.github/workflows/scripts/gcp-delete-old-templates.sh
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+
+          for TEMPLATE in $TEMPLATES
+          do
+            gcloud compute instance-templates delete "${TEMPLATE}" || continue
+          done
 
       # Deletes all mainnet and testnet disks older than $DELETE_AGE_DAYS days.
       #
@@ -80,7 +89,31 @@ jobs:
       # so it can't be shell-quoted.
       - name: Delete old disks
         run: |
-          ./.github/workflows/scripts/gcp-delete-old-disks.sh
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+
+          IFS=$'\n'
+          # Disks created by PR jobs, and other jobs that use a commit hash
+          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
+
+          for DISK_AND_LOCATION in $COMMIT_DISKS
+          do
+            IFS=$' '
+            gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
+            IFS=$'\n'
+          done
+
+          IFS=$'\n'
+          # Disks created by managed instance groups, and other jobs that start with "zebrad-"
+          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
+
+          for DISK_AND_LOCATION in $ZEBRAD_DISKS
+          do
+            IFS=$' '
+            gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
+            IFS=$'\n'
+          done
 
       # Deletes mainnet and testnet cache images older than $DELETE_AGE_DAYS days.
       #
@@ -92,9 +125,108 @@ jobs:
       #
       # TODO:
       # - refactor out repeated shell script code
-      - name: Delete old cache images
+      - name: Delete old cache disks
         run: |
-          ./.github/workflows/scripts/gcp-delete-old-cache-images.sh
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+
+          # As of April 2023, these disk names look like:
+          # zebrad-cache-6039-merge-62c8ecc-v25-mainnet-checkpoint-053559
+          #
+          # Mainnet zebrad checkpoint
+          ZEBRAD_MAINNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_MAINNET_CHECKPOINT_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # Testnet zebrad checkpoint
+          ZEBRAD_TESTNET_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_TESTNET_CHECKPOINT_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # As of April 2023, these disk names look like:
+          # zebrad-cache-6556-merge-a2ca4de-v25-mainnet-tip(-u)?-140654
+          #
+          # Mainnet zebrad tip
+          ZEBRAD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_MAINNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # Testnet zebrad tip
+          ZEBRAD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_TESTNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # As of April 2023, these disk names look like:
+          # lwd-cache-main-fb3fec0-v25-mainnet-tip(-u)?-061314
+          #
+          # Mainnet lightwalletd tip
+          LWD_MAINNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-mainnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $LWD_MAINNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
+
+          # Testnet lightwalletd tip
+          LWD_TESTNET_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*-testnet-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $LWD_TESTNET_TIP_IMAGES
+          do
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+
+            gcloud compute images delete "${IMAGE}" || continue
+          done
 
   # We're using a generic approach here, which allows multiple registries to be included,
   # even those not related to GCP. Enough reason to create a separate job.

@@ -1,10 +1,3 @@
-# This workflow conducts various linting checks for a Rust-based project.
-# 1. Determines if Rust or workflow files have been modified.
-# 2. Runs the Clippy linter on Rust files, producing annotations and failing on warnings.
-# 3. Ensures Rust code formatting complies with 'rustfmt' standards.
-# 4. Lints GitHub Actions workflow files for common issues.
-# 5. Checks for common spelling errors in the codebase.
-# The workflow is designed to maintain code quality and consistency, running checks conditionally based on the changed files.
 name: Lint
 
 # Ensures that only one workflow task will run at a time. Previous builds, if

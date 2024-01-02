@@ -1,13 +1,3 @@
-# This workflow facilitates the individual building of Rust crates present in the repository.
-# 1. A matrix is generated dynamically to identify each crate in the repository.
-# 2. This matrix is checked for validity.
-# 3. Each identified crate undergoes three build processes:
-#    - With no features.
-#    - With the default features.
-#    - With all the features enabled.
-# 4. In case of build failures outside of pull requests, an issue is either opened or updated
-#    in the repository to report the failure.
-# Throughout the workflow, various setup steps ensure the correct environment and tools are present.
 name: Build crates individually
 
 # Ensures that only one workflow task will run at a time. Previous builds, if

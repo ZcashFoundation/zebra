@@ -1,11 +1,3 @@
-# This workflow calculates the test coverage for the Rust codebase.
-# 1. The code is checked out.
-# 2. Rust with the stable toolchain, minimal profile, and llvm-tools-preview component is set up.
-# 3. Necessary tools like 'cargo-llvm-cov' are installed.
-# 4. Proptest is minimized for efficient coverage test runs.
-# 5. Tests are run without producing a report to gather coverage information.
-# 6. A coverage report (lcov format) is generated based on the gathered information.
-# 7. Finally, this report is uploaded to Codecov for visualization and analysis.
 name: Coverage
 
 # Ensures that only one workflow task will run at a time. Previous builds, if

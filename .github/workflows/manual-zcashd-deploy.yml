@@ -1,10 +1,3 @@
-# This workflow is designed for manually deploying zcashd nodes to Google Cloud Platform (GCP) based on user inputs.
-# - Allows selection of network type (Mainnet or Testnet) and instance group size.
-# - Converts network name to lowercase to comply with GCP labeling requirements.
-# - Authenticates with Google Cloud using provided credentials.
-# - Creates a GCP instance template from a container image of zcashd.
-# - Checks if the specified instance group already exists.
-# - Depending on the existence check, either creates a new managed instance group or updates the existing one with the new template.
 name: Zcashd Manual Deploy
 
 on:

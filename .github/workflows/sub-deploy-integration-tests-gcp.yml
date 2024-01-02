@@ -183,22 +183,74 @@ jobs:
       - name: Find ${{ inputs.test_id }} cached state disk
         id: get-disk-name
         if: ${{ inputs.needs_zebra_state || inputs.needs_lwd_state }}
-        env:
-          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
-          NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
-          LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
-          ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
-          DISK_PREFIX: ${{ inputs.disk_prefix }}
-          NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
-          DISK_SUFFIX: ${{ inputs.disk_suffix }}
-          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
-          source ./.github/workflows/scripts/gcp-get-cached-disks.sh
-          echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
-          echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
-          echo "DISK_OPTION=image=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
+          set -x
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]]; then
+              DISK_PREFIX=${{ inputs.lwd_state_dir }}
+          else
+              DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
+          fi
+
+          # Try to find an image generated from a previous step or run of this commit.
+          # Fields are listed in the "Create image from state disk" step.
+          #
+          # We don't want to match the full branch name here, because:
+          # - we want to ignore the different GITHUB_REFs across manually triggered jobs,
+          #   pushed branches, and PRs,
+          # - previous commits might have been buggy,
+          #   or they might have worked and hide bugs in this commit
+          #   (we can't avoid this issue entirely, but we don't want to make it more likely), and
+          # - the branch name might have been shortened for the image.
+          #
+          # The probability of two matching short commit hashes within the same month is very low.
+          COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${{ env.GITHUB_SHA_SHORT }}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL}-${{ env.GITHUB_SHA_SHORT }} Disk: $COMMIT_CACHED_DISK_NAME"
+          if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Try to find an image generated from the main branch
+          MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "main Disk: $MAIN_CACHED_DISK_NAME"
+          if [[ -n "$MAIN_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $MAIN_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Try to find an image generated from any other branch
+          ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "any branch Disk: $ANY_CACHED_DISK_NAME"
+          if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Select a cached disk based on the job settings
+          CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
+          if [[ -z "$CACHED_DISK_NAME" ]] && [[ "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
+              echo "Preferring main branch cached state to other branches..."
+              CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
+          fi
+          if [[ -z "$CACHED_DISK_NAME" ]]; then
+              CACHED_DISK_NAME="$ANY_CACHED_DISK_NAME"
+          fi
+
+          if [[ -z "$CACHED_DISK_NAME" ]]; then
+              echo "No cached state disk available"
+              echo "Expected ${COMMIT_DISK_PREFIX}"
+              echo "Also searched for cached disks from other branches"
+              echo "Cached state test jobs must depend on the cached state rebuild job"
+              exit 1
+          fi
+
+          echo "Selected Disk: $CACHED_DISK_NAME"
+          echo "cached_disk_name=$CACHED_DISK_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
+          echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> "$GITHUB_ENV"
+          echo "DISK_OPTION=image=$CACHED_DISK_NAME," >> "$GITHUB_ENV"
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
@@ -212,7 +264,7 @@ jobs:
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk=${DISK_OPTION},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=400GB,type=pd-ssd \
+          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=400GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \

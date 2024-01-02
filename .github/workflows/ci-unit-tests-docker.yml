@@ -1,16 +1,5 @@
 # Google Cloud unit tests that run when Rust code or dependencies are modified,
 # but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
-#
-# This workflow is designed for running various unit tests within Docker containers.
-# Jobs:
-# 1. Builds a Docker image for tests, adaptable to the specified network (Mainnet or Testnet).
-# 2. 'test-all': Executes all Zebra tests, including normally ignored ones, in a Docker environment.
-# 3. 'test-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
-# 4. 'test-empty-sync': Tests Zebra's ability to sync and checkpoint from an empty state.
-# 5. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
-# 6. 'test-configuration-file': Assesses the default Docker configuration for Zebra.
-# 7. 'test-configuration-file-testnet': Checks the Docker image reconfiguration for the Testnet.
-# 8. 'test-zebra-conf-path': Tests Zebra using a custom Docker configuration.
 name: Docker Unit Tests
 
 # Ensures that only one workflow task will run at a time. Previous builds, if

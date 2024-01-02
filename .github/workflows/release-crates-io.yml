@@ -93,9 +93,26 @@ jobs:
       #
       # These steps should be kept up to date with the release checklist.
       #
+      # TODO: move these steps into a script which is run in the release checklist and CI
       - name: Crate release dry run
         run: |
-          ./.github/workflows/scripts/release-crates-dry-run.sh
+          set -ex
+          git config --global user.email "release-tests-no-reply@zfnd.org"
+          git config --global user.name "Automated Release Test"
+          # This script must be the same as:
+          # https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md#update-crate-versions
+          # with an extra `--no-confirm` argument for non-interactive testing.
+          cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad beta
+          cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
+          cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
+          cargo release commit --verbose --execute --no-confirm --allow-branch '*'
+          # Check the release will work using a dry run
+          #
+          # Workaround unpublished dependency version errors by skipping those crates:
+          # https://github.com/crate-ci/cargo-release/issues/691
+          #
+          # TODO: check all crates after fixing these errors
+          cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad
 
   # TODO: actually do the release here
   #release-crates:
