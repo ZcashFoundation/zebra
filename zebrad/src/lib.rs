@@ -54,6 +54,18 @@
 //! - Additional contexts: wider target deployments for people to use a consensus
 //!   node in more contexts e.g. mobile, wasm, etc.
 //!
+//! ## Configuration
+//!
+//! The command below places the generated `zebrad.toml` config file in the default preferences directory of Linux:
+//!
+//! ```console
+//! zebrad generate -o ~/.config/zebrad.toml
+//! ```
+//!
+//! For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
+//!
+//! See [`config::ZebradConfig`] for more information.
+//!
 //! ## Zebra Feature Flags
 //!
 //! The following `zebrad` feature flags are available at compile time:

@@ -45,7 +45,7 @@ pub struct Config {
     /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | `/home/alice/.cache/zebra`           |
     /// | macOS   | `$HOME/Library/Caches/zebra`                    | `/Users/Alice/Library/Caches/zebra`  |
     /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | `C:\Users\Alice\AppData\Local\zebra` |
-    /// | Other   | `std::env::current_dir()/cache/zebra`           | `/cache/zebra`                       |
+    /// | Other   | `std::env::current_dir()/.cache/zebra`          | `/.cache/zebra`                      |
     ///
     /// # Security
     ///
