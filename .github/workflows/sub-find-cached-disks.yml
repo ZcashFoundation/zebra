@@ -69,6 +69,8 @@ jobs:
         env:
           GITHUB_WORKSPACE: ${{ env.GITHUB_WORKSPACE }}
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
+        # TODO: Use the `gcp-get-available-disks.sh` script instead of the inline script,
+        # as this is crashing. And it might related to the returned JSON values.
         run: |
           # ./.github/workflows/scripts/gcp-get-available-disks.sh
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)

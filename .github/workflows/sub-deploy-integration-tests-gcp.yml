@@ -199,6 +199,7 @@ jobs:
           echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
           echo "DISK_OPTION=image=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
 
+
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
       # if the test needs it.
