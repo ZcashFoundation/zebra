@@ -37,9 +37,6 @@ getblocktemplate-rpcs = [
 # Experimental internal miner support
 internal-miner = [
     "equihash/solver",
-    # TODO: enable common code using either "internal-miner" or "getblocktemplate-rpcs",
-    # and remove this feature dependency
-    "getblocktemplate-rpcs",
 ]
 
 # Experimental elasticsearch support
