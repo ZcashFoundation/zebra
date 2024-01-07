@@ -23,7 +23,7 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::ReadOptions;
 use semver::Version;
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
@@ -640,11 +640,8 @@ impl DiskDb {
             Included(mut bound) => {
                 // Increment the last byte in the upper bound that is less than u8::MAX, and
                 // clear any bytes after it to increment the next key in lexicographic order
-                // (next big-endian number) this Vec represents to RocksDB.
-                let is_wrapped_overflow = bound.iter_mut().rev().all(|v| {
-                    *v = v.wrapping_add(1);
-                    v == &0
-                });
+                // (next big-endian number). RocksDB uses lexicographic order for keys.
+                let is_wrapped_overflow = increment_big_endian(&mut bound);
 
                 if is_wrapped_overflow {
                     bound.insert(0, 0x01)
