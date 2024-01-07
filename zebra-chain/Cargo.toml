@@ -29,7 +29,7 @@ async-error = [
     "tokio",
 ]
 
-# Experimental mining RPC support
+# Mining RPC support
 getblocktemplate-rpcs = [
     "zcash_address",
 ]

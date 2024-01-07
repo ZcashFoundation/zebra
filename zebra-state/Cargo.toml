@@ -22,7 +22,7 @@ progress-bar = [
     "howudoin",
 ]
 
-# Experimental mining RPC support
+# Mining RPC support
 getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
