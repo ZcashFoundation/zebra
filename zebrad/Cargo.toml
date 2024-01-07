@@ -68,6 +68,13 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+# Experimental internal miner support
+internal-miner = [
+    "zebra-chain/internal-miner",
+    # TODO: move common code into zebra-chain or zebra-node-services and remove the RPC dependency
+    "getblocktemplate-rpcs",
+]
+
 # Experimental shielded blockchain scanning
 shielded-scan = ["zebra-scan"]
 

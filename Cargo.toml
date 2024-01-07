@@ -55,6 +55,12 @@ opt-level = 3
 [profile.dev.package.bls12_381]
 opt-level = 3
 
+[profile.dev.package.byteorder]
+opt-level = 3
+
+[profile.dev.package.equihash]
+opt-level = 3
+
 [profile.dev.package.zcash_proofs]
 opt-level = 3
 
