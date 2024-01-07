@@ -82,3 +82,9 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+[patch.crates-io]
+# Use the the working solver branch:
+equihash = { git = 'https://github.com/ZcashFoundation/librustzcash.git', branch = 'equihash-solver-tromp' }
+# or during development, use the locally checked out and modified version of equihash:
+#equihash = { path = '../librustzcash/components/equihash' }

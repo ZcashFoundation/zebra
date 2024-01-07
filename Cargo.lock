@@ -1339,8 +1339,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab579d7cf78477773b03e80bc2f89702ef02d7112c711d54ca93dcdce68533d5"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp#da26c34772f4922eb13b4a1e7d88a969bbcf6a91"
 dependencies = [
  "blake2b_simd",
  "byteorder",

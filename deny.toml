@@ -137,6 +137,8 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
+    # TODO: remove this after the equihash solver branch is merged and released
+    "https://github.com/ZcashFoundation/librustzcash.git"
 ]
 
 [sources.allow-org]
