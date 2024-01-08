@@ -346,3 +346,21 @@ pub enum Response {
     /// `getblocktemplate` RPC request in proposal mode.
     ProposalMode(ProposalResponse),
 }
+
+impl Response {
+    /// Returns the inner template, if the response is in template mode.
+    pub fn try_into_template(self) -> Option<GetBlockTemplate> {
+        match self {
+            Response::TemplateMode(template) => Some(*template),
+            Response::ProposalMode(_) => None,
+        }
+    }
+
+    /// Returns the inner proposal, if the response is in proposal mode.
+    pub fn try_into_proposal(self) -> Option<ProposalResponse> {
+        match self {
+            Response::TemplateMode(_) => None,
+            Response::ProposalMode(proposal) => Some(proposal),
+        }
+    }
+}

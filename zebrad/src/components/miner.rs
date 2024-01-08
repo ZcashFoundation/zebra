@@ -6,19 +6,28 @@
 //!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
+use std::sync::Arc;
+
 use color_eyre::Report;
 use tokio::task::JoinHandle;
 use tower::Service;
 use tracing::Instrument;
 
-use zebra_chain::{block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip};
+use zebra_chain::{
+    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, serialization::ZcashSerialize,
+    work::equihash::Solution,
+};
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_rpc::{
     config::mining::Config,
     methods::{
-        get_block_template_rpcs::get_block_template::{
-            self, GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
+        get_block_template_rpcs::{
+            get_block_template::{
+                self, proposal::TimeSource, proposal_block_from_template,
+                GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
+            },
+            types::hex_data::HexData,
         },
         GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
     },
@@ -26,9 +35,7 @@ use zebra_rpc::{
 
 /// Initialize the miner based on its config, and spawn a task for it.
 ///
-/// TODO:
-/// - add a miner config for the number of solver threads.
-/// - add a test for this function.
+/// TODO: add a test for this function.
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
@@ -100,7 +107,7 @@ where
 {
     // TODO: launch the configured number of solvers
     //       make mining threads lower priority than other threads
-    run_mining_solver(rpc).await
+    run_mining_solver(rpc, 0).await
 }
 
 /// Runs a single mining thread to generate blocks, calculate equihash solutions, and submit valid
@@ -108,6 +115,7 @@ where
 #[instrument(skip(rpc))]
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    thread_id: usize,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -145,7 +153,42 @@ where
         _work_id: None,
     };
 
-    let template = rpc.get_block_template(Some(parameters)).await;
+    let template = rpc.get_block_template(Some(parameters)).await?;
+    let template = template
+        .try_into_template()
+        .expect("invalid RPC response: proposal in response to a template request");
+
+    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
+    // TODO: spawn blocking in a low priority thread
+    //       select!{} on either a solved header or a new block template using long_poll_id
+    //       cancel the solver if there's a new template
+    //       use a different nonce for each solver thread
+    //
+    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+    // https://github.com/rust-lang/rust/issues/93610
+    let solved_header = Solution::solve(*block.header);
+
+    block.header = Arc::new(solved_header);
+    let data = block
+        .zcash_serialize_to_vec()
+        .expect("serializing to Vec never fails");
+
+    match rpc.submit_block(HexData(data), None).await {
+        Ok(success) => info!(
+            height = ?block.coinbase_height().expect("height checked by verifier"),
+            hash = ?block.hash(),
+            ?thread_id,
+            ?success,
+            "successfully mined a new block",
+        ),
+        Err(error) => info!(
+            height = ?block.coinbase_height().expect("height valid in template"),
+            hash = ?block.hash(),
+            ?thread_id,
+            ?error,
+            "validating a newly mined block failed, trying again",
+        ),
+    }
 
     Ok(())
 }
