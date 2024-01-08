@@ -11,12 +11,13 @@ use std::sync::Arc;
 use color_eyre::Report;
 use tokio::task::JoinHandle;
 use tower::Service;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 
 use zebra_chain::{
     block::{self, Block},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
+    diagnostic::task::WaitForPanics,
     serialization::ZcashSerialize,
     work::equihash::Solution,
 };
@@ -170,6 +171,9 @@ where
         .try_into_template()
         .expect("invalid RPC response: proposal in response to a template request");
 
+    // TODO: select!{} on either a solved header or a new block template using long_poll_id
+    //       cancel the solver if there's a new template
+    //       use a different nonce for each solver thread
     let block = mine_one_block(template, thread_id).await?;
     let data = block
         .zcash_serialize_to_vec()
@@ -204,14 +208,15 @@ where
 pub async fn mine_one_block(template: GetBlockTemplate, thread_id: usize) -> Result<Block, Report> {
     let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
 
-    // TODO: spawn blocking in a low priority thread
-    //       select!{} on either a solved header or a new block template using long_poll_id
-    //       cancel the solver if there's a new template
-    //       use a different nonce for each solver thread
+    // TODO: spawn to a low priority thread
     //
     // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
     // https://github.com/rust-lang/rust/issues/93610
-    let solved_header = Solution::solve(*block.header);
+    let span = Span::current();
+    let solved_header =
+        tokio::task::spawn_blocking(move || span.in_scope(move || Solution::solve(*block.header)))
+            .wait_for_panics()
+            .await;
 
     block.header = Arc::new(solved_header);
 
