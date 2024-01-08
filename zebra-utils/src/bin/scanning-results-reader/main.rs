@@ -106,8 +106,8 @@ fn get_tx_via_rpc(txid: String) -> String {
         .expect("URL should be valid")
         .build();
     let client = Client::with_transport(transport);
-    let params = [RawValue::from_string(txid).expect("Provided TXID should be a valid JSON")];
-    let request = client.build_request("getrawtransaction", &params);
+    let params = RawValue::from_string(txid).expect("Provided TXID should be a valid JSON");
+    let request = client.build_request("getrawtransaction", Some(&params));
     let response = client
         .send_request(request)
         .expect("Sending the `getrawtransaction` request should succeed");
