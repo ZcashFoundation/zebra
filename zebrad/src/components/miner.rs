@@ -186,8 +186,9 @@ where
             .expect("invalid RPC response: proposal in response to a template request");
 
         // TODO: select!{} on either a solved header or a new block template using long_poll_id
-        //       cancel the solver if there's a new template or if Zebra is shutting down
-        //       launch the configured number of solvers
+        //       cancel the solver if there's a new template
+        //       add a config & launch the configured number of solvers, using available_parallelism()
+        //       by default
         let solver_id = 0;
 
         let height = template.height;
