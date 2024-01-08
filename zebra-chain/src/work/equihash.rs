@@ -118,11 +118,12 @@ impl Solution {
             for solution in &solutions {
                 header.solution = Self::from_bytes(solution)
                     .expect("unexpected invalid solution: incorrect length");
-                // TODO: only run this redundant check in tests
-                header
-                    .solution
-                    .check(&header)
-                    .expect("unexpected invalid solution: invalid solution for header");
+
+                // TODO: work out why we sometimes get invalid solutions here
+                if let Err(error) = header.solution.check(&header) {
+                    info!(?error, "found invalid solution for header");
+                    continue;
+                }
 
                 if Self::difficulty_is_valid(&header) {
                     info!("found valid solution and difficulty");
@@ -132,7 +133,7 @@ impl Solution {
 
             info!(
                 solutions = ?solutions.len(),
-                "found valid solutions which did not pass the difficulty check"
+                "found valid solutions which did not pass the validity or difficulty checks"
             );
         }
 
