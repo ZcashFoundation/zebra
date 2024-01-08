@@ -329,6 +329,17 @@ where
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
+        // Prevent loss of miner funds due to an unsupported or incorrect address type.
+        if let Some(miner_address) = mining_config.miner_address {
+            assert_eq!(
+                miner_address.network(),
+                network,
+                "incorrect miner address config: {miner_address} \
+                         network.network {network} and miner address network {} must match",
+                miner_address.network(),
+            );
+        }
+
         // A limit on the configured extra coinbase data, regardless of the current block height.
         // This is different from the consensus rule, which limits the total height + data.
         const EXTRA_COINBASE_DATA_LIMIT: usize =
