@@ -91,7 +91,7 @@ humantime = "2.1.0"
 # Error Handling & Formatting
 displaydoc = "0.2.4"
 static_assertions = "1.1.0"
-thiserror = "1.0.51"
+thiserror = "1.0.56"
 tracing = "0.1.39"
 
 # Serialization
@@ -111,7 +111,7 @@ redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.108", optional = true }
+serde_json = { version = "1.0.111", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
 tokio = { version = "1.35.1", optional = true }
