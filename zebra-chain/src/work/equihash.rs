@@ -12,11 +12,17 @@ use crate::{
     },
 };
 
-/// The error type for Equihash
+/// The error type for Equihash validation.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 #[error("invalid equihash solution for BlockHeader")]
 pub struct Error(#[from] equihash::Error);
+
+/// The error type for Equihash solving.
+#[non_exhaustive]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("solver was cancelled")]
+pub struct SolverCancelled;
 
 /// The size of an Equihash solution in bytes (always 1344).
 pub(crate) const SOLUTION_SIZE: usize = 1344;
@@ -62,7 +68,7 @@ impl Solution {
 
     /// Returns a [`Solution`] containing the bytes from `solution`.
     /// Returns an error if `solution` is the wrong length.
-    pub fn from_bytes(solution: Vec<u8>) -> Result<Self, SerializationError> {
+    pub fn from_bytes(solution: &[u8]) -> Result<Self, SerializationError> {
         if solution.len() != SOLUTION_SIZE {
             return Err(SerializationError::Parse(
                 "incorrect equihash solution size",
@@ -71,7 +77,7 @@ impl Solution {
 
         let mut bytes = [0; SOLUTION_SIZE];
         // Won't panic, because we just checked the length.
-        bytes.copy_from_slice(&solution);
+        bytes.copy_from_slice(solution);
 
         Ok(Self(bytes))
     }
@@ -92,21 +98,24 @@ impl Solution {
     /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
     /// It can run for minutes or hours if the network difficulty is high.
     #[cfg(feature = "internal-miner")]
-    pub fn solve(mut header: Header) -> Header {
+    #[allow(clippy::unwrap_in_result)]
+    pub fn solve(mut header: Header) -> Result<Header, SolverCancelled> {
+        use crate::shutdown::is_shutting_down;
+
         let mut input = Vec::new();
         header
             .zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
         let input = &input[0..Solution::INPUT_LENGTH];
 
-        loop {
+        while !is_shutting_down() {
             let solutions = equihash::tromp::solve_200_9_compressed(input, || {
                 // This skips the first nonce, which doesn't matter in practice.
                 Self::next_nonce(&mut header.nonce);
                 Some(*header.nonce)
             });
 
-            for solution in solutions {
+            for solution in &solutions {
                 header.solution = Self::from_bytes(solution)
                     .expect("unexpected invalid solution: incorrect length");
                 // TODO: only run this redundant check in tests
@@ -116,10 +125,18 @@ impl Solution {
                     .expect("unexpected invalid solution: invalid solution for header");
 
                 if Self::difficulty_is_valid(&header) {
-                    return header;
+                    info!("found valid solution and difficulty");
+                    return Ok(header);
                 }
             }
+
+            info!(
+                solutions = ?solutions.len(),
+                "found valid solutions which did not pass the difficulty check"
+            );
         }
+
+        Err(SolverCancelled)
     }
 
     /// Modifies `nonce` to be the next integer in big-endian order.
@@ -191,6 +208,6 @@ impl ZcashSerialize for Solution {
 impl ZcashDeserialize for Solution {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let solution: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
-        Self::from_bytes(solution)
+        Self::from_bytes(&solution)
     }
 }

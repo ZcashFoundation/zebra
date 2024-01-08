@@ -19,7 +19,8 @@ use zebra_chain::{
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
     serialization::ZcashSerialize,
-    work::equihash::Solution,
+    shutdown::is_shutting_down,
+    work::equihash::{Solution, SolverCancelled},
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
@@ -166,7 +167,7 @@ where
         _work_id: None,
     };
 
-    loop {
+    while !is_shutting_down() {
         let template = rpc.get_block_template(Some(parameters.clone())).await;
 
         // Wait for the chain to sync so we get a valid template.
@@ -184,44 +185,66 @@ where
             .expect("invalid RPC response: proposal in response to a template request");
 
         // TODO: select!{} on either a solved header or a new block template using long_poll_id
-        //       cancel the solver if there's a new template
+        //       cancel the solver if there's a new template or if Zebra is shutting down
         //       launch the configured number of solvers
-        let solver_thread = 0;
-        let block = mine_one_block(template, solver_thread).await?;
+        let solver_id = 0;
+
+        let height = template.height;
+        let Ok(block) = mine_one_block(template, solver_id).await else {
+            // If the solver was cancelled, we're either shutting down, or we have a new template.
+            if solver_id == 0 {
+                info!(
+                    ?height,
+                    ?solver_id,
+                    "solver cancelled: getting a new block template or shutting down"
+                );
+            } else {
+                debug!(
+                    ?height,
+                    ?solver_id,
+                    "solver cancelled: getting a new block template or shutting down"
+                );
+            }
+            continue;
+        };
+
         let data = block
             .zcash_serialize_to_vec()
             .expect("serializing to Vec never fails");
 
         match rpc.submit_block(HexData(data), None).await {
             Ok(success) => info!(
-                height = ?block.coinbase_height().expect("height checked by verifier"),
+                ?height,
                 hash = ?block.hash(),
-                ?solver_thread,
+                ?solver_id,
                 ?success,
                 "successfully mined a new block",
             ),
             Err(error) => info!(
-                height = ?block.coinbase_height().expect("height valid in template"),
+                ?height,
                 hash = ?block.hash(),
-                ?solver_thread,
+                ?solver_id,
                 ?error,
                 "validating a newly mined block failed, trying again",
             ),
         }
     }
+
+    Ok(())
 }
 
 /// Mines a single block, calculating its equihash solutions, and submitting it to Zebra's block
-/// validator. Uses a different nonce range for each `solver_thread`.
+/// validator. Uses a different nonce range for each `solver_id`.
 ///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
 /// It can run for minutes or hours if the network difficulty is high.
 #[instrument(skip(template))]
 pub async fn mine_one_block(
     template: GetBlockTemplate,
-    solver_thread: usize,
-) -> Result<Block, Report> {
-    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
+    solver_id: usize,
+) -> Result<Block, SolverCancelled> {
+    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)
+        .expect("unexpected invalid block template");
 
     // TODO: spawn to a low priority thread
     //       use a different nonce for each solver thread
@@ -232,7 +255,7 @@ pub async fn mine_one_block(
     let solved_header =
         tokio::task::spawn_blocking(move || span.in_scope(move || Solution::solve(*block.header)))
             .wait_for_panics()
-            .await;
+            .await?;
 
     block.header = Arc::new(solved_header);
 
