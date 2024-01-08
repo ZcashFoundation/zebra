@@ -109,6 +109,12 @@ impl Solution {
             for solution in solutions {
                 header.solution = Self::from_bytes(solution)
                     .expect("unexpected invalid solution: incorrect length");
+                // TODO: only run this redundant check in tests
+                header
+                    .solution
+                    .check(&header)
+                    .expect("unexpected invalid solution: invalid solution for header");
+
                 if Self::difficulty_is_valid(&header) {
                     return header;
                 }
