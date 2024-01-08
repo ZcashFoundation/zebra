@@ -220,10 +220,10 @@ impl StartCmd {
             build_version(),
             user_agent(),
             mempool.clone(),
-            read_only_state_service,
-            block_verifier_router,
+            read_only_state_service.clone(),
+            block_verifier_router.clone(),
             sync_status.clone(),
-            address_book,
+            address_book.clone(),
             latest_chain_tip.clone(),
             config.network.network,
         );
@@ -267,7 +267,8 @@ impl StartCmd {
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
-            sync::end_of_support::start(config.network.network, latest_chain_tip).in_current_span(),
+            sync::end_of_support::start(config.network.network, latest_chain_tip.clone())
+                .in_current_span(),
         );
 
         // Give the inbound service more time to clear its queue,
@@ -281,7 +282,7 @@ impl StartCmd {
             &config.mempool,
             peer_set,
             mempool.clone(),
-            sync_status,
+            sync_status.clone(),
             chain_tip_change.clone(),
         );
 
@@ -308,6 +309,31 @@ impl StartCmd {
         let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
             tokio::spawn(std::future::pending().in_current_span());
 
+        // And finally, spawn the internal Zcash miner, if it is enabled.
+        //
+        // TODO: add a config to enable the miner rather than a feature.
+        #[cfg(feature = "internal-miner")]
+        let miner_task_handle = {
+            info!("spawning Zcash miner");
+            let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+                config.network.network,
+                config.mining.clone(),
+                mempool,
+                read_only_state_service,
+                latest_chain_tip,
+                block_verifier_router,
+                sync_status,
+                address_book,
+            );
+
+            crate::components::miner::spawn_init(&config.mining, rpc)
+        };
+
+        #[cfg(not(feature = "internal-miner"))]
+        // Spawn a dummy miner task which doesn't do anything and never finishes.
+        let miner_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
+            tokio::spawn(std::future::pending().in_current_span());
+
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
@@ -323,6 +349,7 @@ impl StartCmd {
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
         pin!(scan_task_handle);
+        pin!(miner_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -413,6 +440,10 @@ impl StartCmd {
                 scan_result = &mut scan_task_handle => scan_result
                     .expect("unexpected panic in the scan task")
                     .map(|_| info!("scan task exited")),
+
+                miner_result = &mut miner_task_handle => miner_result
+                    .expect("unexpected panic in the miner task")
+                    .map(|_| info!("miner task exited")),
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -439,6 +470,7 @@ impl StartCmd {
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
         scan_task_handle.abort();
+        miner_task_handle.abort();
 
         // startup tasks
         state_checkpoint_verify_handle.abort();
