@@ -9,6 +9,7 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
+use thread_priority::{ThreadBuilder, ThreadPriority};
 use tokio::{task::JoinHandle, time::sleep};
 use tower::Service;
 use tracing::{Instrument, Span};
@@ -246,16 +247,25 @@ pub async fn mine_one_block(
     let mut block = proposal_block_from_template(&template, TimeSource::CurTime)
         .expect("unexpected invalid block template");
 
-    // TODO: spawn to a low priority thread
-    //       use a different nonce for each solver thread
+    // TODO: use a different nonce for each solver thread
     //
     // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
     // https://github.com/rust-lang/rust/issues/93610
     let span = Span::current();
     let solved_header =
-        tokio::task::spawn_blocking(move || span.in_scope(move || Solution::solve(*block.header)))
-            .wait_for_panics()
-            .await?;
+        tokio::task::spawn_blocking(move || span.in_scope(move || {
+            let miner_thread_handle = ThreadBuilder::default().name("zebra-miner").priority(ThreadPriority::Min).spawn(move |priority_result| {
+                if let Err(error) = priority_result {
+                    info!(?error, "could not set miner to run at a low priority: running at default priority");
+                }
+
+                Solution::solve(*block.header)
+            }).expect("unable to spawn miner thread");
+
+            miner_thread_handle.wait_for_panics()
+        }))
+        .wait_for_panics()
+        .await?;
 
     block.header = Arc::new(solved_header);
 

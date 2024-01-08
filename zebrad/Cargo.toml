@@ -70,6 +70,7 @@ getblocktemplate-rpcs = [
 
 # Experimental internal miner support
 internal-miner = [
+    "thread-priority",
     "zebra-chain/internal-miner",
     # TODO: move common code into zebra-chain or zebra-node-services and remove the RPC dependency
     "zebra-rpc/getblocktemplate-rpcs",
@@ -206,6 +207,9 @@ atty = "0.2.14"
 
 num-integer = "0.1.45"
 rand = "0.8.5"
+
+# prod feature internal-miner
+thread-priority = { version = "0.15.1", optional = true }
 
 # prod feature sentry
 sentry = { version = "0.32.1", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
