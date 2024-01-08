@@ -6,10 +6,10 @@
 //!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::sleep};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -36,6 +36,9 @@ use zebra_rpc::{
         GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
     },
 };
+
+/// The amount of time we wait between block template retries.
+pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
 
 /// Initialize the miner based on its config, and spawn a task for it.
 ///
@@ -115,9 +118,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: launch the configured number of solvers
-    //       make mining threads lower priority than other threads
-    run_mining_solver(rpc, 0).await
+    run_mining_solver(rpc).await
 }
 
 /// Runs a single mining thread to generate blocks, calculate equihash solutions, and submit valid
@@ -128,7 +129,6 @@ where
 #[instrument(skip(rpc))]
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
-    thread_id: usize,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -166,49 +166,65 @@ where
         _work_id: None,
     };
 
-    let template = rpc.get_block_template(Some(parameters)).await?;
-    let template = template
-        .try_into_template()
-        .expect("invalid RPC response: proposal in response to a template request");
+    loop {
+        let template = rpc.get_block_template(Some(parameters.clone())).await;
 
-    // TODO: select!{} on either a solved header or a new block template using long_poll_id
-    //       cancel the solver if there's a new template
-    //       use a different nonce for each solver thread
-    let block = mine_one_block(template, thread_id).await?;
-    let data = block
-        .zcash_serialize_to_vec()
-        .expect("serializing to Vec never fails");
+        // Wait for the chain to sync so we get a valid template.
+        let Ok(template) = template else {
+            info!(
+                ?BLOCK_TEMPLATE_WAIT_TIME,
+                "waiting for a valid block template",
+            );
+            sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+            continue;
+        };
 
-    match rpc.submit_block(HexData(data), None).await {
-        Ok(success) => info!(
-            height = ?block.coinbase_height().expect("height checked by verifier"),
-            hash = ?block.hash(),
-            ?thread_id,
-            ?success,
-            "successfully mined a new block",
-        ),
-        Err(error) => info!(
-            height = ?block.coinbase_height().expect("height valid in template"),
-            hash = ?block.hash(),
-            ?thread_id,
-            ?error,
-            "validating a newly mined block failed, trying again",
-        ),
+        let template = template
+            .try_into_template()
+            .expect("invalid RPC response: proposal in response to a template request");
+
+        // TODO: select!{} on either a solved header or a new block template using long_poll_id
+        //       cancel the solver if there's a new template
+        //       launch the configured number of solvers
+        let solver_thread = 0;
+        let block = mine_one_block(template, solver_thread).await?;
+        let data = block
+            .zcash_serialize_to_vec()
+            .expect("serializing to Vec never fails");
+
+        match rpc.submit_block(HexData(data), None).await {
+            Ok(success) => info!(
+                height = ?block.coinbase_height().expect("height checked by verifier"),
+                hash = ?block.hash(),
+                ?solver_thread,
+                ?success,
+                "successfully mined a new block",
+            ),
+            Err(error) => info!(
+                height = ?block.coinbase_height().expect("height valid in template"),
+                hash = ?block.hash(),
+                ?solver_thread,
+                ?error,
+                "validating a newly mined block failed, trying again",
+            ),
+        }
     }
-
-    Ok(())
 }
 
 /// Mines a single block, calculating its equihash solutions, and submitting it to Zebra's block
-/// validator.
+/// validator. Uses a different nonce range for each `solver_thread`.
 ///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
 /// It can run for minutes or hours if the network difficulty is high.
 #[instrument(skip(template))]
-pub async fn mine_one_block(template: GetBlockTemplate, thread_id: usize) -> Result<Block, Report> {
+pub async fn mine_one_block(
+    template: GetBlockTemplate,
+    solver_thread: usize,
+) -> Result<Block, Report> {
     let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
 
     // TODO: spawn to a low priority thread
+    //       use a different nonce for each solver thread
     //
     // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
     // https://github.com/rust-lang/rust/issues/93610
