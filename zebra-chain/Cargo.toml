@@ -36,7 +36,10 @@ getblocktemplate-rpcs = [
 
 # Experimental internal miner support
 internal-miner = [
-    "equihash/solver",
+    # TODO: replace with "equihash/solver" when that feature is merged and released:
+    # https://github.com/zcash/librustzcash/pull/1083
+    # https://github.com/zcash/librustzcash/pull/1088
+    "equihash-solver",
 ]
 
 # Experimental elasticsearch support
@@ -66,7 +69,19 @@ blake2s_simd = "1.0.2"
 bridgetree = "0.4.0"
 bs58 = { version = "0.5.0", features = ["check"] }
 byteorder = "1.5.0"
+
 equihash = "0.2.0"
+# Experimental internal miner support
+#
+# TODO: remove "equihash-solver" when the "equihash/solver" feature is merged and released:
+# https://github.com/zcash/librustzcash/pull/1083
+# https://github.com/zcash/librustzcash/pull/1088
+#
+# Use the the working solver branch:
+equihash-solver = { version = "0.2.0", git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-solver-tromp", features = ["solver"], package = "equihash", optional = true }
+# or during development, use the locally checked out and modified version of equihash:
+#equihash-solver = { path = "../librustzcash/components/equihash", package = "equihash" }
+
 group = "0.13.0"
 incrementalmerkletree = "0.5.0"
 jubjub = "0.10.0"

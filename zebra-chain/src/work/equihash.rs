@@ -109,7 +109,7 @@ impl Solution {
         let input = &input[0..Solution::INPUT_LENGTH];
 
         while !is_shutting_down() {
-            let solutions = equihash::tromp::solve_200_9_compressed(input, || {
+            let solutions = equihash_solver::tromp::solve_200_9_compressed(input, || {
                 // This skips the first nonce, which doesn't matter in practice.
                 Self::next_nonce(&mut header.nonce);
                 Some(*header.nonce)

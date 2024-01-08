@@ -1339,6 +1339,16 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab579d7cf78477773b03e80bc2f89702ef02d7112c711d54ca93dcdce68533d5"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
+name = "equihash"
+version = "0.2.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp#da26c34772f4922eb13b4a1e7d88a969bbcf6a91"
 dependencies = [
  "blake2b_simd",
@@ -5633,7 +5643,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "byteorder",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ff",
  "fpe",
  "group",
@@ -5731,7 +5741,8 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "equihash 0.2.0 (git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp)",
  "futures",
  "group",
  "halo2_proofs",
