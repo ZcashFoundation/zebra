@@ -48,6 +48,7 @@ pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
 /// mining thread.
 ///
 /// TODO: add a test for this function.
+#[instrument(skip(rpc))]
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
@@ -128,7 +129,6 @@ where
 ///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
 /// It can run for minutes or hours if the network difficulty is high.
-#[instrument(skip(rpc))]
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> Result<(), Report>
@@ -249,13 +249,12 @@ pub async fn mine_one_block(
         .expect("unexpected invalid block template");
 
     // Use a different nonce for each solver thread.
-    // Change both the first and last bytes, so we don't have to care how the nonces are incremented.
+    // Change both the first and last bytes, so we don't have to care if the nonces are incremented in
+    // big-endian or little-endian order. And we can see the thread that mined a block from the nonce.
     let header = Arc::make_mut(&mut block.header);
     *header.nonce.first_mut().unwrap() = solver_id;
     *header.nonce.last_mut().unwrap() = solver_id;
 
-    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-    // https://github.com/rust-lang/rust/issues/93610
     let span = Span::current();
     let solved_header =
         tokio::task::spawn_blocking(move || span.in_scope(move || {
@@ -264,6 +263,8 @@ pub async fn mine_one_block(
                     info!(?error, "could not set miner to run at a low priority: running at default priority");
                 }
 
+                // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                // https://github.com/rust-lang/rust/issues/93610
                 Solution::solve(*block.header)
             }).expect("unable to spawn miner thread");
 
