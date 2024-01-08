@@ -498,6 +498,10 @@ where
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
                 check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
 
+                // TODO: return an error if we have no peers, like `zcashd` does,
+                //       and add a developer config that mines regardless of how many peers we have.
+                // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
+
                 // We're just about to fetch state data, then maybe wait for any changes.
                 // Mark all the changes before the fetch as seen.
                 // Changes are also ignored in any clones made after the mark.
