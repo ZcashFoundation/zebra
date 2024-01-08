@@ -242,13 +242,17 @@ where
 #[instrument(skip(template))]
 pub async fn mine_one_block(
     template: GetBlockTemplate,
-    solver_id: usize,
+    solver_id: u8,
 ) -> Result<Block, SolverCancelled> {
     let mut block = proposal_block_from_template(&template, TimeSource::CurTime)
         .expect("unexpected invalid block template");
 
-    // TODO: use a different nonce for each solver thread
-    //
+    // Use a different nonce for each solver thread.
+    // Change both the first and last bytes, so we don't have to care how the nonces are incremented.
+    let header = Arc::make_mut(&mut block.header);
+    *header.nonce.first_mut().unwrap() = solver_id;
+    *header.nonce.last_mut().unwrap() = solver_id;
+
     // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
     // https://github.com/rust-lang/rust/issues/93610
     let span = Span::current();
