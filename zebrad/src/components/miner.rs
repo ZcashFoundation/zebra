@@ -14,7 +14,10 @@ use tower::Service;
 use tracing::Instrument;
 
 use zebra_chain::{
-    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, serialization::ZcashSerialize,
+    block::{self, Block},
+    chain_sync_status::ChainSyncStatus,
+    chain_tip::ChainTip,
+    serialization::ZcashSerialize,
     work::equihash::Solution,
 };
 use zebra_network::AddressBookPeers;
@@ -24,7 +27,7 @@ use zebra_rpc::{
     methods::{
         get_block_template_rpcs::{
             get_block_template::{
-                self, proposal::TimeSource, proposal_block_from_template,
+                self, proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
                 GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
             },
             types::hex_data::HexData,
@@ -34,6 +37,9 @@ use zebra_rpc::{
 };
 
 /// Initialize the miner based on its config, and spawn a task for it.
+///
+/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
+/// mining thread.
 ///
 /// TODO: add a test for this function.
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
@@ -74,6 +80,9 @@ where
 
 /// Initialize the miner based on its config.
 ///
+/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
+/// mining thread.
+///
 /// TODO: add a test for this function.
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     _config: Config,
@@ -112,6 +121,9 @@ where
 
 /// Runs a single mining thread to generate blocks, calculate equihash solutions, and submit valid
 /// blocks to Zebra's block validator.
+///
+/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
+/// It can run for minutes or hours if the network difficulty is high.
 #[instrument(skip(rpc))]
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
@@ -158,17 +170,7 @@ where
         .try_into_template()
         .expect("invalid RPC response: proposal in response to a template request");
 
-    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
-    // TODO: spawn blocking in a low priority thread
-    //       select!{} on either a solved header or a new block template using long_poll_id
-    //       cancel the solver if there's a new template
-    //       use a different nonce for each solver thread
-    //
-    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-    // https://github.com/rust-lang/rust/issues/93610
-    let solved_header = Solution::solve(*block.header);
-
-    block.header = Arc::new(solved_header);
+    let block = mine_one_block(template, thread_id).await?;
     let data = block
         .zcash_serialize_to_vec()
         .expect("serializing to Vec never fails");
@@ -191,4 +193,27 @@ where
     }
 
     Ok(())
+}
+
+/// Mines a single block, calculating its equihash solutions, and submitting it to Zebra's block
+/// validator.
+///
+/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
+/// It can run for minutes or hours if the network difficulty is high.
+#[instrument(skip(template))]
+pub async fn mine_one_block(template: GetBlockTemplate, thread_id: usize) -> Result<Block, Report> {
+    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)?;
+
+    // TODO: spawn blocking in a low priority thread
+    //       select!{} on either a solved header or a new block template using long_poll_id
+    //       cancel the solver if there's a new template
+    //       use a different nonce for each solver thread
+    //
+    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+    // https://github.com/rust-lang/rust/issues/93610
+    let solved_header = Solution::solve(*block.header);
+
+    block.header = Arc::new(solved_header);
+
+    Ok(block)
 }
