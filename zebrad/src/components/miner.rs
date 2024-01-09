@@ -375,6 +375,13 @@ where
                     "solver cancelled: getting a new block template or shutting down"
                 );
             }
+
+            // If the blockchain is changing rapidly, limit how often we'll update the template.
+            // But if we're shutting down, do that immediately.
+            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
+                sleep(Duration::from_secs(1)).await;
+            }
+
             continue;
         };
 
