@@ -1,11 +1,11 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use futures::{future::OptionFuture, FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use zcash_address::{self, unified::Encoding, TryFromAddress};
 
@@ -223,6 +223,7 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
+#[derive(Clone)]
 pub struct GetBlockTemplateRpcImpl<
     Mempool,
     State,
@@ -235,7 +236,10 @@ pub struct GetBlockTemplateRpcImpl<
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -277,7 +281,7 @@ pub struct GetBlockTemplateRpcImpl<
     // Services
     //
     /// A handle to the mempool service.
-    mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Mempool,
 
     /// A handle to the state service.
     state: State,
@@ -295,6 +299,48 @@ pub struct GetBlockTemplateRpcImpl<
     address_book: AddressBook,
 }
 
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> Debug
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Skip fields without debug impls
+        f.debug_struct("GetBlockTemplateRpcImpl")
+            .field("network", &self.network)
+            .field("miner_address", &self.miner_address)
+            .field("extra_coinbase_data", &self.extra_coinbase_data)
+            .field("debug_like_zcashd", &self.debug_like_zcashd)
+            .finish()
+    }
+}
+
 impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
     GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
@@ -302,7 +348,10 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -332,7 +381,7 @@ where
     pub fn new(
         network: Network,
         mining_config: crate::config::mining::Config,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
         block_verifier_router: BlockVerifierRouter,
@@ -399,7 +448,10 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
