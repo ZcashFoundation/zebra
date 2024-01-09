@@ -182,7 +182,6 @@ impl NonFinalizedState {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
-        #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
         let mut chains = chains.into_iter();
 
@@ -582,7 +581,6 @@ impl NonFinalizedState {
     ///
     /// The chain can be an existing chain in the non-finalized state, or a freshly
     /// created fork.
-    #[allow(clippy::unwrap_in_result)]
     fn parent_chain(&self, parent_hash: block::Hash) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state
