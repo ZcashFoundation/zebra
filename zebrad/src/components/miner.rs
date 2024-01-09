@@ -10,7 +10,7 @@ use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use tokio::{sync::watch, task::JoinHandle, time::sleep};
+use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -131,11 +131,19 @@ where
     let (template_sender, template_receiver) = watch::channel(None);
     let template_receiver = WatchReceiver::new(template_receiver);
 
-    // TODO: select!{} on the block generator and all the mining solver threads
-    //       add a config & launch the configured number of solvers, using available_parallelism()
+    // TODO: add a config & launch the configured number of solvers, using available_parallelism()
     //       by default
-    generate_block_templates(rpc.clone(), template_sender).await?;
-    run_mining_solver(0, template_receiver, rpc).await?;
+    let template_generator = generate_block_templates(rpc.clone(), template_sender);
+    let mining_solver = run_mining_solver(0, template_receiver, rpc);
+
+    // These tasks run forever unless there is a fatal error or shutdown.
+    // When that happens, the first task to notice returns, and the other tasks are cancelled.
+    // Then this task returns and drops the `template_sender`, which cancels all the spawned miner
+    // threads.
+    select! {
+        result = template_generator => { result?; }
+        result = mining_solver => { result?; }
+    }
 
     Ok(())
 }
@@ -191,7 +199,8 @@ where
         _work_id: None,
     };
 
-    while !is_shutting_down() {
+    // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
+    while !template_sender.is_closed() && !is_shutting_down() {
         let template = rpc.get_block_template(Some(parameters.clone())).await;
 
         // Wait for the chain to sync so we get a valid template.
@@ -209,6 +218,7 @@ where
             continue;
         };
 
+        // Convert from RPC GetBlockTemplate to Block
         let template = template
             .try_into_template()
             .expect("invalid RPC response: proposal in response to a template request");
@@ -219,14 +229,14 @@ where
             "mining with an updated block template",
         );
 
-        // Tell the next loop iteration to wait until the template has changed before returning.
+        // Tell the next get_block_template() call to wait until the template has changed.
         parameters.long_poll_id = Some(template.long_poll_id);
 
         let block = proposal_block_from_template(&template, TimeSource::CurTime)
             .expect("unexpected invalid block template");
 
-        // Always send, even if all the receivers have been dropped.
-        let _prev_template = template_sender.send_replace(Some(Arc::new(block)));
+        // If all the receivers have been dropped, stop sending templates and shut down.
+        template_sender.send(Some(Arc::new(block)))?;
     }
 
     Ok(())
@@ -241,7 +251,7 @@ where
 #[instrument(skip(template_receiver, rpc))]
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     solver_id: u8,
-    template_receiver: WatchReceiver<Option<Arc<Block>>>,
+    mut template_receiver: WatchReceiver<Option<Arc<Block>>>,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> Result<(), Report>
 where
@@ -273,8 +283,11 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    while !is_shutting_down() {
-        // Get the latest block template.
+    // Shut down the task when the template sender is dropped, or Zebra shuts down.
+    while template_receiver.has_changed().is_ok() && !is_shutting_down() {
+        // Get the latest block template, and mark the current value as seen.
+        // We mark the value first to avoid missed updates.
+        template_receiver.mark_as_seen();
         let template = template_receiver.cloned_watch_data();
 
         let Some(template) = template else {
