@@ -1,16 +1,7 @@
 //! ![Zebra logotype](https://zfnd.org/wp-content/uploads/2022/03/zebra-logotype.png)
 //!
-//! Zebra is a Zcash node written in Rust.
-//!
-//! The `zebrad` binary uses a collection of `zebra-*` crates,
-//! which implement the different components of a Zcash node
-//! (networking, chain structures, validation, rpc, etc).
-//!
-//! [Rendered docs for the latest crate releases](https://docs.rs/releases/search?query=zebra).
-//!
-//! [Rendered docs from the `main` branch](https://doc-internal.zebra.zfnd.org).
-//!
-//! [Join us on the Zcash Foundation Engineering Discord](https://discord.gg/na6QZNd).
+//! Zebra is a Zcash full node written in Rust. Follow the [introductory
+//! page](https://zebra.zfnd.org/index.html#documentation) in the Zebra Book to learn more.
 //!
 //! ## About Zcash
 //!
@@ -56,7 +47,9 @@
 //!
 //! ## Zebra Feature Flags
 //!
-//! The following `zebrad` feature flags are available at compile time:
+//! The following [Cargo
+//! features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options)
+//! are available at compile time:
 //!
 //! ### JSON-RPC
 //!
