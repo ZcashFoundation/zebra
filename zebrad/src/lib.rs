@@ -97,6 +97,29 @@
 //! section of the book for more details.
 //! * `shielded-scan`: enable experimental support for scanning shielded transactions. Read the [shielded-scan](https://zebra.zfnd.org/user/shielded-scan.html)
 //! section of the book for more details.
+//!
+//! ## Zebra crates
+//!
+//! [The Zebra monorepo](https://github.com/ZcashFoundation/zebra) is a collection of the following
+//! crates:
+//!
+//! - [tower-batch-control](https://docs.rs/tower-batch-control/latest/tower_batch_control/)
+//! - [tower-fallback](https://docs.rs/tower-fallback/latest/tower_fallback/)
+//! - [zebra-chain](https://docs.rs/zebra-chain/latest/zebra_chain/)
+//! - [zebra-consensus](https://docs.rs/zebra-consensus/latest/zebra_consensus/)
+//! - [zebra-network](https://docs.rs/zebra-network/latest/zebra_network/)
+//! - [zebra-node-services](https://docs.rs/zebra-node-services/latest/zebra_node_services/)
+//! - [zebra-rpc](https://docs.rs/zebra-rpc/latest/zebra_rpc/)
+//! - [zebra-scan](https://docs.rs/zebra-scan/latest/zebra_scan/)
+//! - [zebra-script](https://docs.rs/zebra-script/latest/zebra_script/)
+//! - [zebra-state](https://docs.rs/zebra-state/latest/zebra_state/)
+//! - [zebra-test](https://docs.rs/zebra-test/latest/zebra_test/)
+//! - [zebra-utils](https://docs.rs/zebra-utils/latest/zebra_utils/)
+//! - [zebrad](https://docs.rs/zebrad/latest/zebrad/)
+//!
+//! The links in the list above point to the documentation of the public APIs of the crates. For
+//! the documentation of the internal APIs, follow <https://doc-internal.zebra.zfnd.org> that lists
+//! all Zebra crates as well in the left sidebar.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
