@@ -660,6 +660,7 @@ where
                 ));
 
                 // Return immediately if the chain tip has changed.
+                latest_chain_tip.mark_best_tip_seen();
                 let wait_for_best_tip_change = latest_chain_tip.best_tip_changed();
 
                 // Wait for the maximum block time to elapse. This can change the block header
@@ -709,6 +710,30 @@ where
                     tip_changed_result = wait_for_best_tip_change => {
                         match tip_changed_result {
                             Ok(()) => {
+                                // Despite the documentation, this future sometimes returns
+                                // spuriously, even when the tip hasn't changed. This could be a
+                                // bug where the state does spurious updates, or where the change
+                                // detection or its future is implemented incorrectly.
+                                let new_tip_hash = latest_chain_tip.best_tip_hash();
+                                if new_tip_hash == Some(tip_hash) {
+                                    tracing::debug!(
+                                        ?max_time,
+                                        ?cur_time,
+                                        ?server_long_poll_id,
+                                        ?client_long_poll_id,
+                                        ?tip_hash,
+                                        ?tip_height,
+                                        "ignoring spurious state change notification"
+                                    );
+
+                                    // Wait for the mempool interval, then check for any changes.
+                                    tokio::time::sleep(Duration::from_secs(
+                                        GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                                    )).await;
+
+                                    continue;
+                                }
+
                                 tracing::info!(
                                     ?max_time,
                                     ?cur_time,
