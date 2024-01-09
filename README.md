@@ -180,14 +180,18 @@ We will continue to add new features as part of future network upgrades, and in 
 
 ## Documentation
 
-The [Zebra website](https://zebra.zfnd.org/) contains user documentation, such
-as how to run or configure Zebra, set up metrics integrations, etc., as well as
-developer documentation, such as design documents. It also renders
-[internal documentation](https://doc-internal.zebra.zfnd.org) for private APIs
-on the `main` branch.
+The Zcash Foundation maintains the following resources documenting Zebra:
 
-`docs.rs` renders [API documentation](https://docs.rs/releases/search?query=zebra)
-for the external API of the latest releases of our crates.
+- The Zebra Book:
+  - [General Introduction](https://zebra.zfnd.org/index.html),
+  - [User Documentation](https://zebra.zfnd.org/user.html),
+  - [Developer Documentation](https://zebra.zfnd.org/dev.html).
+
+- The public APIs for the latest releases of the individual `zebra-*` crates are documented at
+[docs.rs](https://docs.rs/releases/search?query=zebrad).
+
+- The internal APIs for the `main` branch are documented at
+<https://doc-internal.zebra.zfnd.org>.
 
 ## User support
 
