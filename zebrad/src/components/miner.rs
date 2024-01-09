@@ -48,8 +48,8 @@ pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
 /// mining thread.
 ///
-/// TODO: add a test for this function.
-#[instrument(skip(rpc))]
+/// See [`run_mining_solver()`] for more details.
+#[instrument(skip(config, rpc))]
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
@@ -94,7 +94,7 @@ where
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
 /// mining thread.
 ///
-/// TODO: add a test for this function.
+/// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     _config: Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
