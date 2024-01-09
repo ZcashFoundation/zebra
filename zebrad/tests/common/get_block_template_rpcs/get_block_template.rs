@@ -169,7 +169,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
 
     {
         let client = client.clone();
-        let mut long_poll_id = response_json_result.long_poll_id.clone();
+        let mut long_poll_id = response_json_result.long_poll_id;
 
         tokio::spawn(async move {
             loop {
@@ -196,7 +196,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                     }
 
                     long_poll_result = long_poll_request => {
-                        long_poll_id = long_poll_result.long_poll_id.clone();
+                        long_poll_id = long_poll_result.long_poll_id;
 
                         if let Some(false) = long_poll_result.submit_old {
                             let _ = long_poll_result_tx.send(long_poll_result);

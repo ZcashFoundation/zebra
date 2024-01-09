@@ -546,9 +546,7 @@ where
         async move {
             get_block_template::check_parameters(&parameters)?;
 
-            let client_long_poll_id = parameters
-                .as_ref()
-                .and_then(|params| params.long_poll_id.clone());
+            let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
             // - One-off checks
 
