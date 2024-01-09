@@ -174,10 +174,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
 
-## Future Work
-
-We will continue to add new features as part of future network upgrades, and in response to community feedback.
-
 ## Documentation
 
 The Zcash Foundation maintains the following resources documenting Zebra:
