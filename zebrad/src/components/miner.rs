@@ -205,7 +205,7 @@ where
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
-            info!(
+            debug!(
                 ?BLOCK_TEMPLATE_WAIT_TIME,
                 "waiting for a valid block template",
             );

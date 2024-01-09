@@ -145,7 +145,7 @@ impl Solution {
                 }
             }
 
-            info!(
+            debug!(
                 solutions = ?solutions.len(),
                 "found valid solutions which did not pass the validity or difficulty checks"
             );
