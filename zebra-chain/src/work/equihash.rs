@@ -19,7 +19,6 @@ use crate::{
 pub struct Error(#[from] equihash::Error);
 
 /// The error type for Equihash solving.
-#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("solver was cancelled")]
 pub struct SolverCancelled;
@@ -91,6 +90,8 @@ impl Solution {
     /// Mines and returns one or more [`Solution`]s based on a template `header`.
     /// The returned header contains a valid `nonce` and `solution`.
     ///
+    /// If `cancel_fn()` returns an error, returns early with `Err(SolverCancelled)`.
+    ///
     /// The `nonce` in the header template is taken as the starting nonce. If you are running multiple
     /// solvers at the same time, start them with different nonces.
     /// The `solution` in the header template is ignored.
@@ -99,7 +100,10 @@ impl Solution {
     /// It can run for minutes or hours if the network difficulty is high.
     #[cfg(feature = "internal-miner")]
     #[allow(clippy::unwrap_in_result)]
-    pub fn solve(mut header: Header) -> Result<Header, SolverCancelled> {
+    pub fn solve<F>(mut header: Header, mut cancel_fn: F) -> Result<Header, SolverCancelled>
+    where
+        F: FnMut() -> Result<(), SolverCancelled>,
+    {
         use crate::shutdown::is_shutting_down;
 
         let mut input = Vec::new();
@@ -109,12 +113,22 @@ impl Solution {
         let input = &input[0..Solution::INPUT_LENGTH];
 
         while !is_shutting_down() {
+            // Don't run the solver if we'd just cancel it anyway.
+            cancel_fn()?;
+
             let solutions = equihash_solver::tromp::solve_200_9_compressed(input, || {
+                // Cancel the solver if we have a new template.
+                if cancel_fn().is_err() {
+                    return None;
+                }
+
                 // This skips the first nonce, which doesn't matter in practice.
                 Self::next_nonce(&mut header.nonce);
                 Some(*header.nonce)
             });
 
+            // If we got any solutions, try submitting them, because the new template might just
+            // contain some extra transactions. Mining extra transactions is optional.
             for solution in &solutions {
                 header.solution = Self::from_bytes(solution)
                     .expect("unexpected invalid solution: incorrect length");

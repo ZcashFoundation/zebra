@@ -99,11 +99,20 @@ where
         self.receiver.borrow().clone()
     }
 
-    /// Calls [`watch::Receiver::changed`] and returns the result.
+    /// Calls [`watch::Receiver::changed()`] and returns the result.
+    /// Returns when the inner value has been updated, even if the old and new values are equal.
     ///
     /// Marks the watched data as seen.
     pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
         self.receiver.changed().await
+    }
+
+    /// Calls [`watch::Receiver::has_changed()`] and returns the result.
+    /// Returns `true` when the inner value has been updated, even if the old and new values are equal.
+    ///
+    /// Does not mark the watched data as seen.
+    pub fn has_changed(&self) -> Result<bool, watch::error::RecvError> {
+        self.receiver.has_changed()
     }
 
     /// Marks the watched data as seen.

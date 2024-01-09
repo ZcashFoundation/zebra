@@ -200,8 +200,25 @@ where
         //       by default
         let solver_id = 0;
 
-        let height = template.height;
-        let Ok(block) = mine_one_block(template, solver_id).await else {
+            continue;
+        };
+
+        // Mine a block using the equihash solver.
+        let height = template.coinbase_height().expect("template is valid");
+        let cancel_receiver = template_receiver.clone();
+        let cancel_fn = move || match cancel_receiver.has_changed() {
+            Ok(has_changed) => {
+                if has_changed {
+                    Err(SolverCancelled)
+                } else {
+                    Ok(())
+                }
+            }
+            // If the sender was dropped, we're likely shutting down, so cancel the solver.
+            Err(_sender_dropped) => Err(SolverCancelled),
+        };
+
+        let Ok(block) = mine_one_block(solver_id, template, cancel_fn).await else {
             // If the solver was cancelled, we're either shutting down, or we have a new template.
             if solver_id == 0 {
                 info!(
@@ -219,6 +236,11 @@ where
             continue;
         };
 
+        // Submit the newly mined block to the verifiers.
+        //
+        // TODO: if there is a new template (`cancel_fn().is_err()`), and
+        //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
+        //       block.
         let data = block
             .zcash_serialize_to_vec()
             .expect("serializing to Vec never fails");
@@ -244,27 +266,33 @@ where
     Ok(())
 }
 
-/// Mines a single block, calculating its equihash solutions, and submitting it to Zebra's block
-/// validator. Uses a different nonce range for each `solver_id`.
+/// Mines a single block based on `template`, calculates its equihash solutions, checks difficulty,
+/// and returning the newly mined block. Uses a different nonce range for each `solver_id`.
 ///
-/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
-/// It can run for minutes or hours if the network difficulty is high.
-#[instrument(skip(template))]
-pub async fn mine_one_block(
-    template: GetBlockTemplate,
+/// If `cancel_fn()` returns an error, returns early with `Err(SolverCancelled)`.
+///
+/// See [`run_mining_solver()`] for more details.
+pub async fn mine_one_block<F>(
     solver_id: u8,
-) -> Result<Block, SolverCancelled> {
-    let mut block = proposal_block_from_template(&template, TimeSource::CurTime)
-        .expect("unexpected invalid block template");
+    mut template: Arc<Block>,
+    cancel_fn: F,
+) -> Result<Arc<Block>, SolverCancelled>
+where
+    F: FnMut() -> Result<(), SolverCancelled> + Send + Sync + 'static,
+{
+    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+    // https://github.com/rust-lang/rust/issues/93610
+    let mut header = *template.header;
 
     // Use a different nonce for each solver thread.
     // Change both the first and last bytes, so we don't have to care if the nonces are incremented in
     // big-endian or little-endian order. And we can see the thread that mined a block from the nonce.
-    let header = Arc::make_mut(&mut block.header);
     *header.nonce.first_mut().unwrap() = solver_id;
     *header.nonce.last_mut().unwrap() = solver_id;
 
+    // Mine a block using the solver, in a low-priority blocking thread.
     let span = Span::current();
+    // TODO: get and submit all valid headers, not just the first one
     let solved_header =
         tokio::task::spawn_blocking(move || span.in_scope(move || {
             let miner_thread_handle = ThreadBuilder::default().name("zebra-miner").priority(ThreadPriority::Min).spawn(move |priority_result| {
@@ -272,9 +300,7 @@ pub async fn mine_one_block(
                     info!(?error, "could not set miner to run at a low priority: running at default priority");
                 }
 
-                // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-                // https://github.com/rust-lang/rust/issues/93610
-                Solution::solve(*block.header)
+                Solution::solve(header, cancel_fn)
             }).expect("unable to spawn miner thread");
 
             miner_thread_handle.wait_for_panics()
@@ -282,7 +308,11 @@ pub async fn mine_one_block(
         .wait_for_panics()
         .await?;
 
+    // Modify the template into a solved block.
+    //
+    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises
+    let block = Arc::make_mut(&mut template);
     block.header = Arc::new(solved_header);
 
-    Ok(block)
+    Ok(template)
 }
