@@ -29,6 +29,7 @@ use zebra_rpc::{
     config::mining::Config,
     methods::{
         get_block_template_rpcs::{
+            constants::GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
             get_block_template::{
                 self, proposal::TimeSource, proposal_block_from_template,
                 GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
@@ -235,8 +236,23 @@ where
         let block = proposal_block_from_template(&template, TimeSource::CurTime)
             .expect("unexpected invalid block template");
 
-        // If all the receivers have been dropped, stop sending templates and shut down.
-        template_sender.send(Some(Arc::new(block)))?;
+        // If the template has actually changed, send an updated template.
+        template_sender.send_if_modified(|old_block| {
+            if old_block.as_ref().map(|b| *b.header) == Some(*block.header) {
+                return false;
+            }
+            *old_block = Some(Arc::new(block));
+            true
+        });
+
+        // If the blockchain is changing rapidly, limit how often we'll update the template.
+        // But if we're shutting down, do that immediately.
+        if !template_sender.is_closed() && !is_shutting_down() {
+            sleep(Duration::from_secs(
+                GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+        }
     }
 
     Ok(())
@@ -313,12 +329,23 @@ where
             continue;
         };
 
-        // Mine a block using the equihash solver.
         let height = template.coinbase_height().expect("template is valid");
-        let cancel_receiver = template_receiver.clone();
+
+        // Set up the cancellation conditions for the miner.
+        let mut cancel_receiver = template_receiver.clone();
+        let old_header = *template.header;
         let cancel_fn = move || match cancel_receiver.has_changed() {
+            // Despite the documentation, has_changed sometimes returns `true` spuriously, even
+            // when the template hasn't changed. This could be a bug where the RPC or block
+            // generator does spurious updates, or where the change detection is implemented
+            // incorrectly. Since it's a bug in both the RPC and miner, it could be a tokio bug.
             Ok(has_changed) => {
-                if has_changed {
+                cancel_receiver.mark_as_seen();
+                // We only need to check header equality, because the block data is bound to the
+                // header.
+                if has_changed
+                    && Some(old_header) != cancel_receiver.cloned_watch_data().map(|b| *b.header)
+                {
                     Err(SolverCancelled)
                 } else {
                     Ok(())
@@ -328,6 +355,7 @@ where
             Err(_sender_dropped) => Err(SolverCancelled),
         };
 
+        // Mine a block using the equihash solver.
         let Ok(block) = mine_one_block(solver_id, template, cancel_fn).await else {
             // If the solver was cancelled, we're either shutting down, or we have a new template.
             if solver_id == 0 {

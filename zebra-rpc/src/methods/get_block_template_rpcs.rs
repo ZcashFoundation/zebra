@@ -713,7 +713,8 @@ where
                                 // Despite the documentation, this future sometimes returns
                                 // spuriously, even when the tip hasn't changed. This could be a
                                 // bug where the state does spurious updates, or where the change
-                                // detection or its future is implemented incorrectly.
+                                // detection or its future is implemented incorrectly. Since it's a
+                                // bug in both the RPC and miner, it could be a tokio bug.
                                 let new_tip_hash = latest_chain_tip.best_tip_hash();
                                 if new_tip_hash == Some(tip_hash) {
                                     tracing::debug!(
