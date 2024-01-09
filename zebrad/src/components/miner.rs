@@ -10,7 +10,7 @@ use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use tokio::{task::JoinHandle, time::sleep};
+use tokio::{sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -30,7 +30,7 @@ use zebra_rpc::{
     methods::{
         get_block_template_rpcs::{
             get_block_template::{
-                self, proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+                self, proposal::TimeSource, proposal_block_from_template,
                 GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
             },
             types::hex_data::HexData,
@@ -38,6 +38,7 @@ use zebra_rpc::{
         GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
     },
 };
+use zebra_state::WatchReceiver;
 
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
@@ -127,16 +128,30 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    run_mining_solver(rpc).await
+    let (template_sender, template_receiver) = watch::channel(None);
+    let template_receiver = WatchReceiver::new(template_receiver);
+
+    // TODO: select!{} on the block generator and all the mining solver threads
+    //       add a config & launch the configured number of solvers, using available_parallelism()
+    //       by default
+    generate_block_templates(rpc.clone(), template_sender).await?;
+    run_mining_solver(0, template_receiver, rpc).await?;
+
+    Ok(())
 }
 
-/// Runs a single mining thread to generate blocks, calculate equihash solutions, and submit valid
-/// blocks to Zebra's block validator.
-///
-/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
-/// It can run for minutes or hours if the network difficulty is high.
-pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+/// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
+#[instrument(skip(rpc, template_sender))]
+pub async fn generate_block_templates<
+    Mempool,
+    State,
+    Tip,
+    BlockVerifierRouter,
+    SyncStatus,
+    AddressBook,
+>(
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -168,12 +183,11 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut long_poll_id = None;
     let mut parameters = get_block_template::JsonParameters {
         mode: Template,
         data: None,
         capabilities: vec![LongPoll, CoinbaseTxn],
-        long_poll_id,
+        long_poll_id: None,
         _work_id: None,
     };
 
@@ -186,7 +200,12 @@ where
                 ?BLOCK_TEMPLATE_WAIT_TIME,
                 "waiting for a valid block template",
             );
-            sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+
+            // Skip the wait if we got an error because we are shutting down.
+            if !is_shutting_down() {
+                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+            }
+
             continue;
         };
 
@@ -194,11 +213,89 @@ where
             .try_into_template()
             .expect("invalid RPC response: proposal in response to a template request");
 
-        // TODO: select!{} on either a solved header or a new block template using long_poll_id
-        //       cancel the solver if there's a new template
-        //       add a config & launch the configured number of solvers, using available_parallelism()
-        //       by default
-        let solver_id = 0;
+        info!(
+            height = ?template.height,
+            transactions = ?template.transactions.len(),
+            "mining with an updated block template",
+        );
+
+        // Tell the next loop iteration to wait until the template has changed before returning.
+        parameters.long_poll_id = Some(template.long_poll_id);
+
+        let block = proposal_block_from_template(&template, TimeSource::CurTime)
+            .expect("unexpected invalid block template");
+
+        // Always send, even if all the receivers have been dropped.
+        let _prev_template = template_sender.send_replace(Some(Arc::new(block)));
+    }
+
+    Ok(())
+}
+
+/// Runs a single mining thread that gets blocks from the `template_receiver`, calculates equihash
+/// solutions with nonces based on `solver_id`, and submits valid blocks to Zebra's block validator.
+///
+/// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
+/// It can run for minutes or hours if the network difficulty is high. Mining uses a thread with
+/// low CPU priority.
+#[instrument(skip(template_receiver, rpc))]
+pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+    solver_id: u8,
+    template_receiver: WatchReceiver<Option<Arc<Block>>>,
+    rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+) -> Result<(), Report>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+{
+    while !is_shutting_down() {
+        // Get the latest block template.
+        let template = template_receiver.cloned_watch_data();
+
+        let Some(template) = template else {
+            if solver_id == 0 {
+                info!(
+                    ?solver_id,
+                    ?BLOCK_TEMPLATE_WAIT_TIME,
+                    "solver waiting for initial block template"
+                );
+            } else {
+                debug!(
+                    ?solver_id,
+                    ?BLOCK_TEMPLATE_WAIT_TIME,
+                    "solver waiting for initial block template"
+                );
+            }
+
+            // Skip the wait if we didn't get a template because we are shutting down.
+            if !is_shutting_down() {
+                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+            }
 
             continue;
         };
@@ -224,12 +321,16 @@ where
                 info!(
                     ?height,
                     ?solver_id,
+                    new_template = ?template_receiver.has_changed(),
+                    shutting_down = ?is_shutting_down(),
                     "solver cancelled: getting a new block template or shutting down"
                 );
             } else {
                 debug!(
                     ?height,
                     ?solver_id,
+                    new_template = ?template_receiver.has_changed(),
+                    shutting_down = ?is_shutting_down(),
                     "solver cancelled: getting a new block template or shutting down"
                 );
             }
