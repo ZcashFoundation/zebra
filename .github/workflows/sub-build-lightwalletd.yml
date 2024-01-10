@@ -76,7 +76,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.4.0
+        uses: docker/metadata-action@v5.5.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -111,7 +111,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.0.0
+        uses: google-github-actions/auth@v2.0.1
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
