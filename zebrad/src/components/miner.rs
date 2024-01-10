@@ -6,9 +6,10 @@
 //!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
-use std::{sync::Arc, time::Duration};
+use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
 
 use color_eyre::Report;
+use futures::{stream::FuturesUnordered, TryStreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
@@ -55,6 +56,7 @@ pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressB
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> JoinHandle<Result<(), Report>>
+// TODO: simplify or avoid repeating these generics (how?)
 where
     Mempool: Service<
             mempool::Request,
@@ -129,21 +131,44 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    // If we can't detect the number of cores, assume one core.
+    let solver_count = available_parallelism().map(usize::from).unwrap_or(1);
+
+    info!(
+        ?solver_count,
+        "launching mining tasks with parallel solvers"
+    );
+
     let (template_sender, template_receiver) = watch::channel(None);
     let template_receiver = WatchReceiver::new(template_receiver);
 
     // TODO: add a config & launch the configured number of solvers, using available_parallelism()
     //       by default
     let template_generator = generate_block_templates(rpc.clone(), template_sender);
-    let mining_solver = run_mining_solver(0, template_receiver, rpc);
+
+    let mut mining_solvers = FuturesUnordered::new();
+    for solver_id in 0..solver_count {
+        // Assume there are less than 256 cores. If there are more, only run 256 tasks.
+        let solver_id = min(solver_id, usize::from(u8::MAX))
+            .try_into()
+            .expect("just limited to u8::MAX");
+
+        mining_solvers.push(run_mining_solver(
+            solver_id,
+            template_receiver.clone(),
+            rpc.clone(),
+        ));
+    }
 
     // These tasks run forever unless there is a fatal error or shutdown.
-    // When that happens, the first task to notice returns, and the other tasks are cancelled.
+    // When that happens, the first task to error returns, and the other futures are cancelled.
     // Then this task returns and drops the `template_sender`, which cancels all the spawned miner
-    // threads.
+    // threads. This only works because we run the `template_generator` in this task. If we spawned
+    // it, then the spawned task would take ownership of `template_sender` and keep running.
+    // (Mining solvers can be spawned, because they finish when the `template_sender` is dropped.)
     select! {
         result = template_generator => { result?; }
-        result = mining_solver => { result?; }
+        result = mining_solvers.try_next() => { result?; }
     }
 
     Ok(())
