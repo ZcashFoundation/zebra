@@ -45,6 +45,16 @@
 //!  * Progress Task
 //!    * logs progress towards the chain tip
 //!
+//! Shielded Scanning:
+//!  * Shielded Scanner Task
+//!    * if the user has configured Zebra with their shielded viewing keys, scans new and existing
+//!      blocks for transactions that use those keys
+//!
+//! Block Mining:
+//!  * Internal Miner Task
+//!    * if the user has configured Zebra to mine blocks, spawns tasks to generate new blocks,
+//!      and submits them for verification. This automatically shares these new blocks with peers.
+//!
 //! Mempool Transactions:
 //!  * Mempool Service
 //!    * activates when the syncer is near the chain tip
