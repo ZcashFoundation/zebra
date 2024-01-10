@@ -9,7 +9,7 @@
 use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
 
 use color_eyre::Report;
-use futures::{stream::FuturesUnordered, TryStreamExt};
+use futures::{stream::FuturesUnordered, StreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
@@ -178,9 +178,8 @@ where
     let first_result;
     select! {
         result = template_generator => { first_result = result; }
-        result = mining_solvers.try_next() => {
+        result = mining_solvers.next() => {
             first_result = result
-                .transpose()
                 .expect("stream never teminates because there is at least one solver task");
         }
     }
