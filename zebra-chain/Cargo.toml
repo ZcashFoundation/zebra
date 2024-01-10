@@ -77,7 +77,9 @@ equihash = "0.2.0"
 # https://github.com/zcash/librustzcash/pull/1083
 # https://github.com/zcash/librustzcash/pull/1088
 #
-# Use the the working solver branch:
+# Use the solver PR:
+# - latest: branch = "equihash-solver-tromp",
+# - crashing with double-frees: rev = "da26c34772f4922eb13b4a1e7d88a969bbcf6a91",
 equihash-solver = { version = "0.2.0", git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-solver-tromp", features = ["solver"], package = "equihash", optional = true }
 # or during development, use the locally checked out and modified version of equihash:
 #equihash-solver = { version = "0.2.0", path = "../../librustzcash/components/equihash", features = ["solver"], package = "equihash", optional = true }
