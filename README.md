@@ -117,6 +117,14 @@ sections in the book for more details.
 
 #### Optional Configs & Features
 
+##### Initializing Configuration File
+
+```console
+zebrad generate -o ~/.config/zebrad.toml
+```
+
+The above command places the generated `zebrad.toml` config file in the default preferences directory of Linux. For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
+
 ##### Configuring Progress Bars
 
 Configure `tracing.progress_bar` in your `zebrad.toml` to
