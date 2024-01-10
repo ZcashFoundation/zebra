@@ -359,12 +359,12 @@ where
         let mut cancel_receiver = template_receiver.clone();
         let old_header = *template.header;
         let cancel_fn = move || match cancel_receiver.has_changed() {
-            // Despite the documentation, has_changed sometimes returns `true` spuriously, even
-            // when the template hasn't changed. This could be a bug where the RPC or block
-            // generator does spurious updates, or where the change detection is implemented
-            // incorrectly. Since it's a bug in both the RPC and miner, it could be a tokio bug.
+            // Guard against get_block_template() providing an identical header. This could happen
+            // if something irrelevant to the block data changes, the time was within 1 second, or
+            // there is a spurious channel change.
             Ok(has_changed) => {
                 cancel_receiver.mark_as_seen();
+
                 // We only need to check header equality, because the block data is bound to the
                 // header.
                 if has_changed

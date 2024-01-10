@@ -116,8 +116,13 @@ where
     }
 
     /// Marks the watched data as seen.
-    /// Calls [`watch::Receiver::mark_changed()`].
     pub fn mark_as_seen(&mut self) {
+        self.receiver.borrow_and_update();
+    }
+
+    /// Marks the watched data as unseen.
+    /// Calls [`watch::Receiver::mark_changed()`].
+    pub fn mark_changed(&mut self) {
         self.receiver.mark_changed();
     }
 }

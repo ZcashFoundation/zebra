@@ -660,8 +660,9 @@ where
                 ));
 
                 // Return immediately if the chain tip has changed.
-                latest_chain_tip.mark_best_tip_seen();
-                let wait_for_best_tip_change = latest_chain_tip.best_tip_changed();
+                // The clone preserves the seen status of the chain tip.
+                let mut wait_for_best_tip_change = latest_chain_tip.clone();
+                let wait_for_best_tip_change = wait_for_best_tip_change.best_tip_changed();
 
                 // Wait for the maximum block time to elapse. This can change the block header
                 // on testnet. (On mainnet it can happen due to a network disconnection, or a
@@ -710,11 +711,11 @@ where
                     tip_changed_result = wait_for_best_tip_change => {
                         match tip_changed_result {
                             Ok(()) => {
-                                // Despite the documentation, this future sometimes returns
-                                // spuriously, even when the tip hasn't changed. This could be a
-                                // bug where the state does spurious updates, or where the change
-                                // detection or its future is implemented incorrectly. Since it's a
-                                // bug in both the RPC and miner, it could be a tokio bug.
+                                // Spurious updates shouldn't happen in the state, because the
+                                // difficulty and hash ordering is a stable total order. But
+                                // since they could cause a busy-loop, guard against them here.
+                                latest_chain_tip.mark_best_tip_seen();
+
                                 let new_tip_hash = latest_chain_tip.best_tip_hash();
                                 if new_tip_hash == Some(tip_hash) {
                                     tracing::debug!(
