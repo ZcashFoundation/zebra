@@ -1349,7 +1349,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp#da26c34772f4922eb13b4a1e7d88a969bbcf6a91"
+source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp#838d1e937e8a6f23e99fa4ea4e1984013d423a6f"
 dependencies = [
  "blake2b_simd",
  "byteorder",

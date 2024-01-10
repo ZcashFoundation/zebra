@@ -51,7 +51,6 @@ pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-#[instrument(skip(config, rpc))]
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
