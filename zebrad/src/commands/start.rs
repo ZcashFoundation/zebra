@@ -313,7 +313,7 @@ impl StartCmd {
         //
         // TODO: add a config to enable the miner rather than a feature.
         #[cfg(feature = "internal-miner")]
-        let miner_task_handle = {
+        let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
             let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
                 config.network.network,
@@ -327,6 +327,8 @@ impl StartCmd {
             );
 
             crate::components::miner::spawn_init(&config.mining, rpc)
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
         };
 
         #[cfg(not(feature = "internal-miner"))]

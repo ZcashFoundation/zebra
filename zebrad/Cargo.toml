@@ -73,6 +73,7 @@ internal-miner = [
     "thread-priority",
     "zebra-chain/internal-miner",
     # TODO: move common code into zebra-chain or zebra-node-services and remove the RPC dependency
+    "zebra-rpc/internal-miner",
     "zebra-rpc/getblocktemplate-rpcs",
 ]
 

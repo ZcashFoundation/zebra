@@ -98,7 +98,7 @@ where
 ///
 /// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-    _config: Config,
+    config: Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> Result<(), Report>
 where
@@ -130,11 +130,14 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // If we can't detect the number of cores, assume one core.
-    //
-    // TODO: add a config & launch the configured number of solvers, using available_parallelism()
-    //       by default
-    let solver_count = available_parallelism().map(usize::from).unwrap_or(1);
+    let configured_threads = config.internal_miner_threads;
+    // If we can't detect the number of cores, use the configured number.
+    let available_threads = available_parallelism()
+        .map(usize::from)
+        .unwrap_or(configured_threads);
+
+    // Use the minimum of the configured and available threads.
+    let solver_count = min(configured_threads, available_threads);
 
     info!(
         ?solver_count,
