@@ -131,6 +131,9 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // If we can't detect the number of cores, assume one core.
+    //
+    // TODO: add a config & launch the configured number of solvers, using available_parallelism()
+    //       by default
     let solver_count = available_parallelism().map(usize::from).unwrap_or(1);
 
     info!(
@@ -141,8 +144,7 @@ where
     let (template_sender, template_receiver) = watch::channel(None);
     let template_receiver = WatchReceiver::new(template_receiver);
 
-    // TODO: add a config & launch the configured number of solvers, using available_parallelism()
-    //       by default
+    // TODO: Spawn these tasks, to avoid blocked cooperative futures, and improve shutdown responsiveness.
     let template_generator = generate_block_templates(rpc.clone(), template_sender);
 
     let mut mining_solvers = FuturesUnordered::new();
@@ -161,16 +163,17 @@ where
 
     // These tasks run forever unless there is a fatal error or shutdown.
     // When that happens, the first task to error returns, and the other futures are cancelled.
-    // Then this task returns and drops the `template_sender`, which cancels all the spawned miner
+    let first_result;
+    select! {
+        result = template_generator => { first_result = result; }
+        result = mining_solvers.try_next() => { first_result = result.map(|ok| ok.expect("there is at least one solver")); }
+    }
+
+    // When this task returns and drops the `template_sender`, it cancels all the spawned miner
     // threads. This only works because we run the `template_generator` in this task. If we spawned
     // it, then the spawned task would take ownership of `template_sender` and keep running.
     // (Mining solvers can be spawned, because they finish when the `template_sender` is dropped.)
-    select! {
-        result = template_generator => { result?; }
-        result = mining_solvers.try_next() => { result?; }
-    }
-
-    Ok(())
+    first_result
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
