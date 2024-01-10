@@ -689,7 +689,6 @@ where
                 // But the coinbase value depends on the selected transactions, so this needs
                 // further analysis to check if it actually saves us any time.
 
-                // TODO: change logging to debug after testing
                 tokio::select! {
                     // Poll the futures in the listed order, for efficiency.
                     // We put the most frequent conditions first.
@@ -697,7 +696,7 @@ where
 
                     // This timer elapses every few seconds
                     _elapsed = wait_for_mempool_request => {
-                        tracing::info!(
+                        tracing::debug!(
                             ?max_time,
                             ?cur_time,
                             ?server_long_poll_id,
@@ -736,7 +735,7 @@ where
                                     continue;
                                 }
 
-                                tracing::info!(
+                                tracing::debug!(
                                     ?max_time,
                                     ?cur_time,
                                     ?server_long_poll_id,
@@ -746,8 +745,7 @@ where
                             }
 
                             Err(recv_error) => {
-                                // This log should stay at info when the others go to debug,
-                                // it will help with debugging.
+                                // This log is rare and helps with debugging, so it's ok to be info.
                                 tracing::info!(
                                     ?recv_error,
                                     ?max_time,
@@ -770,8 +768,7 @@ where
                     // The max time does not elapse during normal operation on mainnet,
                     // and it rarely elapses on testnet.
                     Some(_elapsed) = wait_for_max_time => {
-                        // This log should stay at info when the others go to debug,
-                        // it's very rare.
+                        // This log is very rare so it's ok to be info.
                         tracing::info!(
                             ?max_time,
                             ?cur_time,
