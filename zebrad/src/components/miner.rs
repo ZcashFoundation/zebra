@@ -144,8 +144,15 @@ where
     let (template_sender, template_receiver) = watch::channel(None);
     let template_receiver = WatchReceiver::new(template_receiver);
 
-    // TODO: Spawn these tasks, to avoid blocked cooperative futures, and improve shutdown responsiveness.
-    let template_generator = generate_block_templates(rpc.clone(), template_sender);
+    // Spawn these tasks, to avoid blocked cooperative futures, and improve shutdown responsiveness.
+    // This is particularly important when there are a large number of solver threads.
+    let mut abort_handles = Vec::new();
+
+    let template_generator = tokio::task::spawn(
+        generate_block_templates(rpc.clone(), template_sender).in_current_span(),
+    );
+    abort_handles.push(template_generator.abort_handle());
+    let template_generator = template_generator.wait_for_panics();
 
     let mut mining_solvers = FuturesUnordered::new();
     for solver_id in 0..solver_count {
@@ -154,25 +161,36 @@ where
             .try_into()
             .expect("just limited to u8::MAX");
 
-        mining_solvers.push(run_mining_solver(
-            solver_id,
-            template_receiver.clone(),
-            rpc.clone(),
-        ));
+        let solver = tokio::task::spawn(
+            run_mining_solver(solver_id, template_receiver.clone(), rpc.clone()).in_current_span(),
+        );
+        abort_handles.push(solver.abort_handle());
+
+        mining_solvers.push(solver.wait_for_panics());
     }
 
     // These tasks run forever unless there is a fatal error or shutdown.
-    // When that happens, the first task to error returns, and the other futures are cancelled.
+    // When that happens, the first task to error returns, and the other JoinHandle futures are
+    // cancelled.
     let first_result;
     select! {
         result = template_generator => { first_result = result; }
-        result = mining_solvers.try_next() => { first_result = result.map(|ok| ok.expect("there is at least one solver")); }
+        result = mining_solvers.try_next() => {
+            first_result = result
+                .transpose()
+                .expect("stream never teminates because there is at least one solver task");
+        }
     }
 
-    // When this task returns and drops the `template_sender`, it cancels all the spawned miner
-    // threads. This only works because we run the `template_generator` in this task. If we spawned
-    // it, then the spawned task would take ownership of `template_sender` and keep running.
-    // (Mining solvers can be spawned, because they finish when the `template_sender` is dropped.)
+    // But the spawned async tasks keep running, so we need to abort them here.
+    for abort_handle in abort_handles {
+        abort_handle.abort();
+    }
+
+    // Any spawned blocking threads will keep running. When this task returns and drops the
+    // `template_sender`, it cancels all the spawned miner threads. This works because we've
+    // aborted the `template_generator` task, which owns the `template_sender`. (And it doesn't
+    // spawn any blocking threads.)
     first_result
 }
 
