@@ -12,6 +12,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "internal-miner")]
+use crate::serialization::AtLeastOne;
+
 /// The error type for Equihash validation.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
@@ -100,7 +103,10 @@ impl Solution {
     /// It can run for minutes or hours if the network difficulty is high.
     #[cfg(feature = "internal-miner")]
     #[allow(clippy::unwrap_in_result)]
-    pub fn solve<F>(mut header: Header, mut cancel_fn: F) -> Result<Header, SolverCancelled>
+    pub fn solve<F>(
+        mut header: Header,
+        mut cancel_fn: F,
+    ) -> Result<AtLeastOne<Header>, SolverCancelled>
     where
         F: FnMut() -> Result<(), SolverCancelled>,
     {
@@ -127,6 +133,8 @@ impl Solution {
                 Some(*header.nonce)
             });
 
+            let mut valid_solutions = Vec::new();
+
             // If we got any solutions, try submitting them, because the new template might just
             // contain some extra transactions. Mining extra transactions is optional.
             for solution in &solutions {
@@ -140,15 +148,17 @@ impl Solution {
                 }
 
                 if Self::difficulty_is_valid(&header) {
-                    info!("found valid solution and difficulty");
-                    return Ok(header);
+                    valid_solutions.push(header);
                 }
             }
 
-            debug!(
-                solutions = ?solutions.len(),
-                "found valid solutions which did not pass the validity or difficulty checks"
-            );
+            match valid_solutions.try_into() {
+                Ok(at_least_one_solution) => return Ok(at_least_one_solution),
+                Err(_is_empty_error) => debug!(
+                    solutions = ?solutions.len(),
+                    "found valid solutions which did not pass the validity or difficulty checks"
+                ),
+            }
         }
 
         Err(SolverCancelled)

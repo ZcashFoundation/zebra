@@ -20,7 +20,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
-    serialization::ZcashSerialize,
+    serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
 };
@@ -379,8 +379,8 @@ where
             Err(_sender_dropped) => Err(SolverCancelled),
         };
 
-        // Mine a block using the equihash solver.
-        let Ok(block) = mine_one_block(solver_id, template, cancel_fn).await else {
+        // Mine at least one block using the equihash solver.
+        let Ok(blocks) = mine_a_block(solver_id, template, cancel_fn).await else {
             // If the solver was cancelled, we're either shutting down, or we have a new template.
             if solver_id == 0 {
                 info!(
@@ -409,47 +409,50 @@ where
             continue;
         };
 
-        // Submit the newly mined block to the verifiers.
+        // Submit the newly mined blocks to the verifiers.
         //
         // TODO: if there is a new template (`cancel_fn().is_err()`), and
         //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
-        //       block.
-        let data = block
-            .zcash_serialize_to_vec()
-            .expect("serializing to Vec never fails");
+        //       blocks.
+        for block in blocks {
+            let data = block
+                .zcash_serialize_to_vec()
+                .expect("serializing to Vec never fails");
 
-        match rpc.submit_block(HexData(data), None).await {
-            Ok(success) => info!(
-                ?height,
-                hash = ?block.hash(),
-                ?solver_id,
-                ?success,
-                "successfully mined a new block",
-            ),
-            Err(error) => info!(
-                ?height,
-                hash = ?block.hash(),
-                ?solver_id,
-                ?error,
-                "validating a newly mined block failed, trying again",
-            ),
+            match rpc.submit_block(HexData(data), None).await {
+                Ok(success) => info!(
+                    ?height,
+                    hash = ?block.hash(),
+                    ?solver_id,
+                    ?success,
+                    "successfully mined a new block",
+                ),
+                Err(error) => info!(
+                    ?height,
+                    hash = ?block.hash(),
+                    ?solver_id,
+                    ?error,
+                    "validating a newly mined block failed, trying again",
+                ),
+            }
         }
     }
 
     Ok(())
 }
 
-/// Mines a single block based on `template`, calculates its equihash solutions, checks difficulty,
-/// and returning the newly mined block. Uses a different nonce range for each `solver_id`.
+/// Mines one or more blocks based on `template`. Calculates equihash solutions, checks difficulty,
+/// and returns as soon as it has at least one block. Uses a different nonce range for each
+/// `solver_id`.
 ///
 /// If `cancel_fn()` returns an error, returns early with `Err(SolverCancelled)`.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub async fn mine_one_block<F>(
+pub async fn mine_a_block<F>(
     solver_id: u8,
-    mut template: Arc<Block>,
+    template: Arc<Block>,
     cancel_fn: F,
-) -> Result<Arc<Block>, SolverCancelled>
+) -> Result<AtLeastOne<Block>, SolverCancelled>
 where
     F: FnMut() -> Result<(), SolverCancelled> + Send + Sync + 'static,
 {
@@ -463,10 +466,9 @@ where
     *header.nonce.first_mut().unwrap() = solver_id;
     *header.nonce.last_mut().unwrap() = solver_id;
 
-    // Mine a block using the solver, in a low-priority blocking thread.
+    // Mine one or more blocks using the solver, in a low-priority blocking thread.
     let span = Span::current();
-    // TODO: get and submit all valid headers, not just the first one
-    let solved_header =
+    let solved_headers =
         tokio::task::spawn_blocking(move || span.in_scope(move || {
             let miner_thread_handle = ThreadBuilder::default().name("zebra-miner").priority(ThreadPriority::Min).spawn(move |priority_result| {
                 if let Err(error) = priority_result {
@@ -481,11 +483,21 @@ where
         .wait_for_panics()
         .await?;
 
-    // Modify the template into a solved block.
-    //
-    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises
-    let block = Arc::make_mut(&mut template);
-    block.header = Arc::new(solved_header);
+    // Modify the template into solved blocks.
 
-    Ok(template)
+    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises
+    let block = (*template).clone();
+
+    let solved_blocks: Vec<Block> = solved_headers
+        .into_iter()
+        .map(|header| {
+            let mut block = block.clone();
+            block.header = Arc::new(header);
+            block
+        })
+        .collect();
+
+    Ok(solved_blocks
+        .try_into()
+        .expect("a 1:1 mapping of AtLeastOne produces at least one block"))
 }
