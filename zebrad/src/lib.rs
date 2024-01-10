@@ -62,9 +62,7 @@
 //! zebrad generate -o ~/.config/zebrad.toml
 //! ```
 //!
-//! For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
-//!
-//! See [`config::ZebradConfig`] for more information.
+//! See [`config::ZebradConfig`] for other OSes default locations or more information about how to configure Zebra.
 //!
 //! ## Zebra Feature Flags
 //!
