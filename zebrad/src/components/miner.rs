@@ -180,7 +180,7 @@ where
         result = template_generator => { first_result = result; }
         result = mining_solvers.next() => {
             first_result = result
-                .expect("stream never teminates because there is at least one solver task");
+                .expect("stream never terminates because there is at least one solver task");
         }
     }
 
