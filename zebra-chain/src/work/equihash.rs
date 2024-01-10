@@ -61,6 +61,8 @@ impl Solution {
             .zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
 
+        // The part of the header before the nonce and solution.
+        // This data is kept constant during solver runs, so the verifier API takes it separately.
         let input = &input[0..Solution::INPUT_LENGTH];
 
         equihash::is_valid_solution(n, k, input, nonce.as_ref(), solution)?;
@@ -116,6 +118,8 @@ impl Solution {
         header
             .zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
+        // Take the part of the header before the nonce and solution.
+        // This data is kept constant for this solver run.
         let input = &input[0..Solution::INPUT_LENGTH];
 
         while !is_shutting_down() {
