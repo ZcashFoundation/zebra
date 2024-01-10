@@ -1231,10 +1231,13 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
 
+    #[allow(clippy::unnecessary_struct_initialization)]
     let mining_config = crate::config::mining::Config {
         miner_address,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
+        // Use default field values when optional features are enabled in tests
+        ..Default::default()
     };
 
     // nu5 block height
@@ -1677,10 +1680,13 @@ async fn rpc_getdifficulty() {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
+    #[allow(clippy::unnecessary_struct_initialization)]
     let mining_config = Config {
         miner_address: None,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
+        // Use default field values when optional features are enabled in tests
+        ..Default::default()
     };
 
     // nu5 block height
