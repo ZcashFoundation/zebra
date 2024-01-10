@@ -5,10 +5,20 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0) - TODO: 2024-01-??
+
+This release:
+- TODO: summary of other important changes
+- adds an experimental `internal-miner` feature, which mines blocks within `zebrad`. This feature
+  is only supported on testnet. Use a more efficient GPU or ASIC for mainnet mining.
+
+TODO: the rest of the changelog
+
+
 ## [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) - 2023-11-28
 
 This release:
-- fixes a panic that was introduced in Zebra v1.4.0, which happens in rare circumstances when reading cached sprout or history trees. 
+- fixes a panic that was introduced in Zebra v1.4.0, which happens in rare circumstances when reading cached sprout or history trees.
 - further improves how Zebra recovers from network interruptions and prevents potential network hangs.
 - limits the ability of synthetic nodes to spread throughout the network through Zebra to address some of the Ziggurat red team report.
 
