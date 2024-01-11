@@ -57,8 +57,8 @@ rand = "0.8.5"
 rayon = "1.7.0"
 regex = "1.10.2"
 serde = { version = "1.0.193", features = ["serde_derive"] }
-tempfile = "3.8.1"
-thiserror = "1.0.51"
+tempfile = "3.9.0"
+thiserror = "1.0.56"
 
 futures = "0.3.30"
 tokio = { version = "1.35.1", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }

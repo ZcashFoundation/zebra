@@ -39,7 +39,7 @@ proptest-impl = [
 color-eyre = "0.6.2"
 indexmap = { version = "2.0.1", features = ["serde"] }
 itertools = "0.12.0"
-semver = "1.0.20"
+semver = "1.0.21"
 serde = { version = "1.0.193", features = ["serde_derive"] }
 tokio = { version = "1.35.1", features = ["time"] }
 tower = "0.4.13"
