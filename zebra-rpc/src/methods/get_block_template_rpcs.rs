@@ -1,11 +1,11 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use futures::{future::OptionFuture, FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use zcash_address::{self, unified::Encoding, TryFromAddress};
 
@@ -223,6 +223,7 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
+#[derive(Clone)]
 pub struct GetBlockTemplateRpcImpl<
     Mempool,
     State,
@@ -232,22 +233,32 @@ pub struct GetBlockTemplateRpcImpl<
     AddressBook,
 > where
     Mempool: Service<
-        mempool::Request,
-        Response = mempool::Response,
-        Error = zebra_node_services::BoxError,
-    >,
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-    AddressBook: AddressBookPeers,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -270,7 +281,7 @@ pub struct GetBlockTemplateRpcImpl<
     // Services
     //
     /// A handle to the mempool service.
-    mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Mempool,
 
     /// A handle to the state service.
     state: State,
@@ -288,14 +299,18 @@ pub struct GetBlockTemplateRpcImpl<
     address_book: AddressBook,
 }
 
-impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
-    GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> Debug
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -304,12 +319,56 @@ where
         + Send
         + Sync
         + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Skip fields without debug impls
+        f.debug_struct("GetBlockTemplateRpcImpl")
+            .field("network", &self.network)
+            .field("miner_address", &self.miner_address)
+            .field("extra_coinbase_data", &self.extra_coinbase_data)
+            .field("debug_like_zcashd", &self.debug_like_zcashd)
+            .finish()
+    }
+}
+
+impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -322,13 +381,24 @@ where
     pub fn new(
         network: Network,
         mining_config: crate::config::mining::Config,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
+        // Prevent loss of miner funds due to an unsupported or incorrect address type.
+        if let Some(miner_address) = mining_config.miner_address {
+            assert_eq!(
+                miner_address.network(),
+                network,
+                "incorrect miner address config: {miner_address} \
+                         network.network {network} and miner address network {} must match",
+                miner_address.network(),
+            );
+        }
+
         // A limit on the configured extra coinbase data, regardless of the current block height.
         // This is different from the consensus rule, which limits the total height + data.
         const EXTRA_COINBASE_DATA_LIMIT: usize =
@@ -378,7 +448,10 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -473,9 +546,7 @@ where
         async move {
             get_block_template::check_parameters(&parameters)?;
 
-            let client_long_poll_id = parameters
-                .as_ref()
-                .and_then(|params| params.long_poll_id.clone());
+            let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
             // - One-off checks
 
@@ -497,6 +568,10 @@ where
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
                 check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
+
+                // TODO: return an error if we have no peers, like `zcashd` does,
+                //       and add a developer config that mines regardless of how many peers we have.
+                // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
 
                 // We're just about to fetch state data, then maybe wait for any changes.
                 // Mark all the changes before the fetch as seen.
@@ -585,7 +660,9 @@ where
                 ));
 
                 // Return immediately if the chain tip has changed.
-                let wait_for_best_tip_change = latest_chain_tip.best_tip_changed();
+                // The clone preserves the seen status of the chain tip.
+                let mut wait_for_best_tip_change = latest_chain_tip.clone();
+                let wait_for_best_tip_change = wait_for_best_tip_change.best_tip_changed();
 
                 // Wait for the maximum block time to elapse. This can change the block header
                 // on testnet. (On mainnet it can happen due to a network disconnection, or a
@@ -612,7 +689,6 @@ where
                 // But the coinbase value depends on the selected transactions, so this needs
                 // further analysis to check if it actually saves us any time.
 
-                // TODO: change logging to debug after testing
                 tokio::select! {
                     // Poll the futures in the listed order, for efficiency.
                     // We put the most frequent conditions first.
@@ -620,7 +696,7 @@ where
 
                     // This timer elapses every few seconds
                     _elapsed = wait_for_mempool_request => {
-                        tracing::info!(
+                        tracing::debug!(
                             ?max_time,
                             ?cur_time,
                             ?server_long_poll_id,
@@ -634,7 +710,32 @@ where
                     tip_changed_result = wait_for_best_tip_change => {
                         match tip_changed_result {
                             Ok(()) => {
-                                tracing::info!(
+                                // Spurious updates shouldn't happen in the state, because the
+                                // difficulty and hash ordering is a stable total order. But
+                                // since they could cause a busy-loop, guard against them here.
+                                latest_chain_tip.mark_best_tip_seen();
+
+                                let new_tip_hash = latest_chain_tip.best_tip_hash();
+                                if new_tip_hash == Some(tip_hash) {
+                                    tracing::debug!(
+                                        ?max_time,
+                                        ?cur_time,
+                                        ?server_long_poll_id,
+                                        ?client_long_poll_id,
+                                        ?tip_hash,
+                                        ?tip_height,
+                                        "ignoring spurious state change notification"
+                                    );
+
+                                    // Wait for the mempool interval, then check for any changes.
+                                    tokio::time::sleep(Duration::from_secs(
+                                        GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                                    )).await;
+
+                                    continue;
+                                }
+
+                                tracing::debug!(
                                     ?max_time,
                                     ?cur_time,
                                     ?server_long_poll_id,
@@ -644,8 +745,7 @@ where
                             }
 
                             Err(recv_error) => {
-                                // This log should stay at info when the others go to debug,
-                                // it will help with debugging.
+                                // This log is rare and helps with debugging, so it's ok to be info.
                                 tracing::info!(
                                     ?recv_error,
                                     ?max_time,
@@ -668,8 +768,7 @@ where
                     // The max time does not elapse during normal operation on mainnet,
                     // and it rarely elapses on testnet.
                     Some(_elapsed) = wait_for_max_time => {
-                        // This log should stay at info when the others go to debug,
-                        // it's very rare.
+                        // This log is very rare so it's ok to be info.
                         tracing::info!(
                             ?max_time,
                             ?cur_time,

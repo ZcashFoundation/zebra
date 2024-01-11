@@ -86,6 +86,11 @@ skip-tree = [
     # wait for hdwallet to upgrade
     { name = "ring", version = "=0.16.20" },
 
+    # wait for the equihash/solver feature to merge
+    # https://github.com/zcash/librustzcash/pull/1083
+    # https://github.com/zcash/librustzcash/pull/1088
+    { name = "equihash", version = "=0.2.0" },
+
     # zebra-utils dependencies
 
     # wait for structopt upgrade (or upgrade to clap 4)
@@ -137,6 +142,10 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
+    # TODO: remove this after the equihash solver branch is merged and released.
+    #
+    # "cargo deny" will log a warning in builds without the internal-miner feature. That's ok.
+    "https://github.com/ZcashFoundation/librustzcash.git"
 ]
 
 [sources.allow-org]

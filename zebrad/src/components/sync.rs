@@ -261,7 +261,8 @@ pub struct Config {
 
     /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
     ///
-    /// Set to `0` by default, which uses one thread per available CPU core.
+    /// If the number of threads is not configured or zero, Zebra uses the number of logical cores.
+    /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
 }

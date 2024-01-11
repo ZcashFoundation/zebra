@@ -19,7 +19,7 @@ default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Experimental mining RPC support
+# Mining RPC support
 getblocktemplate-rpcs = [
     "rand",
     "zcash_address",
@@ -28,6 +28,9 @@ getblocktemplate-rpcs = [
     "zebra-node-services/getblocktemplate-rpcs",
     "zebra-chain/getblocktemplate-rpcs",
 ]
+
+# Experimental internal miner support
+internal-miner = []
 
 # Test-only features
 proptest-impl = [
@@ -48,7 +51,6 @@ hyper = { version = "0.14.28", features = ["http1", "server"] }
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
-num_cpus = "1.16.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
 serde_json = { version = "1.0.108", features = ["preserve_order"] }
