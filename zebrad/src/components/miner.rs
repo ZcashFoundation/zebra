@@ -352,7 +352,7 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
-    while template_receiver.has_changed().is_ok() && !is_shutting_down() {
+    while !template_receiver.is_closed() && !is_shutting_down() {
         // Get the latest block template, and mark the current value as seen.
         // We mark the value first to avoid missed updates.
         template_receiver.mark_as_seen();

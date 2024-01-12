@@ -125,4 +125,9 @@ where
     pub fn mark_changed(&mut self) {
         self.receiver.mark_changed();
     }
+
+    /// Returns true if the sender has dropped and the watch channel is closed.
+    pub fn is_closed(&mut self) -> bool {
+        self.receiver.has_changed().is_err()
+    }
 }
