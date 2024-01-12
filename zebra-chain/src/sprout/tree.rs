@@ -83,12 +83,6 @@ lazy_static! {
     };
 }
 
-/// The index of a note's commitment at the leafmost layer of its Note
-/// Commitment Tree.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
-pub struct Position(pub(crate) u64);
-
 /// Sprout note commitment tree root node hash.
 ///
 /// The root hash in LEBS2OSP256(rt) encoding of the Sprout note

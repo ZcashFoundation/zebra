@@ -11,6 +11,17 @@ use serde::{Deserialize, Serialize};
 /// The `zebrad` config is a TOML-encoded version of this structure. The meaning
 /// of each field is described in the documentation, although it may be necessary
 /// to click through to the sub-structures for each section.
+///
+/// The path to the configuration file can also be specified with the `--config` flag when running Zebra.
+///
+/// The default path to the `zebrad` config is platform dependent, based on
+/// [`dirs::preference_dir`](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html):
+///
+/// | Platform | Value                                 | Example                                        |
+/// | -------- | ------------------------------------- | ---------------------------------------------- |
+/// | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
+/// | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
+/// | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
 #[derive(Clone, Default, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {

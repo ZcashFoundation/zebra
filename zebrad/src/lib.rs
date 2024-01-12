@@ -45,6 +45,16 @@
 //! - Additional contexts: wider target deployments for people to use a consensus
 //!   node in more contexts e.g. mobile, wasm, etc.
 //!
+//! ## Configuration
+//!
+//! The command below places the generated `zebrad.toml` config file in the default preferences directory of Linux:
+//!
+//! ```console
+//! zebrad generate -o ~/.config/zebrad.toml
+//! ```
+//!
+//! See [`config::ZebradConfig`] for other OSes default locations or more information about how to configure Zebra.
+//!
 //! ## Zebra Feature Flags
 //!
 //! The following [Cargo
@@ -94,9 +104,12 @@
 //! ### Experimental
 //!
 //! * `elasticsearch`: save block data into elasticsearch database. Read the [elasticsearch](https://zebra.zfnd.org/user/elasticsearch.html)
-//! section of the book for more details.
+//!   section of the book for more details.
 //! * `shielded-scan`: enable experimental support for scanning shielded transactions. Read the [shielded-scan](https://zebra.zfnd.org/user/shielded-scan.html)
-//! section of the book for more details.
+//!   section of the book for more details.
+//! * `internal-miner`: enable experimental support for mining inside Zebra, without an external
+//!   mining pool. This feature is only supported on testnet. Use a GPU or ASIC on mainnet for
+//!   efficient mining.
 //!
 //! ## Zebra crates
 //!

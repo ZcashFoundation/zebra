@@ -8,6 +8,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use insta::dynamic_redaction;
+use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::Block,
@@ -338,7 +339,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network) {
         network,
         false,
         true,
-        Buffer::new(mempool, 1),
+        mempool,
         state.clone(),
         latest_chain_tip,
     );

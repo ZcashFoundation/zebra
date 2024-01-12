@@ -123,6 +123,11 @@ impl Header {
             ))?
         }
     }
+
+    /// Compute the hash of this header.
+    pub fn hash(&self) -> Hash {
+        Hash::from(self)
+    }
 }
 
 /// A header with a count of the number of transactions in its block.

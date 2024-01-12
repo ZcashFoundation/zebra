@@ -7,13 +7,12 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic};
+use std::{fmt, panic, thread::available_parallelism};
 
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::{CloseHandle, ServerBuilder};
 use tokio::task::JoinHandle;
-use tower::{buffer::Buffer, Service};
-
+use tower::Service;
 use tracing::{Instrument, *};
 
 use zebra_chain::{
@@ -99,7 +98,7 @@ impl RpcServer {
         mining_config: crate::config::mining::Config,
         build_version: VersionString,
         user_agent: UserAgentString,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         block_verifier_router: BlockVerifierRouter,
@@ -117,7 +116,10 @@ impl RpcServer {
                 mempool::Request,
                 Response = mempool::Response,
                 Error = zebra_node_services::BoxError,
-            > + 'static,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
         Mempool::Future: Send,
         State: Service<
                 zebra_state::ReadRequest,
@@ -150,17 +152,6 @@ impl RpcServer {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {
-                // Prevent loss of miner funds due to an unsupported or incorrect address type.
-                if let Some(miner_address) = mining_config.miner_address {
-                    assert_eq!(
-                        miner_address.network(),
-                        network,
-                        "incorrect miner address config: {miner_address} \
-                         network.network {network} and miner address network {} must match",
-                        miner_address.network(),
-                    );
-                }
-
                 // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
                     network,
@@ -196,7 +187,7 @@ impl RpcServer {
             // If zero, automatically scale threads to the number of CPU cores
             let mut parallel_cpu_threads = config.parallel_cpu_threads;
             if parallel_cpu_threads == 0 {
-                parallel_cpu_threads = num_cpus::get();
+                parallel_cpu_threads = available_parallelism().map(usize::from).unwrap_or(1);
             }
 
             // The server is a blocking task, which blocks on executor shutdown.

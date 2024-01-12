@@ -78,9 +78,7 @@ fn vergen_build_version() -> Option<Version> {
     // - optional pre-release: `-`tag[`.`tag ...]
     // - optional build: `+`tag[`.`tag ...]
     // change the git describe format to the semver 2.0 format
-    let Some(vergen_git_describe) = VERGEN_GIT_DESCRIBE else {
-        return None;
-    };
+    let vergen_git_describe = VERGEN_GIT_DESCRIBE?;
 
     // `git describe` uses "dirty" for uncommitted changes,
     // but users won't understand what that means.
@@ -90,10 +88,7 @@ fn vergen_build_version() -> Option<Version> {
     let mut vergen_git_describe = vergen_git_describe.split('-').peekable();
 
     // Check the "version core" part.
-    let version = vergen_git_describe.next();
-    let Some(mut version) = version else {
-        return None;
-    };
+    let mut version = vergen_git_describe.next()?;
 
     // strip the leading "v", if present.
     version = version.strip_prefix('v').unwrap_or(version);

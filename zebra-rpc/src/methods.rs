@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tokio::{sync::broadcast, task::JoinHandle};
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -268,19 +268,28 @@ pub trait Rpc {
 }
 
 /// RPC method implementations.
+#[derive(Clone)]
 pub struct RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<
-        mempool::Request,
-        Response = mempool::Response,
-        Error = zebra_node_services::BoxError,
-    >,
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-    Tip: ChainTip,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -304,7 +313,7 @@ where
     // Services
     //
     /// A handle to the mempool service.
-    mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Mempool,
 
     /// A handle to the state service.
     state: State,
@@ -318,13 +327,17 @@ where
     queue_sender: broadcast::Sender<UnminedTx>,
 }
 
-impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip> Debug for RpcImpl<Mempool, State, Tip>
 where
     Mempool: Service<
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -333,6 +346,41 @@ where
         + Send
         + Sync
         + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Skip fields without Debug impls, and skip channels
+        f.debug_struct("RpcImpl")
+            .field("build_version", &self.build_version)
+            .field("user_agent", &self.user_agent)
+            .field("network", &self.network)
+            .field("debug_force_finished_sync", &self.debug_force_finished_sync)
+            .field("debug_like_zcashd", &self.debug_like_zcashd)
+            .finish()
+    }
+}
+
+impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
@@ -346,15 +394,13 @@ where
         network: Network,
         debug_force_finished_sync: bool,
         debug_like_zcashd: bool,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
         UserAgentString: ToString + Clone + Send + 'static,
-        <Mempool as Service<mempool::Request>>::Future: Send,
-        <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
         let (runner, queue_sender) = Queue::start();
 
@@ -391,11 +437,14 @@ where
 
 impl<Mempool, State, Tip> Rpc for RpcImpl<Mempool, State, Tip>
 where
-    Mempool: tower::Service<
+    Mempool: Service<
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

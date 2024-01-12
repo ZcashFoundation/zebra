@@ -29,9 +29,17 @@ async-error = [
     "tokio",
 ]
 
-# Experimental mining RPC support
+# Mining RPC support
 getblocktemplate-rpcs = [
     "zcash_address",
+]
+
+# Experimental internal miner support
+internal-miner = [
+    # TODO: replace with "equihash/solver" when that feature is merged and released:
+    # https://github.com/zcash/librustzcash/pull/1083
+    # https://github.com/zcash/librustzcash/pull/1088
+    "equihash-solver",
 ]
 
 # Experimental elasticsearch support
@@ -61,7 +69,21 @@ blake2s_simd = "1.0.2"
 bridgetree = "0.4.0"
 bs58 = { version = "0.5.0", features = ["check"] }
 byteorder = "1.5.0"
+
 equihash = "0.2.0"
+# Experimental internal miner support
+#
+# TODO: remove "equihash-solver" when the "equihash/solver" feature is merged and released:
+# https://github.com/zcash/librustzcash/pull/1083
+# https://github.com/zcash/librustzcash/pull/1088
+#
+# Use the solver PR:
+# - latest: branch = "equihash-solver-tromp",
+# - crashing with double-frees: rev = "da26c34772f4922eb13b4a1e7d88a969bbcf6a91",
+equihash-solver = { version = "0.2.0", git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-solver-tromp", features = ["solver"], package = "equihash", optional = true }
+# or during development, use the locally checked out and modified version of equihash:
+#equihash-solver = { version = "0.2.0", path = "../../librustzcash/components/equihash", features = ["solver"], package = "equihash", optional = true }
+
 group = "0.13.0"
 incrementalmerkletree = "0.5.0"
 jubjub = "0.10.0"
@@ -91,7 +113,7 @@ humantime = "2.1.0"
 # Error Handling & Formatting
 displaydoc = "0.2.4"
 static_assertions = "1.1.0"
-thiserror = "1.0.51"
+thiserror = "1.0.56"
 tracing = "0.1.39"
 
 # Serialization
@@ -111,7 +133,7 @@ redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.108", optional = true }
+serde_json = { version = "1.0.111", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
 tokio = { version = "1.35.1", optional = true }

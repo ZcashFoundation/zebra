@@ -16,5 +16,8 @@ pub mod tokio;
 #[allow(missing_docs)]
 pub mod tracing;
 
+#[cfg(feature = "internal-miner")]
+pub mod miner;
+
 pub use inbound::Inbound;
 pub use sync::ChainSync;
