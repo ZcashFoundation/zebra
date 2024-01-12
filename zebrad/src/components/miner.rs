@@ -249,10 +249,9 @@ where
     // Pass the correct arguments, even if Zebra currently ignores them.
     let mut parameters = get_block_template::JsonParameters {
         mode: Template,
-        data: None,
         capabilities: vec![LongPoll, CoinbaseTxn],
         long_poll_id: None,
-        _work_id: None,
+        ..Default::default()
     };
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
