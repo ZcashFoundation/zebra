@@ -1,5 +1,119 @@
 # Zebra Cached State Database Implementation
 
+## Adding a Column Family
+
+Most Zebra column families are implemented using low-level methods that allow accesses using any
+type. But this is error-prone, because we can accidentally use different types to read and write
+them. (Or read using different types in different methods.)
+
+If we type the column family name out every time, a typo can lead to a panic, because the column
+family doesn't exist.
+
+Instead:
+- define the name and type of each column family at the top of the implementation module,
+- add a method on the database that returns that type, and
+- add the column family name to the list of column families in the database:
+
+For example:
+```rust
+/// The name of the sapling transaction IDs result column family.
+pub const SAPLING_TX_IDS: &str = "sapling_tx_ids";
+
+/// The column families supported by the running `zebra-scan` database code.
+pub const SCANNER_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    sapling::SAPLING_TX_IDS,
+];
+
+/// The type for reading sapling transaction IDs results from the database.
+pub type SaplingTxIdsCf<'cf> =
+    TypedColumnFamily<'cf, SaplingScannedDatabaseIndex, Option<SaplingScannedResult>>;
+
+impl Storage {
+    /// Returns a typed handle to the `sapling_tx_ids` column family.
+    pub(crate) fn sapling_tx_ids_cf(&self) -> SaplingTxIdsCf {
+        SaplingTxIdsCf::new(&self.db, SAPLING_TX_IDS)
+            .expect("column family was created when database was created")
+    }
+}
+```
+
+Then, every read of the column family uses that method, which enforces the correct types:
+(These methods have the same name as the low-level methods, but are easier to call.)
+```rust
+impl Storage {
+    /// Returns the result for a specific database index (key, block height, transaction index).
+    pub fn sapling_result_for_index(
+        &self,
+        index: &SaplingScannedDatabaseIndex,
+    ) -> Option<SaplingScannedResult> {
+        self.sapling_tx_ids_cf().zs_get(index).flatten()
+    }
+
+    /// Returns the Sapling indexes and results in the supplied range.
+    fn sapling_results_in_range(
+        &self,
+        range: impl RangeBounds<SaplingScannedDatabaseIndex>,
+    ) -> BTreeMap<SaplingScannedDatabaseIndex, Option<SaplingScannedResult>> {
+        self.sapling_tx_ids_cf().zs_items_in_range_ordered(range)
+    }
+}
+```
+
+This simplifies the implementation compared with the raw `ReadDisk` methods.
+
+To write to the database, use the `new_batch_for_writing()` method on the column family type.
+This returns a batch that enforces the correct types. Use `write_batch()` to write it to the
+database:
+```rust
+impl Storage {
+    /// Insert a sapling scanning `key`, and mark all heights before `birthday_height` so they
+    /// won't be scanned.
+    pub(crate) fn insert_sapling_key(
+        &mut self,
+        storage: &Storage,
+        sapling_key: &SaplingScanningKey,
+        birthday_height: Option<Height>,
+    ) {
+        ...
+        self.sapling_tx_ids_cf()
+            .new_batch_for_writing()
+            .zs_insert(&index, &None)
+            .write_batch()
+            .expect("unexpected database write failure");
+    }
+}
+```
+
+To write to an existing batch in legacy code, use `with_batch_for_writing()` instead.
+This relies on the caller to write the batch to the database:
+```rust
+impl DiskWriteBatch {
+    /// Updates the history tree for the tip, if it is not empty.
+    ///
+    /// The batch must be written to the database by the caller.
+    pub fn update_history_tree(&mut self, db: &ZebraDb, tree: &HistoryTree) {
+        let history_tree_cf = db.history_tree_cf().with_batch_for_writing(self);
+
+        if let Some(tree) = tree.as_ref().as_ref() {
+            // The batch is modified by this method and written by the caller.
+            let _ = history_tree_cf.zs_insert(&(), tree);
+        }
+    }
+}
+```
+
+To write to a legacy batch, then write it to the database, you can use
+`take_batch_for_writing(batch).write_batch()`.
+
+During database upgrades, you might need to access the same column family using different types.
+[Define a type](https://github.com/ZcashFoundation/zebra/pull/8115/files#diff-ba689ca6516946a903da62153652d91dc1bb3d0100bcf08698cb3f38ead57734R36-R53)
+and [convenience method](https://github.com/ZcashFoundation/zebra/pull/8115/files#diff-ba689ca6516946a903da62153652d91dc1bb3d0100bcf08698cb3f38ead57734R69-R87)
+for each legacy type, and use them during the upgrade.
+
+Some full examples of legacy code conversions, and the typed column family implementation itself
+are in [PR #8112](https://github.com/ZcashFoundation/zebra/pull/8112/files) and
+[PR #8115](https://github.com/ZcashFoundation/zebra/pull/8115/files).
+
 ## Current Implementation
 
 ### Verification Modes
