@@ -9,13 +9,20 @@ them. (Or read using different types in different methods.)
 If we type the column family name out every time, a typo can lead to a panic, because the column
 family doesn't exist.
 
-Instead, define the name and type of each column family at the top of the implementation module,
-and a method on the database that returns that type:
+Instead:
+- define the name and type of each column family at the top of the implementation module,
+- add a method on the database that returns that type, and
+- add the column family name to the list of column families in the database:
 
 For example:
 ```rust
 /// The name of the sapling transaction IDs result column family.
 pub const SAPLING_TX_IDS: &str = "sapling_tx_ids";
+
+/// The column families supported by the running `zebra-scan` database code.
+pub const SCANNER_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    sapling::SAPLING_TX_IDS,
+];
 
 /// The type for reading sapling transaction IDs results from the database.
 pub type SaplingTxIdsCf<'cf> =
