@@ -72,9 +72,11 @@ Every few weeks, we release a [new Zebra version](https://github.com/ZcashFounda
 
 Below are quick summaries for installing the dependencies on your machine.
 
-<details>
+[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+<details><summary>
 
-<summary><h4>General instructions for installing dependencies</h4></summary>
+#### General instructions for installing dependencies
+</summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
 
@@ -88,9 +90,11 @@ Below are quick summaries for installing the dependencies on your machine.
 
 </details>
 
-<details>
+[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+<details><summary>
 
-<summary><h4>Dependencies on Arch</h4></summary>
+#### Dependencies on Arch
+</summary>
 
 ```sh
 sudo pacman -S rust clang pkgconf
@@ -178,20 +182,20 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - Experimental Tor support is disabled until [Zebra upgrades to the latest `arti-client`](https://github.com/ZcashFoundation/zebra/issues/5492). This happened due to a Rust dependency conflict, which could only be resolved by `arti` upgrading to a version of `x25519-dalek` with the dependency fix.
 
-## Future Work
-
-We will continue to add new features as part of future network upgrades, and in response to community feedback.
-
 ## Documentation
 
-The [Zebra website](https://zebra.zfnd.org/) contains user documentation, such
-as how to run or configure Zebra, set up metrics integrations, etc., as well as
-developer documentation, such as design documents. It also renders
-[internal documentation](https://doc-internal.zebra.zfnd.org) for private APIs
-on the `main` branch.
+The Zcash Foundation maintains the following resources documenting Zebra:
 
-`docs.rs` renders [API documentation](https://docs.rs/releases/search?query=zebra)
-for the external API of the latest releases of our crates.
+- The Zebra Book:
+  - [General Introduction](https://zebra.zfnd.org/index.html),
+  - [User Documentation](https://zebra.zfnd.org/user.html),
+  - [Developer Documentation](https://zebra.zfnd.org/dev.html).
+
+- The public APIs for the latest releases of the individual `zebra-*` crates are documented at
+[docs.rs](https://docs.rs/releases/search?query=zebrad).
+
+- The internal APIs for the `main` branch are documented at
+<https://doc-internal.zebra.zfnd.org>.
 
 ## User support
 
