@@ -30,7 +30,6 @@ use zebra_rpc::{
     config::mining::Config,
     methods::{
         get_block_template_rpcs::{
-            constants::GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
             get_block_template::{
                 self, proposal::TimeSource, proposal_block_from_template,
                 GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
@@ -44,6 +43,15 @@ use zebra_state::WatchReceiver;
 
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
+
+/// A rate-limit for block template refreshes.
+pub const BLOCK_TEMPLATE_REFRESH_LIMIT: Duration = Duration::from_secs(2);
+
+/// How long we wait after mining a block, before expecting a new template.
+///
+/// This should be slightly longer than `BLOCK_TEMPLATE_REFRESH_LIMIT` to allow for template
+/// generation.
+pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 
 /// Initialize the miner based on its config, and spawn a task for it.
 ///
@@ -295,10 +303,7 @@ where
         // If the blockchain is changing rapidly, limit how often we'll update the template.
         // But if we're shutting down, do that immediately.
         if !template_sender.is_closed() && !is_shutting_down() {
-            sleep(Duration::from_secs(
-                GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
-            ))
-            .await;
+            sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
         }
     }
 
@@ -426,7 +431,7 @@ where
             // If the blockchain is changing rapidly, limit how often we'll update the template.
             // But if we're shutting down, do that immediately.
             if template_receiver.has_changed().is_ok() && !is_shutting_down() {
-                sleep(Duration::from_secs(1)).await;
+                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
             }
 
             continue;
@@ -437,19 +442,23 @@ where
         // TODO: if there is a new template (`cancel_fn().is_err()`), and
         //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
         //       blocks.
+        let mut any_success = false;
         for block in blocks {
             let data = block
                 .zcash_serialize_to_vec()
                 .expect("serializing to Vec never fails");
 
             match rpc.submit_block(HexData(data), None).await {
-                Ok(success) => info!(
-                    ?height,
-                    hash = ?block.hash(),
-                    ?solver_id,
-                    ?success,
-                    "successfully mined a new block",
-                ),
+                Ok(success) => {
+                    info!(
+                        ?height,
+                        hash = ?block.hash(),
+                        ?solver_id,
+                        ?success,
+                        "successfully mined a new block",
+                    );
+                    any_success = true;
+                }
                 Err(error) => info!(
                     ?height,
                     hash = ?block.hash(),
@@ -458,6 +467,25 @@ where
                     "validating a newly mined block failed, trying again",
                 ),
             }
+        }
+
+        // Start re-mining quickly after a failed solution.
+        // If there's a new template, we'll use it, otherwise the existing one is ok.
+        if !any_success {
+            // If the blockchain is changing rapidly, limit how often we'll update the template.
+            // But if we're shutting down, do that immediately.
+            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
+                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+            }
+            continue;
+        }
+
+        // Wait for the new block to verify, and the RPC task to pick up a new template.
+        // But don't wait too long, we could have mined on a fork.
+        tokio::select! {
+            shutdown_result = template_receiver.changed() => shutdown_result?,
+            _ = sleep(BLOCK_MINING_WAIT_TIME) => {}
+
         }
     }
 
