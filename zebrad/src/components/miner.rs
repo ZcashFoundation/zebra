@@ -30,7 +30,6 @@ use zebra_rpc::{
     config::mining::Config,
     methods::{
         get_block_template_rpcs::{
-            constants::GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
             get_block_template::{
                 self, proposal::TimeSource, proposal_block_from_template,
                 GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
