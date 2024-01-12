@@ -86,7 +86,7 @@ impl Storage {
 
 To write to an existing batch in legacy code, use `with_batch_for_writing()` instead.
 This relies on the caller to write the batch to the database:
-```
+```rust
 impl DiskWriteBatch {
     /// Updates the history tree for the tip, if it is not empty.
     ///
