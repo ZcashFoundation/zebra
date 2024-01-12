@@ -3,7 +3,7 @@
 This section contains the contribution guide and design documentation. It
 does not contain API documentation, which is generated using Rustdoc:
 
-- [`docs.rs`](https://docs.rs/releases/search?query=zebra) renders documentation for the public API
+- [`docs.rs`](https://docs.rs/releases/search?query=zebrad) renders documentation for the public API
   of the latest crate releases;
 - [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/) renders documentation for
   the internal API on the `main` branch.
