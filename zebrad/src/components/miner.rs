@@ -6,12 +6,22 @@
 //!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
-use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{
+    cmp::min,
+    sync::Arc,
+    thread::available_parallelism,
+    time::{Duration, Instant},
+};
 
 use color_eyre::Report;
 use futures::{stream::FuturesUnordered, StreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    select,
+    sync::watch,
+    task::JoinHandle,
+    time::{sleep, sleep_until},
+};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -254,8 +264,20 @@ where
         ..Default::default()
     };
 
+    let mut last_template_modification: Option<Instant> = None;
+
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
+        // If the blockchain is changing rapidly, limit how often we'll update the template.
+        let wait_time = last_template_modification
+            .map(|last_time| last_time + BLOCK_TEMPLATE_REFRESH_LIMIT)
+            // Update immediately if we're shutting down.
+            .filter(|_| !template_sender.is_closed() && !is_shutting_down());
+
+        if let Some(wait_time) = wait_time {
+            sleep_until(wait_time.into()).await;
+        }
+
         let template = rpc.get_block_template(Some(parameters.clone())).await;
 
         // Wait for the chain to sync so we get a valid template.
@@ -291,7 +313,7 @@ where
             .expect("unexpected invalid block template");
 
         // If the template has actually changed, send an updated template.
-        template_sender.send_if_modified(|old_block| {
+        let is_modified = template_sender.send_if_modified(|old_block| {
             if old_block.as_ref().map(|b| *b.header) == Some(*block.header) {
                 return false;
             }
@@ -299,10 +321,8 @@ where
             true
         });
 
-        // If the blockchain is changing rapidly, limit how often we'll update the template.
-        // But if we're shutting down, do that immediately.
-        if !template_sender.is_closed() && !is_shutting_down() {
-            sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+        if is_modified {
+            last_template_modification = Some(Instant::now());
         }
     }
 
@@ -350,36 +370,21 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    // Wait for the latest block template, and mark the current value as seen.
+    // We mark the value first to avoid missed updates.
+    if template_receiver.changed().await.is_err() {
+        // Return if the watch channel sender has been dropped.
+        return Ok(());
+    }
+
+    // Get the latest block template.
+    let mut latest_template = template_receiver
+        .cloned_watch_data()
+        .expect("should always be Some after generate_block_template sends the first template");
+
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
     while !template_receiver.is_closed() && !is_shutting_down() {
-        // Get the latest block template, and mark the current value as seen.
-        // We mark the value first to avoid missed updates.
-        template_receiver.mark_as_seen();
-        let template = template_receiver.cloned_watch_data();
-
-        let Some(template) = template else {
-            if solver_id == 0 {
-                info!(
-                    ?solver_id,
-                    ?BLOCK_TEMPLATE_WAIT_TIME,
-                    "solver waiting for initial block template"
-                );
-            } else {
-                debug!(
-                    ?solver_id,
-                    ?BLOCK_TEMPLATE_WAIT_TIME,
-                    "solver waiting for initial block template"
-                );
-            }
-
-            // Skip the wait if we didn't get a template because we are shutting down.
-            if !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
-            }
-
-            continue;
-        };
-
+        let template = latest_template.clone();
         let height = template.coinbase_height().expect("template is valid");
 
         // Set up the cancellation conditions for the miner.
@@ -427,12 +432,6 @@ where
                 );
             }
 
-            // If the blockchain is changing rapidly, limit how often we'll update the template.
-            // But if we're shutting down, do that immediately.
-            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
-            }
-
             continue;
         };
 
@@ -447,6 +446,8 @@ where
                 .zcash_serialize_to_vec()
                 .expect("serializing to Vec never fails");
 
+            // TODO: Await these in a FuturesUnordered - though it may be rare to have multiple solutions in one run.
+            // Wait for the block to be committed or fail validation.
             match rpc.submit_block(HexData(data), None).await {
                 Ok(success) => {
                     info!(
@@ -456,7 +457,12 @@ where
                         ?success,
                         "successfully mined a new block",
                     );
-                    any_success = true;
+
+                    // Mark old template as seen when a block has been mined.
+                    if !any_success {
+                        template_receiver.mark_as_seen();
+                        any_success = true;
+                    }
                 }
                 Err(error) => info!(
                     ?height,
@@ -468,24 +474,26 @@ where
             }
         }
 
-        // Start re-mining quickly after a failed solution.
-        // If there's a new template, we'll use it, otherwise the existing one is ok.
-        if !any_success {
-            // If the blockchain is changing rapidly, limit how often we'll update the template.
-            // But if we're shutting down, do that immediately.
-            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+        if any_success {
+            // Wait for the RPC task to pick up a new template.
+            // But don't wait too long, we could have mined on a fork.
+            tokio::select! {
+                _ = template_receiver.changed() => {},
+
+                // There should be a new template before this wait time except in rare circumstances.
+                _ = sleep(BLOCK_MINING_WAIT_TIME) => {
+                    info!("unusually long wait time for a new template after successful block submission, using old template")
+                }
             }
-            continue;
+        } else {
+            // Start re-mining immediately after a failed solution.
+            // If there's a new template, we'll use it, otherwise the existing one is ok.
         }
 
-        // Wait for the new block to verify, and the RPC task to pick up a new template.
-        // But don't wait too long, we could have mined on a fork.
-        tokio::select! {
-            shutdown_result = template_receiver.changed() => shutdown_result?,
-            _ = sleep(BLOCK_MINING_WAIT_TIME) => {}
-
-        }
+        // Get the latest block template.
+        latest_template = template_receiver
+            .cloned_watch_data()
+            .expect("should always be Some after generate_block_template sends the first template");
     }
 
     Ok(())
