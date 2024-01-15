@@ -12,7 +12,7 @@ dependencies = [
  "arc-swap",
  "backtrace",
  "canonical-path",
- "clap 4.4.14",
+ "clap 4.4.16",
  "color-eyre",
  "fs-err",
  "once_cell",
@@ -137,9 +137,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d664a92ecae85fd0a7392615844904654d1d5f5514837f471ddef4a057aba1b6"
+checksum = "4cd2405b3ac1faab2990b74d728624cd9fd115651fcecc7c2d8daf01376275ba"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -612,10 +612,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "camino"
+version = "1.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c59e92b5a388f549b863a7bea62612c09f24c8393560709a54558a9abdfb3b9c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "canonical-path"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e9e01327e6c86e92ec72b1c798d4a94810f147209bbe3ffab6a86954937a6f"
+
+[[package]]
+name = "cargo-platform"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ceed8ef69d8518a5dda55c07425450b58a4e1946f4951eab6d7191ee86c2443d"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver 1.0.21",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "cast"
@@ -766,9 +798,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.14"
+version = "4.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33e92c5c1a78c62968ec57dbc2440366a2d6e5a23faf829970ff1585dc6b18e2"
+checksum = "58e54881c004cec7895b0068a0a954cd5d62da01aef83fa35b1e594497bf5445"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -776,9 +808,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.4.14"
+version = "4.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4323769dc8a61e2c39ad7dc26f6f2800524691a44d74fe3d1071a5c24db6370"
+checksum = "59cb82d7f531603d2fd1f507441cdd35184fa81beff7bd489570de7f773460bb"
 dependencies = [
  "anstream",
  "anstyle",
@@ -953,7 +985,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.14",
+ "clap 4.4.16",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -5051,12 +5083,14 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "8.2.6"
+version = "8.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1290fd64cc4e7d3c9b07d7f333ce0ce0007253e32870e632624835cc80b83939"
+checksum = "1a78365c3f8ca9dc5428a9f5c6349558c3f9f3eeb65e3fc00b6a981379462947"
 dependencies = [
  "anyhow",
+ "cargo_metadata",
  "git2",
+ "regex",
  "rustc_version 0.4.0",
  "rustversion",
  "time",
@@ -5553,9 +5587,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8944af5c206cf2e37020ad54618e1825501b98548d35a638b73e0ec5762df8d5"
+checksum = "bce173f1d9ed4f806e310bc3a873301531e7a6dc209928584d6404e3f8228ef4"
 dependencies = [
  "bech32",
  "bs58",
@@ -6062,7 +6096,7 @@ dependencies = [
  "abscissa_core",
  "atty",
  "chrono",
- "clap 4.4.14",
+ "clap 4.4.16",
  "color-eyre",
  "console-subscriber",
  "dirs",
