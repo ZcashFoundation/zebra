@@ -80,5 +80,5 @@ jubjub = "0.10.0"
 rand = "0.8.5"
 zcash_note_encryption = "0.4.0"
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.31", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.31" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.32", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.32" }
