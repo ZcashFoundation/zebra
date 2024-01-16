@@ -11,7 +11,6 @@ use hex::ToHex;
 use itertools::Itertools;
 use jsonrpc::simple_http::SimpleHttpTransport;
 use jsonrpc::Client;
-use serde_json::value::RawValue;
 
 use zcash_client_backend::decrypt_transaction;
 use zcash_client_backend::keys::UnifiedFullViewingKey;
@@ -65,7 +64,7 @@ pub fn main() {
 
             for txid in txids.iter() {
                 let tx = Transaction::read(
-                    &hex::decode(&get_tx_via_rpc(txid.encode_hex()))
+                    &hex::decode(&fetch_tx_via_rpc(txid.encode_hex()))
                         .expect("RPC response should be decodable from hex string to bytes")[..],
                     BranchId::for_height(&network, height),
                 )
@@ -98,21 +97,17 @@ fn memo_bytes_to_string(memo: &[u8; 512]) -> String {
 }
 
 /// Uses the `getrawtransaction` RPC to retrieve a transaction by its TXID.
-fn get_tx_via_rpc(txid: String) -> String {
-    // Wrap the TXID with `"` so that [`RawValue::from_string`] eats it.
-    let txid = format!("\"{}\"", txid);
-    let transport = SimpleHttpTransport::builder()
-        .url("127.0.0.1:8232")
-        .expect("URL should be valid")
-        .build();
-    let client = Client::with_transport(transport);
-    let params = RawValue::from_string(txid).expect("Provided TXID should be a valid JSON");
-    let request = client.build_request("getrawtransaction", Some(&params));
-    let response = client
-        .send_request(request)
-        .expect("Sending the `getrawtransaction` request should succeed");
+fn fetch_tx_via_rpc(txid: String) -> String {
+    let client = Client::with_transport(
+        SimpleHttpTransport::builder()
+            .url("127.0.0.1:8232")
+            .expect("Zebra's URL should be valid")
+            .build(),
+    );
 
-    response
+    client
+        .send_request(client.build_request("getrawtransaction", Some(&jsonrpc::arg([txid]))))
+        .expect("Sending the `getrawtransaction` request should succeed")
         .result()
         .expect("Zebra's RPC response should contain a valid result")
 }
