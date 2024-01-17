@@ -5869,6 +5869,10 @@ dependencies = [
 [[package]]
 name = "zebra-grpc"
 version = "0.1.0-alpha.1"
+dependencies = [
+ "tonic",
+ "zebra-scan",
+]
 
 [[package]]
 name = "zebra-network"

@@ -15,3 +15,7 @@ keywords = ["zebra", "zcash"]
 categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
+
+tonic = "0.10.2"
+
+zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.1" }
