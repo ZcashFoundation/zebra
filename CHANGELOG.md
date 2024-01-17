@@ -5,14 +5,38 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0) - TODO: 2024-01-??
+## [Zebra 1.5.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.1) - 2024-01-18
 
 This release:
-- TODO: summary of other important changes
-- adds an experimental `internal-miner` feature, which mines blocks within `zebrad`. This feature
-  is only supported on testnet. Use a more efficient GPU or ASIC for mainnet mining.
+- Adds a scanner result reader as a zebra utility and finalize MVP scanner features.
+- Adds an experimental `internal-miner` feature, which mines blocks within `zebrad`. This feature is only supported on testnet. Use a more efficient GPU or ASIC for mainnet mining.
 
-TODO: the rest of the changelog
+### Added
+
+- Add an internal Zcash miner to Zebra ([#8136](https://github.com/ZcashFoundation/zebra/pull/8136), [#8150](https://github.com/ZcashFoundation/zebra/pull/8150))
+- Blockchain scanner new features:
+  - Don't scan and log if we are below sapling height ([#8121](https://github.com/ZcashFoundation/zebra/pull/8121))
+  - Restart scanning where left ([#8080](https://github.com/ZcashFoundation/zebra/pull/8080))
+
+### Changed
+
+- Improve feature flag docs ([#8114](https://github.com/ZcashFoundation/zebra/pull/8114))
+- Document how to add a column family ([#8149](https://github.com/ZcashFoundation/zebra/pull/8149))
+- Allow opening the database in a read-only mode ([#8079](https://github.com/ZcashFoundation/zebra/pull/8079))
+- Send all zebrad logs to the journal under systemd ([#7965](https://github.com/ZcashFoundation/zebra/pull/7965))
+- CI workflow: Move most scripts to their own executables ([#8005](https://github.com/ZcashFoundation/zebra/pull/8005))
+
+### Fixed
+
+- Point to a manually created list of Zebra crates in docs ([#8160](https://github.com/ZcashFoundation/zebra/pull/8160))
+- Add shielded-scan.md to the index ([#8095](https://github.com/ZcashFoundation/zebra/pull/8095))
+- Elasticsearch feature, make bulk size the same for testnet and mainnet ([#8127](https://github.com/ZcashFoundation/zebra/pull/8127))
+- Ignore segmentation fault errors when shutting down Docker in tests ([#8107](https://github.com/ZcashFoundation/zebra/pull/8107))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @bishopcheckmate, @gustavovalverde, @oxarbitrage, @sandakersmann, @teor2345 and @upbqdn
 
 
 ## [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0) - 2023-11-28
