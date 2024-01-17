@@ -1,9 +1,11 @@
 # Developer Documentation
 
-This section contains the contribution guide and design documentation. It
-does not contain API documentation, which is generated using Rustdoc:
+This section contains the contribution guide and design documentation. It does
+not contain:
 
-- [`docs.rs`](https://docs.rs/releases/search?query=zebrad) renders documentation for the public API
-  of the latest crate releases;
-- [`doc-internal.zebra.zfnd.org`](https://doc-internal.zebra.zfnd.org/) renders documentation for
-  the internal API on the `main` branch.
+- The [documentation of the public
+  APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
+  releases of the individual Zebra crates.
+
+- The [documentation of the internal APIs](https://doc-internal.zebra.zfnd.org)
+  for the `main` branch of the whole Zebra monorepo.

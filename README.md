@@ -191,11 +191,12 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   - [User Documentation](https://zebra.zfnd.org/user.html),
   - [Developer Documentation](https://zebra.zfnd.org/dev.html).
 
-- The public APIs for the latest releases of the individual `zebra-*` crates are documented at
-[docs.rs](https://docs.rs/releases/search?query=zebrad).
+- The [documentation of the public
+  APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
+  releases of the individual Zebra crates.
 
-- The internal APIs for the `main` branch are documented at
-<https://doc-internal.zebra.zfnd.org>.
+- The [documentation of the internal APIs](https://doc-internal.zebra.zfnd.org)
+  for the `main` branch of the whole Zebra monorepo.
 
 ## User support
 
