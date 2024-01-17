@@ -1,6 +1,10 @@
 [package]
 name = "zebra-grpc"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+description = "Zebra gRPC interface"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

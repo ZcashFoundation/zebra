@@ -5868,7 +5868,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-grpc"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 
 [[package]]
 name = "zebra-network"
