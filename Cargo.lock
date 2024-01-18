@@ -4674,6 +4674,7 @@ dependencies = [
  "ed25519-zebra",
  "futures",
  "futures-core",
+ "metrics 0.22.0",
  "pin-project",
  "rand 0.8.5",
  "rayon",
@@ -4686,7 +4687,7 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-futures",
- "zebra-consensus",
+ "zebra-chain",
  "zebra-test",
 ]
 

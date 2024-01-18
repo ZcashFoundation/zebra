@@ -34,6 +34,7 @@ tracing-futures = "0.2.5"
 
 [dev-dependencies]
 color-eyre = "0.6.2"
+metrics = "0.22.0"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
@@ -46,5 +47,5 @@ tokio-test = "0.4.3"
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.8" }
 tower-test = "0.4.0"
 
-zebra-consensus = { path = "../zebra-consensus/", version = "1.0.0-beta.32" }
+zebra-chain = { path = "../zebra-chain/", version = "1.0.0-beta.32" }
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.32" }
