@@ -589,20 +589,46 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   submit-block-test:
     name: submit block
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: submit-block
       test_description: Test submitting blocks via Zebra's rpc server
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+    secrets: inherit
+
+  # Test that the scanner can continue scanning where it was left when zebrad restarts.
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  scan-start-where-left-test:
+    name: Scan starts where left
+    needs: [test-full-sync, get-available-disks]
+    uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    with:
+      app_name: zebrad
+      test_id: scan-start-where-left
+      test_description: Test that the scanner can continue scanning where it was left when zebrad restarts.
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_START_WHERE_LEFT=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e TEST_FEATURES=shielded-scan"
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: true
+      disk_suffix: tip
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
     secrets: inherit
 
   failure-issue:
@@ -611,7 +637,22 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ regenerate-stateful-disks, test-full-sync, lightwalletd-full-sync, test-stateful-sync, test-update-sync, checkpoints-mainnet, lightwalletd-update-sync, lightwalletd-rpc-test, lightwalletd-transactions-test, lightwalletd-grpc-test, get-block-template-test, submit-block-test ]
+    needs:
+      [
+        regenerate-stateful-disks,
+        test-full-sync,
+        lightwalletd-full-sync,
+        test-stateful-sync,
+        test-update-sync,
+        checkpoints-mainnet,
+        lightwalletd-update-sync,
+        lightwalletd-rpc-test,
+        lightwalletd-transactions-test,
+        lightwalletd-grpc-test,
+        get-block-template-test,
+        submit-block-test,
+        scan-start-where-left-test,
+      ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
