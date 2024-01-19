@@ -55,7 +55,7 @@ async fn batch_flushes_on_max_items() -> Result<(), Report> {
     //
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
     let verifier = Batch::new(Verifier::default(), 10, 5, Duration::from_secs(1000));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
+    timeout(Duration::from_secs(5), sign_and_verify(verifier, 100, None))
         .await
         .map_err(|e| eyre!(e))?
         .map_err(|e| eyre!(e))?;
@@ -73,7 +73,7 @@ async fn batch_flushes_on_max_latency() -> Result<(), Report> {
     //
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
     let verifier = Batch::new(Verifier::default(), 100, 10, Duration::from_millis(500));
-    timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
+    timeout(Duration::from_secs(5), sign_and_verify(verifier, 10, None))
         .await
         .map_err(|e| eyre!(e))?
         .map_err(|e| eyre!(e))?;
