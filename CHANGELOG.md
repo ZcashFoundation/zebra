@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## [Zebra 1.5.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.1) - 2024-01-18
 
 This release:
-- Adds a scanner result reader as a zebra utility and finalize MVP scanner features.
+
+- Adds a utility for reading scanning results, and finalizes the MVP features of the scanner.
 - Adds an experimental `internal-miner` feature, which mines blocks within `zebrad`. This feature is only supported on testnet. Use a more efficient GPU or ASIC for mainnet mining.
 
 ### Added
@@ -17,6 +18,7 @@ This release:
 - Blockchain scanner new features:
   - Don't scan and log if we are below sapling height ([#8121](https://github.com/ZcashFoundation/zebra/pull/8121))
   - Restart scanning where left ([#8080](https://github.com/ZcashFoundation/zebra/pull/8080))
+  - Add scanning result reader utility ([#8104](https://github.com/ZcashFoundation/zebra/pull/8104), [#8157](https://github.com/ZcashFoundation/zebra/pull/8157))
 
 ### Changed
 
@@ -24,7 +26,6 @@ This release:
 - Document how to add a column family ([#8149](https://github.com/ZcashFoundation/zebra/pull/8149))
 - Allow opening the database in a read-only mode ([#8079](https://github.com/ZcashFoundation/zebra/pull/8079))
 - Send all zebrad logs to the journal under systemd ([#7965](https://github.com/ZcashFoundation/zebra/pull/7965))
-- CI workflow: Move most scripts to their own executables ([#8005](https://github.com/ZcashFoundation/zebra/pull/8005))
 
 ### Fixed
 
