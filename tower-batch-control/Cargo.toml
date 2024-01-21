@@ -1,7 +1,10 @@
 [package]
 name = "tower-batch-control"
 version = "0.2.41-beta.9"
-authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
+authors = [
+  "Zcash Foundation <zebra@zfnd.org>",
+  "Tower Maintainers <team@tower-rs.com>",
+]
 description = "Tower middleware for batch request processing"
 # # Legal
 #
@@ -34,7 +37,6 @@ tracing-futures = "0.2.5"
 
 [dev-dependencies]
 color-eyre = "0.6.2"
-metrics = "0.22.0"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
