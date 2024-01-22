@@ -58,7 +58,7 @@ itertools = "0.12.0"
 lazy_static = "1.4.0"
 metrics = "0.22.0"
 mset = "0.1.1"
-regex = "1.10.2"
+regex = "1.10.3"
 rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.21"
@@ -66,7 +66,7 @@ serde = { version = "1.0.193", features = ["serde_derive"] }
 tempfile = "3.9.0"
 thiserror = "1.0.56"
 
-rayon = "1.7.0"
+rayon = "1.8.1"
 tokio = { version = "1.35.1", features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.39"
