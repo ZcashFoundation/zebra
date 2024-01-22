@@ -82,9 +82,6 @@ on:
       - '.github/workflows/sub-build-docker-image.yml'
 
 env:
-  # We need to combine the features manually because some tests don't use the Docker entrypoint
-  TEST_FEATURES: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
-  EXPERIMENTAL_FEATURES: ${{ format('{0} {1} {2}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES, vars.RUST_EXPERIMENTAL_FEATURES) }}
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
@@ -135,27 +132,21 @@ jobs:
       #
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
       #
-      # TODO: move this test command into entrypoint.sh
       - name: Run zebrad tests
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --workspace -- --include-ignored
+          docker run --tty -e NETWORK -e RUN_ALL_TESTS=1
 
       # Run unit, basic acceptance tests, and ignored tests with experimental features.
       #
-      # TODO: move this test command into entrypoint.sh
       - name: Run zebrad tests with experimental features
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
-          # GitHub doesn't allow empty variables
-          if [[ -n "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" && "${{ vars.RUST_EXPERIMENTAL_FEATURES }}" != " " ]]; then
-            docker run -e NETWORK --name zebrad-tests-experimental --tty ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.EXPERIMENTAL_FEATURES }} " --workspace -- --include-ignored
-          else
-            echo "Experimental builds are disabled, set RUST_EXPERIMENTAL_FEATURES in GitHub actions variables to enable them"
-          fi
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
+          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1
 
   # Run state tests with fake activation heights.
   #
@@ -179,15 +170,12 @@ jobs:
         with:
           short-length: 7
 
-      # TODO: move this test command into entrypoint.sh
-      #       make sure that at least one test runs, and that it doesn't skip itself due to the environmental variable
       - name: Run tests with fake activation heights
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "zebra-test" --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
-        env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+          docker run --tty -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS=1
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
   test-empty-sync:
@@ -203,13 +191,12 @@ jobs:
         with:
           short-length: 7
 
-      # TODO: move this test command into entrypoint.sh
       - name: Run zebrad large sync tests
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK --name zebrad-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
+          docker run --tty -e NETWORK -e ENTRYPOINT_FEATURES -e TEST_ZEBRA_EMPTY_SYNC=1
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
@@ -225,14 +212,12 @@ jobs:
         with:
           short-length: 7
 
-      # TODO: move this test command into entrypoint.sh
       - name: Run tests with empty lightwalletd launch
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }} cargo test --locked --release --features "${{ env.TEST_FEATURES }}" --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
-        env:
-          ZEBRA_TEST_LIGHTWALLETD: '1'
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
