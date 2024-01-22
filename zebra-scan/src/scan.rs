@@ -1,4 +1,5 @@
 //! The scanner task and scanning APIs.
+//! TODO: Make this into a service?
 
 use std::{
     collections::{BTreeMap, HashMap},

@@ -50,6 +50,7 @@ zcash_primitives = "0.13.0-rc.1"
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.33" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.33", features = ["shielded-scan"] }
+zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.1" }
 
 chrono = { version = "0.4.31", default-features = false, features = ["clock", "std", "serde"] }
 

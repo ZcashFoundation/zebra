@@ -1,0 +1,30 @@
+syntax = "proto3";
+package zebra.scan.rpc;
+
+service ZebraScanRpc {
+    rpc Scan (ScanRequest) returns (stream ScanResponse);
+}
+
+// TODO: Move message types for each method into its own proto file?
+message ScanRequest {
+    // A set of key hashes for authorizing access to cached viewing keys
+    repeated string key_hashes = 1;
+
+    // A set of viewing keys
+    repeated string keys = 2;
+}
+
+message ScanResponse {
+    // A relevant transaction
+    repeated RawTransaction results = 1;
+}
+
+// Copied from lightwalletd service.proto:
+//
+// RawTransaction contains the complete transaction data. It also optionally includes 
+// the block height in which the transaction was included, or, when returned
+// by GetMempoolStream(), the latest block height.
+message RawTransaction {
+    bytes data = 1;     // exact data returned by Zcash 'getrawtransaction'
+    uint64 height = 2;  // height that the transaction was mined (or -1)
+}

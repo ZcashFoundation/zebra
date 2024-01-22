@@ -17,5 +17,21 @@ categories = ["cryptography::cryptocurrencies"]
 [dependencies]
 
 tonic = "0.10.2"
+prost = "0.12.2"
+tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1.14"
+color-eyre = "0.6.2"
+tracing = "0.1.39"
+futures = "0.3.30"
+blake2b_simd = "1.0.2"
+bs58 = { version = "0.5.0", features = ["check"] }
 
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.1" }
+
+zcash_primitives = "0.13.0-rc.1"
+zcash_client_backend = "0.10.0-rc.1"
+
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.32" }
+
+[build-dependencies]
+
+tonic-build = "0.10"
