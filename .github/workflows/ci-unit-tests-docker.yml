@@ -137,7 +137,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run --tty -e NETWORK -e RUN_ALL_TESTS=1
+          docker run --tty -e NETWORK -e RUN_ALL_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
 
       # Run unit, basic acceptance tests, and ignored tests with experimental features.
       #
@@ -146,7 +146,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1
+          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
 
   # Run state tests with fake activation heights.
   #
@@ -175,7 +175,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run --tty -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS=1
+          docker run --tty -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
   test-empty-sync:
@@ -196,7 +196,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run --tty -e NETWORK -e ENTRYPOINT_FEATURES -e TEST_ZEBRA_EMPTY_SYNC=1
+          docker run --tty -e NETWORK -e ENTRYPOINT_FEATURES -e TEST_ZEBRA_EMPTY_SYNC=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
@@ -217,7 +217,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
-          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1
+          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
