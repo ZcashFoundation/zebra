@@ -14,8 +14,19 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["cryptography::cryptocurrencies"]
 
+[[bin]] # Bin to run the Scanner gRPC server
+name = "scanner-grpc-server"
+path = "src/server.rs"
+
 [dependencies]
 
 tonic = "0.10.2"
+prost = "0.12.3"
+tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
 
 zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.1" }
+
+zcash_primitives = { version = "0.13.0-rc.1" }
+
+[build-dependencies]
+tonic-build = "0.10.2"
