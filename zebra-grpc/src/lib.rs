@@ -11,3 +11,4 @@ pub mod zebra_scan_service {
 
 mod auth;
 mod init;
+pub mod methods;
