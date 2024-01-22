@@ -5777,8 +5777,19 @@ dependencies = [
 name = "zebra-grpc"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "blake2b_simd",
+ "bs58",
+ "color-eyre",
+ "futures",
+ "prost",
+ "tokio",
+ "tokio-stream",
  "tonic",
- "zebra-scan",
+ "tonic-build",
+ "tracing",
+ "zcash_client_backend",
+ "zcash_primitives",
+ "zebra-chain",
 ]
 
 [[package]]
@@ -5890,6 +5901,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zebra-chain",
+ "zebra-grpc",
  "zebra-state",
  "zebra-test",
 ]
