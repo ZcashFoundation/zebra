@@ -16,7 +16,8 @@
 # Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
+ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints shielded-scan"
+ARG EXPERIMENTAL_FEATURES=""
 
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
@@ -111,7 +112,9 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 # separately from the test and production image builds.
 ARG FEATURES
 ARG TEST_FEATURES
-ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
+ARG EXPERIMENTAL_FEATURES
+# ${EXPERIMENTAL_FEATURES} is empty, so this is equivalent to ${FEATURES} ${TEST_FEATURES} by default
+ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -140,6 +143,9 @@ RUN chmod u+x /entrypoint.sh
 
 # Entrypoint environment variables
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
+# We repeat the ARGs here, so they are available in the entrypoint.sh script for $RUN_ALL_EXPERIMENTAL_TESTS
+ARG EXPERIMENTAL_FEATURES="elasticsearch journald prometheus filter-reload"
+ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT [ "/entrypoint.sh" ]
