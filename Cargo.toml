@@ -11,6 +11,7 @@ members = [
         "zebra-test",
         "zebra-utils",
         "zebra-scan",
+	"zebra-grpc",
         "tower-batch-control",
         "tower-fallback",
 ]
