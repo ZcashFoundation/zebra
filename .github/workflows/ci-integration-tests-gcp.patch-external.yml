@@ -79,6 +79,13 @@ jobs:
     steps:
       - run: 'echo "Skipping job on fork"'
 
+  scan-start-where-left-test:
+    name: Scan starts where left / Run scan-start-where-left test
+    needs: get-available-disks
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     needs: get-available-disks
