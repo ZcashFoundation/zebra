@@ -1,7 +1,7 @@
-//! Scan [`tower::Service`] request types.
+//! `zebra_scan::service::ScanService` request types.
 
 #[derive(Debug)]
-/// Request types for [`ScanService`](crate::service::ScanService)
+/// Request types for `zebra_scan::service::ScanService`
 pub enum Request {
     /// TODO: Accept `KeyHash`es and return key hashes that are registered
     CheckKeyHashes(Vec<()>),
@@ -9,7 +9,7 @@ pub enum Request {
     /// TODO: Accept `ViewingKeyWithHash`es and return Ok(()) if successful or an error
     RegisterKeys(Vec<()>),
 
-    /// TODO: Accept `KeyHash`es and return Ok(Vec<KeyHash>) with hashes of deleted keys
+    /// TODO: Accept `KeyHash`es and return Ok(`Vec<KeyHash>`) with hashes of deleted keys
     DeleteKeys(Vec<()>),
 
     /// TODO: Accept `KeyHash`es and return `Transaction`s
