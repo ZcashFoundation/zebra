@@ -40,7 +40,7 @@ pub enum ScanTaskCommand {
 /// Scan task handle and command channel sender
 pub struct ScanTask {
     /// [`JoinHandle`] of scan task
-    _handle: JoinHandle<Result<(), Report>>,
+    pub handle: JoinHandle<Result<(), Report>>,
 
     /// Task command channel sender
     cmd_sender: mpsc::Sender<ScanTaskCommand>,
@@ -58,7 +58,7 @@ impl ScanTask {
         let (cmd_sender, _cmd_receiver) = mpsc::channel();
 
         Self {
-            _handle: spawn_init(config, network, state, chain_tip_change),
+            handle: spawn_init(config, network, state, chain_tip_change),
             cmd_sender,
         }
     }

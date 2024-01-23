@@ -17,7 +17,7 @@ pub struct ScanService {
     db: Storage,
 
     /// Handle to scan task that's responsible for writing results
-    _scan_task: ScanTask,
+    scan_task: ScanTask,
 }
 
 impl ScanService {
@@ -30,7 +30,7 @@ impl ScanService {
     ) -> Self {
         Self {
             db: Storage::new(config, network, false),
-            _scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
+            scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
         }
     }
 }
@@ -42,7 +42,11 @@ impl Service<Request> for ScanService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // TODO: Check for panics in scan task
+        // TODO: If scan task returns an error, add error to the panic message
+        assert!(
+            !self.scan_task.handle.is_finished(),
+            "scan task finished unexpectedly"
+        );
 
         self.db.check_for_panics();
 
