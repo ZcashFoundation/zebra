@@ -35,7 +35,7 @@ getblocktemplate-rpcs = [
 ]
 
 # Experimental internal miner support
-# TODO: Internal miner feature functionality wass removed at https://github.com/ZcashFoundation/zebra/issues/8180
+# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
 #       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43
 #       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
 internal-miner = []
