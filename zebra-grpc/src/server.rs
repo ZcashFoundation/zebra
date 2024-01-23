@@ -5,8 +5,6 @@ use tonic::{transport::Server, Response, Status};
 use scanner::scanner_server::{Scanner, ScannerServer};
 use scanner::{Empty, InfoReply};
 
-use zebra_scan::{storage::Storage, Config};
-
 /// The generated scanner proto
 pub mod scanner {
     tonic::include_proto!("scanner");
@@ -22,11 +20,14 @@ impl Scanner for ScannerRPC {
         &self,
         _request: tonic::Request<Empty>,
     ) -> Result<Response<InfoReply>, Status> {
-        let network = zcash_primitives::consensus::Network::MainNetwork;
-        let storage = Storage::new(&Config::default(), network.into(), true);
+        let _network = zcash_primitives::consensus::Network::MainNetwork;
+
+        // TODO: call zebra-scanner service to get `min_sapling_birthday_height` and
+        // other info results.
 
         let reply = scanner::InfoReply {
-            min_sapling_birthday_height: storage.min_sapling_birthday_height().0,
+            // dummy value
+            min_sapling_birthday_height: 1,
         };
 
         Ok(Response::new(reply))

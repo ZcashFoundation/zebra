@@ -5875,7 +5875,6 @@ dependencies = [
  "tonic",
  "tonic-build",
  "zcash_primitives",
- "zebra-scan",
 ]
 
 [[package]]
