@@ -58,7 +58,7 @@ impl Config {
     /// Is the internal miner enabled using at least one thread?
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {
-        // TODO: Changed to return always falso so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
+        // TODO: Changed to return always false so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
         // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
         // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
         false
