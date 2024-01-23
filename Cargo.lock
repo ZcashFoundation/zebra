@@ -5862,6 +5862,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "ff",
+ "futures",
  "group",
  "indexmap 2.1.0",
  "insta",

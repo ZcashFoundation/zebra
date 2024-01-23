@@ -2,7 +2,9 @@
 
 use std::{future::Future, pin::Pin, task::Poll};
 
+use futures::future::FutureExt;
 use tower::Service;
+
 use zebra_chain::parameters::Network;
 use zebra_state::ChainTipChange;
 
@@ -15,12 +17,12 @@ pub struct ScanService {
     db: Storage,
 
     /// Handle to scan task that's responsible for writing results
-    scan_task: ScanTask,
+    _scan_task: ScanTask,
 }
 
 impl ScanService {
     /// Create a new [`ScanService`].
-    pub fn new(
+    pub fn _new(
         config: &Config,
         network: Network,
         state: scan::State,
@@ -28,7 +30,7 @@ impl ScanService {
     ) -> Self {
         Self {
             db: Storage::new(config, network, false),
-            scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
+            _scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
         }
     }
 }
@@ -39,7 +41,7 @@ impl Service<Request> for ScanService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // TODO: Check for panics in scan task
 
         self.db.check_for_panics();
@@ -49,37 +51,33 @@ impl Service<Request> for ScanService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
-            Request::CheckKeyHashes(key_hashes) => {
+            Request::CheckKeyHashes(_key_hashes) => {
                 // TODO: check that these entries exist in db
-                todo!()
             }
 
-            Request::RegisterKeys(viewing_key_with_hashes) => {
+            Request::RegisterKeys(_viewing_key_with_hashes) => {
                 // TODO:
                 //  - add these keys as entries in db
                 //  - send keys to scanner task
-                todo!()
             }
 
-            Request::DeleteKeys(key_hashes) => {
+            Request::DeleteKeys(_key_hashes) => {
                 // TODO: delete these entries from db
-                todo!()
             }
 
-            Request::Results(key_hashes) => {
+            Request::Results(_key_hashes) => {
                 // TODO: read results from db
-                todo!()
             }
 
-            Request::SubscribeResults(key_hashes) => {
+            Request::SubscribeResults(_key_hashes) => {
                 // TODO: send key_hashes and mpsc::Sender to scanner task, return mpsc::Receiver to caller
-                todo!()
             }
 
-            Request::ClearResults(key_hashes) => {
+            Request::ClearResults(_key_hashes) => {
                 // TODO: clear results from db
-                todo!()
             }
         }
+
+        async move { Ok(Response::Results(vec![])) }.boxed()
     }
 }
