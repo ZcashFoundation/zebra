@@ -62,11 +62,13 @@ impl Service<Request> for ScanService {
             Request::RegisterKeys(_viewing_key_with_hashes) => {
                 // TODO:
                 //  - add these keys as entries in db
-                //  - send keys to scanner task
+                //  - send new keys to scan task
             }
 
             Request::DeleteKeys(_key_hashes) => {
-                // TODO: delete these entries from db
+                // TODO:
+                //  - delete these keys and their results from db
+                //  - send deleted keys to scan task
             }
 
             Request::Results(_key_hashes) => {
@@ -78,7 +80,7 @@ impl Service<Request> for ScanService {
             }
 
             Request::ClearResults(_key_hashes) => {
-                // TODO: clear results from db
+                // TODO: clear results for these keys from db
             }
         }
 
