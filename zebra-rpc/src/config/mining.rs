@@ -15,28 +15,9 @@ pub struct Config {
     /// `getblocktemplate` RPC coinbase transaction.
     pub miner_address: Option<transparent::Address>,
 
-    /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
-    ///
-    /// This experimental feature is only supported on testnet.
-    /// Mainnet miners should use a mining pool with GPUs or ASICs designed for efficient mining.
-    ///
-    /// The internal miner is off by default.
-    #[cfg(feature = "internal-miner")]
-    pub internal_miner: bool,
-
-    /// The number of internal miner threads used by Zebra.
-    /// These threads are scheduled at low priority.
-    ///
-    /// The number of threads is limited by the available parallelism reported by the OS.
-    /// If the number of threads isn't configured, or can't be detected, Zebra uses one thread.
-    /// This is different from Zebra's other parallelism configs, because mining runs constantly and
-    /// uses a large amount of memory. (144 MB of RAM and 100% of a core per thread.)
-    ///
-    /// If the number of threads is set to zero, Zebra disables mining.
-    /// This matches `zcashd`'s behaviour, but is different from Zebra's other parallelism configs.
-    #[cfg(feature = "internal-miner")]
-    pub internal_miner_threads: usize,
-
+    // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
+    // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L18-L38
+    // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
     /// Extra data to include in coinbase transaction inputs.
     /// Limited to around 95 bytes by the consensus rules.
     ///
@@ -58,12 +39,9 @@ impl Default for Config {
             // TODO: do we want to default to v5 transactions and Zebra coinbase data?
             extra_coinbase_data: None,
             debug_like_zcashd: true,
-            // TODO: ignore and warn rather than panicking if these fields are in the config,
-            //       but the feature isn't enabled.
-            #[cfg(feature = "internal-miner")]
-            internal_miner: false,
-            #[cfg(feature = "internal-miner")]
-            internal_miner_threads: 1,
+            // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
+            // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L61-L66
+            // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
         }
     }
 }
@@ -80,6 +58,9 @@ impl Config {
     /// Is the internal miner enabled using at least one thread?
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {
-        self.internal_miner && self.internal_miner_threads > 0
+        // TODO: Changed to return always falso so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
+        // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
+        // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
+        false
     }
 }
