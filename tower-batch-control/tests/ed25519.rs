@@ -8,7 +8,7 @@ use std::{
 };
 
 use color_eyre::{eyre::eyre, Report};
-use ed25519_zebra::*;
+use ed25519_zebra::{batch, Error, SigningKey, VerificationKeyBytes};
 use futures::stream::{FuturesOrdered, StreamExt};
 use futures::FutureExt;
 use futures_core::Future;
@@ -17,7 +17,6 @@ use tokio::sync::{oneshot::error::RecvError, watch};
 use tower::{Service, ServiceExt};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::primitives::ed25519::batch;
 
 // ============ service impl ============
 

@@ -4686,7 +4686,6 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-futures",
- "zebra-chain",
  "zebra-test",
 ]
 
