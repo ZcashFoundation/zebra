@@ -13,7 +13,7 @@ use crate::{scan, storage::Storage, Config};
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
-pub enum ScannerCommand {
+pub enum ScanTaskCommand {
     /// Start scanning for new viewing keys
     RegisterKeys(Vec<()>), // TODO: send `ViewingKeyWithHash`es
 
@@ -43,7 +43,7 @@ pub struct ScanTask {
     _handle: JoinHandle<Result<(), Report>>,
 
     /// Task command channel sender
-    cmd_sender: mpsc::Sender<ScannerCommand>,
+    cmd_sender: mpsc::Sender<ScanTaskCommand>,
 }
 
 impl ScanTask {
@@ -64,7 +64,10 @@ impl ScanTask {
     }
 
     /// Sends a command to the scan task
-    pub fn send(&mut self, command: ScannerCommand) -> Result<(), mpsc::SendError<ScannerCommand>> {
+    pub fn send(
+        &mut self,
+        command: ScanTaskCommand,
+    ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
         self.cmd_sender.send(command)
     }
 }
