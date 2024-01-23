@@ -60,7 +60,7 @@ bench = ["zebra-test"]
 
 # Cryptography
 bitvec = "1.0.1"
-bitflags = "2.4.1"
+bitflags = "2.4.2"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
@@ -96,7 +96,7 @@ zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.13.0-rc.1", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.31", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.32", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
@@ -108,13 +108,13 @@ tracing = "0.1.39"
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.193", features = ["serde_derive", "rc"] }
-serde_with = "3.4.0"
+serde_with = "3.5.0"
 serde-big-array = "0.5.1"
 
 # Processing
 futures = "0.3.30"
 itertools = "0.12.0"
-rayon = "1.7.0"
+rayon = "1.8.1"
 
 # ZF deps
 ed25519-zebra = "4.0.3"
