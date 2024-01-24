@@ -49,7 +49,7 @@ listen_addr = "0.0.0.0:28233"
 network = "Testnet"
 
 [rpc]
-listen_addr = '127.0.0.1:18232'
+listen_addr = '0.0.0.0:18232'
 
 [state]
 cache_dir = "/etc/zebra-test"
