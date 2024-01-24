@@ -1370,16 +1370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "equihash"
-version = "0.2.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp#aff6fac6cb9c7390565313733f0ba7d679166504"
-dependencies = [
- "blake2b_simd",
- "byteorder",
- "cc",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4668,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41-beta.9"
+version = "0.2.41-beta.10"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4691,7 +4681,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.41-beta.9"
+version = "0.2.41-beta.10"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -5583,7 +5573,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "byteorder",
- "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "equihash",
  "ff",
  "fpe",
  "group",
@@ -5666,7 +5656,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "bitflags 2.4.1",
  "bitflags-serde-legacy",
@@ -5681,8 +5671,7 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "equihash 0.2.0 (git+https://github.com/ZcashFoundation/librustzcash.git?branch=equihash-solver-tromp)",
+ "equihash",
  "futures",
  "group",
  "halo2_proofs",
@@ -5728,7 +5717,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5773,8 +5762,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zebra-grpc"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "tonic",
+ "zebra-scan",
+]
+
+[[package]]
 name = "zebra-network"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "bitflags 2.4.1",
  "byteorder",
@@ -5815,7 +5812,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "color-eyre",
  "jsonrpc-core",
@@ -5827,7 +5824,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "chrono",
  "futures",
@@ -5858,7 +5855,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-scan"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "bls12_381",
  "chrono",
@@ -5887,7 +5884,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5900,7 +5897,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "bincode",
  "chrono",
@@ -5944,7 +5941,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5972,7 +5969,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.33"
+version = "1.0.0-beta.34"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5997,7 +5994,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "abscissa_core",
  "atty",

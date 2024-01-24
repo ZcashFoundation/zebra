@@ -5,6 +5,26 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.5.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.2) - 2024-01-23
+
+This release serves as a hotfix for version 1.5.1, addressing issues encountered after its initial release. For more information about version 1.5.1, refer to [this link](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.2).
+
+Following the release on GitHub, we identified difficulties in publishing the `zebra-chain` crate to crates.io. Detailed information is available in [issue #8180](https://github.com/ZcashFoundation/zebra/issues/8180) and its references.
+
+Unfortunately, to resolve this challenge, which involves an unpublished dependency, we had to temporarily remove the internal miner support introduced in version 1.5.1.
+
+In our efforts to reinstate this feature, we've opened a tracking ticket to monitor the progress of the required code that must be merged into the `equihash` dependency. You can follow the developments in [issue #8183](https://github.com/ZcashFoundation/zebra/issues/8183), which will only be closed once the feature is successfully restored.
+
+### Breaking Changes
+
+- Temporally remove the internal miner functionality ([#8184](https://github.com/ZcashFoundation/zebra/pull/8184))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@oxarbitrage
+
+
 ## [Zebra 1.5.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.1) - 2024-01-18
 
 This release:
