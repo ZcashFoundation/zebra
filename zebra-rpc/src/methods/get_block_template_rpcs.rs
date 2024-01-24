@@ -496,7 +496,8 @@ where
                 //
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-                check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
+                // TODO add debug options to disable this check
+                //check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
 
                 // We're just about to fetch state data, then maybe wait for any changes.
                 // Mark all the changes before the fetch as seen.

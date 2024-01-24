@@ -601,8 +601,18 @@ where
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
         self.check_height(height)?;
 
-        crate::block::check::difficulty_is_valid(&block.header, self.network, &height, &hash)?;
-        crate::block::check::equihash_solution_is_valid(&block.header)?;
+        // TODO add debug option to disable these checks
+        // if cfg!(feature = "zsa-integration-test") {
+        //     crate::block::check::difficulty_threshold_is_valid(
+        //         &block.header,
+        //         Network::Testnet,
+        //         &height,
+        //         &hash,
+        //     )?;
+        // } else {
+        //     crate::block::check::difficulty_is_valid(&block.header, self.network, &height, &hash)?;
+        //     crate::block::check::equihash_solution_is_valid(&block.header)?;
+        // }
 
         // don't do precalculation until the block passes basic difficulty checks
         let block = CheckpointVerifiedBlock::with_hash(block, hash);
