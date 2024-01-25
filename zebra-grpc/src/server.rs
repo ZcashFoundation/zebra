@@ -27,6 +27,7 @@ where
         + Send
         + Sync
         + 'static,
+    <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
     scan_service: ScanService,
 }
@@ -39,6 +40,7 @@ where
         + Send
         + Sync
         + 'static,
+    <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
     async fn get_info(
         &self,
@@ -48,12 +50,14 @@ where
             min_sapling_birthday_height,
         } = self
             .scan_service
+            .clone()
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::Info))
             .await
+            .map_err(|_| Status::unknown("scan service was unavailable"))?
         else {
             return Err(Status::unknown(
-                "scan service was unavailable or returned an unexpected response",
+                "scan service returned an unexpected response",
             ));
         };
 
@@ -65,6 +69,7 @@ where
     }
 }
 
+/// Initializes the zebra-scan gRPC server
 pub async fn init<ScanService>(scan_service: ScanService) -> Result<(), Box<dyn std::error::Error>>
 where
     ScanService: tower::Service<ScanServiceRequest, Response = ScanServiceResponse, Error = BoxError>
@@ -72,6 +77,7 @@ where
         + Send
         + Sync
         + 'static,
+    <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
     let addr = "[::1]:50051".parse()?;
     let service = ScannerRPC { scan_service };
