@@ -150,14 +150,14 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.0.1
+        uses: google-github-actions/auth@v2.1.0
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.0.1
+        uses: google-github-actions/setup-gcloud@v2.1.0
 
       # Find a cached state disk for this job, matching all of:
       # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
@@ -447,13 +447,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.0.1
+        uses: google-github-actions/auth@v2.1.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.0.1
+        uses: google-github-actions/setup-gcloud@v2.1.0
 
       # Get the state version from the local constants.rs file to be used in the image creation,
       # as the state version is part of the disk image name.
@@ -724,13 +724,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.0.1
+        uses: google-github-actions/auth@v2.1.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.0.1
+        uses: google-github-actions/setup-gcloud@v2.1.0
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
