@@ -73,6 +73,7 @@ fi
 : "${TEST_LWD_TRANSACTIONS:=}"
 : "${TEST_GET_BLOCK_TEMPLATE:=}"
 : "${TEST_SUBMIT_BLOCK:=}"
+: "${TEST_SCAN_START_WHERE_LEFT:=}"
 : "${ENTRYPOINT_FEATURES:=}"
 
 # Configuration file path
@@ -325,6 +326,11 @@ case "$1" in
         # Starting with a cached Zebra tip, test sending a block to Zebra's RPC port.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         run_cargo_test "${ENTRYPOINT_FEATURES}" "submit_block"
+
+      elif [[ "${TEST_SCAN_START_WHERE_LEFT}" -eq "1" ]]; then
+        # Test that the scanner can continue scanning where it was left when zebrad restarts.
+        check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+        run_cargo_test "shielded-scan" "scan_start_where_left"
 
       else
           exec "$@"
