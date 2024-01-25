@@ -1,6 +1,8 @@
 //! The gRPC server implementation
 
+use futures_util::future::TryFutureExt;
 use tonic::{transport::Server, Response, Status};
+use tower::ServiceExt;
 
 use scanner::scanner_server::{Scanner, ScannerServer};
 use scanner::{Empty, InfoReply};
@@ -56,7 +58,7 @@ where
         };
 
         let reply = scanner::InfoReply {
-            min_sapling_birthday_height,
+            min_sapling_birthday_height: min_sapling_birthday_height.0,
         };
 
         Ok(Response::new(reply))

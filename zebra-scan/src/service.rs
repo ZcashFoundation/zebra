@@ -22,7 +22,7 @@ pub struct ScanService {
 
 impl ScanService {
     /// Create a new [`ScanService`].
-    pub fn _new(
+    pub fn new(
         config: &Config,
         network: Network,
         state: scan::State,

@@ -6,10 +6,11 @@ use color_eyre::Report;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tracing::Instrument;
 
-use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Transaction};
+use zebra_chain::{chain_tip, diagnostic::task::WaitForPanics, parameters::Network, transaction::Transaction};
+use zebra_node_services::scan_service;
 use zebra_state::ChainTipChange;
 
-use crate::{scan, storage::Storage, Config};
+use crate::{scan, service::ScanService, storage::Storage, Config};
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
@@ -96,9 +97,14 @@ pub async fn init(
     state: scan::State,
     chain_tip_change: ChainTipChange,
 ) -> Result<(), Report> {
+    let scan_service: ScanService = ScanService::new(&config, network, state.clone(), chain_tip_chang.clone());
+
     let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
         .wait_for_panics()
         .await;
+
+    // Start the gRPC server.
+    zebra_grpc::server::init(scan_service).await?;
 
     // TODO: add more tasks here?
     scan::start(state, chain_tip_change, storage).await
