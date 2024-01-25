@@ -12,6 +12,8 @@ mod address;
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use address::Address;
 
+pub mod viewing_key;
+
 pub mod byte_array;
 
 pub use ed25519_zebra as ed25519;
