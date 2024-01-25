@@ -5773,7 +5773,6 @@ dependencies = [
  "tower",
  "zcash_primitives",
  "zebra-node-services",
- "zebra-scan",
 ]
 
 [[package]]
