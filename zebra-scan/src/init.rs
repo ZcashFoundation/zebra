@@ -48,9 +48,7 @@ pub struct ScanTask {
 
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
-    #[cfg(test)]
     pub fn mock() -> Self {
-        // TODO: Pass `_cmd_receiver` to `scan::start()` to pass it new keys after it's been spawned
         let (cmd_sender, _cmd_receiver) = mpsc::channel();
 
         Self {
@@ -96,7 +94,7 @@ pub fn spawn_init(
     scan::spawn_init(config, network, state, chain_tip_change)
 }
 
-/// Initialize the scanner based on its config.
+/// Initialize [`ScanService`] based on its config.
 ///
 /// TODO: add a test for this function.
 pub async fn init(

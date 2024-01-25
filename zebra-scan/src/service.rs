@@ -34,9 +34,8 @@ impl ScanService {
         }
     }
 
-    #[cfg(test)]
     /// Create a new [`ScanService`] with a mock `ScanTask`
-    pub fn _new_with_mock_scanner(config: &Config, network: Network) -> Self {
+    pub fn new_with_mock_scanner(config: &Config, network: Network) -> Self {
         Self {
             db: Storage::new(config, network, false),
             scan_task: ScanTask::mock(),

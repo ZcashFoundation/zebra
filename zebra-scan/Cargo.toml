@@ -14,6 +14,10 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["cryptography::cryptocurrencies"]
 
+[[bin]] # Bin to run the Scanner gRPC server
+name = "scanner-grpc-server"
+path = "src/bin/rpc_server.rs"
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in dependencies
