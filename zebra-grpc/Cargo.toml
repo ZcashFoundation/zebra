@@ -21,6 +21,7 @@ tonic = "0.10.2"
 prost = "0.12.3"
 tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["util", "buffer"] }
+color-eyre = "0.6.2"
 
 zcash_primitives = { version = "0.13.0-rc.1" }
 

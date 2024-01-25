@@ -70,7 +70,7 @@ where
 }
 
 /// Initializes the zebra-scan gRPC server
-pub async fn init<ScanService>(scan_service: ScanService) -> Result<(), Box<dyn std::error::Error>>
+pub async fn init<ScanService>(scan_service: ScanService) -> Result<(), color_eyre::Report>
 where
     ScanService: tower::Service<ScanServiceRequest, Response = ScanServiceResponse, Error = BoxError>
         + Clone

@@ -5766,6 +5766,7 @@ dependencies = [
 name = "zebra-grpc"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "color-eyre",
  "futures-util",
  "prost",
  "tokio",
