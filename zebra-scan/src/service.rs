@@ -55,6 +55,17 @@ impl Service<Request> for ScanService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
+            Request::Info => {
+                let db = self.db.clone();
+
+                return async move {
+                    Ok(Response::Info {
+                        min_sapling_birthday_height: db.min_sapling_birthday_height(),
+                    })
+                }
+                .boxed();
+            }
+
             Request::CheckKeyHashes(_key_hashes) => {
                 // TODO: check that these entries exist in db
             }

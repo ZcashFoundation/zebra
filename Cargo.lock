@@ -5770,7 +5770,9 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
+ "tower",
  "zcash_primitives",
+ "zebra-node-services",
  "zebra-scan",
 ]
 
