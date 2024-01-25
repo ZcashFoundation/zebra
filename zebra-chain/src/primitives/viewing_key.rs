@@ -4,6 +4,13 @@ use std::fmt;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 
+use crate::parameters::Network;
+
+pub mod sapling;
+
+#[cfg(test)]
+mod tests;
+
 const KEY_HASH_BYTE_SIZE: usize = 32;
 
 #[derive(Debug, Clone)]
@@ -24,6 +31,18 @@ impl ViewingKey {
             Self::SaplingIvk(ivk) => ivk.to_repr().to_vec(),
             Self::DiversifiableFullViewingKey(dfvk) => dfvk.to_bytes().to_vec(),
         }
+    }
+
+    /// Parses an encoded viewing key and returns it as a [`ViewingKey`] type.
+    pub fn parse(
+        key: &str,
+        network: Network,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> // TODO: Consider using an explicit error type
+    {
+        Self::parse_extended_full_viewing_key(key, network)
+            .map(Self::DiversifiableFullViewingKey)
+            // TODO: Call .or_else() with every other parse method, they won't do anything unless the HRP is correct
+            .map_err(|err| err.to_string().into())
     }
 }
 
