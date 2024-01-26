@@ -13,9 +13,9 @@ mod tests;
 
 const KEY_HASH_BYTE_SIZE: usize = 32;
 
-#[derive(Debug, Clone)]
 /// A Zcash Sapling or Orchard viewing key
 // TODO: Add Orchard types and any other Sapling key types
+#[derive(Debug, Clone)]
 pub enum ViewingKey {
     /// An incoming viewing key for Sapling
     SaplingIvk(Box<SaplingIvk>),
@@ -52,8 +52,8 @@ impl From<DiversifiableFullViewingKey> for ViewingKey {
     }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 /// The hash of a viewing key for use as an identifier and for authorizing remote access
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub struct KeyHash([u8; KEY_HASH_BYTE_SIZE]);
 
 impl From<&ViewingKey> for KeyHash {
