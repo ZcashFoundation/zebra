@@ -5766,8 +5766,15 @@ dependencies = [
 name = "zebra-grpc"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "color-eyre",
+ "futures-util",
+ "prost",
+ "tokio",
  "tonic",
- "zebra-scan",
+ "tonic-build",
+ "tower",
+ "zcash_primitives",
+ "zebra-node-services",
 ]
 
 [[package]]
@@ -5880,6 +5887,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zebra-chain",
+ "zebra-grpc",
  "zebra-node-services",
  "zebra-state",
  "zebra-test",

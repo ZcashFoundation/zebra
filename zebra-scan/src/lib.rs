@@ -14,7 +14,7 @@ pub mod storage;
 
 use zebra_node_services::scan_service::{request::Request, response::Response};
 
-mod service;
+pub mod service;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;
 

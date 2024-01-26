@@ -3,6 +3,9 @@
 #[derive(Debug)]
 /// Request types for `zebra_scan::service::ScanService`
 pub enum Request {
+    /// Requests general info about the scanner
+    Info,
+
     /// TODO: Accept `KeyHash`es and return key hashes that are registered
     CheckKeyHashes(Vec<()>),
 

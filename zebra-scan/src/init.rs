@@ -4,12 +4,12 @@ use std::sync::{mpsc, Arc};
 
 use color_eyre::Report;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tracing::Instrument;
+use tower::ServiceBuilder;
 
-use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Transaction};
+use zebra_chain::{parameters::Network, transaction::Transaction};
 use zebra_state::ChainTipChange;
 
-use crate::{scan, storage::Storage, Config};
+use crate::{scan, service::ScanService, Config};
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
@@ -47,6 +47,16 @@ pub struct ScanTask {
 }
 
 impl ScanTask {
+    /// Spawns a new [`ScanTask`] for tests.
+    pub fn mock() -> Self {
+        let (cmd_sender, _cmd_receiver) = mpsc::channel();
+
+        Self {
+            handle: tokio::spawn(std::future::pending()),
+            cmd_sender,
+        }
+    }
+
     /// Spawns a new [`ScanTask`].
     pub fn spawn(
         config: &Config,
@@ -58,7 +68,7 @@ impl ScanTask {
         let (cmd_sender, _cmd_receiver) = mpsc::channel();
 
         Self {
-            handle: spawn_init(config, network, state, chain_tip_change),
+            handle: scan::spawn_init(config, network, state, chain_tip_change),
             cmd_sender,
         }
     }
@@ -81,13 +91,10 @@ pub fn spawn_init(
     state: scan::State,
     chain_tip_change: ChainTipChange,
 ) -> JoinHandle<Result<(), Report>> {
-    let config = config.clone();
-
-    // TODO: spawn an entirely new executor here, to avoid timing attacks.
-    tokio::spawn(init(config, network, state, chain_tip_change).in_current_span())
+    scan::spawn_init(config, network, state, chain_tip_change)
 }
 
-/// Initialize the scanner based on its config.
+/// Initialize [`ScanService`] based on its config.
 ///
 /// TODO: add a test for this function.
 pub async fn init(
@@ -96,10 +103,15 @@ pub async fn init(
     state: scan::State,
     chain_tip_change: ChainTipChange,
 ) -> Result<(), Report> {
-    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
-        .wait_for_panics()
-        .await;
+    let scan_service = ServiceBuilder::new().buffer(10).service(ScanService::new(
+        &config,
+        network,
+        state,
+        chain_tip_change,
+    ));
 
-    // TODO: add more tasks here?
-    scan::start(state, chain_tip_change, storage).await
+    // Start the gRPC server.
+    zebra_grpc::server::init(scan_service).await?;
+
+    Ok(())
 }

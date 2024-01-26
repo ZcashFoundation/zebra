@@ -14,6 +14,10 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["cryptography::cryptocurrencies"]
 
+[[bin]] # Bin to run the Scanner gRPC server
+name = "scanner-grpc-server"
+path = "src/bin/rpc_server.rs"
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in dependencies
@@ -52,6 +56,7 @@ zcash_primitives = "0.13.0-rc.1"
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.34" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.34", features = ["shielded-scan"] }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.33" }
+zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.1" }
 
 chrono = { version = "0.4.32", default-features = false, features = ["clock", "std", "serde"] }
 
