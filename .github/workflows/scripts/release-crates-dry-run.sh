@@ -18,7 +18,8 @@ fi
 
 # Release process
 # Ensure to have an extra `--no-confirm` argument for non-interactive testing.
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad beta
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
+# TODO: `zebra-scan` and `zebra-grpc` has to be updated with exact versions, we are skipping them by now.
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
 cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --no-confirm --allow-branch '*'

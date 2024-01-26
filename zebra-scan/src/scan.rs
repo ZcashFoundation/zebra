@@ -8,8 +8,10 @@ use std::{
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
+use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
+use tracing::Instrument;
 use zcash_client_backend::{
     data_api::ScannedBlock,
     encoding::decode_extended_full_viewing_key,
@@ -34,7 +36,10 @@ use zebra_chain::{
 };
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
-use crate::storage::{SaplingScanningKey, Storage};
+use crate::{
+    storage::{SaplingScanningKey, Storage},
+    Config,
+};
 
 /// The generic state type used by the scanner.
 pub type State = Buffer<
@@ -429,4 +434,36 @@ async fn tip_height(mut state: State) -> Result<Height, Report> {
         zebra_state::Response::Tip(None) => Ok(Height(0)),
         _ => unreachable!("unmatched response to a state::Tip request"),
     }
+}
+
+/// Initialize the scanner based on its config, and spawn a task for it.
+///
+/// TODO: add a test for this function.
+pub fn spawn_init(
+    config: &Config,
+    network: Network,
+    state: State,
+    chain_tip_change: ChainTipChange,
+) -> JoinHandle<Result<(), Report>> {
+    let config = config.clone();
+
+    // TODO: spawn an entirely new executor here, to avoid timing attacks.
+    tokio::spawn(init(config, network, state, chain_tip_change).in_current_span())
+}
+
+/// Initialize the scanner based on its config.
+///
+/// TODO: add a test for this function.
+pub async fn init(
+    config: Config,
+    network: Network,
+    state: State,
+    chain_tip_change: ChainTipChange,
+) -> Result<(), Report> {
+    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
+        .wait_for_panics()
+        .await;
+
+    // TODO: add more tasks here?
+    start(state, chain_tip_change, storage).await
 }
