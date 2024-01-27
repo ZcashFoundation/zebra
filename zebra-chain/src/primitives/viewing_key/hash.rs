@@ -2,7 +2,7 @@ use std::fmt;
 
 use super::ViewingKey;
 
-/// The size of [`KeyHash`]
+/// The size of [`ViewingKeyHash`]
 const KEY_HASH_BYTE_SIZE: usize = 32;
 
 /// The hash of a viewing key for use as an identifier in zebra-scan, and
@@ -16,17 +16,17 @@ impl From<&ViewingKey> for ViewingKeyHash {
     }
 }
 
-/// A [`ViewingKey`] and its [`KeyHash`]
+/// A [`ViewingKey`] and its [`ViewingKeyHash`]
 pub struct ViewingKeyWithHash {
     /// The [`ViewingKey`]
     pub key: ViewingKey,
 
-    /// The [`KeyHash`] for the above `key`
+    /// The [`ViewingKeyHash`] for the above `key`
     pub hash: ViewingKeyHash,
 }
 
 impl ViewingKeyHash {
-    /// Creates a new [`KeyHash`] for the provided viewing key
+    /// Creates a new [`ViewingKeyHash`] for the provided viewing key
     pub fn new(viewing_key: &ViewingKey) -> Self {
         Self(
             blake2b_simd::Params::new()
