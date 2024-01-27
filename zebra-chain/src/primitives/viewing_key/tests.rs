@@ -13,8 +13,8 @@ fn key_hash_can_be_reproduced() -> color_eyre::Result<()> {
         .expect("should parse hard-coded viewing key successfully");
 
     assert_eq!(
-        KeyHash::new(&viewing_key),
-        KeyHash::new(&viewing_key),
+        ViewingKeyHash::new(&viewing_key),
+        ViewingKeyHash::new(&viewing_key),
         "key hashes for a given viewing key should match",
     );
 
@@ -25,12 +25,13 @@ fn key_hash_can_be_reproduced() -> color_eyre::Result<()> {
 fn key_hash_decoded_correctly() -> color_eyre::Result<()> {
     let _init_guard = zebra_test::init();
 
-    let key_hash: KeyHash = ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, Network::Mainnet)
-        .map(|key| KeyHash::new(&key))
-        .expect("should parse hard-coded viewing key successfully");
+    let key_hash: ViewingKeyHash =
+        ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, Network::Mainnet)
+            .map(|key| ViewingKeyHash::new(&key))
+            .expect("should parse hard-coded viewing key successfully");
 
     let encoded_key_hash = key_hash.to_string();
-    let decoded_key_hash: KeyHash = encoded_key_hash.parse()?;
+    let decoded_key_hash: ViewingKeyHash = encoded_key_hash.parse()?;
 
     assert_eq!(
         key_hash, decoded_key_hash,
