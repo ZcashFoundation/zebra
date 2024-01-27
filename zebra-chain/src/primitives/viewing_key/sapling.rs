@@ -54,6 +54,8 @@ impl SaplingViewingKey {
     /// Returns a [`SaplingViewingKey::Dfvk`] if successful, or None otherwise
     fn parse_extended_full_viewing_key(sapling_key: &str, network: Network) -> Option<Self> {
         decode_extended_full_viewing_key(network.sapling_efvk_hrp(), sapling_key)
+            // this should fail often, so a debug-level log is okay
+            .map_err(|err| debug!(?err, "could not decode Sapling extended full viewing key"))
             .ok()
             .map(|efvk| Box::new(efvk.to_diversifiable_full_viewing_key()))
             .map(Self::Dfvk)

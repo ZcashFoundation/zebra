@@ -39,7 +39,6 @@ shielded-scan = [
     "zcash_client_backend"
 ]
 
-
 # Experimental internal miner support
 # TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
 #       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43

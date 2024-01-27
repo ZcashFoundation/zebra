@@ -49,7 +49,6 @@ impl ViewingKey {
 
     /// Parses an encoded viewing key and returns it as a [`ViewingKey`] type.
     pub fn parse(key: &str, network: Network) -> Option<Self> {
-        // TODO: Try types with prefixes first if some don't have prefixes?
         Self::parse_sapling(key, network).or_else(|| Self::parse_orchard(key, network))
     }
 }
