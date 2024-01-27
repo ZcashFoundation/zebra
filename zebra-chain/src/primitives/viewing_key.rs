@@ -14,7 +14,6 @@ use sapling::SaplingViewingKey;
 mod tests;
 
 /// A Zcash Sapling or Orchard viewing key
-// TODO: Add Orchard types and any other Sapling key types
 #[derive(Debug, Clone)]
 pub enum ViewingKey {
     /// A viewing key for Sapling

@@ -1,4 +1,4 @@
-//! Tests for Zebra history trees
+//! Tests for zebra-chain viewing key hashes
 
 use super::*;
 
