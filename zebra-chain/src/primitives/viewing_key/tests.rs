@@ -1,7 +1,5 @@
 //! Tests for Zebra history trees
 
-use color_eyre::eyre::eyre;
-
 use super::*;
 
 /// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
@@ -12,7 +10,7 @@ fn key_hash_can_be_reproduced() -> color_eyre::Result<()> {
     let _init_guard = zebra_test::init();
 
     let viewing_key = ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, Network::Mainnet)
-        .map_err(|err| eyre!(err))?;
+        .expect("should parse hard-coded viewing key successfully");
 
     assert_eq!(
         KeyHash::new(&viewing_key),
@@ -29,7 +27,7 @@ fn key_hash_decoded_correctly() -> color_eyre::Result<()> {
 
     let key_hash: KeyHash = ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, Network::Mainnet)
         .map(|key| KeyHash::new(&key))
-        .map_err(|err| eyre!(err))?;
+        .expect("should parse hard-coded viewing key successfully");
 
     let encoded_key_hash = key_hash.to_string();
     let decoded_key_hash: KeyHash = encoded_key_hash.parse()?;

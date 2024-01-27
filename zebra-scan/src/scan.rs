@@ -288,8 +288,9 @@ pub fn scan_block<K: ScanningKey>(
 /// Currently only accepts extended full viewing keys, and returns both their diversifiable full
 /// viewing key and their individual viewing key, for testing purposes.
 ///
-/// TODO: work out what string format is used for SaplingIvk, if any, and support it here
-///       performance: stop returning both the dfvk and ivk for the same key
+// TODO: work out what string format is used for SaplingIvk, if any, and support it here
+//       performance: stop returning both the dfvk and ivk for the same key
+// TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_scan_block_keys(
     sapling_key: &SaplingScanningKey,
     network: Network,

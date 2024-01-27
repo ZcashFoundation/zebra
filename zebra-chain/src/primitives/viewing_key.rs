@@ -2,11 +2,15 @@
 
 use std::fmt;
 
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-
 use crate::parameters::Network;
 
 pub mod sapling;
+
+use sapling::SaplingViewingKey;
+
+pub mod orchard;
+
+use orchard::OrchardViewingKey;
 
 #[cfg(test)]
 mod tests;
@@ -17,42 +21,45 @@ const KEY_HASH_BYTE_SIZE: usize = 32;
 // TODO: Add Orchard types and any other Sapling key types
 #[derive(Debug, Clone)]
 pub enum ViewingKey {
-    /// An incoming viewing key for Sapling
-    SaplingIvk(Box<SaplingIvk>),
+    /// A viewing key for Sapling
+    Sapling(SaplingViewingKey),
 
-    /// A diversifiable full viewing key for Sapling
-    DiversifiableFullViewingKey(Box<DiversifiableFullViewingKey>),
+    /// A viewing key for Orchard
+    Orchard(OrchardViewingKey),
 }
 
 impl ViewingKey {
     /// Returns an encoded byte representation of the viewing key
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Self::SaplingIvk(ivk) => ivk.to_repr().to_vec(),
-            Self::DiversifiableFullViewingKey(dfvk) => dfvk.to_bytes().to_vec(),
+            Self::Sapling(sapling_key) => sapling_key.to_bytes(),
+            Self::Orchard(_) => vec![], // TODO: add Orchard keys
         }
     }
 
+    /// Accepts an encoded Sapling viewing key to decode
+    ///
+    /// Returns a [`ViewingKey`] if successful, or None otherwise
+    fn parse_sapling(sapling_key: &str, network: Network) -> Option<Self> {
+        SaplingViewingKey::parse(sapling_key, network).map(Self::Sapling)
+    }
+
+    /// Accepts an encoded Orchard viewing key to decode
+    ///
+    /// Returns a [`ViewingKey`] if successful, or None otherwise
+    fn parse_orchard(sapling_key: &str, network: Network) -> Option<Self> {
+        OrchardViewingKey::parse(sapling_key, network).map(Self::Orchard)
+    }
+
     /// Parses an encoded viewing key and returns it as a [`ViewingKey`] type.
-    pub fn parse(
-        key: &str,
-        network: Network,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> // TODO: Consider using an explicit error type
-    {
-        Self::parse_extended_full_viewing_key(key, network)
-            .map(Self::DiversifiableFullViewingKey)
-            // TODO: Call .or_else() with every other parse method, they won't do anything unless the HRP is correct
-            .map_err(|err| err.to_string().into())
+    pub fn parse(key: &str, network: Network) -> Option<Self> {
+        // TODO: Try types with prefixes first if some don't have prefixes?
+        Self::parse_sapling(key, network).or_else(|| Self::parse_orchard(key, network))
     }
 }
 
-impl From<DiversifiableFullViewingKey> for ViewingKey {
-    fn from(value: DiversifiableFullViewingKey) -> Self {
-        Self::DiversifiableFullViewingKey(Box::new(value))
-    }
-}
-
-/// The hash of a viewing key for use as an identifier and for authorizing remote access
+/// The hash of a viewing key for use as an identifier in zebra-scan, and
+/// for authorizing remote access via the scanner's gRPC interface.
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub struct KeyHash([u8; KEY_HASH_BYTE_SIZE]);
 
@@ -115,5 +122,17 @@ impl std::str::FromStr for KeyHash {
         let mut output = [0u8; KEY_HASH_BYTE_SIZE];
         bs58::decode(s).onto(&mut output)?;
         Ok(Self(output))
+    }
+}
+
+impl From<SaplingViewingKey> for ViewingKey {
+    fn from(key: SaplingViewingKey) -> Self {
+        Self::Sapling(key)
+    }
+}
+
+impl From<OrchardViewingKey> for ViewingKey {
+    fn from(key: OrchardViewingKey) -> Self {
+        Self::Orchard(key)
     }
 }
