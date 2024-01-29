@@ -2,7 +2,7 @@
 
 The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/).
 
-We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users.
+We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users. We recommend using `docker-compose` over plain `docker` CLI, especially for more advanced use-cases like running CI locally, as it provides a more convenient and powerful way to manage multi-container Docker applications.
 
 ## Quick usage
 
@@ -30,47 +30,46 @@ See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) fo
 
 You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
 
-For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
-
 > [!WARNING]
 > To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
-```shell
-docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries prometheus' --tag local/zebra.mining:latest .
-```
+### CI/CD Local Testing
 
-To increase the log output we can optionally add these `build-arg`s:
+To run CI tests locally, which mimics the testing done in our CI pipelines on GitHub Actions, use the `docker-compose.test.yml` file. This setup allows for a consistent testing environment both locally and in CI.
 
-```shell
---build-arg RUST_BACKTRACE=full --build-arg RUST_LOG=debug --build-arg COLORBT_SHOW_HIDDEN=1
-```
+#### Running Tests Locally
 
-And after our image has been built, we can run it on `Mainnet` with the following command, which will expose the metrics endpoint on port `9999` and force the logs to be colored:
+1. **Setting Environment Variables**:
+   - Modify the `test.env` file to set the desired test configurations.
+   - For running all tests, set `RUN_ALL_TESTS=1` in `test.env`.
 
-```shell
-docker run --env LOG_COLOR="true" -p 9999:9999 local/zebra.mining
-```
+2. **Starting the Test Environment**:
+   - Use Docker Compose to start the testing environment:
 
-Based on our actual `entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
+     ```shell
+     docker-compose -f docker/docker-compose.test.yml up
+     ```
 
-```toml
-[network]
-network = "Mainnet"
-listen_addr = "0.0.0.0"
-[state]
-cache_dir = "/var/cache/zebrad-cache"
-[metrics]
-endpoint_addr = "127.0.0.1:9999"
-```
+   - This will start the Docker container and run the tests based on `test.env` settings.
 
-### Build time arguments
+3. **Viewing Test Output**:
+   - The test results and logs will be displayed in the terminal.
 
-#### Configuration
+4. **Stopping the Environment**:
+   - Once testing is complete, stop the environment using:
+
+     ```shell
+     docker-compose -f docker/docker-compose.test.yml down
+     ```
+
+This approach ensures you can run the same tests locally that are run in CI, providing a robust way to validate changes before pushing to the repository.
+
+### Build and Run Time Configuration
+
+#### Build Time Arguments
 
 - `FEATURES`: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
-
-#### Logging
-
+- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 - `RUST_LOG`: Sets the trace log level. Example: `"debug"`
 - `RUST_BACKTRACE`: Enables or disables backtraces. Example: `"full"`
 - `RUST_LIB_BACKTRACE`: Enables or disables library backtraces. Example: `1`
@@ -82,13 +81,13 @@ endpoint_addr = "127.0.0.1:9999"
 - `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
 - `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
 
+Specific tests are defined in `docker/test.env` file and can be enabled by setting the corresponding environment variable to `1`.
+
 #### CI/CD
 
 - `SHORT_SHA`: Represents the short SHA of the commit. Example: `"a1b2c3d"`
 
-### Run time variables
-
-#### Network
+#### Run Time Variables
 
 - `NETWORK`: Specifies the network type. Example: `"Mainnet"`
 
