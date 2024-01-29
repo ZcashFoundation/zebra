@@ -16,7 +16,7 @@
 # Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints shielded-scan"
+ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 
 # This stage implements cargo-chef for docker layer caching
@@ -114,7 +114,7 @@ ARG FEATURES
 ARG TEST_FEATURES
 ARG EXPERIMENTAL_FEATURES
 # ${EXPERIMENTAL_FEATURES} is empty, so this is equivalent to ${FEATURES} ${TEST_FEATURES} by default
-ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES} ${EXPERIMENTAL_FEATURES}"
+ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # over the top of the original source files,
@@ -125,7 +125,6 @@ ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES} ${EXPERIMENTAL_FEATURES}"
 #
 # TODO: add --locked when cargo-chef supports it
 RUN cargo chef cook --tests --release --features "${ENTRYPOINT_FEATURES}" --workspace --recipe-path recipe.json
-
 # Undo the source file changes made by cargo-chef.
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
 # This makes sure the fake empty binaries created by cargo-chef are rebuilt.
