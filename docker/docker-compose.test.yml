@@ -23,8 +23,6 @@ services:
       - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
       - "8233:8233" # Mainnet Network (for peer connections)
       - "18233:18233" # Testnet Network
-      # - "9999:9999" # Metrics
-      # - "3000:3000" # Tracing
     env_file:
       - test.env
 
