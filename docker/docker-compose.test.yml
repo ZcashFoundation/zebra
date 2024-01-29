@@ -12,7 +12,7 @@ services:
         reservations:
           cpus: "4"
           memory: 16G
-    # Change this to the commmand you want to run, respecting the entrypoint.sh
+    # Change this to the command you want to run, respecting the entrypoint.sh
     # For example, to run the tests, use the following command:
     # command: ["cargo", "test", "--locked", "--release", "--features", "${TEST_FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
     volumes:
@@ -23,6 +23,8 @@ services:
       - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
       - "8233:8233" # Mainnet Network (for peer connections)
       - "18233:18233" # Testnet Network
+      # - "9999:9999" # Metrics
+      # - "3000:3000" # Tracing
     env_file:
       - test.env
 

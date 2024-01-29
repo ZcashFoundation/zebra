@@ -32,6 +32,9 @@ You're able to specify various parameters when building or launching the Docker 
 
 For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
 
+> [!WARNING]
+> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
+
 ```shell
 docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries prometheus' --tag local/zebra.mining:latest .
 ```
@@ -59,9 +62,6 @@ cache_dir = "/var/cache/zebrad-cache"
 [metrics]
 endpoint_addr = "127.0.0.1:9999"
 ```
-
-> [!WARNING]
-> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
 ### CI/CD Local Testing
 
@@ -98,8 +98,13 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 
 #### Build Time Arguments
 
+#### Configuration
+
 - `FEATURES`: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
 - `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
+
+#### Logging
+
 - `RUST_LOG`: Sets the trace log level. Example: `"debug"`
 - `RUST_BACKTRACE`: Enables or disables backtraces. Example: `"full"`
 - `RUST_LIB_BACKTRACE`: Enables or disables library backtraces. Example: `1`
@@ -110,8 +115,6 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 - `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 - `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
 - `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
-
-Specific tests are defined in `docker/test.env` file and can be enabled by setting the corresponding environment variable to `1`.
 
 #### CI/CD
 
@@ -141,6 +144,8 @@ Specific tests are defined in `docker/test.env` file and can be enabled by setti
 - `LOG_COLOR`: Enables or disables log color. Example: `false`
 - `TRACING_ENDPOINT_ADDR`: Address for tracing endpoint. Example: `"0.0.0.0"`
 - `TRACING_ENDPOINT_PORT`: Port for tracing endpoint. Example: `3000`
+
+Specific tests are defined in `docker/test.env` file and can be enabled by setting the corresponding environment variable to `1`.
 
 ## Registries
 
