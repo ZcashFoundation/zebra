@@ -113,7 +113,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 ARG FEATURES
 ARG TEST_FEATURES
 ARG EXPERIMENTAL_FEATURES
-# ${EXPERIMENTAL_FEATURES} is empty, so this is equivalent to ${FEATURES} ${TEST_FEATURES} by default
+# TODO: add empty $EXPERIMENTAL_FEATURES when we can avoid adding an extra space to the end of the string
 ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
