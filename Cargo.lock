@@ -2772,36 +2772,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orchard"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92c801aeaccd19bb6916d71f25694b62d223061872900e8022221c1ad8dcad2d"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "tracing",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
 name = "ordered-map"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5540,7 +5510,7 @@ dependencies = [
  "incrementalmerkletree",
  "memuse",
  "nom",
- "orchard 0.6.0",
+ "orchard",
  "percent-encoding",
  "prost",
  "rayon",
@@ -5615,7 +5585,7 @@ dependencies = [
  "lazy_static",
  "memuse",
  "nonempty",
- "orchard 0.6.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "ripemd",
@@ -5671,7 +5641,7 @@ dependencies = [
  "libc",
  "memuse",
  "metrics 0.21.1",
- "orchard 0.6.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rayon",
@@ -5683,15 +5653,6 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
-]
-
-[[package]]
-name = "zcash_spec"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7a3bf58b673cb3dacd8ae09ba345998923a197ab0da70d6239d8e8838949e9b"
-dependencies = [
- "blake2b_simd",
 ]
 
 [[package]]
@@ -5722,7 +5683,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.7.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5775,7 +5736,7 @@ dependencies = [
  "metrics 0.22.0",
  "num-integer",
  "once_cell",
- "orchard 0.7.0",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -6149,15 +6110,4 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
-]
-
-[[package]]
-name = "zip32"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d724a63be4dfb50b7f3617e542984e22e4b4a5b8ca5de91f55613152885e6b22"
-dependencies = [
- "blake2b_simd",
- "memuse",
- "subtle",
 ]
