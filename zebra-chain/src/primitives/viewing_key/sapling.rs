@@ -1,11 +1,9 @@
 //! Defines types and implements methods for parsing Sapling viewing keys and converting them to `zebra-chain` types
 
-use group::GroupEncoding;
-use jubjub::ExtendedPoint;
 use zcash_client_backend::encoding::decode_extended_full_viewing_key;
 use zcash_primitives::{
     constants::*,
-    sapling::keys::{FullViewingKey as SaplingFvk, SaplingIvk, ViewingKey as SaplingVk},
+    sapling::keys::{FullViewingKey as SaplingFvk, SaplingIvk},
     zip32::DiversifiableFullViewingKey as SaplingDfvk,
 };
 
@@ -14,9 +12,6 @@ use crate::parameters::Network;
 /// A Zcash Sapling viewing key
 #[derive(Debug, Clone)]
 pub enum SaplingViewingKey {
-    /// A viewing key for Sapling
-    Vk(Box<SaplingVk>),
-
     /// An incoming viewing key for Sapling
     Ivk(Box<SaplingIvk>),
 
@@ -27,28 +22,7 @@ pub enum SaplingViewingKey {
     Dfvk(Box<SaplingDfvk>),
 }
 
-/// Accepts a Sapling viewing key, [`SaplingVk`]
-///
-/// Returns its byte representation.
-fn viewing_key_to_bytes(SaplingVk { ak, nk }: &SaplingVk) -> Vec<u8> {
-    ExtendedPoint::from(*ak)
-        .to_bytes()
-        .into_iter()
-        .chain(ExtendedPoint::from(nk.0).to_bytes())
-        .collect()
-}
-
 impl SaplingViewingKey {
-    /// Returns an encoded byte representation of the Sapling viewing key
-    pub(super) fn to_bytes(&self) -> Vec<u8> {
-        match self {
-            Self::Vk(vk) => viewing_key_to_bytes(vk),
-            Self::Ivk(ivk) => ivk.to_repr().to_vec(),
-            Self::Fvk(fvk) => fvk.to_bytes().to_vec(),
-            Self::Dfvk(dfvk) => dfvk.to_bytes().to_vec(),
-        }
-    }
-
     /// Accepts an encoded Sapling extended full viewing key to decode
     ///
     /// Returns a [`SaplingViewingKey::Dfvk`] if successful, or None otherwise

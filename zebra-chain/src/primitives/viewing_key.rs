@@ -22,14 +22,6 @@ pub enum ViewingKey {
 }
 
 impl ViewingKey {
-    /// Returns an encoded byte representation of the viewing key
-    pub fn to_bytes(&self) -> Vec<u8> {
-        match self {
-            Self::Sapling(sapling_key) => sapling_key.to_bytes(),
-            Self::Orchard(_) => vec![], // TODO: add Orchard keys
-        }
-    }
-
     /// Accepts an encoded Sapling viewing key to decode
     ///
     /// Returns a [`ViewingKey`] if successful, or None otherwise
