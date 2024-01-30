@@ -61,21 +61,12 @@ impl SaplingViewingKey {
 
     /// Accepts an encoded Sapling viewing key to decode
     ///
-    /// Returns a [`SaplingViewingKey::Vk`] if successful, or None otherwise
-    fn parse_viewing_key(_sapling_key: &str, _network: Network) -> Option<Self> {
-        // TODO: Parse Sapling viewing key
-        None
-    }
-
-    /// Accepts an encoded Sapling viewing key to decode
-    ///
     /// Returns a [`SaplingViewingKey`] if successful, or None otherwise
     pub(super) fn parse(key: &str, network: Network) -> Option<Self> {
         // TODO: Try types with prefixes first if some don't have prefixes?
         Self::parse_extended_full_viewing_key(key, network)
             .or_else(|| Self::parse_diversifiable_full_viewing_key(key, network))
             .or_else(|| Self::parse_full_viewing_key(key, network))
-            .or_else(|| Self::parse_viewing_key(key, network))
             .or_else(|| Self::parse_incoming_viewing_key(key, network))
     }
 }
