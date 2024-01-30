@@ -2,11 +2,9 @@
 
 use crate::parameters::Network;
 
-mod hash;
 mod orchard;
 mod sapling;
 
-pub use hash::{ViewingKeyHash, ViewingKeyWithHash};
 use orchard::OrchardViewingKey;
 use sapling::SaplingViewingKey;
 
