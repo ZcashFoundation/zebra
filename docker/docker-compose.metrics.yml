@@ -1,0 +1,66 @@
+version: "3.8"
+
+services:
+  zebra:
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+    ports:
+      - "8232:8232"
+      - "8233:8233"
+      - "18233:18233"
+      - "9999:9999" # Metrics
+
+  prometheus:
+    image: prom/prometheus
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:9090/status || exit 1
+      start_period: 30s
+      interval: 10s
+      timeout: 15s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+configs:
+  prometheus_config:
+    file: ../prometheus.yaml
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
