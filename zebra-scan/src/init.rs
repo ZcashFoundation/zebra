@@ -1,6 +1,9 @@
 //! Initializing the scanner.
 
-use std::sync::{mpsc, Arc};
+use std::sync::{
+    mpsc::{self},
+    Arc,
+};
 
 use color_eyre::Report;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -23,7 +26,7 @@ pub enum ScanTaskCommand {
         done_tx: oneshot::Sender<()>,
 
         /// Key hashes that are to be removed
-        key_hashes: Vec<()>,
+        keys: Vec<String>,
     },
 
     /// Start sending results for key hashes to `result_sender`
@@ -43,7 +46,7 @@ pub struct ScanTask {
     pub handle: JoinHandle<Result<(), Report>>,
 
     /// Task command channel sender
-    cmd_sender: mpsc::Sender<ScanTaskCommand>,
+    pub cmd_sender: mpsc::Sender<ScanTaskCommand>,
 }
 
 impl ScanTask {
@@ -65,10 +68,10 @@ impl ScanTask {
         chain_tip_change: ChainTipChange,
     ) -> Self {
         // TODO: Pass `_cmd_receiver` to `scan::start()` to pass it new keys after it's been spawned
-        let (cmd_sender, _cmd_receiver) = mpsc::channel();
+        let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         Self {
-            handle: scan::spawn_init(config, network, state, chain_tip_change),
+            handle: scan::spawn_init(config, network, state, chain_tip_change, cmd_receiver),
             cmd_sender,
         }
     }
@@ -90,8 +93,8 @@ pub fn spawn_init(
     network: Network,
     state: scan::State,
     chain_tip_change: ChainTipChange,
-) -> JoinHandle<Result<(), Report>> {
-    scan::spawn_init(config, network, state, chain_tip_change)
+) -> ScanTask {
+    ScanTask::spawn(config, network, state, chain_tip_change)
 }
 
 /// Initialize [`ScanService`] based on its config.
