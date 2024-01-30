@@ -233,6 +233,24 @@ impl Storage {
             .write_batch()
             .expect("unexpected database write failure");
     }
+
+    pub(crate) fn delete_sapling_results(&mut self, keys: &[String]) {
+        let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
+
+        for key in keys {
+            batch = batch.zs_delete_range(
+                &SaplingScannedDatabaseIndex::min_for_key(key),
+                // Note: It's okay to exclude the last index because the representation for block heights
+                //       should always be larger than expected block heights. The current Height::MAX is >2B,
+                //       and can be updated once the chain gets close to that height.
+                &SaplingScannedDatabaseIndex::max_for_key(key),
+            );
+        }
+
+        batch
+            .write_batch()
+            .expect("unexpected database write failure");
+    }
 }
 
 /// Utility trait for inserting sapling heights into a WriteSaplingTxIdsBatch.

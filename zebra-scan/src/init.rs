@@ -39,11 +39,11 @@ pub enum ScanTaskCommand {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Scan task handle and command channel sender
 pub struct ScanTask {
     /// [`JoinHandle`] of scan task
-    pub handle: JoinHandle<Result<(), Report>>,
+    pub handle: Arc<JoinHandle<Result<(), Report>>>,
 
     /// Task command channel sender
     pub cmd_sender: mpsc::Sender<ScanTaskCommand>,
@@ -55,7 +55,7 @@ impl ScanTask {
         let (cmd_sender, _cmd_receiver) = mpsc::channel();
 
         Self {
-            handle: tokio::spawn(std::future::pending()),
+            handle: Arc::new(tokio::spawn(std::future::pending())),
             cmd_sender,
         }
     }
@@ -71,7 +71,13 @@ impl ScanTask {
         let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         Self {
-            handle: scan::spawn_init(config, network, state, chain_tip_change, cmd_receiver),
+            handle: Arc::new(scan::spawn_init(
+                config,
+                network,
+                state,
+                chain_tip_change,
+                cmd_receiver,
+            )),
             cmd_sender,
         }
     }
@@ -82,6 +88,21 @@ impl ScanTask {
         command: ScanTaskCommand,
     ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
         self.cmd_sender.send(command)
+    }
+
+    /// Sends a command to the scan task
+    pub fn remove_keys(
+        &mut self,
+        keys: &[String],
+    ) -> Result<oneshot::Receiver<()>, mpsc::SendError<ScanTaskCommand>> {
+        let (done_tx, done_rx) = oneshot::channel();
+
+        self.send(ScanTaskCommand::RemoveKeys {
+            keys: keys.to_vec(),
+            done_tx,
+        })?;
+
+        Ok(done_rx)
     }
 }
 

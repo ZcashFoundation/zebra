@@ -312,7 +312,11 @@ impl StartCmd {
                     chain_tip_change,
                 );
 
-                (scan_task.handle, Some(scan_task.cmd_sender))
+                (
+                    std::sync::Arc::into_inner(scan_task.handle)
+                        .expect("should only have one reference here"),
+                    Some(scan_task.cmd_sender),
+                )
             } else {
                 (tokio::spawn(std::future::pending().in_current_span()), None)
             };

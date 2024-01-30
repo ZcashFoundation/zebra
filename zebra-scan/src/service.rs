@@ -84,7 +84,18 @@ impl Service<Request> for ScanService {
                 //  - send new keys to scan task
             }
 
-            Request::DeleteKeys(_key_hashes) => {
+            Request::DeleteKeys(keys) => {
+                let mut db = self.db.clone();
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    scan_task.remove_keys(&keys)?.await?;
+                    db.delete_sapling_results(&keys);
+
+                    Ok(Response::DeletedKeys(keys))
+                }
+                .boxed();
+
                 // TODO:
                 //  - delete these keys and their results from db
                 //  - send deleted keys to scan task

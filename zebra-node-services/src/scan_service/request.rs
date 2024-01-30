@@ -13,7 +13,7 @@ pub enum Request {
     RegisterKeys(Vec<()>),
 
     /// TODO: Accept `KeyHash`es and return Ok(`Vec<KeyHash>`) with hashes of deleted keys
-    DeleteKeys(Vec<()>),
+    DeleteKeys(Vec<String>),
 
     /// TODO: Accept `KeyHash`es and return `Transaction`s
     Results(Vec<()>),
