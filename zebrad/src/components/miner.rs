@@ -106,7 +106,7 @@ where
 ///
 /// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-    config: Config,
+    _config: Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> Result<(), Report>
 where
@@ -138,7 +138,9 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    let configured_threads = config.internal_miner_threads;
+    // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
+    //       https://github.com/ZcashFoundation/zebra/issues/8183
+    let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
         .map(usize::from)

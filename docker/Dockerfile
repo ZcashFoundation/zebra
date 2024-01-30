@@ -143,7 +143,7 @@ RUN chmod u+x /entrypoint.sh
 # Entrypoint environment variables
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
 # We repeat the ARGs here, so they are available in the entrypoint.sh script for $RUN_ALL_EXPERIMENTAL_TESTS
-ARG EXPERIMENTAL_FEATURES="elasticsearch journald prometheus filter-reload"
+ARG EXPERIMENTAL_FEATURES="shielded-scan journald prometheus filter-reload"
 ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
