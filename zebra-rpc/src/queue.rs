@@ -95,7 +95,7 @@ impl Queue {
 
     /// Remove a transaction from the queue.
     pub fn remove(&mut self, unmined_id: UnminedTxId) {
-        self.transactions.remove(&unmined_id);
+        self.transactions.swap_remove(&unmined_id);
     }
 
     /// Remove the oldest transaction from the queue.
