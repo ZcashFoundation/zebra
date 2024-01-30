@@ -34,6 +34,11 @@ getblocktemplate-rpcs = [
     "zcash_address",
 ]
 
+# Experimental shielded scanning support
+shielded-scan = [
+    "zcash_client_backend"
+]
+
 # Experimental internal miner support
 # TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
 #       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43
@@ -127,8 +132,11 @@ serde_json = { version = "1.0.113", optional = true }
 # Production feature async-error and testing feature proptest-impl
 tokio = { version = "1.35.1", optional = true }
 
-# Experimental feature getblocktemplate-rpcs
+# Production feature getblocktemplate-rpcs
 zcash_address = { version = "0.3.1", optional = true }
+
+# Experimental feature shielded-scan
+zcash_client_backend = { version = "0.10.0-rc.1", optional = true }
 
 # Optional testing dependencies
 proptest = { version = "1.4.0", optional = true }
