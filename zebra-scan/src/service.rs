@@ -31,6 +31,9 @@ pub struct ScanService {
 /// A timeout applied to `DeleteKeys` requests.
 const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// The maximum number of keys that may be included in a request to the scan service
+const MAX_REQUEST_KEYS: usize = 1000;
+
 impl ScanService {
     /// Create a new [`ScanService`].
     pub fn new(
@@ -99,6 +102,13 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
+                    if keys.len() > MAX_REQUEST_KEYS {
+                        return Err(format!(
+                            "maximum number of keys per request is {MAX_REQUEST_KEYS}"
+                        )
+                        .into());
+                    }
+
                     // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
                     let remove_keys_result =
                         tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
