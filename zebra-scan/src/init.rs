@@ -1,9 +1,6 @@
 //! Initializing the scanner.
 
-use std::sync::{
-    mpsc::{self, Receiver},
-    Arc,
-};
+use std::sync::{mpsc, Arc};
 
 use color_eyre::Report;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -52,7 +49,7 @@ pub struct ScanTask {
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn mock() -> (Self, Receiver<ScanTaskCommand>) {
+    pub fn mock() -> (Self, mpsc::Receiver<ScanTaskCommand>) {
         let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         (
