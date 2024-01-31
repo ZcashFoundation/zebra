@@ -1,7 +1,7 @@
 //! Initializing the scanner.
 
 use std::sync::{
-    mpsc::{self},
+    mpsc::{self, Receiver},
     Arc,
 };
 
@@ -51,13 +51,16 @@ pub struct ScanTask {
 
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
-    pub fn mock() -> Self {
-        let (cmd_sender, _cmd_receiver) = mpsc::channel();
+    pub fn mock() -> (Self, Receiver<ScanTaskCommand>) {
+        let (cmd_sender, cmd_receiver) = mpsc::channel();
 
-        Self {
-            handle: Arc::new(tokio::spawn(std::future::pending())),
-            cmd_sender,
-        }
+        (
+            Self {
+                handle: Arc::new(tokio::spawn(std::future::pending())),
+                cmd_sender,
+            },
+            cmd_receiver,
+        )
     }
 
     /// Spawns a new [`ScanTask`].

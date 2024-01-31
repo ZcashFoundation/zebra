@@ -1,6 +1,6 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, task::Poll};
+use std::{future::Future, pin::Pin, sync::mpsc::Receiver, task::Poll};
 
 use futures::future::FutureExt;
 use tower::Service;
@@ -8,13 +8,21 @@ use tower::Service;
 use zebra_chain::parameters::Network;
 use zebra_state::ChainTipChange;
 
-use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
+use crate::{
+    init::{ScanTask, ScanTaskCommand},
+    scan,
+    storage::Storage,
+    Config, Request, Response,
+};
+
+#[cfg(test)]
+mod tests;
 
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]
 pub struct ScanService {
     /// On-disk storage
-    db: Storage,
+    pub db: Storage,
 
     /// Handle to scan task that's responsible for writing results
     scan_task: ScanTask,
@@ -35,11 +43,9 @@ impl ScanService {
     }
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
-    pub fn new_with_mock_scanner(config: &Config, network: Network) -> Self {
-        Self {
-            db: Storage::new(config, network, false),
-            scan_task: ScanTask::mock(),
-        }
+    pub fn new_with_mock_scanner(db: Storage) -> (Self, Receiver<ScanTaskCommand>) {
+        let (scan_task, cmd_receiver) = ScanTask::mock();
+        (Self { db, scan_task }, cmd_receiver)
     }
 }
 
@@ -93,7 +99,8 @@ impl Service<Request> for ScanService {
 
                     tokio::task::spawn_blocking(move || {
                         db.delete_sapling_results(keys);
-                    });
+                    })
+                    .await?;
 
                     Ok(Response::DeletedKeys)
                 }
