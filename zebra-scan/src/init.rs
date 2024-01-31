@@ -71,7 +71,6 @@ impl ScanTask {
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
-        // TODO: Pass `_cmd_receiver` to `scan::start()` to pass it new keys after it's been spawned
         let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         Self {
