@@ -305,7 +305,7 @@ impl StartCmd {
             if !config.shielded_scan.sapling_keys_to_scan.is_empty() {
                 // TODO: log the number of keys and update the scan_task_starts() test
                 info!("spawning shielded scanner with configured viewing keys");
-                let scan_task = zebra_scan::spawn_init(
+                let scan_task = zebra_scan::ScanTask::spawn(
                     &config.shielded_scan,
                     config.network.network,
                     state,

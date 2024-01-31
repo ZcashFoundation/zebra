@@ -106,18 +106,6 @@ impl ScanTask {
     }
 }
 
-/// Initialize the scanner based on its config, and spawn a task for it.
-///
-/// TODO: add a test for this function.
-pub fn spawn_init(
-    config: &Config,
-    network: Network,
-    state: scan::State,
-    chain_tip_change: ChainTipChange,
-) -> ScanTask {
-    ScanTask::spawn(config, network, state, chain_tip_change)
-}
-
 /// Initialize [`ScanService`] based on its config.
 ///
 /// TODO: add a test for this function.
