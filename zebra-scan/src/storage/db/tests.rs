@@ -18,6 +18,9 @@ use crate::{
 #[cfg(test)]
 mod snapshot;
 
+#[cfg(test)]
+mod vectors;
+
 /// Returns an empty `Storage` suitable for testing.
 pub fn new_test_storage(network: Network) -> Storage {
     Storage::new(&Config::ephemeral(), network, false)
