@@ -22,26 +22,40 @@ pub fn deletes_keys_and_results_correctly() {
     );
 
     let efvks = [&zec_pages_sapling_efvk, &fake_efvk];
+    let fake_heights = [Height::MIN, Height(1), Height::MAX];
+    let fake_transaction_indexes = [
+        TransactionIndex::MIN,
+        TransactionIndex::from_index(40),
+        TransactionIndex::MAX,
+    ];
 
     for efvk in efvks {
-        for fake_result_height in [Height::MIN, Height(1), Height::MAX] {
+        for fake_result_height in fake_heights {
             db.insert_sapling_results(
                 efvk,
                 fake_result_height,
-                fake_sapling_results([
-                    TransactionIndex::MIN,
-                    TransactionIndex::from_index(40),
-                    TransactionIndex::MAX,
-                ]),
+                fake_sapling_results(fake_transaction_indexes),
             );
         }
     }
 
+    let expected_num_entries = fake_heights.len();
+    let expected_num_results_per_entry = fake_transaction_indexes.len();
+
     for efvk in efvks {
-        assert!(
-            !db.sapling_results(efvk).is_empty(),
-            "there should be some results for this key in the db"
+        assert_eq!(
+            db.sapling_results(efvk).len(),
+            expected_num_entries,
+            "there should be {expected_num_entries} entries for this key in the db"
         );
+
+        for (_, result) in db.sapling_results(efvk) {
+            assert_eq!(
+                result.len(),
+                expected_num_results_per_entry,
+                "there should be {expected_num_results_per_entry} results for this entry in the db"
+            );
+        }
 
         db.delete_sapling_results(vec![efvk.clone()]);
 
