@@ -47,10 +47,13 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
         .map_err(|err| eyre!(err))?
         .call(Request::DeleteKeys(vec![zec_pages_sapling_efvk.clone()]));
 
+    let expected_keys = vec![zec_pages_sapling_efvk.clone()];
     let cmd_handler_fut = tokio::task::spawn_blocking(move || {
-        let Ok(ScanTaskCommand::RemoveKeys { done_tx, .. }) = cmd_receiver.recv() else {
+        let Ok(ScanTaskCommand::RemoveKeys { done_tx, keys }) = cmd_receiver.recv() else {
             panic!("should successfully receive RemoveKeys message");
         };
+
+        assert_eq!(keys, expected_keys, "keys should match the request keys");
 
         done_tx.send(()).expect("send should succeed");
     });
