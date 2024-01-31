@@ -42,7 +42,7 @@ use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 use crate::{
     init::ScanTaskCommand,
     storage::{SaplingScanningKey, Storage},
-    Config,
+    Config, ScanTask,
 };
 
 /// The generic state type used by the scanner.
@@ -113,6 +113,45 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
+        parsed_keys = ScanTask::process_msgs(&cmd_receiver, parsed_keys)?;
+
+        let scanned_height = scan_height_and_store_results(
+            height,
+            state.clone(),
+            chain_tip_change.clone(),
+            storage.clone(),
+            key_heights.clone(),
+            parsed_keys.clone(),
+        )
+        .await?;
+
+        // If we've reached the tip, sleep for a while then try and get the same block.
+        if scanned_height.is_none() {
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+
+        height = height
+            .next()
+            .expect("a valid blockchain never reaches the max height");
+    }
+}
+
+impl ScanTask {
+    /// Accepts the scan task's `parsed_key` collection and a reference to the command channel receiver
+    ///
+    /// Processes messages in the scan task channel, updating `parsed_keys` if required.
+    ///
+    /// Returns the updated `parsed_keys`
+    fn process_msgs(
+        cmd_receiver: &Receiver<ScanTaskCommand>,
+        mut parsed_keys: Arc<
+            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+        >,
+    ) -> Result<
+        Arc<HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>>,
+        Report,
+    > {
         loop {
             let cmd = match cmd_receiver.try_recv() {
                 Ok(cmd) => cmd,
@@ -145,28 +184,9 @@ pub async fn start(
             }
         }
 
-        let scanned_height = scan_height_and_store_results(
-            height,
-            state.clone(),
-            chain_tip_change.clone(),
-            storage.clone(),
-            key_heights.clone(),
-            parsed_keys.clone(),
-        )
-        .await?;
-
-        // If we've reached the tip, sleep for a while then try and get the same block.
-        if scanned_height.is_none() {
-            tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
-        }
-
-        height = height
-            .next()
-            .expect("a valid blockchain never reaches the max height");
+        Ok(parsed_keys)
     }
 }
-
 /// Get the block at `height` from `state`, scan it with the keys in `parsed_keys`, and store the
 /// results in `storage`. If `height` is lower than the `key_birthdays` for that key, skip it.
 ///
