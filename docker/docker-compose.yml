@@ -26,7 +26,6 @@ services:
     #     mode: 0440
     volumes:
       - zebrad-cache:/var/cache/zebrad-cache
-      - lwd-cache:/var/cache/lwd-cache
     ports:
       # Zebra uses the following inbound and outbound TCP ports
       - "8233:8233" # Mainnet Network (for peer connections)
@@ -43,7 +42,4 @@ configs:
 
 volumes:
   zebrad-cache:
-    driver: local
-
-  lwd-cache:
     driver: local

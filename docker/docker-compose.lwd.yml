@@ -3,9 +3,7 @@ version: "3.8"
 services:
   zebra:
     ports:
-      # Zebra uses the following inbound and outbound TCP ports
-      - "8233:8233"
-      - "8232:8232"
+      - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
     healthcheck:
       start_period: 1m
       interval: 15s

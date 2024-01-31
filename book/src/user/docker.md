@@ -23,13 +23,11 @@ With plain `docker` CLI:
 
 ```shell
 docker volume create zebrad-cache
-docker volume create lwd-cache
 
 docker run -d --platform linux/amd64 \
   --restart unless-stopped \
   --env-file .env \
   --mount type=volume,source=zebrad-cache,target=/var/cache/zebrad-cache \
-  --mount type=volume,source=lwd-cache,target=/var/cache/lwd-cache \
   -p 8233:8233 \
   --memory 16G \
   --cpus 4 \
