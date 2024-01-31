@@ -90,15 +90,14 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     scan_task.remove_keys(&keys)?.await?;
-                    db.delete_sapling_results(&keys);
 
-                    Ok(Response::DeletedKeys(keys))
+                    tokio::task::spawn_blocking(move || {
+                        db.delete_sapling_results(keys);
+                    });
+
+                    Ok(Response::DeletedKeys)
                 }
                 .boxed();
-
-                // TODO:
-                //  - delete these keys and their results from db
-                //  - send deleted keys to scan task
             }
 
             Request::Results(_key_hashes) => {

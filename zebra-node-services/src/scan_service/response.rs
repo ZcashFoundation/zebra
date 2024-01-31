@@ -17,9 +17,7 @@ pub enum Response {
     Results(Vec<Transaction>),
 
     /// Response to DeleteKeys request
-    ///
-    /// Includes the keys that were removed from the database.
-    DeletedKeys(Vec<String>),
+    DeletedKeys,
 
     /// Response to SubscribeResults request
     SubscribeResults(mpsc::Receiver<Arc<Transaction>>),
