@@ -93,7 +93,7 @@ impl ScanTask {
         self.cmd_sender.send(command)
     }
 
-    /// Sends a command to the scan task
+    /// Sends a message to the scan task to remove the provided viewing keys.
     pub fn remove_keys(
         &mut self,
         keys: &[String],

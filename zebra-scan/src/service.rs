@@ -1,6 +1,6 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, sync::mpsc::Receiver, task::Poll};
+use std::{future::Future, pin::Pin, sync::mpsc::Receiver, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
 use tower::Service;
@@ -27,6 +27,9 @@ pub struct ScanService {
     /// Handle to scan task that's responsible for writing results
     scan_task: ScanTask,
 }
+
+/// A timeout applied to `DeleteKeys` requests.
+const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
     /// Create a new [`ScanService`].
@@ -95,12 +98,21 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    scan_task.remove_keys(&keys)?.await?;
+                    // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
+                    let remove_keys_result =
+                        tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
+                            .await
+                            .map_err(|_| "timeout waiting for delete keys done notification");
 
-                    tokio::task::spawn_blocking(move || {
+                    // Delete the key from the database after either confirmation that it's been removed from the scan task, or
+                    // waiting `DELETE_KEY_TIMEOUT`.
+                    let delete_key_task = tokio::task::spawn_blocking(move || {
                         db.delete_sapling_results(keys);
-                    })
-                    .await?;
+                    });
+
+                    // Return timeout errors or `RecvError`s, or wait for the key to be deleted from the database.
+                    remove_keys_result??;
+                    delete_key_task.await?;
 
                     Ok(Response::DeletedKeys)
                 }
