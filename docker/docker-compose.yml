@@ -14,11 +14,6 @@ services:
         reservations:
           cpus: "4"
           memory: 16G
-    depends_on:
-      prometheus:
-        condition: service_started
-      grafana:
-        condition: service_started
     env_file:
       - .env
     #! Uncomment the following line to use a zebrad.toml from the host machine
@@ -34,9 +29,9 @@ services:
       - lwd-cache:/var/cache/lwd-cache
     ports:
       # Zebra uses the following inbound and outbound TCP ports
-      - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
       - "8233:8233" # Mainnet Network (for peer connections)
-      - "18233:18233" # Testnet Network
+      # - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
+      # - "18233:18233" # Testnet Network
       # - "9999:9999" # Metrics
       # - "3000:3000" # Tracing
 

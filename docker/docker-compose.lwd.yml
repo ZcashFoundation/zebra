@@ -2,6 +2,10 @@ version: "3.8"
 
 services:
   zebra:
+    ports:
+      # Zebra uses the following inbound and outbound TCP ports
+      - "8233:8233"
+      - "8232:8232"
     healthcheck:
       start_period: 1m
       interval: 15s
@@ -36,8 +40,8 @@ services:
     #! For production environments follow the guidelines here: https://github.com/zcash/lightwalletd#production-usage
     command: >
       --no-tls-very-insecure
-      --grpc-bind-addr=0.0.0.0:$LWD_GRPC_PORT
-      --http-bind-addr=0.0.0.0:$LWD_HTTP_PORT
+      --grpc-bind-addr=0.0.0.0:9067
+      --http-bind-addr=0.0.0.0:9068
       --zcash-conf-path=/etc/lightwalletd/zcash.conf
       --data-dir=/var/lib/lightwalletd/db
       --log-file=/dev/stdout
