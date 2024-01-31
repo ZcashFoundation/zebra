@@ -12,8 +12,8 @@ pub enum Request {
     /// TODO: Accept `ViewingKeyWithHash`es and return Ok(()) if successful or an error
     RegisterKeys(Vec<()>),
 
-    /// TODO: Accept `KeyHash`es and return Ok(`Vec<KeyHash>`) with hashes of deleted keys
-    DeleteKeys(Vec<()>),
+    /// Deletes viewing keys and their results from the database.
+    DeleteKeys(Vec<String>),
 
     /// TODO: Accept `KeyHash`es and return `Transaction`s
     Results(Vec<()>),

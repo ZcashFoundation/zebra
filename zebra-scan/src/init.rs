@@ -23,7 +23,7 @@ pub enum ScanTaskCommand {
         done_tx: oneshot::Sender<()>,
 
         /// Key hashes that are to be removed
-        key_hashes: Vec<()>,
+        keys: Vec<String>,
     },
 
     /// Start sending results for key hashes to `result_sender`
@@ -36,25 +36,29 @@ pub enum ScanTaskCommand {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Scan task handle and command channel sender
 pub struct ScanTask {
     /// [`JoinHandle`] of scan task
-    pub handle: JoinHandle<Result<(), Report>>,
+    pub handle: Arc<JoinHandle<Result<(), Report>>>,
 
     /// Task command channel sender
-    cmd_sender: mpsc::Sender<ScanTaskCommand>,
+    pub cmd_sender: mpsc::Sender<ScanTaskCommand>,
 }
 
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
-    pub fn mock() -> Self {
-        let (cmd_sender, _cmd_receiver) = mpsc::channel();
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn mock() -> (Self, mpsc::Receiver<ScanTaskCommand>) {
+        let (cmd_sender, cmd_receiver) = mpsc::channel();
 
-        Self {
-            handle: tokio::spawn(std::future::pending()),
-            cmd_sender,
-        }
+        (
+            Self {
+                handle: Arc::new(tokio::spawn(std::future::pending())),
+                cmd_sender,
+            },
+            cmd_receiver,
+        )
     }
 
     /// Spawns a new [`ScanTask`].
@@ -64,11 +68,16 @@ impl ScanTask {
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
-        // TODO: Pass `_cmd_receiver` to `scan::start()` to pass it new keys after it's been spawned
-        let (cmd_sender, _cmd_receiver) = mpsc::channel();
+        let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         Self {
-            handle: scan::spawn_init(config, network, state, chain_tip_change),
+            handle: Arc::new(scan::spawn_init(
+                config,
+                network,
+                state,
+                chain_tip_change,
+                cmd_receiver,
+            )),
             cmd_sender,
         }
     }
@@ -80,18 +89,21 @@ impl ScanTask {
     ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
         self.cmd_sender.send(command)
     }
-}
 
-/// Initialize the scanner based on its config, and spawn a task for it.
-///
-/// TODO: add a test for this function.
-pub fn spawn_init(
-    config: &Config,
-    network: Network,
-    state: scan::State,
-    chain_tip_change: ChainTipChange,
-) -> JoinHandle<Result<(), Report>> {
-    scan::spawn_init(config, network, state, chain_tip_change)
+    /// Sends a message to the scan task to remove the provided viewing keys.
+    pub fn remove_keys(
+        &mut self,
+        keys: &[String],
+    ) -> Result<oneshot::Receiver<()>, mpsc::SendError<ScanTaskCommand>> {
+        let (done_tx, done_rx) = oneshot::channel();
+
+        self.send(ScanTaskCommand::RemoveKeys {
+            keys: keys.to_vec(),
+            done_tx,
+        })?;
+
+        Ok(done_rx)
+    }
 }
 
 /// Initialize [`ScanService`] based on its config.

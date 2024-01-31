@@ -2,7 +2,10 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{
+        mpsc::{Receiver, TryRecvError},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -37,8 +40,9 @@ use zebra_chain::{
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::{
+    init::ScanTaskCommand,
     storage::{SaplingScanningKey, Storage},
-    Config,
+    Config, ScanTask,
 };
 
 /// The generic state type used by the scanner.
@@ -66,6 +70,7 @@ pub async fn start(
     state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
+    cmd_receiver: Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
     let sapling_activation_height = storage.min_sapling_birthday_height();
@@ -102,12 +107,14 @@ pub async fn start(
             Ok::<_, Report>((key.clone(), parsed_keys))
         })
         .try_collect()?;
-    let parsed_keys = Arc::new(parsed_keys);
+    let mut parsed_keys = Arc::new(parsed_keys);
 
     // Give empty states time to verify some blocks before we start scanning.
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
+        parsed_keys = ScanTask::process_msgs(&cmd_receiver, parsed_keys)?;
+
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
@@ -130,6 +137,56 @@ pub async fn start(
     }
 }
 
+impl ScanTask {
+    /// Accepts the scan task's `parsed_key` collection and a reference to the command channel receiver
+    ///
+    /// Processes messages in the scan task channel, updating `parsed_keys` if required.
+    ///
+    /// Returns the updated `parsed_keys`
+    fn process_msgs(
+        cmd_receiver: &Receiver<ScanTaskCommand>,
+        mut parsed_keys: Arc<
+            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+        >,
+    ) -> Result<
+        Arc<HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>>,
+        Report,
+    > {
+        loop {
+            let cmd = match cmd_receiver.try_recv() {
+                Ok(cmd) => cmd,
+
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    // Return early if the sender has been dropped.
+                    return Err(eyre!("command channel disconnected"));
+                }
+            };
+
+            match cmd {
+                ScanTaskCommand::RemoveKeys { done_tx, keys } => {
+                    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                    // https://github.com/rust-lang/rust/issues/93610
+                    let mut updated_parsed_keys =
+                        Arc::try_unwrap(parsed_keys).unwrap_or_else(|arc| (*arc).clone());
+
+                    for key in keys {
+                        updated_parsed_keys.remove(&key);
+                    }
+
+                    parsed_keys = Arc::new(updated_parsed_keys);
+
+                    // Ignore send errors for the done notification
+                    let _ = done_tx.send(());
+                }
+
+                _ => continue,
+            }
+        }
+
+        Ok(parsed_keys)
+    }
+}
 /// Get the block at `height` from `state`, scan it with the keys in `parsed_keys`, and store the
 /// results in `storage`. If `height` is lower than the `key_birthdays` for that key, skip it.
 ///
@@ -445,11 +502,12 @@ pub fn spawn_init(
     network: Network,
     state: State,
     chain_tip_change: ChainTipChange,
+    cmd_receiver: Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
     let config = config.clone();
 
     // TODO: spawn an entirely new executor here, to avoid timing attacks.
-    tokio::spawn(init(config, network, state, chain_tip_change).in_current_span())
+    tokio::spawn(init(config, network, state, chain_tip_change, cmd_receiver).in_current_span())
 }
 
 /// Initialize the scanner based on its config.
@@ -460,11 +518,12 @@ pub async fn init(
     network: Network,
     state: State,
     chain_tip_change: ChainTipChange,
+    cmd_receiver: Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
         .wait_for_panics()
         .await;
 
     // TODO: add more tasks here?
-    start(state, chain_tip_change, storage).await
+    start(state, chain_tip_change, storage, cmd_receiver).await
 }

@@ -1,6 +1,6 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, task::Poll};
+use std::{future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
 use tower::Service;
@@ -10,15 +10,24 @@ use zebra_state::ChainTipChange;
 
 use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
 
+#[cfg(test)]
+mod tests;
+
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]
 pub struct ScanService {
     /// On-disk storage
-    db: Storage,
+    pub db: Storage,
 
     /// Handle to scan task that's responsible for writing results
     scan_task: ScanTask,
 }
+
+/// A timeout applied to `DeleteKeys` requests.
+const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The maximum number of keys that may be included in a request to the scan service
+const MAX_REQUEST_KEYS: usize = 1000;
 
 impl ScanService {
     /// Create a new [`ScanService`].
@@ -35,11 +44,15 @@ impl ScanService {
     }
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
-    pub fn new_with_mock_scanner(config: &Config, network: Network) -> Self {
-        Self {
-            db: Storage::new(config, network, false),
-            scan_task: ScanTask::mock(),
-        }
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_with_mock_scanner(
+        db: Storage,
+    ) -> (
+        Self,
+        std::sync::mpsc::Receiver<crate::init::ScanTaskCommand>,
+    ) {
+        let (scan_task, cmd_receiver) = ScanTask::mock();
+        (Self { db, scan_task }, cmd_receiver)
     }
 }
 
@@ -84,10 +97,37 @@ impl Service<Request> for ScanService {
                 //  - send new keys to scan task
             }
 
-            Request::DeleteKeys(_key_hashes) => {
-                // TODO:
-                //  - delete these keys and their results from db
-                //  - send deleted keys to scan task
+            Request::DeleteKeys(keys) => {
+                let mut db = self.db.clone();
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    if keys.len() > MAX_REQUEST_KEYS {
+                        return Err(format!(
+                            "maximum number of keys per request is {MAX_REQUEST_KEYS}"
+                        )
+                        .into());
+                    }
+
+                    // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
+                    let remove_keys_result =
+                        tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
+                            .await
+                            .map_err(|_| "timeout waiting for delete keys done notification");
+
+                    // Delete the key from the database after either confirmation that it's been removed from the scan task, or
+                    // waiting `DELETE_KEY_TIMEOUT`.
+                    let delete_key_task = tokio::task::spawn_blocking(move || {
+                        db.delete_sapling_results(keys);
+                    });
+
+                    // Return timeout errors or `RecvError`s, or wait for the key to be deleted from the database.
+                    remove_keys_result??;
+                    delete_key_task.await?;
+
+                    Ok(Response::DeletedKeys)
+                }
+                .boxed();
             }
 
             Request::Results(_key_hashes) => {

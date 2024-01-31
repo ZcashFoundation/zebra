@@ -19,4 +19,4 @@ pub mod service;
 pub mod tests;
 
 pub use config::Config;
-pub use init::{init, spawn_init};
+pub use init::{init, ScanTask};

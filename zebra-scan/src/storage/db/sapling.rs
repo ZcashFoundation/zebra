@@ -233,6 +233,25 @@ impl Storage {
             .write_batch()
             .expect("unexpected database write failure");
     }
+
+    /// Delete the results of sapling scanning `keys`, if they exist
+    pub(crate) fn delete_sapling_results(&mut self, keys: Vec<SaplingScanningKey>) {
+        let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
+
+        for key in &keys {
+            let from = SaplingScannedDatabaseIndex::min_for_key(key);
+            let until_strictly_before = SaplingScannedDatabaseIndex::max_for_key(key);
+
+            batch = batch
+                .zs_delete_range(&from, &until_strictly_before)
+                // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+                .zs_delete(&until_strictly_before);
+        }
+
+        batch
+            .write_batch()
+            .expect("unexpected database write failure");
+    }
 }
 
 /// Utility trait for inserting sapling heights into a WriteSaplingTxIdsBatch.
