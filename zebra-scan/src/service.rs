@@ -1,6 +1,6 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, sync::mpsc::Receiver, task::Poll, time::Duration};
+use std::{future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
 use tower::Service;
@@ -8,12 +8,7 @@ use tower::Service;
 use zebra_chain::parameters::Network;
 use zebra_state::ChainTipChange;
 
-use crate::{
-    init::{ScanTask, ScanTaskCommand},
-    scan,
-    storage::Storage,
-    Config, Request, Response,
-};
+use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
 
 #[cfg(test)]
 mod tests;
@@ -50,7 +45,12 @@ impl ScanService {
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn new_with_mock_scanner(db: Storage) -> (Self, Receiver<ScanTaskCommand>) {
+    pub fn new_with_mock_scanner(
+        db: Storage,
+    ) -> (
+        Self,
+        std::sync::mpsc::Receiver<crate::init::ScanTaskCommand>,
+    ) {
         let (scan_task, cmd_receiver) = ScanTask::mock();
         (Self { db, scan_task }, cmd_receiver)
     }
