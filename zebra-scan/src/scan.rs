@@ -126,6 +126,8 @@ pub async fn start(
 
             match cmd {
                 ScanTaskCommand::RemoveKeys { done_tx, keys } => {
+                    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                    // https://github.com/rust-lang/rust/issues/93610
                     let mut updated_parsed_keys =
                         Arc::try_unwrap(parsed_keys).unwrap_or_else(|arc| (*arc).clone());
 
