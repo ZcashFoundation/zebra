@@ -234,6 +234,25 @@ impl Storage {
             .expect("unexpected database write failure");
     }
 
+    /// Delete the sapling keys and their results, if they exist,
+    pub(crate) fn delete_sapling_keys(&mut self, keys: Vec<SaplingScanningKey>) {
+        let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
+
+        for key in &keys {
+            let from = SaplingScannedDatabaseIndex::min_for_key(key);
+            let until_strictly_before = SaplingScannedDatabaseIndex::max_for_key(key);
+
+            batch = batch
+                .zs_delete_range(&from, &until_strictly_before)
+                // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+                .zs_delete(&until_strictly_before);
+        }
+
+        batch
+            .write_batch()
+            .expect("unexpected database write failure");
+    }
+
     /// Delete the results of sapling scanning `keys`, if they exist
     pub(crate) fn delete_sapling_results(&mut self, keys: Vec<SaplingScanningKey>) {
         let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
@@ -245,7 +264,8 @@ impl Storage {
             batch = batch
                 .zs_delete_range(&from, &until_strictly_before)
                 // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                .zs_delete(&until_strictly_before);
+                .zs_delete(&until_strictly_before)
+                .insert_sapling_height(key, Height::MIN);
         }
 
         batch
