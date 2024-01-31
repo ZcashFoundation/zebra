@@ -51,6 +51,7 @@ pub struct ScanTask {
 
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn mock() -> (Self, Receiver<ScanTaskCommand>) {
         let (cmd_sender, cmd_receiver) = mpsc::channel();
 

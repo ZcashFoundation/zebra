@@ -46,6 +46,7 @@ impl ScanService {
     }
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn new_with_mock_scanner(db: Storage) -> (Self, Receiver<ScanTaskCommand>) {
         let (scan_task, cmd_receiver) = ScanTask::mock();
         (Self { db, scan_task }, cmd_receiver)

@@ -17,6 +17,7 @@ categories = ["cryptography::cryptocurrencies"]
 [[bin]] # Bin to run the Scanner gRPC server
 name = "scanner-grpc-server"
 path = "src/bin/rpc_server.rs"
+required-features = ["proptest-impl"]
 
 [features]
 
