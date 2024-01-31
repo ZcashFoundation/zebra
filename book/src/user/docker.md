@@ -4,7 +4,7 @@ The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docke
 
 We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users.
 
-> [!WARNING]
+> [!TIP]
 > We recommend using `docker compose` sub-command over the plain `docker` CLI, especially for more advanced use-cases like running CI locally, as it provides a more convenient and powerful way to manage multi-container Docker applications. See [CI/CD Local Testing](#cicd-local-testing) for more information, and other compose files available in the [docker](https://github.com/ZcashFoundation/zebra/tree/main/docker) folder.
 
 ## Quick usage
@@ -54,7 +54,7 @@ You're able to specify various parameters when building or launching the Docker 
 
 For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
 
-> [!WARNING]
+> [!IMPORTANT]
 > To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
 ```shell

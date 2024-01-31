@@ -6,7 +6,7 @@ recommend using
 use it in testing. Other `lightwalletd` forks have limited support, see the
 [Sync lightwalletd](#sync-lightwalletd) section for more info.
 
-> [!WARNING]
+> [!NOTE]
 > You can also use `docker` to run lightwalletd with zebra. Please see our [docker documentation](./docker.md#running-zebra-with-lightwalletd) for more information.
 
 Contents:
