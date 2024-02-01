@@ -3,13 +3,13 @@ version: "3.8"
 services:
   zebra:
     ports:
-      - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
+      - "8232:8232" # Opens an RPC endpoint (for lightwalletd and mining)
     healthcheck:
       start_period: 1m
       interval: 15s
       timeout: 10s
       retries: 3
-      test: ["CMD-SHELL", "curl --data-binary '{\"jsonrpc\": \"1.0\", \"id\":\"curltest\", \"method\": \"getinfo\", \"params\": [] }' -H 'content-type: application/json' http://127.0.0.1:8232/ || exit 1"]
+      test: ["CMD-SHELL", "curl --data-binary '{\"id\":\"curltest\", \"method\": \"getinfo\"}' -H 'content-type: application/json' 127.0.0.1:8232 || exit 1"]
 
   lightwalletd:
     image: electriccoinco/lightwalletd
