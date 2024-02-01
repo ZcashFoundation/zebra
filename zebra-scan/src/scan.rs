@@ -73,15 +73,12 @@ pub async fn start(
     let sapling_activation_height = storage.min_sapling_birthday_height();
 
     // Do not scan and notify if we are below sapling activation height.
-    loop {
-        let tip_height = tip_height(state.clone()).await?;
-        if tip_height < sapling_activation_height {
-            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
-            tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
-        }
-        break;
-    }
+    wait_for_height(
+        sapling_activation_height,
+        "Sapling activation",
+        state.clone(),
+    )
+    .await?;
 
     // Read keys from the storage on disk, which can block async execution.
     let key_storage = storage.clone();
@@ -155,17 +152,13 @@ pub async fn scan_until(
     storage: Storage,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.min_sapling_birthday_height();
-
     // Do not scan and notify if we are below sapling activation height.
-    loop {
-        let tip_height = tip_height(state.clone()).await?;
-        if tip_height < sapling_activation_height {
-            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
-            tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
-        }
-        break;
-    }
+    wait_for_height(
+        sapling_activation_height,
+        "Sapling activation",
+        state.clone(),
+    )
+    .await?;
 
     let key_heights = keys
         .iter()
@@ -210,6 +203,28 @@ pub async fn scan_until(
         height = height
             .next()
             .expect("a valid blockchain never reaches the max height");
+    }
+
+    Ok(())
+}
+
+/// Polls state service for tip height every [`CHECK_INTERVAL`] until the tip reaches the provided `tip_height`
+pub async fn wait_for_height(
+    height: Height,
+    height_name: &'static str,
+    state: State,
+) -> Result<(), Report> {
+    loop {
+        let tip_height = tip_height(state.clone()).await?;
+        if tip_height < height {
+            info!(
+                "scanner is waiting for {height_name}. Current tip: {}, {height_name}: {}",
+                tip_height.0, height.0
+            );
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+        break;
     }
 
     Ok(())
