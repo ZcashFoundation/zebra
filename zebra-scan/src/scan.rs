@@ -208,7 +208,6 @@ pub async fn scan_until(
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
     // Parse and convert keys once, then use them to scan all blocks.
-    // There is some cryptography here, but it should be fast even with thousands of keys.
     let parsed_keys: HashMap<
         SaplingScanningKey,
         (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
