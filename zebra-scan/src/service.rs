@@ -144,8 +144,13 @@ impl Service<Request> for ScanService {
 
                     let mut final_result = BTreeMap::new();
                     for key in keys {
+                        let db = db.clone();
                         let mut heights_and_transactions = BTreeMap::new();
-                        let txs = db.sapling_results_for_key(&key);
+                        let txs = {
+                            let key = key.clone();
+                            tokio::task::spawn_blocking(move || db.sapling_results_for_key(&key))
+                        }
+                        .await?;
                         txs.iter().for_each(|(k, v)| {
                             heights_and_transactions
                                 .entry(*k)
