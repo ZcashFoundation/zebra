@@ -2,6 +2,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use tokio::task::JoinHandle;
+use tracing::Instrument;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, BoxError};
 use zebra_state::SaplingScanningKey;
@@ -11,9 +13,51 @@ use crate::{
     storage::Storage,
 };
 
+/// A builder for a scan until task
+pub struct ScanRangeTaskBuilder {
+    height_range: std::ops::Range<Height>,
+    keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+    state: State,
+    storage: Storage,
+}
+
+impl ScanRangeTaskBuilder {
+    /// Creates a new [`ScanRangeTaskBuilder`]
+    pub fn new(
+        stop_height: Height,
+        keys: HashMap<
+            SaplingScanningKey,
+            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
+        >,
+        state: State,
+        storage: Storage,
+    ) -> Self {
+        Self {
+            height_range: Height::MIN..stop_height,
+            keys,
+            state,
+            storage,
+        }
+    }
+
+    /// Spawns a `scan_range()` task and returns its [`JoinHandle`]
+    // TODO: return a tuple with a shutdown sender
+    pub fn spawn(self) -> JoinHandle<Result<(), BoxError>> {
+        let Self {
+            height_range,
+            keys,
+            state,
+            storage,
+        } = self;
+
+        tokio::spawn(scan_range(height_range.end, keys, state, storage).in_current_span())
+    }
+}
+
 /// Start a scan task that reads blocks from `state` within the provided height range,
 /// scans them with the configured keys in `storage`, and then writes the results to `storage`.
-pub async fn scan_until(
+// TODO: update the first parameter to `std::ops::Range<Height>`
+pub async fn scan_range(
     stop_before_height: Height,
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,

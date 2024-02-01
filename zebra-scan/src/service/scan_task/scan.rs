@@ -7,7 +7,6 @@ use std::{
 };
 
 use color_eyre::{eyre::eyre, Report};
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
@@ -34,7 +33,6 @@ use zebra_chain::{
     parameters::Network,
     serialization::ZcashSerialize,
     transaction::Transaction,
-    BoxError,
 };
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
@@ -44,6 +42,8 @@ use crate::{
     Config,
 };
 
+use self::add_keys::ScanRangeTaskBuilder;
+
 /// The generic state type used by the scanner.
 pub type State = Buffer<
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
@@ -51,6 +51,7 @@ pub type State = Buffer<
 >;
 
 mod add_keys;
+mod executor;
 
 /// Wait a few seconds at startup for some blocks to get verified.
 ///
@@ -107,52 +108,24 @@ pub async fn start(
         .try_collect()?;
     let mut parsed_keys = Arc::new(parsed_keys);
 
-    let (scan_until_task_sender, mut scan_until_task_receiver) =
-        tokio::sync::mpsc::unbounded_channel();
-
-    let _scan_until_task_handler = tokio::spawn(
-        async move {
-            let mut scan_until_tasks = FuturesUnordered::new();
-
-            // Push a pending future so that `.next()` will always return `Some`
-            scan_until_tasks.push(tokio::spawn(
-                std::future::pending::<Result<(), BoxError>>().boxed(),
-            ));
-
-            loop {
-                tokio::select! {
-                    Some((height, new_keys, state, storage)) = scan_until_task_receiver.recv() => {
-                        // TODO: Add a long timeout?
-                        let scan_until_task = tokio::spawn(
-                            add_keys::scan_until(height, new_keys, state, storage).in_current_span(),
-                        );
-
-                        scan_until_tasks.push(scan_until_task);
-                    }
-
-                    Some(finished_task) = scan_until_tasks.next() => {
-                        // TODO: Move this to a function and return the first error from a finished task?
-                        match finished_task
-                            .expect("futures unordered with pending future should always return Some")
-                        {
-                            Ok(()) => {}
-
-                            Err(err) => {
-                                warn!(?err, "scan_until task join error")
-                            }
-                        }
-                    }
-                }
-
-            }
-        }
-        .in_current_span(),
-    );
+    let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
+    let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
     // Give empty states time to verify some blocks before we start scanning.
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
+        if let Some(handle) = scan_task_executor_handle {
+            if handle.is_finished() {
+                warn!("scan task finished unexpectedly");
+
+                handle.await?.map_err(|err| eyre!(err))?;
+                return Ok(());
+            } else {
+                scan_task_executor_handle = Some(handle);
+            }
+        }
+
         let new_keys = ScanTask::process_messages(
             &cmd_receiver,
             Arc::get_mut(&mut parsed_keys)
@@ -164,8 +137,8 @@ pub async fn start(
             let state = state.clone();
             let storage = storage.clone();
 
-            scan_until_task_sender
-                .send((height, new_keys, state, storage))
+            scan_task_sender
+                .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
                 .expect("scan_until_task channel should not be full");
         }
 
