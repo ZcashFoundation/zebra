@@ -78,6 +78,61 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
     Ok(())
 }
 
+/// Tests that results are cleared are deleted correctly
+#[tokio::test]
+pub async fn scan_service_clears_results_correctly() -> Result<()> {
+    let mut db = new_test_storage(Network::Mainnet);
+
+    let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
+
+    for fake_result_height in [Height::MIN, Height(1), Height::MAX] {
+        db.insert_sapling_results(
+            &zec_pages_sapling_efvk,
+            fake_result_height,
+            fake_sapling_results([
+                TransactionIndex::MIN,
+                TransactionIndex::from_index(40),
+                TransactionIndex::MAX,
+            ]),
+        );
+    }
+
+    assert!(
+        !db.sapling_results(&zec_pages_sapling_efvk).is_empty(),
+        "there should be some results for this key in the db"
+    );
+
+    let (mut scan_service, _cmd_receiver) = ScanService::new_with_mock_scanner(db.clone());
+
+    let response = scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::ClearResults(vec![zec_pages_sapling_efvk.clone()]))
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    match response {
+        Response::ClearedResults => {}
+        _ => panic!("scan service returned unexpected response variant"),
+    };
+
+    assert_eq!(
+        db.sapling_results(&zec_pages_sapling_efvk).len(),
+        1,
+        "all results for this key should have been deleted, one empty entry should remain"
+    );
+
+    for (_, result) in db.sapling_results(&zec_pages_sapling_efvk) {
+        assert!(
+            result.is_empty(),
+            "there should be no results for this entry in the db"
+        );
+    }
+
+    Ok(())
+}
+
 /// Tests that results for key are returned correctly
 #[tokio::test]
 pub async fn scan_service_get_results_for_key_correctly() -> Result<()> {

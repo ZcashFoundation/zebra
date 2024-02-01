@@ -27,9 +27,6 @@ pub struct ScanService {
 /// A timeout applied to `DeleteKeys` requests.
 const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The maximum number of keys that may be included in a request to the scan service
-const MAX_REQUEST_KEYS: usize = 1000;
-
 impl ScanService {
     /// Create a new [`ScanService`].
     pub fn new(
@@ -76,6 +73,10 @@ impl Service<Request> for ScanService {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
+        if let Err(error) = req.check() {
+            return async move { Err(error) }.boxed();
+        }
+
         match req {
             Request::Info => {
                 let db = self.db.clone();
@@ -103,13 +104,6 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    if keys.len() > MAX_REQUEST_KEYS {
-                        return Err(format!(
-                            "maximum number of keys per request is {MAX_REQUEST_KEYS}"
-                        )
-                        .into());
-                    }
-
                     // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
                     let remove_keys_result =
                         tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
@@ -119,7 +113,7 @@ impl Service<Request> for ScanService {
                     // Delete the key from the database after either confirmation that it's been removed from the scan task, or
                     // waiting `DELETE_KEY_TIMEOUT`.
                     let delete_key_task = tokio::task::spawn_blocking(move || {
-                        db.delete_sapling_results(keys);
+                        db.delete_sapling_keys(keys);
                     });
 
                     // Return timeout errors or `RecvError`s, or wait for the key to be deleted from the database.
@@ -135,13 +129,6 @@ impl Service<Request> for ScanService {
                 let db = self.db.clone();
 
                 return async move {
-                    if keys.len() > MAX_REQUEST_KEYS {
-                        return Err(format!(
-                            "maximum number of keys per request is {MAX_REQUEST_KEYS}"
-                        )
-                        .into());
-                    }
-
                     let mut final_result = BTreeMap::new();
                     for key in keys {
                         let db = db.clone();
@@ -169,8 +156,19 @@ impl Service<Request> for ScanService {
                 // TODO: send key_hashes and mpsc::Sender to scanner task, return mpsc::Receiver to caller
             }
 
-            Request::ClearResults(_key_hashes) => {
-                // TODO: clear results for these keys from db
+            Request::ClearResults(keys) => {
+                let mut db = self.db.clone();
+
+                return async move {
+                    // Clear results from db for the provided `keys`
+                    tokio::task::spawn_blocking(move || {
+                        db.delete_sapling_results(keys);
+                    })
+                    .await?;
+
+                    Ok(Response::ClearedResults)
+                }
+                .boxed();
             }
         }
 
