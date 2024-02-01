@@ -2842,8 +2842,8 @@ fn scan_task_starts() -> Result<()> {
     zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
 
     // Look for 2 scanner notices indicating we are below sapling activation.
-    zebrad.expect_stdout_line_matches("scanner is waiting for sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
-    zebrad.expect_stdout_line_matches("scanner is waiting for sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
+    zebrad.expect_stdout_line_matches("scanner is waiting for Sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
+    zebrad.expect_stdout_line_matches("scanner is waiting for Sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
 
     // Kill the node.
     zebrad.kill(false)?;

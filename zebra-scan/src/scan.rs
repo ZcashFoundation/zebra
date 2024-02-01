@@ -105,7 +105,8 @@ pub async fn start(
         .try_collect()?;
     let mut parsed_keys = Arc::new(parsed_keys);
 
-    let (scan_until_task_sender, mut scan_until_task_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (scan_until_task_sender, mut scan_until_task_receiver) =
+        tokio::sync::mpsc::unbounded_channel();
 
     let _scan_until_task_handler = tokio::spawn(
         async move {
@@ -118,8 +119,13 @@ pub async fn start(
 
             loop {
                 tokio::select! {
-                    Some(new_task) = scan_until_task_receiver.recv() => {
-                        scan_until_tasks.push(new_task);
+                    Some((height, new_keys, state, storage)) = scan_until_task_receiver.recv() => {
+                        // TODO: Add a long timeout?
+                        let scan_until_task = tokio::spawn(
+                            scan_until(height, new_keys, state, storage).in_current_span(),
+                        );
+
+                        scan_until_tasks.push(scan_until_task);
                     }
 
                     Some(finished_task) = scan_until_tasks.next() => {
@@ -128,7 +134,7 @@ pub async fn start(
                             .expect("futures unordered with pending future should always return Some")
                         {
                             Ok(()) => {}
-                
+
                             Err(err) => {
                                 warn!(?err, "scan_until task join error")
                             }
@@ -153,12 +159,12 @@ pub async fn start(
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
-            // TODO: Add a long timeout?
-            let scan_until_task = tokio::spawn(
-                scan_until(height, new_keys, state.clone(), storage.clone()).in_current_span(),
-            );
+            let state = state.clone();
+            let storage = storage.clone();
 
-            scan_until_task_sender.send(scan_until_task).expect("sync_until_task channel should not be full");
+            scan_until_task_sender
+                .send((height, new_keys, state, storage))
+                .expect("scan_until_task channel should not be full");
         }
 
         let scanned_height = scan_height_and_store_results(
