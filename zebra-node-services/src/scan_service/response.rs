@@ -19,6 +19,9 @@ pub enum Response {
     /// Response to DeleteKeys request
     DeletedKeys,
 
+    /// Response to ClearResults request
+    ClearedResults,
+
     /// Response to SubscribeResults request
     SubscribeResults(mpsc::Receiver<Arc<Transaction>>),
 }

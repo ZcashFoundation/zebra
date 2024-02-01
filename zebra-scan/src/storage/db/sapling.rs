@@ -234,18 +234,24 @@ impl Storage {
             .expect("unexpected database write failure");
     }
 
+    /// Delete the sapling keys and their results, if they exist,
+    pub(crate) fn delete_sapling_keys(&mut self, keys: Vec<SaplingScanningKey>) {
+        self.sapling_tx_ids_cf()
+            .new_batch_for_writing()
+            .delete_sapling_keys(keys)
+            .write_batch()
+            .expect("unexpected database write failure");
+    }
+
     /// Delete the results of sapling scanning `keys`, if they exist
     pub(crate) fn delete_sapling_results(&mut self, keys: Vec<SaplingScanningKey>) {
-        let mut batch = self.sapling_tx_ids_cf().new_batch_for_writing();
+        let mut batch = self
+            .sapling_tx_ids_cf()
+            .new_batch_for_writing()
+            .delete_sapling_keys(keys.clone());
 
         for key in &keys {
-            let from = SaplingScannedDatabaseIndex::min_for_key(key);
-            let until_strictly_before = SaplingScannedDatabaseIndex::max_for_key(key);
-
-            batch = batch
-                .zs_delete_range(&from, &until_strictly_before)
-                // TODO: convert zs_delete_range() to take std::ops::RangeBounds
-                .zs_delete(&until_strictly_before);
+            batch = batch.insert_sapling_height(key, Height::MIN);
         }
 
         batch
@@ -269,5 +275,27 @@ impl<'cf> InsertSaplingHeight for WriteSaplingTxIdsBatch<'cf> {
 
         // TODO: assert that we don't overwrite any entries here.
         self.zs_insert(&index, &None)
+    }
+}
+
+/// Utility trait for deleting sapling keys in a WriteSaplingTxIdsBatch.
+trait DeleteSaplingKeys {
+    fn delete_sapling_keys(self, sapling_key: Vec<SaplingScanningKey>) -> Self;
+}
+
+impl<'cf> DeleteSaplingKeys for WriteSaplingTxIdsBatch<'cf> {
+    /// Delete sapling keys and their results.
+    fn delete_sapling_keys(mut self, sapling_keys: Vec<SaplingScanningKey>) -> Self {
+        for key in &sapling_keys {
+            let from_index = SaplingScannedDatabaseIndex::min_for_key(key);
+            let until_strictly_before_index = SaplingScannedDatabaseIndex::max_for_key(key);
+
+            self = self
+                .zs_delete_range(&from_index, &until_strictly_before_index)
+                // TODO: convert zs_delete_range() to take std::ops::RangeBounds
+                .zs_delete(&until_strictly_before_index);
+        }
+
+        self
     }
 }
