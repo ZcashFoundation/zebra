@@ -78,7 +78,7 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
     Ok(())
 }
 
-/// Tests that keys are deleted correctly
+/// Tests that results are cleared are deleted correctly
 #[tokio::test]
 pub async fn scan_service_clears_results_correctly() -> Result<()> {
     let mut db = new_test_storage(Network::Mainnet);
