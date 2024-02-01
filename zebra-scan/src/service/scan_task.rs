@@ -24,10 +24,10 @@ pub enum ScanTaskCommand {
     /// Start scanning for new viewing keys
     RegisterKeys {
         /// New keys to start scanning for
-        keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-
-        /// The first height to start scanning at
-        start_height: Option<Height>,
+        keys: HashMap<
+            SaplingScanningKey,
+            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
+        >,
     },
 
     /// Stop scanning for deleted viewing keys
@@ -107,14 +107,10 @@ impl ScanTask {
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
     ) -> Result<
-        (
-            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-            Height,
-        ),
+        HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
         Report,
     > {
         let mut new_keys = HashMap::new();
-        let mut new_keys_start_height = Height::MIN;
 
         loop {
             let cmd = match cmd_receiver.try_recv() {
@@ -128,16 +124,21 @@ impl ScanTask {
             };
 
             match cmd {
-                ScanTaskCommand::RegisterKeys { keys, start_height } => {
-                    let start_height = start_height.unwrap_or(Height::MIN);
+                ScanTaskCommand::RegisterKeys { keys } => {
                     let keys: Vec<_> = keys
                         .into_iter()
                         .filter(|(key, _)| parsed_keys.contains_key(key))
                         .collect();
 
                     if !keys.is_empty() {
-                        new_keys_start_height = new_keys_start_height.min(start_height);
                         new_keys.extend(keys.clone());
+
+                        let keys =
+                            keys.into_iter()
+                                .map(|(key, (decoded_dfvks, decoded_ivks, _h))| {
+                                    (key, (decoded_dfvks, decoded_ivks))
+                                });
+
                         parsed_keys.extend(keys);
                     }
                 }
@@ -155,7 +156,7 @@ impl ScanTask {
             }
         }
 
-        Ok((new_keys, new_keys_start_height))
+        Ok(new_keys)
     }
 
     /// Sends a command to the scan task

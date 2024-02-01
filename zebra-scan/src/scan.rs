@@ -110,16 +110,24 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        let (_new_keys, _start_height) = ScanTask::process_messages(
+        let new_keys = ScanTask::process_messages(
             &cmd_receiver,
             Arc::get_mut(&mut parsed_keys)
                 .expect("there should only be one reference to parsed keys at this point"),
         )?;
 
+        if new_keys.is_empty() {
+            // TODO: add new task to a futures unordered
+
+            tokio::spawn(
+                scan_until(height, new_keys, state.clone(), storage.clone()).in_current_span(),
+            );
+        }
+
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
-            chain_tip_change.clone(),
+            Some(chain_tip_change.clone()),
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
@@ -138,6 +146,75 @@ pub async fn start(
     }
 }
 
+/// Start a scan task that reads blocks from `state` within the provided height range,
+/// scans them with the configured keys in `storage`, and then writes the results to `storage`.
+pub async fn scan_until(
+    stop_before_height: Height,
+    keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+    state: State,
+    storage: Storage,
+) -> Result<(), Report> {
+    let sapling_activation_height = storage.min_sapling_birthday_height();
+
+    // Do not scan and notify if we are below sapling activation height.
+    loop {
+        let tip_height = tip_height(state.clone()).await?;
+        if tip_height < sapling_activation_height {
+            info!("scanner is waiting for sapling activation. Current tip: {}, Sapling activation: {}", tip_height.0, sapling_activation_height.0);
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+        break;
+    }
+
+    let key_heights = keys
+        .iter()
+        .map(|(key, (_, _, height))| (key.clone(), *height))
+        .collect();
+    let key_heights = Arc::new(key_heights);
+
+    let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
+
+    // Parse and convert keys once, then use them to scan all blocks.
+    // There is some cryptography here, but it should be fast even with thousands of keys.
+    let parsed_keys: HashMap<
+        SaplingScanningKey,
+        (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
+    > = keys
+        .into_iter()
+        .map(|(key, (decoded_dfvks, decoded_ivks, _h))| (key, (decoded_dfvks, decoded_ivks)))
+        .collect();
+
+    let parsed_keys = Arc::new(parsed_keys);
+
+    // Give empty states time to verify some blocks before we start scanning.
+    tokio::time::sleep(INITIAL_WAIT).await;
+
+    while height < stop_before_height {
+        let scanned_height = scan_height_and_store_results(
+            height,
+            state.clone(),
+            None,
+            storage.clone(),
+            key_heights.clone(),
+            parsed_keys.clone(),
+        )
+        .await?;
+
+        // If we've reached the tip, sleep for a while then try and get the same block.
+        if scanned_height.is_none() {
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            continue;
+        }
+
+        height = height
+            .next()
+            .expect("a valid blockchain never reaches the max height");
+    }
+
+    Ok(())
+}
+
 /// Get the block at `height` from `state`, scan it with the keys in `parsed_keys`, and store the
 /// results in `storage`. If `height` is lower than the `key_birthdays` for that key, skip it.
 ///
@@ -148,7 +225,7 @@ pub async fn start(
 pub async fn scan_height_and_store_results(
     height: Height,
     mut state: State,
-    chain_tip_change: ChainTipChange,
+    chain_tip_change: Option<ChainTipChange>,
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: Arc<
@@ -193,12 +270,14 @@ pub async fn scan_height_and_store_results(
         // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
         // the logs could use the key to view those transactions.
         if is_info_log {
-            info!(
-                "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
-                key_num, last_scanned_height.next().expect("height is not maximum").as_usize(),
-                height.as_usize(),
-                chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
-            );
+            if let Some(chain_tip_change) = &chain_tip_change {
+                info!(
+                    "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
+                    key_num, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                    height.as_usize(),
+                    chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
+                );
+            }
         }
 
         // Get the pre-parsed keys for this configured key.
