@@ -15,6 +15,9 @@ pub mod scan;
 
 pub use commands::*;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod tests;
+
 #[derive(Debug, Clone)]
 /// Scan task handle and command channel sender
 pub struct ScanTask {
@@ -26,20 +29,6 @@ pub struct ScanTask {
 }
 
 impl ScanTask {
-    /// Spawns a new [`ScanTask`] for tests.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn mock() -> (Self, mpsc::Receiver<ScanTaskCommand>) {
-        let (cmd_sender, cmd_receiver) = mpsc::channel();
-
-        (
-            Self {
-                handle: Arc::new(tokio::spawn(std::future::pending())),
-                cmd_sender,
-            },
-            cmd_receiver,
-        )
-    }
-
     /// Spawns a new [`ScanTask`].
     pub fn spawn(
         config: &Config,
