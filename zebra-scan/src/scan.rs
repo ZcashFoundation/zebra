@@ -40,9 +40,9 @@ use zebra_chain::{
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::{
-    init::ScanTaskCommand,
+    service::{ScanTask, ScanTaskCommand},
     storage::{SaplingScanningKey, Storage},
-    Config, ScanTask,
+    Config,
 };
 
 /// The generic state type used by the scanner.
