@@ -123,5 +123,12 @@ pub async fn scan_service_clears_results_correctly() -> Result<()> {
         "all results for this key should have been deleted, one empty entry should remain"
     );
 
+    for (_, result) in db.sapling_results(&zec_pages_sapling_efvk) {
+        assert!(
+            result.is_empty(),
+            "there should be no results for this entry in the db"
+        );
+    }
+
     Ok(())
 }

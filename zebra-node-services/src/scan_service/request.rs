@@ -26,7 +26,7 @@ pub enum Request {
     /// TODO: Accept `KeyHash`es and return a channel receiver
     SubscribeResults(Vec<()>),
 
-    /// TODO: Accept `KeyHash`es and return transaction ids
+    /// Clear the results for a set of viewing keys
     ClearResults(Vec<String>),
 }
 
@@ -49,5 +49,38 @@ impl Request {
 
             _ => Ok(()),
         }
+    }
+}
+
+#[test]
+fn test_check_num_keys() {
+    let fake_keys: Vec<_> = std::iter::repeat(String::new())
+        .take(MAX_REQUEST_KEYS + 1)
+        .collect();
+
+    let bad_requests = [
+        Request::DeleteKeys(vec![]),
+        Request::DeleteKeys(fake_keys.clone()),
+        Request::ClearResults(vec![]),
+        Request::ClearResults(fake_keys),
+    ];
+
+    let valid_requests = [
+        Request::DeleteKeys(vec![String::new()]),
+        Request::ClearResults(vec![String::new()]),
+    ];
+
+    for request in bad_requests {
+        let error = request.check().expect_err("check should return an error");
+
+        assert_eq!(
+            format!("request must include between 1 and {MAX_REQUEST_KEYS} keys"),
+            error.to_string(),
+            "check_num_keys should return an error because there are too many keys"
+        );
+    }
+
+    for request in valid_requests {
+        request.check().expect("check should return Ok(())");
     }
 }

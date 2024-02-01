@@ -136,7 +136,7 @@ impl Service<Request> for ScanService {
                 let mut db = self.db.clone();
 
                 return async move {
-                    // Delete the key from the database after either confirmation
+                    // Clear results from db for the provided `keys`
                     tokio::task::spawn_blocking(move || {
                         db.delete_sapling_results(keys);
                     })
