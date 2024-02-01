@@ -151,6 +151,7 @@ pub async fn start(
                 .expect("there should only be one reference to parsed keys at this point"),
         )?;
 
+        // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
             // TODO: Add a long timeout?
             let scan_until_task = tokio::spawn(
