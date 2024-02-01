@@ -16,7 +16,9 @@ use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, parameters::Network, transaction::Transaction};
 use zebra_state::{ChainTipChange, SaplingScanningKey};
 
-use crate::{scan, service::ScanService, Config};
+use crate::{service::ScanService, Config};
+
+pub mod scan;
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
