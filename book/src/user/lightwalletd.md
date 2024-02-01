@@ -6,17 +6,21 @@ recommend using
 use it in testing. Other `lightwalletd` forks have limited support, see the
 [Sync lightwalletd](#sync-lightwalletd) section for more info.
 
+> [!NOTE]
+> You can also use `docker` to run lightwalletd with zebra. Please see our [docker documentation](./docker.md#running-zebra-with-lightwalletd) for more information.
+
 Contents:
 
-- [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
-  - [JSON-RPC](#json-rpc)
-- [Sync Zebra](#sync-zebra)
-- [Download and build lightwalletd](#download-and-build-lightwalletd)
-- [Sync lightwalletd](#sync-lightwalletd)
-- [Run tests](#run-tests)
-- [Connect wallet to lightwalletd](#connect-wallet-to-lightwalletd)
-  - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
-  - [Run the wallet](#run-the-wallet)
+- [Running lightwalletd with zebra](#running-lightwalletd-with-zebra)
+  - [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
+    - [JSON-RPC](#json-rpc)
+  - [Sync Zebra](#sync-zebra)
+  - [Download and build lightwalletd](#download-and-build-lightwalletd)
+  - [Sync lightwalletd](#sync-lightwalletd)
+  - [Run tests](#run-tests)
+  - [Connect a wallet to lightwalletd](#connect-a-wallet-to-lightwalletd)
+    - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
+    - [Run the wallet](#run-the-wallet)
 
 ## Configure zebra for lightwalletd
 

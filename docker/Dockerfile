@@ -188,6 +188,7 @@ COPY --from=release /entrypoint.sh /
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     rocksdb-tools
 
 # Config settings for zebrad
