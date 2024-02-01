@@ -1,8 +1,11 @@
 //! `zebra_scan::service::ScanService` response types.
 
-use std::sync::{mpsc, Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{mpsc, Arc},
+};
 
-use zebra_chain::{block::Height, transaction::Transaction};
+use zebra_chain::{block::Height, transaction::Hash};
 
 #[derive(Debug)]
 /// Response types for `zebra_scan::service::ScanService`
@@ -14,11 +17,13 @@ pub enum Response {
     },
 
     /// Response to Results request
-    Results(Vec<Transaction>),
+    ///
+    /// We use the nested `BTreeMap` so we don't repeat any piece of response data.
+    Results(BTreeMap<String, BTreeMap<Height, Vec<Hash>>>),
 
     /// Response to DeleteKeys request
     DeletedKeys,
 
     /// Response to SubscribeResults request
-    SubscribeResults(mpsc::Receiver<Arc<Transaction>>),
+    SubscribeResults(mpsc::Receiver<Arc<Hash>>),
 }
