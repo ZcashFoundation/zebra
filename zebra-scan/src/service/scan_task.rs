@@ -1,13 +1,20 @@
 //! Types and method implementations for [`ScanTask`]
 
-use std::sync::{mpsc, Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        mpsc::{self, Receiver, TryRecvError},
+        Arc,
+    },
+};
 
-use color_eyre::Report;
+use color_eyre::{eyre::eyre, Report};
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::ServiceBuilder;
 
+use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{parameters::Network, transaction::Transaction};
-use zebra_state::ChainTipChange;
+use zebra_state::{ChainTipChange, SaplingScanningKey};
 
 use crate::{scan, service::ScanService, Config};
 
@@ -80,6 +87,55 @@ impl ScanTask {
             )),
             cmd_sender,
         }
+    }
+
+    /// Accepts the scan task's `parsed_key` collection and a reference to the command channel receiver
+    ///
+    /// Processes messages in the scan task channel, updating `parsed_keys` if required.
+    ///
+    /// Returns the updated `parsed_keys`
+    pub fn process_messages(
+        cmd_receiver: &Receiver<ScanTaskCommand>,
+        mut parsed_keys: Arc<
+            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+        >,
+    ) -> Result<
+        Arc<HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>>,
+        Report,
+    > {
+        loop {
+            let cmd = match cmd_receiver.try_recv() {
+                Ok(cmd) => cmd,
+
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    // Return early if the sender has been dropped.
+                    return Err(eyre!("command channel disconnected"));
+                }
+            };
+
+            match cmd {
+                ScanTaskCommand::RemoveKeys { done_tx, keys } => {
+                    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
+                    // https://github.com/rust-lang/rust/issues/93610
+                    let mut updated_parsed_keys =
+                        Arc::try_unwrap(parsed_keys).unwrap_or_else(|arc| (*arc).clone());
+
+                    for key in keys {
+                        updated_parsed_keys.remove(&key);
+                    }
+
+                    parsed_keys = Arc::new(updated_parsed_keys);
+
+                    // Ignore send errors for the done notification
+                    let _ = done_tx.send(());
+                }
+
+                _ => continue,
+            }
+        }
+
+        Ok(parsed_keys)
     }
 
     /// Sends a command to the scan task
