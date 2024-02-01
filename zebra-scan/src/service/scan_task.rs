@@ -13,7 +13,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::ServiceBuilder;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{parameters::Network, transaction::Transaction};
+use zebra_chain::{block::Height, parameters::Network, transaction::Transaction};
 use zebra_state::{ChainTipChange, SaplingScanningKey};
 
 use crate::{scan, service::ScanService, Config};
@@ -22,7 +22,13 @@ use crate::{scan, service::ScanService, Config};
 /// Commands that can be sent to [`ScanTask`]
 pub enum ScanTaskCommand {
     /// Start scanning for new viewing keys
-    RegisterKeys(Vec<()>), // TODO: send `ViewingKeyWithHash`es
+    RegisterKeys {
+        /// New keys to start scanning for
+        keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+
+        /// The first height to start scanning at
+        start_height: Option<Height>,
+    },
 
     /// Stop scanning for deleted viewing keys
     RemoveKeys {
@@ -93,16 +99,23 @@ impl ScanTask {
     ///
     /// Processes messages in the scan task channel, updating `parsed_keys` if required.
     ///
-    /// Returns the updated `parsed_keys`
+    /// Returns newly registered keys for scanning.
     pub fn process_messages(
         cmd_receiver: &Receiver<ScanTaskCommand>,
-        mut parsed_keys: Arc<
-            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+        parsed_keys: &mut HashMap<
+            SaplingScanningKey,
+            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
     ) -> Result<
-        Arc<HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>>,
+        (
+            HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+            Height,
+        ),
         Report,
     > {
+        let mut new_keys = HashMap::new();
+        let mut new_keys_start_height = Height::MIN;
+
         loop {
             let cmd = match cmd_receiver.try_recv() {
                 Ok(cmd) => cmd,
@@ -115,19 +128,26 @@ impl ScanTask {
             };
 
             match cmd {
-                ScanTaskCommand::RemoveKeys { done_tx, keys } => {
-                    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-                    // https://github.com/rust-lang/rust/issues/93610
-                    let mut updated_parsed_keys =
-                        Arc::try_unwrap(parsed_keys).unwrap_or_else(|arc| (*arc).clone());
+                ScanTaskCommand::RegisterKeys { keys, start_height } => {
+                    let start_height = start_height.unwrap_or(Height::MIN);
+                    let keys: Vec<_> = keys
+                        .into_iter()
+                        .filter(|(key, _)| parsed_keys.contains_key(key))
+                        .collect();
 
+                    if !keys.is_empty() {
+                        new_keys_start_height = new_keys_start_height.min(start_height);
+                        new_keys.extend(keys.clone());
+                        parsed_keys.extend(keys);
+                    }
+                }
+
+                ScanTaskCommand::RemoveKeys { done_tx, keys } => {
                     for key in keys {
-                        updated_parsed_keys.remove(&key);
+                        parsed_keys.remove(&key);
                     }
 
-                    parsed_keys = Arc::new(updated_parsed_keys);
-
-                    // Ignore send errors for the done notification
+                    // Ignore send errors for the done notification, caller is expected to use a timeout.
                     let _ = done_tx.send(());
                 }
 
@@ -135,7 +155,7 @@ impl ScanTask {
             }
         }
 
-        Ok(parsed_keys)
+        Ok((new_keys, new_keys_start_height))
     }
 
     /// Sends a command to the scan task

@@ -110,7 +110,11 @@ pub async fn start(
     tokio::time::sleep(INITIAL_WAIT).await;
 
     loop {
-        parsed_keys = ScanTask::process_messages(&cmd_receiver, parsed_keys)?;
+        let (_new_keys, _start_height) = ScanTask::process_messages(
+            &cmd_receiver,
+            Arc::get_mut(&mut parsed_keys)
+                .expect("there should only be one reference to parsed keys at this point"),
+        )?;
 
         let scanned_height = scan_height_and_store_results(
             height,
