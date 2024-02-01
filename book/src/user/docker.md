@@ -2,7 +2,10 @@
 
 The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/).
 
-We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users. We recommend using `docker-compose` over plain `docker` CLI, especially for more advanced use-cases like running CI locally, as it provides a more convenient and powerful way to manage multi-container Docker applications.
+We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users.
+
+> [!TIP]
+> We recommend using `docker compose` sub-command over the plain `docker` CLI, especially for more advanced use-cases like running CI locally, as it provides a more convenient and powerful way to manage multi-container Docker applications. See [CI/CD Local Testing](#cicd-local-testing) for more information, and other compose files available in the [docker](https://github.com/ZcashFoundation/zebra/tree/main/docker) folder.
 
 ## Quick usage
 
@@ -10,8 +13,25 @@ You can deploy Zebra for daily use with the images available in [Docker Hub](htt
 
 ### Ready to use image
 
+Using `docker compose`:
+
 ```shell
-docker run --detach zfnd/zebra:latest
+docker compose -f docker/docker-compose.yml up
+```
+
+With plain `docker` CLI:
+
+```shell
+docker volume create zebrad-cache
+
+docker run -d --platform linux/amd64 \
+  --restart unless-stopped \
+  --env-file .env \
+  --mount type=volume,source=zebrad-cache,target=/var/cache/zebrad-cache \
+  -p 8233:8233 \
+  --memory 16G \
+  --cpus 4 \
+  zfnd/zebra
 ```
 
 ### Build it locally
@@ -32,7 +52,7 @@ You're able to specify various parameters when building or launching the Docker 
 
 For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
 
-> [!WARNING]
+> [!IMPORTANT]
 > To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
 ```shell
@@ -61,6 +81,14 @@ listen_addr = "0.0.0.0"
 cache_dir = "/var/cache/zebrad-cache"
 [metrics]
 endpoint_addr = "127.0.0.1:9999"
+```
+
+### Running Zebra with Lightwalletd
+
+To run Zebra with Lightwalletd, we recommend using the provided `docker compose` files for Zebra and Lightwalletd, which will start both services and connect them together, while exposing ports, mounting volumes, and setting environment variables.
+
+```shell
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.lwd.yml up
 ```
 
 ### CI/CD Local Testing
