@@ -20,8 +20,8 @@ pub enum Request {
     /// Deletes viewing keys and their results from the database.
     DeleteKeys(Vec<String>),
 
-    /// TODO: Accept `KeyHash`es and return `Transaction`s
-    Results(Vec<()>),
+    /// Accept keys and return transaction data
+    Results(Vec<String>),
 
     /// TODO: Accept `KeyHash`es and return a channel receiver
     SubscribeResults(Vec<()>),

@@ -1,11 +1,12 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, task::Poll, time::Duration};
+use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
 use tower::Service;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, transaction::Hash};
+
 use zebra_state::ChainTipChange;
 
 use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
@@ -124,8 +125,31 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
 
-            Request::Results(_key_hashes) => {
-                // TODO: read results from db
+            Request::Results(keys) => {
+                let db = self.db.clone();
+
+                return async move {
+                    let mut final_result = BTreeMap::new();
+                    for key in keys {
+                        let db = db.clone();
+                        let mut heights_and_transactions = BTreeMap::new();
+                        let txs = {
+                            let key = key.clone();
+                            tokio::task::spawn_blocking(move || db.sapling_results_for_key(&key))
+                        }
+                        .await?;
+                        txs.iter().for_each(|(k, v)| {
+                            heights_and_transactions
+                                .entry(*k)
+                                .or_insert_with(Vec::new)
+                                .extend(v.iter().map(|x| Hash::from(*x)));
+                        });
+                        final_result.entry(key).or_insert(heights_and_transactions);
+                    }
+
+                    Ok(Response::Results(final_result))
+                }
+                .boxed();
             }
 
             Request::SubscribeResults(_key_hashes) => {
@@ -148,6 +172,6 @@ impl Service<Request> for ScanService {
             }
         }
 
-        async move { Ok(Response::Results(vec![])) }.boxed()
+        async move { Ok(Response::Results(BTreeMap::new())) }.boxed()
     }
 }
