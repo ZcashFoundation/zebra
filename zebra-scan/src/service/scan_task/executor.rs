@@ -8,7 +8,7 @@ use tokio::{
 use tracing::Instrument;
 use zebra_chain::BoxError;
 
-use super::add_keys::ScanRangeTaskBuilder;
+use super::scan::ScanRangeTaskBuilder;
 
 pub fn spawn_init() -> (
     UnboundedSender<ScanRangeTaskBuilder>,

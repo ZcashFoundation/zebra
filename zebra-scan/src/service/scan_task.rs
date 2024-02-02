@@ -11,9 +11,10 @@ use zebra_state::ChainTipChange;
 use crate::Config;
 
 mod commands;
+mod executor;
 pub mod scan;
 
-pub use commands::*;
+pub use commands::ScanTaskCommand;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;

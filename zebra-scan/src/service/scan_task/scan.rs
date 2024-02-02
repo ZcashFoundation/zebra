@@ -42,16 +42,17 @@ use crate::{
     Config,
 };
 
-use self::add_keys::ScanRangeTaskBuilder;
+use super::executor;
+
+mod scan_range;
+
+pub use scan_range::ScanRangeTaskBuilder;
 
 /// The generic state type used by the scanner.
 pub type State = Buffer<
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
     zebra_state::Request,
 >;
-
-mod add_keys;
-mod executor;
 
 /// Wait a few seconds at startup for some blocks to get verified.
 ///
