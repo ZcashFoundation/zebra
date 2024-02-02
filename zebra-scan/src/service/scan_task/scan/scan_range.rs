@@ -101,8 +101,6 @@ pub async fn scan_range(
         .map(|(key, (decoded_dfvks, decoded_ivks, _h))| (key, (decoded_dfvks, decoded_ivks)))
         .collect();
 
-    let parsed_keys = Arc::new(parsed_keys);
-
     while height < stop_before_height {
         let scanned_height = scan_height_and_store_results(
             height,

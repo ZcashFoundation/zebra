@@ -97,7 +97,7 @@ pub async fn start(
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
-    let parsed_keys: HashMap<
+    let mut parsed_keys: HashMap<
         SaplingScanningKey,
         (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
     > = key_heights
@@ -107,7 +107,6 @@ pub async fn start(
             Ok::<_, Report>((key.clone(), parsed_keys))
         })
         .try_collect()?;
-    let mut parsed_keys = Arc::new(parsed_keys);
 
     let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
@@ -127,11 +126,7 @@ pub async fn start(
             }
         }
 
-        let new_keys = ScanTask::process_messages(
-            &cmd_receiver,
-            Arc::get_mut(&mut parsed_keys)
-                .expect("there should only be one reference to parsed keys at this point"),
-        )?;
+        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
@@ -200,9 +195,7 @@ pub async fn scan_height_and_store_results(
     chain_tip_change: Option<ChainTipChange>,
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
-    parsed_keys: Arc<
-        HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-    >,
+    parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -227,33 +220,28 @@ pub async fn scan_height_and_store_results(
         _ => unreachable!("unmatched response to a state::Block request"),
     };
 
-    // Scan it with all the keys.
-    //
-    // TODO: scan each key in parallel (after MVP?)
-    for (key_num, (sapling_key, last_scanned_height)) in key_last_scanned_heights.iter().enumerate()
-    {
-        // Only scan what was not scanned for each key
-        if height <= *last_scanned_height {
-            continue;
-        }
+    for (key_index_in_task, (sapling_key, (dfvks, ivks))) in parsed_keys.into_iter().enumerate() {
+        match key_last_scanned_heights.get(&sapling_key) {
+            // Only scan what was not scanned for each key
+            Some(last_scanned_height) if height <= *last_scanned_height => continue,
 
-        // # Security
-        //
-        // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
-        // the logs could use the key to view those transactions.
-        if is_info_log {
-            if let Some(chain_tip_change) = &chain_tip_change {
-                info!(
-                    "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
-                    key_num, last_scanned_height.next().expect("height is not maximum").as_usize(),
-                    height.as_usize(),
-                    chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
-                );
+            Some(last_scanned_height) if is_info_log => {
+                if let Some(chain_tip_change) = &chain_tip_change {
+                    // # Security
+                    //
+                    // We can't log `sapling_key` here because it is a private viewing key. Anyone who reads
+                    // the logs could use the key to view those transactions.
+                    info!(
+                        "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}, current tip {:?}",
+                        key_index_in_task, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                        height.as_usize(),
+                        chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
+                    );
+                }
             }
-        }
 
-        // Get the pre-parsed keys for this configured key.
-        let (dfvks, ivks) = parsed_keys.get(sapling_key).cloned().unwrap_or_default();
+            _other => {}
+        };
 
         let sapling_key = sapling_key.clone();
         let block = block.clone();
