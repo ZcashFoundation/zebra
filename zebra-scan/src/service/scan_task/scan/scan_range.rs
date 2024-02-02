@@ -15,9 +15,17 @@ use crate::{
 
 /// A builder for a scan until task
 pub struct ScanRangeTaskBuilder {
+    /// The range of block heights that should be scanned for these keys
+    // TODO: Remove start heights from keys and require that all keys per task use the same start height
     height_range: std::ops::Range<Height>,
+
+    /// The keys to be used for scanning blocks in this task
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+
+    /// A handle to the state service for reading the blocks and the chain tip height
     state: State,
+
+    /// A handle to the zebra-scan database for storing results
     storage: Storage,
 }
 

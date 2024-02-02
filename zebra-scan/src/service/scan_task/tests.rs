@@ -7,6 +7,9 @@ use std::sync::{
 
 use super::{ScanTask, ScanTaskCommand};
 
+#[cfg(test)]
+mod vectors;
+
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
     pub fn mock() -> (Self, Receiver<ScanTaskCommand>) {

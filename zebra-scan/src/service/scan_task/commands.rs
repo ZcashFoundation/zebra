@@ -81,7 +81,9 @@ impl ScanTask {
                 ScanTaskCommand::RegisterKeys { keys } => {
                     let keys: Vec<_> = keys
                         .into_iter()
-                        .filter(|(key, _)| parsed_keys.contains_key(key))
+                        .filter(|(key, _)| {
+                            !parsed_keys.contains_key(key) || new_keys.contains_key(key)
+                        })
                         .collect();
 
                     if !keys.is_empty() {
@@ -100,6 +102,7 @@ impl ScanTask {
                 ScanTaskCommand::RemoveKeys { done_tx, keys } => {
                     for key in keys {
                         parsed_keys.remove(&key);
+                        new_keys.remove(&key);
                     }
 
                     // Ignore send errors for the done notification, caller is expected to use a timeout.
@@ -134,5 +137,16 @@ impl ScanTask {
         })?;
 
         Ok(done_rx)
+    }
+
+    /// Sends a message to the scan task to start scanning for the provided viewing keys.
+    pub fn register_keys(
+        &mut self,
+        keys: HashMap<
+            SaplingScanningKey,
+            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
+        >,
+    ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
+        self.send(ScanTaskCommand::RegisterKeys { keys })
     }
 }
