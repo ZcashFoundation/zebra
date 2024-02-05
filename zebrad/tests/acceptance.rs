@@ -2967,7 +2967,7 @@ fn scan_start_where_left() -> Result<()> {
 /// See [`common::shielded_scan::register_key`] for more information.
 #[tokio::test]
 #[ignore]
-#[cfg(feature = "getblocktemplate-rpcs")]
+#[cfg(feature = "shielded-scan")]
 async fn scans_for_new_key() -> Result<()> {
     common::shielded_scan::scans_for_new_key::run().await
 }
