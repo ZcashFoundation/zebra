@@ -6,8 +6,9 @@ use zebra_chain::{
     block::{Block, Height},
     parameters::Network::{self, *},
     serialization::ZcashDeserializeInto,
+    transaction,
 };
-use zebra_state::TransactionIndex;
+use zebra_state::{SaplingScannedResult, TransactionIndex};
 
 use crate::{
     storage::{Storage, INSERT_CONTROL_INTERVAL},
@@ -17,6 +18,9 @@ use crate::{
 
 #[cfg(test)]
 mod snapshot;
+
+#[cfg(test)]
+mod vectors;
 
 /// Returns an empty `Storage` suitable for testing.
 pub fn new_test_storage(network: Network) -> Storage {
@@ -73,4 +77,20 @@ pub fn add_fake_results(
                 .collect(),
         );
     }
+}
+
+/// Accepts an iterator of [`TransactionIndex`]es and returns a `BTreeMap` with empty results
+pub fn fake_sapling_results<T: IntoIterator<Item = TransactionIndex>>(
+    transaction_indexes: T,
+) -> BTreeMap<TransactionIndex, SaplingScannedResult> {
+    let mut fake_sapling_results = BTreeMap::new();
+
+    for transaction_index in transaction_indexes {
+        fake_sapling_results.insert(
+            transaction_index,
+            SaplingScannedResult::from(transaction::Hash::from([0; 32])),
+        );
+    }
+
+    fake_sapling_results
 }

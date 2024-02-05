@@ -1,24 +1,31 @@
 //! [`tower::Service`] for zebra-scan.
 
-use std::{future::Future, pin::Pin, task::Poll};
+use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
 use tower::Service;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, transaction::Hash};
+
 use zebra_state::ChainTipChange;
 
 use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
+
+#[cfg(test)]
+mod tests;
 
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]
 pub struct ScanService {
     /// On-disk storage
-    db: Storage,
+    pub db: Storage,
 
     /// Handle to scan task that's responsible for writing results
     scan_task: ScanTask,
 }
+
+/// A timeout applied to `DeleteKeys` requests.
+const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
     /// Create a new [`ScanService`].
@@ -35,11 +42,15 @@ impl ScanService {
     }
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
-    pub fn new_with_mock_scanner(config: &Config, network: Network) -> Self {
-        Self {
-            db: Storage::new(config, network, false),
-            scan_task: ScanTask::mock(),
-        }
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_with_mock_scanner(
+        db: Storage,
+    ) -> (
+        Self,
+        std::sync::mpsc::Receiver<crate::init::ScanTaskCommand>,
+    ) {
+        let (scan_task, cmd_receiver) = ScanTask::mock();
+        (Self { db, scan_task }, cmd_receiver)
     }
 }
 
@@ -62,6 +73,10 @@ impl Service<Request> for ScanService {
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
+        if let Err(error) = req.check() {
+            return async move { Err(error) }.boxed();
+        }
+
         match req {
             Request::Info => {
                 let db = self.db.clone();
@@ -84,25 +99,79 @@ impl Service<Request> for ScanService {
                 //  - send new keys to scan task
             }
 
-            Request::DeleteKeys(_key_hashes) => {
-                // TODO:
-                //  - delete these keys and their results from db
-                //  - send deleted keys to scan task
+            Request::DeleteKeys(keys) => {
+                let mut db = self.db.clone();
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
+                    let remove_keys_result =
+                        tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
+                            .await
+                            .map_err(|_| "timeout waiting for delete keys done notification");
+
+                    // Delete the key from the database after either confirmation that it's been removed from the scan task, or
+                    // waiting `DELETE_KEY_TIMEOUT`.
+                    let delete_key_task = tokio::task::spawn_blocking(move || {
+                        db.delete_sapling_keys(keys);
+                    });
+
+                    // Return timeout errors or `RecvError`s, or wait for the key to be deleted from the database.
+                    remove_keys_result??;
+                    delete_key_task.await?;
+
+                    Ok(Response::DeletedKeys)
+                }
+                .boxed();
             }
 
-            Request::Results(_key_hashes) => {
-                // TODO: read results from db
+            Request::Results(keys) => {
+                let db = self.db.clone();
+
+                return async move {
+                    let mut final_result = BTreeMap::new();
+                    for key in keys {
+                        let db = db.clone();
+                        let mut heights_and_transactions = BTreeMap::new();
+                        let txs = {
+                            let key = key.clone();
+                            tokio::task::spawn_blocking(move || db.sapling_results_for_key(&key))
+                        }
+                        .await?;
+                        txs.iter().for_each(|(k, v)| {
+                            heights_and_transactions
+                                .entry(*k)
+                                .or_insert_with(Vec::new)
+                                .extend(v.iter().map(|x| Hash::from(*x)));
+                        });
+                        final_result.entry(key).or_insert(heights_and_transactions);
+                    }
+
+                    Ok(Response::Results(final_result))
+                }
+                .boxed();
             }
 
             Request::SubscribeResults(_key_hashes) => {
                 // TODO: send key_hashes and mpsc::Sender to scanner task, return mpsc::Receiver to caller
             }
 
-            Request::ClearResults(_key_hashes) => {
-                // TODO: clear results for these keys from db
+            Request::ClearResults(keys) => {
+                let mut db = self.db.clone();
+
+                return async move {
+                    // Clear results from db for the provided `keys`
+                    tokio::task::spawn_blocking(move || {
+                        db.delete_sapling_results(keys);
+                    })
+                    .await?;
+
+                    Ok(Response::ClearedResults)
+                }
+                .boxed();
             }
         }
 
-        async move { Ok(Response::Results(vec![])) }.boxed()
+        async move { Ok(Response::Results(BTreeMap::new())) }.boxed()
     }
 }
