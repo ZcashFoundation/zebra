@@ -109,16 +109,24 @@
 //! Example of how to run the get_block_template test:
 //!
 //! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test get_block_template --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test get_block_template --features getblocktemplate-rpcs --release -- --ignored --nocapture
 //! ```
 //!
 //! Example of how to run the submit_block test:
 //!
 //! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Shielded scanning tests
+//!
+//! Example of how to run the scans_for_new_key test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scans_for_new_key --features shielded-scan --release -- --ignored --nocapture
+//! ```
 //!
 //! ## Checkpoint Generation Tests
 //!
@@ -2952,4 +2960,14 @@ fn scan_start_where_left() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Test successful registration of a new key in the scan task.
+///
+/// See [`common::shielded_scan::register_key`] for more information.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn scans_for_new_key() -> Result<()> {
+    common::shielded_scan::scans_for_new_key::run().await
 }

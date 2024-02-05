@@ -22,3 +22,5 @@ pub mod tests;
 
 pub use config::Config;
 pub use init::init;
+
+pub use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};

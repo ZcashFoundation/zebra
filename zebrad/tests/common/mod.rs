@@ -23,3 +23,6 @@ pub mod checkpoints;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
+
+#[cfg(feature = "shielded-scan")]
+pub mod shielded_scan;
