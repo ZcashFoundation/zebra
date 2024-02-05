@@ -47,7 +47,7 @@ chrono = { version = "0.4.33", default-features = false, features = ["clock", "s
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
-indexmap = { version = "2.2.1", features = ["serde"] }
+indexmap = { version = "2.2.2", features = ["serde"] }
 itertools = "0.12.1"
 lazy_static = "1.4.0"
 num-integer = "0.1.45"
@@ -61,7 +61,7 @@ tempfile = "3.9.0"
 thiserror = "1.0.56"
 
 futures = "0.3.30"
-tokio = { version = "1.35.1", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.36.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "time"] }
 tokio-util = { version = "0.7.10", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
@@ -90,8 +90,8 @@ proptest = "1.4.0"
 proptest-derive = "0.4.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.35.1", features = ["full", "tracing", "test-util"] }
-toml = "0.8.8"
+tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
+toml = "0.8.9"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

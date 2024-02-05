@@ -175,15 +175,15 @@ abscissa_core = "0.7.0"
 clap = { version = "4.4.16", features = ["cargo"] }
 chrono = { version = "0.4.33", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "2.2.1"
+indexmap = "2.2.2"
 lazy_static = "1.4.0"
 semver = "1.0.21"
 serde = { version = "1.0.196", features = ["serde_derive"] }
-toml = "0.8.8"
+toml = "0.8.9"
 
 futures = "0.3.30"
 rayon = "1.8.1"
-tokio = { version = "1.35.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.36.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.14", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.4"
@@ -213,7 +213,7 @@ rand = "0.8.5"
 thread-priority = { version = "0.15.1", optional = true }
 
 # prod feature sentry
-sentry = { version = "0.32.1", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { version = "0.32.2", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
@@ -267,7 +267,7 @@ tempfile = "3.9.0"
 hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.35.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.14"
 
 # test feature lightwalletd-grpc-tests
