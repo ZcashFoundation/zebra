@@ -75,7 +75,7 @@ where
         let keys = request.into_inner().keys;
 
         if keys.is_empty() {
-            let msg = "must provide the keys for which to clear results";
+            let msg = "must provide at least 1 key for which to clear results";
             return Err(Status::invalid_argument(msg));
         }
 
@@ -102,7 +102,7 @@ where
         let keys = request.into_inner().keys;
 
         if keys.is_empty() {
-            let msg = "must provide the keys for which to clear results";
+            let msg = "must provide at least 1 key to delete";
             return Err(Status::invalid_argument(msg));
         }
 
