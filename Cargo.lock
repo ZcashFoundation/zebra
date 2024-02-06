@@ -6064,6 +6064,7 @@ dependencies = [
  "vergen",
  "zebra-chain",
  "zebra-consensus",
+ "zebra-grpc",
  "zebra-network",
  "zebra-node-services",
  "zebra-rpc",

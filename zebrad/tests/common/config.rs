@@ -82,7 +82,8 @@ pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
 
     #[cfg(feature = "shielded-scan")]
     {
-        let shielded_scan = zebra_scan::Config::ephemeral();
+        let mut shielded_scan = zebra_scan::Config::ephemeral();
+        shielded_scan.db_config_mut().cache_dir = "zebra-scan".into();
 
         let config = ZebradConfig {
             network,
