@@ -41,6 +41,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             sapling_keys_to_scan: IndexMap::new(),
+
+            // TODO: Add a const generic for specifying the default cache_dir path, like 'zebra' or 'zebra-scan'?
             db_config: DbConfig::default(),
         }
     }

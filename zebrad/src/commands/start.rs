@@ -301,25 +301,16 @@ impl StartCmd {
 
         #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task only if we have keys to scan for.
-        let (scan_task_handle, _cmd_sender) =
-            if !config.shielded_scan.sapling_keys_to_scan.is_empty() {
-                // TODO: log the number of keys and update the scan_task_starts() test
-                info!("spawning shielded scanner with configured viewing keys");
-                let scan_task = zebra_scan::service::scan_task::ScanTask::spawn(
-                    &config.shielded_scan,
-                    config.network.network,
-                    state,
-                    chain_tip_change,
-                );
-
-                (
-                    std::sync::Arc::into_inner(scan_task.handle)
-                        .expect("should only have one reference here"),
-                    Some(scan_task.cmd_sender),
-                )
-            } else {
-                (tokio::spawn(std::future::pending().in_current_span()), None)
-            };
+        let scan_task_handle = {
+            // TODO: log the number of keys and update the scan_task_starts() test
+            info!("spawning shielded scanner with configured viewing keys");
+            zebra_scan::spawn_init(
+                config.shielded_scan.clone(),
+                config.network.network,
+                state,
+                chain_tip_change,
+            )
+        };
 
         #[cfg(not(feature = "shielded-scan"))]
         // Spawn a dummy scan task which doesn't do anything and never finishes.
