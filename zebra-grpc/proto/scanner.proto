@@ -13,7 +13,8 @@ service Scanner {
     // only clears past results.
     rpc ClearResults(ClearResultsRequest) returns (Empty);
 
-    // Deletes a set of keys and their results from the scanner
+    // Deletes a set of keys and their results from the scanner.
+    // This request stop the scanner from scanning blocks for the these keys.
     rpc DeleteKeys(DeleteKeysRequest) returns (Empty);
 }
 
