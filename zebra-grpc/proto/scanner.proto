@@ -9,6 +9,8 @@ service Scanner {
     rpc GetInfo (Empty) returns (InfoReply);
 
     rpc ClearResults(ClearResultsRequest) returns (Empty);
+
+    rpc DeleteKeys(DeleteKeysRequest) returns (Empty);
 }
 
 // A response to a GetInfo call.
@@ -18,5 +20,9 @@ message InfoReply {
 }
 
 message ClearResultsRequest {
+    repeated string keys = 1;
+}
+
+message DeleteKeysRequest {
     repeated string keys = 1;
 }
