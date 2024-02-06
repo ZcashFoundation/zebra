@@ -8,8 +8,12 @@ service Scanner {
     // Get information about the scanner service.
     rpc GetInfo (Empty) returns (InfoReply);
 
+    // Clear results for a set of keys without removing the keys from the scanner.
+    // This request does not stop the scanner from scanning blocks for these keys, it
+    // only clears past results.
     rpc ClearResults(ClearResultsRequest) returns (Empty);
 
+    // Deletes a set of keys and their results from the scanner
     rpc DeleteKeys(DeleteKeysRequest) returns (Empty);
 }
 
@@ -19,10 +23,14 @@ message InfoReply {
     uint32 min_sapling_birthday_height = 1;
 }
 
+// A request for clearing past results from the scanner cache.
 message ClearResultsRequest {
+    // Keys for which to clear results.
     repeated string keys = 1;
 }
 
+// A request to delete keys, delete their results, and stop scanning for their results.
 message DeleteKeysRequest {
+    // Keys to delete from scanner.
     repeated string keys = 1;
 }
