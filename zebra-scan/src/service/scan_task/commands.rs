@@ -1,4 +1,4 @@
-//! Types and method implementations for [`ScanTask`]
+//! Types and method implementations for [`ScanTaskCommand`]
 
 use std::{
     collections::HashMap,
@@ -39,12 +39,13 @@ pub enum ScanTaskCommand {
     },
 
     /// Start sending results for key hashes to `result_sender`
+    // TODO: Implement this command (#8206)
     SubscribeResults {
         /// Sender for results
         result_sender: mpsc::Sender<Arc<Transaction>>,
 
         /// Key hashes to send the results of to result channel
-        key_hashes: Vec<()>,
+        keys: Vec<String>,
     },
 }
 

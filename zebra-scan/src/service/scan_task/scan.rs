@@ -135,7 +135,8 @@ pub async fn start(
 
             scan_task_sender
                 .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
-                .expect("scan_until_task channel should not be full");
+                .await
+                .expect("scan_until_task channel should not be closed");
         }
 
         let scanned_height = scan_height_and_store_results(

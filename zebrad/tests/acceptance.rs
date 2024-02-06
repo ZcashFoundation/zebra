@@ -2965,6 +2965,7 @@ fn scan_start_where_left() -> Result<()> {
 /// Test successful registration of a new key in the scan task.
 ///
 /// See [`common::shielded_scan::register_key`] for more information.
+// TODO: Add this test to CI (#8236)
 #[tokio::test]
 #[ignore]
 #[cfg(feature = "shielded-scan")]

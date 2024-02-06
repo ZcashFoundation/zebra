@@ -1,4 +1,4 @@
-//! Initializing the scanner and RPC server.
+//! Initializing the scanner and gRPC server.
 
 use color_eyre::Report;
 use tower::ServiceBuilder;

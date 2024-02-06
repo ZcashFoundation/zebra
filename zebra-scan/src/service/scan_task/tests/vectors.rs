@@ -44,7 +44,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
             .collect(),
     )?;
 
-    // Check that it updated parsed_keys correctly and returned the right new keys when starting with an empty state
+    // Check that no key should be added if they are all already known and the heights are the same
 
     let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
 
@@ -104,7 +104,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
 
-    // Check that it sends the done notification successfully before returning and dropping `done_tx``
+    // Check that it sends the done notification successfully before returning and dropping `done_tx`
     done_rx.await?;
 
     assert!(

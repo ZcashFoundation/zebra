@@ -37,6 +37,7 @@ impl ScanTask {
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
+        // TODO: Use a bounded channel or move this logic to the scan service or another service.
         let (cmd_sender, cmd_receiver) = mpsc::channel();
 
         Self {
