@@ -9,14 +9,18 @@ extern crate tracing;
 
 pub mod config;
 pub mod init;
-pub mod scan;
 pub mod storage;
 
 use zebra_node_services::scan_service::{request::Request, response::Response};
 
 pub mod service;
+
+pub use service::scan_task::scan;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;
 
 pub use config::Config;
-pub use init::{init, ScanTask};
+pub use init::init;
+
+pub use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};

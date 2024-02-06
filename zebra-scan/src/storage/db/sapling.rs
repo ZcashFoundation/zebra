@@ -235,7 +235,7 @@ impl Storage {
     }
 
     /// Delete the sapling keys and their results, if they exist,
-    pub(crate) fn delete_sapling_keys(&mut self, keys: Vec<SaplingScanningKey>) {
+    pub fn delete_sapling_keys(&mut self, keys: Vec<SaplingScanningKey>) {
         self.sapling_tx_ids_cf()
             .new_batch_for_writing()
             .delete_sapling_keys(keys)
