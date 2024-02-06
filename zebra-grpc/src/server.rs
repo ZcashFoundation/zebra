@@ -5,7 +5,7 @@ use tonic::{transport::Server, Response, Status};
 use tower::ServiceExt;
 
 use scanner::scanner_server::{Scanner, ScannerServer};
-use scanner::{Empty, InfoReply};
+use scanner::{ClearResultsRequest, Empty, InfoReply};
 
 use zebra_node_services::scan_service::{
     request::Request as ScanServiceRequest, response::Response as ScanServiceResponse,
@@ -66,6 +66,33 @@ where
         };
 
         Ok(Response::new(reply))
+    }
+
+    async fn clear_results(
+        &self,
+        request: tonic::Request<ClearResultsRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        let keys = request.into_inner().keys;
+
+        if keys.is_empty() {
+            let msg = "must provide the keys for which to clear results";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        let ScanServiceResponse::ClearedResults = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::ClearResults(keys)))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        Ok(Response::new(Empty {}))
     }
 }
 

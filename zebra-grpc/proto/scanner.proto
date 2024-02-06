@@ -7,10 +7,16 @@ message Empty {}
 service Scanner {
     // Get information about the scanner service.
     rpc GetInfo (Empty) returns (InfoReply);
+
+    rpc ClearResults(ClearResultsRequest) returns (Empty);
 }
 
 // A response to a GetInfo call.
 message InfoReply {
     // The minimum sapling height allowed.
     uint32 min_sapling_birthday_height = 1;
+}
+
+message ClearResultsRequest {
+    repeated string keys = 1;
 }
