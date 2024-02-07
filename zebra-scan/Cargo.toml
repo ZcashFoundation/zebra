@@ -42,11 +42,11 @@ proptest-impl = [
 [dependencies]
 
 color-eyre = "0.6.2"
-indexmap = { version = "2.2.1", features = ["serde"] }
+indexmap = { version = "2.2.2", features = ["serde"] }
 itertools = "0.12.1"
 semver = "1.0.21"
 serde = { version = "1.0.196", features = ["serde_derive"] }
-tokio = { version = "1.35.1", features = ["time"] }
+tokio = { version = "1.36.0", features = ["time"] }
 tower = "0.4.13"
 tracing = "0.1.39"
 futures = "0.3.30"
@@ -77,7 +77,7 @@ zebra-test = { path = "../zebra-test", version = "1.0.0-beta.34", optional = tru
 [dev-dependencies]
 
 insta = { version = "1.33.0", features = ["ron", "redactions"] }
-tokio = { version = "1.35.1", features = ["test-util"] }
+tokio = { version = "1.36.0", features = ["test-util"] }
 
 proptest = "1.4.0"
 proptest-derive = "0.4.0"

@@ -1697,7 +1697,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "slab",
  "tokio",
  "tokio-util 0.7.10",
@@ -2073,9 +2073,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.1"
+version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "433de089bd45971eecf4668ee0ee8f4cec17db4f8bd8f7bc3197a6ce37aa7d9b"
+checksum = "824b2ae422412366ba479e8111fd301f7b5faece8149317bb81925979a53f520"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
@@ -2993,7 +2993,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
 ]
 
 [[package]]
@@ -3547,9 +3547,9 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
 name = "reqwest"
-version = "0.11.23"
+version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37b1ae8d9ac08420c66222fb9096fc5de435c3c48542bc5336c51892cffafb41"
+checksum = "c6920094eb85afde5e4a138be3f2de8bbdf28000f0029e72c45025a56b042251"
 dependencies = [
  "async-compression",
  "base64 0.21.7",
@@ -3574,6 +3574,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "sync_wrapper",
  "system-configuration",
  "tokio",
  "tokio-rustls",
@@ -3848,9 +3849,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sentry"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab18211f62fb890f27c9bb04861f76e4be35e4c2fcbfc2d98afa37aadebb16f1"
+checksum = "766448f12e44d68e675d5789a261515c46ac6ccd240abdd451a9c46c84a49523"
 dependencies = [
  "httpdate",
  "reqwest",
@@ -3866,9 +3867,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf018ff7d5ce5b23165a9cbfee60b270a55ae219bc9eebef2a3b6039356dd7e5"
+checksum = "32701cad8b3c78101e1cd33039303154791b0ff22e7802ed8cc23212ef478b45"
 dependencies = [
  "backtrace",
  "once_cell",
@@ -3878,9 +3879,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-contexts"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d934df6f9a17b8c15b829860d9d6d39e78126b5b970b365ccbd817bc0fe82c9"
+checksum = "17ddd2a91a13805bd8dab4ebf47323426f758c35f7bf24eacc1aded9668f3824"
 dependencies = [
  "hostname",
  "libc",
@@ -3892,9 +3893,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-core"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e362d3fb1c5de5124bf1681086eaca7adf6a8c4283a7e1545359c729f9128ff"
+checksum = "b1189f68d7e7e102ef7171adf75f83a59607fafd1a5eecc9dc06c026ff3bdec4"
 dependencies = [
  "once_cell",
  "rand 0.8.5",
@@ -3905,9 +3906,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-tracing"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "087bed8c616d176a9c6b662a8155e5f23b40dc9e1fa96d0bd5fb56e8636a9275"
+checksum = "3012699a9957d7f97047fd75d116e22d120668327db6e7c59824582e16e791b2"
 dependencies = [
  "sentry-backtrace",
  "sentry-core",
@@ -3917,9 +3918,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-types"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb4f0e37945b7a8ce7faebc310af92442e2d7c5aa7ef5b42fe6daa98ee133f65"
+checksum = "c7173fd594569091f68a7c37a886e202f4d0c1db1e1fa1d18a051ba695b2e2ec"
 dependencies = [
  "debugid",
  "hex",
@@ -3967,7 +3968,7 @@ version = "1.0.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69801b70b1c3dac963ecb03a364ba0ceda9cf60c71cfe475e99864759c8b8a79"
 dependencies = [
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "itoa",
  "ryu",
  "serde",
@@ -4006,18 +4007,18 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5c9fdb6b00a489875b22efd4b78fe2b363b72265cc5f6eb2e2b9ee270e6140c"
+checksum = "1b0ed1662c5a68664f45b76d18deb0e234aff37207086803165c961eb695e981"
 dependencies = [
  "base64 0.21.7",
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "serde",
  "serde_json",
- "serde_with_macros 3.5.1",
+ "serde_with_macros 3.6.0",
  "time",
 ]
 
@@ -4035,9 +4036,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbff351eb4b33600a2e138dfa0b10b65a238ea8ff8fb2387c422c5022a3e8298"
+checksum = "568577ff0ef47b879f736cd66740e022f3672788cdf002a05a4e609ea5a6fb15"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -4439,9 +4440,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.35.1"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c89b4efa943be685f629b149f53829423f8f5531ea21249408e8e2f8671ec104"
+checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931"
 dependencies = [
  "backtrace",
  "bytes",
@@ -4552,14 +4553,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
+checksum = "c6a4b9e8023eb94392d3dca65d717c53abc5dad49c07cb65bb8fcd87115fa325"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.21.0",
+ "toml_edit 0.21.1",
 ]
 
 [[package]]
@@ -4577,18 +4578,18 @@ version = "0.20.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
 dependencies = [
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "toml_datetime",
  "winnow",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
+checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -5698,7 +5699,7 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_json",
- "serde_with 3.5.1",
+ "serde_with 3.6.0",
  "sha2",
  "spandoc",
  "static_assertions",
@@ -5791,7 +5792,7 @@ dependencies = [
  "hex",
  "howudoin",
  "humantime-serde",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "itertools 0.12.1",
  "lazy_static",
  "metrics 0.22.0",
@@ -5810,7 +5811,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.10",
- "toml 0.8.8",
+ "toml 0.8.9",
  "tower",
  "tracing",
  "tracing-error",
@@ -5839,7 +5840,7 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "insta",
  "jsonrpc-core",
  "jsonrpc-derive",
@@ -5872,7 +5873,7 @@ dependencies = [
  "ff",
  "futures",
  "group",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "insta",
  "itertools 0.12.1",
  "jubjub",
@@ -5922,7 +5923,7 @@ dependencies = [
  "hex-literal",
  "howudoin",
  "humantime-serde",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "insta",
  "itertools 0.12.1",
  "jubjub",
@@ -5959,7 +5960,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "insta",
  "itertools 0.12.1",
  "lazy_static",
@@ -6021,7 +6022,7 @@ dependencies = [
  "howudoin",
  "humantime-serde",
  "hyper",
- "indexmap 2.2.1",
+ "indexmap 2.2.2",
  "indicatif",
  "inferno",
  "insta",
@@ -6049,7 +6050,7 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tokio-stream",
- "toml 0.8.8",
+ "toml 0.8.9",
  "tonic",
  "tonic-build",
  "tower",
