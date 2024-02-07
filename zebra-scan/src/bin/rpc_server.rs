@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scan_service = ServiceBuilder::new().buffer(10).service(scan_service);
 
     // Start the gRPC server.
-    zebra_grpc::server::init(scan_service).await?;
+    zebra_grpc::server::init("127.0.0.1:8231".parse()?, scan_service).await?;
 
     Ok(())
 }
