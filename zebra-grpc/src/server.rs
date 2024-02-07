@@ -1,5 +1,7 @@
 //! The gRPC server implementation
 
+use std::net::SocketAddr;
+
 use futures_util::future::TryFutureExt;
 use tonic::{transport::Server, Response, Status};
 use tower::ServiceExt;
@@ -121,7 +123,10 @@ where
 }
 
 /// Initializes the zebra-scan gRPC server
-pub async fn init<ScanService>(scan_service: ScanService) -> Result<(), color_eyre::Report>
+pub async fn init<ScanService>(
+    listen_addr: SocketAddr,
+    scan_service: ScanService,
+) -> Result<(), color_eyre::Report>
 where
     ScanService: tower::Service<ScanServiceRequest, Response = ScanServiceResponse, Error = BoxError>
         + Clone
@@ -130,12 +135,11 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    let addr = "[::1]:50051".parse()?;
     let service = ScannerRPC { scan_service };
 
     Server::builder()
         .add_service(ScannerServer::new(service))
-        .serve(addr)
+        .serve(listen_addr)
         .await?;
 
     Ok(())

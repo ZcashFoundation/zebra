@@ -497,7 +497,6 @@ pub fn spawn_init(
 ) -> JoinHandle<Result<(), Report>> {
     let config = config.clone();
 
-    // TODO: spawn an entirely new executor here, to avoid timing attacks.
     tokio::spawn(init(config, network, state, chain_tip_change, cmd_receiver).in_current_span())
 }
 
