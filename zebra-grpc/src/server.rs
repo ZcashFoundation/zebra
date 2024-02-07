@@ -1,20 +1,19 @@
 //! The gRPC server implementation
 
+use std::net::SocketAddr;
+
 use futures_util::future::TryFutureExt;
 use tonic::{transport::Server, Response, Status};
 use tower::ServiceExt;
-
-use scanner::scanner_server::{Scanner, ScannerServer};
-use scanner::{ClearResultsRequest, DeleteKeysRequest, Empty, InfoReply};
 
 use zebra_node_services::scan_service::{
     request::Request as ScanServiceRequest, response::Response as ScanServiceResponse,
 };
 
-/// The generated scanner proto
-pub mod scanner {
-    tonic::include_proto!("scanner");
-}
+use crate::scanner::{
+    scanner_server::{Scanner, ScannerServer},
+    ClearResultsRequest, DeleteKeysRequest, Empty, InfoReply,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -61,7 +60,7 @@ where
             ));
         };
 
-        let reply = scanner::InfoReply {
+        let reply = InfoReply {
             min_sapling_birthday_height: min_sapling_birthday_height.0,
         };
 
@@ -124,7 +123,10 @@ where
 }
 
 /// Initializes the zebra-scan gRPC server
-pub async fn init<ScanService>(scan_service: ScanService) -> Result<(), color_eyre::Report>
+pub async fn init<ScanService>(
+    listen_addr: SocketAddr,
+    scan_service: ScanService,
+) -> Result<(), color_eyre::Report>
 where
     ScanService: tower::Service<ScanServiceRequest, Response = ScanServiceResponse, Error = BoxError>
         + Clone
@@ -133,12 +135,11 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    let addr = "[::1]:50051".parse()?;
     let service = ScannerRPC { scan_service };
 
     Server::builder()
         .add_service(ScannerServer::new(service))
-        .serve(addr)
+        .serve(listen_addr)
         .await?;
 
     Ok(())
