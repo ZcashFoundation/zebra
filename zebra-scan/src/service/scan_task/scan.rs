@@ -39,7 +39,6 @@ use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 use crate::{
     service::{ScanTask, ScanTaskCommand},
     storage::{SaplingScanningKey, Storage},
-    Config,
 };
 
 use super::executor;
@@ -489,31 +488,10 @@ async fn tip_height(mut state: State) -> Result<Height, Report> {
 ///
 /// TODO: add a test for this function.
 pub fn spawn_init(
-    config: &Config,
-    network: Network,
+    storage: Storage,
     state: State,
     chain_tip_change: ChainTipChange,
     cmd_receiver: Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
-    let config = config.clone();
-
-    tokio::spawn(init(config, network, state, chain_tip_change, cmd_receiver).in_current_span())
-}
-
-/// Initialize the scanner based on its config.
-///
-/// TODO: add a test for this function.
-pub async fn init(
-    config: Config,
-    network: Network,
-    state: State,
-    chain_tip_change: ChainTipChange,
-    cmd_receiver: Receiver<ScanTaskCommand>,
-) -> Result<(), Report> {
-    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
-        .wait_for_panics()
-        .await;
-
-    // TODO: add more tasks here?
-    start(state, chain_tip_change, storage, cmd_receiver).await
+    tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
 }

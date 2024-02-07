@@ -42,9 +42,11 @@ impl ScanService {
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
+        let db = Storage::new(config, network, false);
+
         Self {
-            db: Storage::new(config, network, false),
-            scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
+            scan_task: ScanTask::spawn(db.clone(), state, chain_tip_change),
+            db,
         }
     }
 

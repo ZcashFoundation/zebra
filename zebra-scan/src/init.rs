@@ -10,7 +10,7 @@ use tracing::Instrument;
 use zebra_chain::parameters::Network;
 use zebra_state::ChainTipChange;
 
-use crate::{scan, service::ScanService, Config};
+use crate::{scan, service::ScanService, storage::Storage, Config};
 
 /// Initialize [`ScanService`] based on its config.
 ///
@@ -56,8 +56,9 @@ pub fn spawn_init(
         // TODO: spawn an entirely new executor here, to avoid timing attacks.
         tokio::spawn(
             async move {
+                let db = Storage::new(&config, network, false);
                 let (_cmd_sender, cmd_receiver) = std::sync::mpsc::channel();
-                scan::init(config, network, state, chain_tip_change, cmd_receiver).await
+                scan::start(state, chain_tip_change, db, cmd_receiver).await
             }
             .in_current_span(),
         )
