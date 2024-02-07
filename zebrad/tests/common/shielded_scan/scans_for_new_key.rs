@@ -82,15 +82,13 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("opened state service with valid chain tip height, deleting any past keys in db and starting scan task",);
 
-    {
-        // Before spawning `ScanTask`, delete past results for the zecpages key, if any.
-        let mut storage = Storage::new(&shielded_scan_config, network, false);
-        storage.delete_sapling_keys(vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]);
-    }
+    // Before spawning `ScanTask`, delete past results for the zecpages key, if any.
+    let mut storage = Storage::new(&shielded_scan_config, network, false);
+    storage.delete_sapling_keys(vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]);
 
     let state = ServiceBuilder::new().buffer(10).service(state_service);
 
-    let mut scan_task = ScanTask::spawn(&shielded_scan_config, network, state, chain_tip_change);
+    let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
 
     let (zecpages_dfvks, zecpages_ivks) =
         sapling_key_to_scan_block_keys(&ZECPAGES_SAPLING_VIEWING_KEY.to_string(), network)?;
