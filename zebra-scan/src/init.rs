@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use tower::ServiceBuilder;
 
 use tracing::Instrument;
-use zebra_chain::parameters::Network;
+use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network};
 use zebra_state::ChainTipChange;
 
 use crate::{scan, service::ScanService, storage::Storage, Config};
@@ -23,12 +23,9 @@ pub async fn init_with_server(
     chain_tip_change: ChainTipChange,
 ) -> Result<(), Report> {
     info!(?config, "starting scan service");
-    let scan_service = ServiceBuilder::new().buffer(10).service(ScanService::new(
-        &config,
-        network,
-        state,
-        chain_tip_change,
-    ));
+    let scan_service = ServiceBuilder::new()
+        .buffer(10)
+        .service(ScanService::new(&config, network, state, chain_tip_change).await);
 
     // TODO: move this to zebra-grpc init() function and include addr
     info!("starting scan gRPC server");
@@ -56,9 +53,12 @@ pub fn spawn_init(
         // TODO: spawn an entirely new executor here, to avoid timing attacks.
         tokio::spawn(
             async move {
-                let db = Storage::new(&config, network, false);
+                let storage =
+                    tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
+                        .wait_for_panics()
+                        .await;
                 let (_cmd_sender, cmd_receiver) = std::sync::mpsc::channel();
-                scan::start(state, chain_tip_change, db, cmd_receiver).await
+                scan::start(state, chain_tip_change, storage, cmd_receiver).await
             }
             .in_current_span(),
         )

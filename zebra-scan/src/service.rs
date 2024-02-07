@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Dur
 use futures::future::FutureExt;
 use tower::Service;
 
-use zebra_chain::{parameters::Network, transaction::Hash};
+use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Hash};
 
 use zebra_state::ChainTipChange;
 
@@ -36,17 +36,20 @@ const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
     /// Create a new [`ScanService`].
-    pub fn new(
+    pub async fn new(
         config: &Config,
         network: Network,
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
-        let db = Storage::new(config, network, false);
+        let config = config.clone();
+        let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
+            .wait_for_panics()
+            .await;
 
         Self {
-            scan_task: ScanTask::spawn(db.clone(), state, chain_tip_change),
-            db,
+            scan_task: ScanTask::spawn(storage.clone(), state, chain_tip_change),
+            db: storage,
         }
     }
 
