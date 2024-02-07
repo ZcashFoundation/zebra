@@ -2881,7 +2881,7 @@ async fn scan_rpc_server_starts() -> Result<()> {
     let port = random_known_port();
     let listen_addr = format!("127.0.0.1:{port}");
     let mut config = default_test_config(Mainnet)?;
-    config.shielded_scan.listen_addr = listen_addr.parse().ok();
+    config.shielded_scan.listen_addr = Some(listen_addr.parse()?);
 
     // Start zebra with the config.
     let mut zebrad = testdir()?
@@ -2889,8 +2889,10 @@ async fn scan_rpc_server_starts() -> Result<()> {
         .spawn_child(args!["start"])?
         .with_timeout(test_type.zebrad_timeout());
 
-    // Wait for the gRPC server to start
-    tokio::time::sleep(TINY_CHECKPOINT_TIMEOUT).await;
+    // Wait until gRPC server is starting.
+    tokio::time::sleep(LAUNCH_DELAY).await;
+    zebrad.expect_stdout_line_matches("starting scan gRPC server")?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
 
