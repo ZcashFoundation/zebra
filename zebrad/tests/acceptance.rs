@@ -2878,16 +2878,21 @@ async fn scan_rpc_server_starts() -> Result<()> {
         launches_lightwalletd: false,
     };
 
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{port}");
+    let mut config = default_test_config(Mainnet)?;
+    config.shielded_scan.listen_addr = listen_addr.parse().ok();
+
     // Start zebra with the config.
     let mut zebrad = testdir()?
-        .with_exact_config(&default_test_config(Mainnet)?)?
+        .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .with_timeout(test_type.zebrad_timeout());
 
     // Wait for the gRPC server to start
     tokio::time::sleep(TINY_CHECKPOINT_TIMEOUT).await;
 
-    let mut client = ScannerClient::connect("http://[::1]:50051").await?;
+    let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
 
     let request = tonic::Request::new(Empty {});
 
