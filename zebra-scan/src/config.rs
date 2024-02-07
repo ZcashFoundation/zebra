@@ -29,7 +29,7 @@ pub struct Config {
     /// listen_addr = '127.0.0.1:8231'
     /// ```
     ///
-    /// The recommended ports for the RPC server are:
+    /// The recommended ports for the gRPC server are:
     /// - Mainnet: 127.0.0.1:8231
     /// - Testnet: 127.0.0.1:18231
     pub listen_addr: Option<SocketAddr>,
