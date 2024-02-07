@@ -60,7 +60,7 @@ jobs:
         with:
           # Note: check service.proto when modifying lightwalletd repo
           repository: zcash/lightwalletd
-          ref: 'master'
+          ref: 'v0.4.16'
           persist-credentials: false
 
       - uses: actions/checkout@v4.1.1
@@ -76,7 +76,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.5.0
+        uses: docker/metadata-action@v5.5.1
         with:
           # list of Docker images to use as base name for tags
           images: |

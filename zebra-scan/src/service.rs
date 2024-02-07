@@ -9,10 +9,17 @@ use zebra_chain::{parameters::Network, transaction::Hash};
 
 use zebra_state::ChainTipChange;
 
-use crate::{init::ScanTask, scan, storage::Storage, Config, Request, Response};
+use crate::{scan, storage::Storage, Config, Request, Response};
 
 #[cfg(test)]
 mod tests;
+
+pub mod scan_task;
+
+pub use scan_task::{ScanTask, ScanTaskCommand};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use std::sync::mpsc::Receiver;
 
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]
@@ -42,13 +49,9 @@ impl ScanService {
     }
 
     /// Create a new [`ScanService`] with a mock `ScanTask`
+    // TODO: Move this to tests behind `cfg(any(test, feature = "proptest-impl"))`
     #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn new_with_mock_scanner(
-        db: Storage,
-    ) -> (
-        Self,
-        std::sync::mpsc::Receiver<crate::init::ScanTaskCommand>,
-    ) {
+    pub fn new_with_mock_scanner(db: Storage) -> (Self, Receiver<ScanTaskCommand>) {
         let (scan_task, cmd_receiver) = ScanTask::mock();
         (Self { db, scan_task }, cmd_receiver)
     }

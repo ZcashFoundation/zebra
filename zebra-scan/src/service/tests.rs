@@ -9,8 +9,7 @@ use zebra_node_services::scan_service::{request::Request, response::Response};
 use zebra_state::TransactionIndex;
 
 use crate::{
-    init::ScanTaskCommand,
-    service::ScanService,
+    service::{scan_task::ScanTaskCommand, ScanService},
     storage::db::tests::{fake_sapling_results, new_test_storage},
     tests::ZECPAGES_SAPLING_VIEWING_KEY,
 };
