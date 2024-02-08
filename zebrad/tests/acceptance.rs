@@ -128,6 +128,12 @@
 //! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scans_for_new_key --features shielded-scan --release -- --ignored --nocapture
 //! ```
 //!
+//! Example of how to run the scan_subscribe_results test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_subscribe_results --features shielded-scan --release -- --ignored --nocapture
+//! ```
+//!
 //! ## Checkpoint Generation Tests
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
@@ -3011,11 +3017,22 @@ fn scan_start_where_left() -> Result<()> {
 
 /// Test successful registration of a new key in the scan task.
 ///
-/// See [`common::shielded_scan::register_key`] for more information.
+/// See [`common::shielded_scan::scans_for_new_key`] for more information.
 // TODO: Add this test to CI (#8236)
 #[tokio::test]
 #[ignore]
 #[cfg(feature = "shielded-scan")]
 async fn scans_for_new_key() -> Result<()> {
     common::shielded_scan::scans_for_new_key::run().await
+}
+
+/// Tests SubscribeResults ScanService request.
+///
+/// See [`common::shielded_scan::subscribe_results`] for more information.
+// TODO: Add this test to CI (#8236)
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "shielded-scan")]
+async fn scan_subscribe_results() -> Result<()> {
+    common::shielded_scan::subscribe_results::run().await
 }
