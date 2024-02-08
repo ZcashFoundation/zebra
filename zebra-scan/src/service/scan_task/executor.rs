@@ -1,21 +1,18 @@
 //! The scan task executor
 
+use color_eyre::eyre::Report;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
 use tracing::Instrument;
-use zebra_chain::BoxError;
 
 use super::scan::ScanRangeTaskBuilder;
 
 const EXECUTOR_BUFFER_SIZE: usize = 100;
 
-pub fn spawn_init() -> (
-    Sender<ScanRangeTaskBuilder>,
-    JoinHandle<Result<(), BoxError>>,
-) {
+pub fn spawn_init() -> (Sender<ScanRangeTaskBuilder>, JoinHandle<Result<(), Report>>) {
     // TODO: Use a bounded channel.
     let (scan_task_sender, scan_task_receiver) = tokio::sync::mpsc::channel(EXECUTOR_BUFFER_SIZE);
 
@@ -27,12 +24,12 @@ pub fn spawn_init() -> (
 
 pub async fn scan_task_executor(
     mut scan_task_receiver: Receiver<ScanRangeTaskBuilder>,
-) -> Result<(), BoxError> {
+) -> Result<(), Report> {
     let mut scan_range_tasks = FuturesUnordered::new();
 
     // Push a pending future so that `.next()` will always return `Some`
     scan_range_tasks.push(tokio::spawn(
-        std::future::pending::<Result<(), BoxError>>().boxed(),
+        std::future::pending::<Result<(), Report>>().boxed(),
     ));
 
     loop {

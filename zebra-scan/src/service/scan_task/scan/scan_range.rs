@@ -2,10 +2,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use color_eyre::eyre::Report;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, BoxError};
+use zebra_chain::block::Height;
 use zebra_state::SaplingScanningKey;
 
 use crate::{
@@ -50,7 +51,7 @@ impl ScanRangeTaskBuilder {
 
     /// Spawns a `scan_range()` task and returns its [`JoinHandle`]
     // TODO: return a tuple with a shutdown sender
-    pub fn spawn(self) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(self) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
             keys,
@@ -70,7 +71,7 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
-) -> Result<(), BoxError> {
+) -> Result<(), Report> {
     let sapling_activation_height = storage.min_sapling_birthday_height();
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
