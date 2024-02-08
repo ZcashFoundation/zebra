@@ -12,8 +12,11 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use rand::{rngs::OsRng, thread_rng, RngCore};
 
-use zcash_client_backend::proto::compact_formats::{
-    ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+use zcash_client_backend::{
+    encoding::encode_extended_full_viewing_key,
+    proto::compact_formats::{
+        ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+    },
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -27,7 +30,7 @@ use zcash_primitives::{
         value::NoteValue,
         Note, Nullifier,
     },
-    zip32::DiversifiableFullViewingKey,
+    zip32,
 };
 
 use zebra_chain::{
@@ -83,7 +86,7 @@ pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::sapling::ExtendedFullViewingKey 
 pub fn fake_block(
     height: BlockHeight,
     nf: Nullifier,
-    dfvk: &DiversifiableFullViewingKey,
+    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,
@@ -157,7 +160,7 @@ pub fn fake_compact_block(
     height: BlockHeight,
     prev_hash: BlockHash,
     nf: Nullifier,
-    dfvk: &DiversifiableFullViewingKey,
+    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,

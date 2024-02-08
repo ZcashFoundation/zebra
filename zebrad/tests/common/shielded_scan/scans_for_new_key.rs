@@ -107,7 +107,12 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("started scan task, sending register keys message with zecpages key to start scanning for a new key",);
 
-    scan_task.register_keys(parsed_keys)?;
+    scan_task.register_keys(
+        parsed_keys
+            .into_iter()
+            .map(|key| (key.0, Some(key.1 .2 .0)))
+            .collect(),
+    )?;
 
     tracing::info!(
         ?WAIT_FOR_RESULTS_DURATION,
