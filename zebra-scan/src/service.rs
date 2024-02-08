@@ -86,7 +86,7 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     Ok(Response::Info {
-                        min_sapling_birthday_height: db.min_sapling_birthday_height(),
+                        min_sapling_birthday_height: db.network().sapling_activation_height(),
                     })
                 }
                 .boxed();

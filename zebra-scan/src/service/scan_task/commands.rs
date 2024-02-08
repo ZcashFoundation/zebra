@@ -12,7 +12,7 @@ use color_eyre::{eyre::eyre, Report};
 use tokio::sync::oneshot;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, transaction::Transaction};
+use zebra_chain::{block::Height, parameters::Network, transaction::Transaction};
 use zebra_state::SaplingScanningKey;
 
 use super::ScanTask;
@@ -61,11 +61,13 @@ impl ScanTask {
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
+        network: Network,
     ) -> Result<
         HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
         Report,
     > {
         let mut new_keys = HashMap::new();
+        let sapling_activation_height = network.sapling_activation_height();
 
         loop {
             let cmd = match cmd_receiver.try_recv() {
