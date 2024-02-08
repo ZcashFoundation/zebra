@@ -1,10 +1,10 @@
 //! Fixed test vectors for the scan task.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use color_eyre::Report;
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction};
 
 use crate::service::ScanTask;
 
@@ -165,6 +165,33 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         parsed_keys.len(),
         2,
         "should add 2 keys to parsed_keys after removals"
+    );
+
+    let subscribe_keys: HashSet<String> = (0..5).map(|i| i.to_string()).collect();
+    let result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
+
+    let (_new_keys, new_results_senders) =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+
+    let processed_subscribe_keys: HashSet<String> = new_results_senders.keys().cloned().collect();
+    let expected_new_subscribe_keys: HashSet<String> = (0..2).map(|i| i.to_string()).collect();
+
+    assert_eq!(
+        processed_subscribe_keys, expected_new_subscribe_keys,
+        "should return new result senders for registered keys"
+    );
+
+    for sender in new_results_senders.values() {
+        // send a fake tx id for each key
+        sender.send(transaction::Hash([0; 32]).into())?;
+    }
+
+    let results: Vec<_> = result_receiver.try_iter().collect();
+
+    assert_eq!(
+        results.len(),
+        expected_new_subscribe_keys.len(),
+        "there should be a fake result sent for each subscribed key"
     );
 
     Ok(())
