@@ -77,6 +77,50 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
     Ok(())
 }
 
+/// Tests that keys are deleted correctly
+#[tokio::test]
+pub async fn scan_service_subscribes_to_results_correctly() -> Result<()> {
+    let db = new_test_storage(Network::Mainnet);
+
+    let (mut scan_service, cmd_receiver) = ScanService::new_with_mock_scanner(db);
+
+    let keys = [String::from("fake key")];
+
+    let response_fut = scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::SubscribeResults(keys.iter().cloned().collect()));
+
+    let expected_keys = keys.iter().cloned().collect();
+    let cmd_handler_fut = tokio::task::spawn_blocking(move || {
+        let Ok(ScanTaskCommand::SubscribeResults {
+            result_sender: _,
+            keys,
+        }) = cmd_receiver.recv()
+        else {
+            panic!("should successfully receive RemoveKeys message");
+        };
+
+        assert_eq!(keys, expected_keys, "keys should match the request keys");
+    });
+
+    // Poll futures
+    let (response, join_result) = tokio::join!(response_fut, cmd_handler_fut);
+    join_result?;
+
+    let results_receiver = match response.map_err(|err| eyre!(err))? {
+        Response::SubscribeResults(results_receiver) => results_receiver,
+        _ => panic!("scan service returned unexpected response variant"),
+    };
+
+    results_receiver
+        .try_recv()
+        .expect_err("channel should be disconnected");
+
+    Ok(())
+}
+
 /// Tests that results are cleared are deleted correctly
 #[tokio::test]
 pub async fn scan_service_clears_results_correctly() -> Result<()> {
