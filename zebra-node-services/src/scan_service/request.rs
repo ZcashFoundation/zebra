@@ -14,8 +14,8 @@ pub enum Request {
     /// TODO: Accept `KeyHash`es and return key hashes that are registered
     CheckKeyHashes(Vec<()>),
 
-    /// TODO: Accept `ViewingKeyWithHash`es and return Ok(()) if successful or an error
-    RegisterKeys(Vec<()>),
+    /// Submits viewing keys with their optional birth-heights for scanning.
+    RegisterKeys(Vec<(String, Option<u32>)>),
 
     /// Deletes viewing keys and their results from the database.
     DeleteKeys(Vec<String>),

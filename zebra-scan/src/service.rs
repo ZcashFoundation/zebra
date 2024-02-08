@@ -96,10 +96,15 @@ impl Service<Request> for ScanService {
                 // TODO: check that these entries exist in db
             }
 
-            Request::RegisterKeys(_viewing_key_with_hashes) => {
-                // TODO:
-                //  - add these keys as entries in db
-                //  - send new keys to scan task
+            Request::RegisterKeys(keys) => {
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    Ok(Response::RegisteredKeys(
+                        scan_task.register_keys(keys)?.await?,
+                    ))
+                }
+                .boxed();
             }
 
             Request::DeleteKeys(keys) => {
