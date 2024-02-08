@@ -160,8 +160,15 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
 
-            Request::SubscribeResults(_key_hashes) => {
-                // TODO: send key_hashes and mpsc::Sender to scanner task, return mpsc::Receiver to caller
+            Request::SubscribeResults(keys) => {
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    let results_receiver = scan_task.subscribe(keys)?;
+
+                    Ok(Response::SubscribeResults(results_receiver))
+                }
+                .boxed();
             }
 
             Request::ClearResults(keys) => {

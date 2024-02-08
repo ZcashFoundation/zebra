@@ -183,7 +183,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     for sender in new_results_senders.values() {
         // send a fake tx id for each key
-        sender.send(transaction::Hash([0; 32]).into())?;
+        sender.send(transaction::Hash([0; 32]))?;
     }
 
     let results: Vec<_> = result_receiver.try_iter().collect();

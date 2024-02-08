@@ -1,9 +1,6 @@
 //! `zebra_scan::service::ScanService` response types.
 
-use std::{
-    collections::BTreeMap,
-    sync::{mpsc, Arc},
-};
+use std::{collections::BTreeMap, sync::mpsc};
 
 use zebra_chain::{block::Height, transaction::Hash};
 
@@ -28,5 +25,5 @@ pub enum Response {
     ClearedResults,
 
     /// Response to SubscribeResults request
-    SubscribeResults(mpsc::Receiver<Arc<Hash>>),
+    SubscribeResults(mpsc::Receiver<Hash>),
 }

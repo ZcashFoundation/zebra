@@ -35,7 +35,7 @@ use zebra_chain::{
     diagnostic::task::WaitForPanics,
     parameters::Network,
     serialization::ZcashSerialize,
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
@@ -110,7 +110,7 @@ pub async fn start(
         })
         .try_collect()?;
 
-    let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>> =
+    let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<transaction::Hash>> =
         HashMap::new();
 
     let (subscribed_keys_sender, subscribed_keys_receiver) =
@@ -214,7 +214,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-    subscribed_keys: HashMap<SaplingScanningKey, Sender<SaplingScannedResult>>,
+    subscribed_keys: HashMap<SaplingScanningKey, Sender<transaction::Hash>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -294,7 +294,7 @@ pub async fn scan_height_and_store_results(
 
                 for (_tx_index, &tx_id) in results {
                     // TODO: Handle `SendErrors`
-                    let _ = results_sender.send(tx_id);
+                    let _ = results_sender.send(tx_id.into());
                 }
             }
 

@@ -5,17 +5,16 @@ use std::{
     sync::{mpsc::Sender, Arc},
 };
 
-use color_eyre::eyre::Report;
-use tokio::task::JoinHandle;
-use tracing::Instrument;
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::block::Height;
-use zebra_state::{SaplingScannedResult, SaplingScanningKey};
-
 use crate::{
     scan::{scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
     storage::Storage,
 };
+use color_eyre::eyre::Report;
+use tokio::task::JoinHandle;
+use tracing::Instrument;
+use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
+use zebra_chain::{block::Height, transaction};
+use zebra_state::SaplingScanningKey;
 
 /// A builder for a scan until task
 pub struct ScanRangeTaskBuilder {
@@ -57,7 +56,7 @@ impl ScanRangeTaskBuilder {
     pub fn spawn(
         self,
         subscribed_keys_receiver: tokio::sync::watch::Receiver<
-            HashMap<String, Sender<SaplingScannedResult>>,
+            HashMap<String, Sender<transaction::Hash>>,
         >,
     ) -> JoinHandle<Result<(), Report>> {
         let Self {
@@ -89,7 +88,7 @@ pub async fn scan_range(
     state: State,
     storage: Storage,
     subscribed_keys_receiver: tokio::sync::watch::Receiver<
-        HashMap<String, Sender<SaplingScannedResult>>,
+        HashMap<String, Sender<transaction::Hash>>,
     >,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.min_sapling_birthday_height();

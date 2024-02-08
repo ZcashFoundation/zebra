@@ -1,5 +1,7 @@
 //! `zebra_scan::service::ScanService` request types.
 
+use std::collections::HashSet;
+
 use crate::BoxError;
 
 /// The maximum number of keys that may be included in a request to the scan service
@@ -24,7 +26,7 @@ pub enum Request {
     Results(Vec<String>),
 
     /// TODO: Accept `KeyHash`es and return a channel receiver
-    SubscribeResults(Vec<()>),
+    SubscribeResults(HashSet<String>),
 
     /// Clear the results for a set of viewing keys
     ClearResults(Vec<String>),

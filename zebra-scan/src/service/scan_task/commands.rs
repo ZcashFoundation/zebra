@@ -9,8 +9,8 @@ use color_eyre::{eyre::eyre, Report};
 use tokio::sync::oneshot;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::block::Height;
-use zebra_state::{SaplingScannedResult, SaplingScanningKey};
+use zebra_chain::{block::Height, transaction};
+use zebra_state::SaplingScanningKey;
 
 use super::ScanTask;
 
@@ -40,7 +40,7 @@ pub enum ScanTaskCommand {
     SubscribeResults {
         /// Sender for results
         // TODO: Update type to return full `WalletTx`
-        result_sender: mpsc::Sender<SaplingScannedResult>,
+        result_sender: mpsc::Sender<transaction::Hash>,
 
         /// Key hashes to send the results of to result channel
         keys: HashSet<String>,
@@ -65,7 +65,7 @@ impl ScanTask {
                 SaplingScanningKey,
                 (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
             >,
-            HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>>,
+            HashMap<SaplingScanningKey, mpsc::Sender<transaction::Hash>>,
         ),
         Report,
     > {
@@ -175,7 +175,7 @@ impl ScanTask {
     pub fn subscribe(
         &mut self,
         keys: HashSet<SaplingScanningKey>,
-    ) -> Result<Receiver<SaplingScannedResult>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<Receiver<transaction::Hash>, mpsc::SendError<ScanTaskCommand>> {
         // TODO: Use a bounded channel
         let (result_sender, result_receiver) = mpsc::channel();
 
