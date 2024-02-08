@@ -109,6 +109,7 @@ pub async fn scan_range(
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
+            HashMap::new(),
         )
         .await?;
 

@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, Sender},
         Arc,
     },
     time::Duration,
@@ -152,6 +152,7 @@ pub async fn start(
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
+            subscribed_keys.clone(),
         )
         .await?;
 
@@ -203,6 +204,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+    subscribed_keys: HashMap<SaplingScanningKey, Sender<SaplingScannedResult>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -250,6 +252,8 @@ pub async fn scan_height_and_store_results(
             _other => {}
         };
 
+        let results_sender = subscribed_keys.get(&sapling_key).cloned();
+
         let sapling_key = sapling_key.clone();
         let block = block.clone();
         let mut storage = storage.clone();
@@ -274,6 +278,15 @@ pub async fn scan_height_and_store_results(
 
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
+
+            if let Some(results_sender) = results_sender {
+                let results = dfvk_res.iter().chain(ivk_res.iter());
+
+                for (_tx_index, &tx_id) in results {
+                    // TODO: Handle `SendErrors`
+                    let _ = results_sender.send(tx_id);
+                }
+            }
 
             storage.add_sapling_results(&sapling_key, height, dfvk_res);
             storage.add_sapling_results(&sapling_key, height, ivk_res);
