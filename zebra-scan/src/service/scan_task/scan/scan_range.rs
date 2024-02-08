@@ -1,13 +1,16 @@
 //! Functions for registering new keys in the scan task
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{mpsc::Sender, Arc},
+};
 
 use color_eyre::eyre::Report;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::block::Height;
-use zebra_state::SaplingScanningKey;
+use zebra_state::{SaplingScannedResult, SaplingScanningKey};
 
 use crate::{
     scan::{scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
@@ -51,7 +54,12 @@ impl ScanRangeTaskBuilder {
 
     /// Spawns a `scan_range()` task and returns its [`JoinHandle`]
     // TODO: return a tuple with a shutdown sender
-    pub fn spawn(self) -> JoinHandle<Result<(), Report>> {
+    pub fn spawn(
+        self,
+        subscribed_keys_receiver: tokio::sync::watch::Receiver<
+            HashMap<String, Sender<SaplingScannedResult>>,
+        >,
+    ) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
             keys,
@@ -59,7 +67,16 @@ impl ScanRangeTaskBuilder {
             storage,
         } = self;
 
-        tokio::spawn(scan_range(height_range.end, keys, state, storage).in_current_span())
+        tokio::spawn(
+            scan_range(
+                height_range.end,
+                keys,
+                state,
+                storage,
+                subscribed_keys_receiver,
+            )
+            .in_current_span(),
+        )
     }
 }
 
@@ -71,6 +88,9 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
+    subscribed_keys_receiver: tokio::sync::watch::Receiver<
+        HashMap<String, Sender<SaplingScannedResult>>,
+    >,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.min_sapling_birthday_height();
     // Do not scan and notify if we are below sapling activation height.
@@ -103,6 +123,7 @@ pub async fn scan_range(
         .collect();
 
     while height < stop_before_height {
+        let subscribed_keys = subscribed_keys_receiver.borrow().clone();
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
@@ -110,7 +131,7 @@ pub async fn scan_range(
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
-            HashMap::new(),
+            subscribed_keys,
         )
         .await?;
 

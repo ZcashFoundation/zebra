@@ -1,5 +1,7 @@
 //! The scan task executor
 
+use std::collections::HashMap;
+
 use color_eyre::eyre::Report;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use tokio::{
@@ -7,23 +9,33 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::Instrument;
+use zebra_state::SaplingScannedResult;
 
 use super::scan::ScanRangeTaskBuilder;
 
 const EXECUTOR_BUFFER_SIZE: usize = 100;
 
-pub fn spawn_init() -> (Sender<ScanRangeTaskBuilder>, JoinHandle<Result<(), Report>>) {
+pub fn spawn_init(
+    subscribed_keys_receiver: tokio::sync::watch::Receiver<
+        HashMap<String, std::sync::mpsc::Sender<SaplingScannedResult>>,
+    >,
+) -> (Sender<ScanRangeTaskBuilder>, JoinHandle<Result<(), Report>>) {
     // TODO: Use a bounded channel.
     let (scan_task_sender, scan_task_receiver) = tokio::sync::mpsc::channel(EXECUTOR_BUFFER_SIZE);
 
     (
         scan_task_sender,
-        tokio::spawn(scan_task_executor(scan_task_receiver).in_current_span()),
+        tokio::spawn(
+            scan_task_executor(scan_task_receiver, subscribed_keys_receiver).in_current_span(),
+        ),
     )
 }
 
 pub async fn scan_task_executor(
     mut scan_task_receiver: Receiver<ScanRangeTaskBuilder>,
+    subscribed_keys_receiver: tokio::sync::watch::Receiver<
+        HashMap<String, std::sync::mpsc::Sender<SaplingScannedResult>>,
+    >,
 ) -> Result<(), Report> {
     let mut scan_range_tasks = FuturesUnordered::new();
 
@@ -36,7 +48,7 @@ pub async fn scan_task_executor(
         tokio::select! {
             Some(scan_range_task) = scan_task_receiver.recv() => {
                 // TODO: Add a long timeout?
-                scan_range_tasks.push(scan_range_task.spawn());
+                scan_range_tasks.push(scan_range_task.spawn(subscribed_keys_receiver.clone()));
             }
 
             Some(finished_task) = scan_range_tasks.next() => {

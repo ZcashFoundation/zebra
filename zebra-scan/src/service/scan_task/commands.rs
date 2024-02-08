@@ -59,12 +59,18 @@ impl ScanTask {
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
-        subscribed_keys: &mut HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>>,
     ) -> Result<
-        HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+        (
+            HashMap<
+                SaplingScanningKey,
+                (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
+            >,
+            HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>>,
+        ),
         Report,
     > {
         let mut new_keys = HashMap::new();
+        let mut new_result_senders = HashMap::new();
 
         loop {
             let cmd = match cmd_receiver.try_recv() {
@@ -118,13 +124,13 @@ impl ScanTask {
                         .filter(|key| registered_keys.contains_key(key));
 
                     for key in keys {
-                        subscribed_keys.insert(key, result_sender.clone());
+                        new_result_senders.insert(key, result_sender.clone());
                     }
                 }
             }
         }
 
-        Ok(new_keys)
+        Ok((new_keys, new_result_senders))
     }
 
     /// Sends a command to the scan task

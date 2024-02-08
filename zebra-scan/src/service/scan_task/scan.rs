@@ -113,7 +113,11 @@ pub async fn start(
     let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>> =
         HashMap::new();
 
-    let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
+    let (subscribed_keys_sender, subscribed_keys_receiver) =
+        tokio::sync::watch::channel(subscribed_keys.clone());
+
+    let (scan_task_sender, scan_task_executor_handle) =
+        executor::spawn_init(subscribed_keys_receiver);
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
     // Give empty states time to verify some blocks before we start scanning.
@@ -131,8 +135,8 @@ pub async fn start(
             }
         }
 
-        let new_keys =
-            ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
+        let (new_keys, new_result_senders) =
+            ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
@@ -143,6 +147,12 @@ pub async fn start(
                 .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
                 .await
                 .expect("scan_until_task channel should not be closed");
+        }
+
+        if !new_result_senders.is_empty() {
+            subscribed_keys.extend(new_result_senders);
+            // Ignore send errors, it's okay if there aren't any receivers.
+            let _ = subscribed_keys_sender.send(subscribed_keys.clone());
         }
 
         let scanned_height = scan_height_and_store_results(
