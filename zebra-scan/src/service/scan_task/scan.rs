@@ -2,7 +2,10 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{mpsc::Receiver, Arc},
+    sync::{
+        mpsc::{self, Receiver},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -107,6 +110,9 @@ pub async fn start(
         })
         .try_collect()?;
 
+    let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>> =
+        HashMap::new();
+
     let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
@@ -125,7 +131,8 @@ pub async fn start(
             }
         }
 
-        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        let new_keys =
+            ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {

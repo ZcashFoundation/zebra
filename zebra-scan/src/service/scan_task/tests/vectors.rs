@@ -1,10 +1,11 @@
 //! Fixed test vectors for the scan task.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::mpsc};
 
 use color_eyre::Report;
 
 use zebra_chain::block::Height;
+use zebra_state::{SaplingScannedResult, SaplingScanningKey};
 
 use crate::service::ScanTask;
 
@@ -13,6 +14,8 @@ use crate::service::ScanTask;
 async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let (mut mock_scan_task, cmd_receiver) = ScanTask::mock();
     let mut parsed_keys = HashMap::new();
+    let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>> =
+        HashMap::new();
 
     // Send some keys to be registered
     let num_keys = 10;
@@ -22,7 +25,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
             .collect(),
     )?;
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     // Check that it updated parsed_keys correctly and returned the right new keys when starting with an empty state
 
@@ -46,7 +50,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that no key should be added if they are all already known and the heights are the same
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -73,7 +78,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
             .collect(),
     )?;
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -102,7 +108,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let done_rx =
         mock_scan_task.remove_keys(&(0..200).map(|i| i.to_string()).collect::<Vec<_>>())?;
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     // Check that it sends the done notification successfully before returning and dropping `done_tx`
     done_rx.await?;
@@ -124,7 +131,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     mock_scan_task.remove_keys(&(0..200).map(|i| i.to_string()).collect::<Vec<_>>())?;
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     assert!(
         new_keys.is_empty(),
@@ -147,7 +155,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
             .collect(),
     )?;
 
-    let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+    let new_keys =
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, &mut subscribed_keys)?;
 
     assert_eq!(
         new_keys.len(),

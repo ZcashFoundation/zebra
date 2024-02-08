@@ -2,18 +2,15 @@
 
 use std::{
     collections::HashMap,
-    sync::{
-        mpsc::{self, Receiver, TryRecvError},
-        Arc,
-    },
+    sync::mpsc::{self, Receiver, TryRecvError},
 };
 
 use color_eyre::{eyre::eyre, Report};
 use tokio::sync::oneshot;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, transaction::Transaction};
-use zebra_state::SaplingScanningKey;
+use zebra_chain::block::Height;
+use zebra_state::{SaplingScannedResult, SaplingScanningKey};
 
 use super::ScanTask;
 
@@ -42,7 +39,8 @@ pub enum ScanTaskCommand {
     // TODO: Implement this command (#8206)
     SubscribeResults {
         /// Sender for results
-        result_sender: mpsc::Sender<Arc<Transaction>>,
+        // TODO: Update type to return full `WalletTx`
+        result_sender: mpsc::Sender<SaplingScannedResult>,
 
         /// Key hashes to send the results of to result channel
         keys: Vec<String>,
@@ -57,10 +55,11 @@ impl ScanTask {
     /// Returns newly registered keys for scanning.
     pub fn process_messages(
         cmd_receiver: &Receiver<ScanTaskCommand>,
-        parsed_keys: &mut HashMap<
+        registered_keys: &mut HashMap<
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
+        subscribed_keys: &mut HashMap<SaplingScanningKey, mpsc::Sender<SaplingScannedResult>>,
     ) -> Result<
         HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
         Report,
@@ -83,7 +82,7 @@ impl ScanTask {
                     let keys: Vec<_> = keys
                         .into_iter()
                         .filter(|(key, _)| {
-                            !parsed_keys.contains_key(key) || new_keys.contains_key(key)
+                            !registered_keys.contains_key(key) || new_keys.contains_key(key)
                         })
                         .collect();
 
@@ -96,13 +95,13 @@ impl ScanTask {
                                     (key, (decoded_dfvks, decoded_ivks))
                                 });
 
-                        parsed_keys.extend(keys);
+                        registered_keys.extend(keys);
                     }
                 }
 
                 ScanTaskCommand::RemoveKeys { done_tx, keys } => {
                     for key in keys {
-                        parsed_keys.remove(&key);
+                        registered_keys.remove(&key);
                         new_keys.remove(&key);
                     }
 
@@ -110,7 +109,18 @@ impl ScanTask {
                     let _ = done_tx.send(());
                 }
 
-                _ => continue,
+                ScanTaskCommand::SubscribeResults {
+                    result_sender,
+                    keys,
+                } => {
+                    let keys = keys
+                        .into_iter()
+                        .filter(|key| registered_keys.contains_key(key));
+
+                    for key in keys {
+                        subscribed_keys.insert(key, result_sender.clone());
+                    }
+                }
             }
         }
 
