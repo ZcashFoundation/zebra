@@ -2866,6 +2866,53 @@ fn scan_task_starts() -> Result<()> {
     Ok(())
 }
 
+/// Test that the scanner gRPC server starts when the node starts.
+#[tokio::test]
+#[cfg(feature = "shielded-scan")]
+async fn scan_rpc_server_starts() -> Result<()> {
+    use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
+
+    let _init_guard = zebra_test::init();
+
+    let test_type = TestType::LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
+
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{port}");
+    let mut config = default_test_config(Mainnet)?;
+    config.shielded_scan.listen_addr = Some(listen_addr.parse()?);
+
+    // Start zebra with the config.
+    let mut zebrad = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(test_type.zebrad_timeout());
+
+    // Wait until gRPC server is starting.
+    tokio::time::sleep(LAUNCH_DELAY).await;
+    zebrad.expect_stdout_line_matches("starting scan gRPC server")?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
+
+    let request = tonic::Request::new(Empty {});
+
+    client.get_info(request).await?;
+
+    // Kill the node.
+    zebrad.kill(false)?;
+
+    // Check that scan task started and the first scanning is done.
+    let output = zebrad.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+    output.assert_failure()?;
+
+    Ok(())
+}
+
 /// Test that the scanner can continue scanning where it was left when zebrad restarts.
 ///
 /// Needs a cache state close to the tip. A possible way to run it locally is:
