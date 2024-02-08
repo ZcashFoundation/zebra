@@ -51,6 +51,28 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 /// A fake viewing key in an incorrect format.
 pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
 
+/// Generates fake Sapling viewing keys.
+pub fn mock_sapling_viewing_keys(i: u8) -> Vec<String> {
+    let mut keys: Vec<String> = vec![];
+
+    for i in 0..i {
+        keys.push(encode_extended_full_viewing_key(
+            "zxviews",
+            &mock_sapling_efvk(&[i]),
+        ));
+    }
+
+    keys
+}
+
+/// Generates an [`zip32::sapling::ExtendedFullViewingKey`] from `seed` for tests.
+#[allow(deprecated)]
+pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::sapling::ExtendedFullViewingKey {
+    // TODO: Use `to_diversifiable_full_viewing_key` since `to_extended_full_viewing_key` is
+    // deprecated.
+    zip32::sapling::ExtendedSpendingKey::master(seed).to_extended_full_viewing_key()
+}
+
 /// Generates a fake block containing a Sapling output decryptable by `dfvk`.
 ///
 /// The fake block has the following transactions in this order:
