@@ -1,7 +1,7 @@
 //! Types and method implementations for [`ScanTaskCommand`]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
@@ -43,7 +43,7 @@ pub enum ScanTaskCommand {
         result_sender: mpsc::Sender<SaplingScannedResult>,
 
         /// Key hashes to send the results of to result channel
-        keys: Vec<String>,
+        keys: HashSet<String>,
     },
 }
 
@@ -142,6 +142,8 @@ impl ScanTask {
     }
 
     /// Sends a message to the scan task to remove the provided viewing keys.
+    ///
+    /// Returns a oneshot channel receiver to notify the caller when the keys have been removed.
     pub fn remove_keys(
         &mut self,
         keys: &[String],
@@ -165,5 +167,22 @@ impl ScanTask {
         >,
     ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
         self.send(ScanTaskCommand::RegisterKeys { keys })
+    }
+
+    /// Sends a message to the scan task to start sending the results for the provided viewing keys to a channel.
+    ///
+    /// Returns the channel receiver.
+    pub fn subscribe(
+        &mut self,
+        keys: HashSet<SaplingScanningKey>,
+    ) -> Result<Receiver<SaplingScannedResult>, mpsc::SendError<ScanTaskCommand>> {
+        // TODO: Use a bounded channel
+        let (result_sender, result_receiver) = mpsc::channel();
+
+        self.send(ScanTaskCommand::SubscribeResults {
+            result_sender,
+            keys,
+        })
+        .map(|_| result_receiver)
     }
 }
