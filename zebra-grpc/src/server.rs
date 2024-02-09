@@ -168,7 +168,7 @@ where
 
                 (key, transactions)
             })
-            .collect::<std::collections::BTreeMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
 
         Ok(Response::new(GetResultsResponse { results }))
     }
