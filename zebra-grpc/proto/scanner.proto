@@ -16,6 +16,9 @@ service Scanner {
     // Deletes a set of keys and their results from the scanner.
     // This request stop the scanner from scanning blocks for the these keys.
     rpc DeleteKeys(DeleteKeysRequest) returns (Empty);
+
+    // Get all data we have stored for the given keys.
+    rpc GetResults(GetResultsRequest) returns (GetResultsResponse);
 }
 
 // A response to a GetInfo call.
@@ -34,4 +37,28 @@ message ClearResultsRequest {
 message DeleteKeysRequest {
     // Keys to delete from scanner.
     repeated string keys = 1;
+}
+
+// A request for getting results for a set of keys.
+message GetResultsRequest {
+    // Keys for which to get results.
+    repeated string keys = 1;
+}
+
+// A set of responses for each provided key of a GetResults call.
+message GetResultsResponse {
+    // Results for each key.
+    map<string, Results> results = 1;
+}
+
+// A result for a single key.
+message Results {
+    // A height, transaction id map
+    map<uint32, TransactionHash> transactions = 1;
+}
+
+// A vector of transaction hashes
+message TransactionHash {
+    // A transaction id hash
+    repeated string hash = 1;
 }

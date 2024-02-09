@@ -1,6 +1,6 @@
 //! The gRPC server implementation
 
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use futures_util::future::TryFutureExt;
 use tonic::{transport::Server, Response, Status};
@@ -12,7 +12,8 @@ use zebra_node_services::scan_service::{
 
 use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
-    ClearResultsRequest, DeleteKeysRequest, Empty, InfoReply,
+    ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
+    InfoReply, Results, TransactionHash,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -119,6 +120,57 @@ where
         };
 
         Ok(Response::new(Empty {}))
+    }
+
+    async fn get_results(
+        &self,
+        request: tonic::Request<GetResultsRequest>,
+    ) -> Result<Response<GetResultsResponse>, Status> {
+        let keys = request.into_inner().keys;
+
+        if keys.is_empty() {
+            let msg = "must provide at least 1 key to get results";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        let ScanServiceResponse::Results(response) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::Results(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        // If there are no results for a key, we still want to return it with empty results.
+        let empty_map = BTreeMap::new();
+
+        let results = keys
+            .into_iter()
+            .map(|key| {
+                let values = response.get(&key).unwrap_or(&empty_map);
+
+                // Skip heights with no transactions, they are scanner markers and should not be returned.
+                let transactions = Results {
+                    transactions: values
+                        .iter()
+                        .filter(|(_, transactions)| !transactions.is_empty())
+                        .map(|(height, transactions)| {
+                            let txs = transactions.iter().map(ToString::to_string).collect();
+                            (height.0, TransactionHash { hash: txs })
+                        })
+                        .collect(),
+                };
+
+                (key, transactions)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        Ok(Response::new(GetResultsResponse { results }))
     }
 }
 
