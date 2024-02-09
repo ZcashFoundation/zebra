@@ -40,40 +40,40 @@ fn push_genesis_chain() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     proptest!(
-        ProptestConfig::with_cases(env::var("PROPTEST_CASES")
-                                   .ok()
-                                   .and_then(|v| v.parse().ok())
-                                   .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, count, network, empty_tree) in PreparedChain::default())| {
-            prop_assert!(empty_tree.is_none());
+    ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                               .ok()
+                               .and_then(|v| v.parse().ok())
+                               .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+    |((chain, count, network, empty_tree) in PreparedChain::default())| {
+        prop_assert!(empty_tree.is_none());
 
-            let mut only_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, ValueBalance::zero());
-            // contains the block value pool changes and chain value pool balances for each height
-            let mut chain_values = BTreeMap::new();
+        let mut only_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, ValueBalance::zero());
+        // contains the block value pool changes and chain value pool balances for each height
+        let mut chain_values = BTreeMap::new();
 
-            chain_values.insert(None, (None, only_chain.chain_value_pools.into()));
+        chain_values.insert(None, (None, only_chain.chain_value_pools.into()));
 
-            for block in chain.iter().take(count).skip(1).cloned() {
-                let block =
-                ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-                        block,
-                        only_chain.unspent_utxos(),
-                    )
-                    .map_err(|e| (e, chain_values.clone()))
-                    .expect("invalid block value pool change");
+        for block in chain.iter().take(count).skip(1).cloned() {
+            let block =
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+                    block,
+                    only_chain.unspent_utxos(),
+                )
+                .map_err(|e| (e, chain_values.clone()))
+                .expect("invalid block value pool change");
 
-                chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), None));
+            chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), None));
 
-                only_chain = only_chain
-                    .push(block.clone())
-                    .map_err(|e| (e, chain_values.clone()))
-                    .expect("invalid chain value pools");
+            only_chain = only_chain
+                .push(block.clone())
+                .map_err(|e| (e, chain_values.clone()))
+                .expect("invalid chain value pools");
 
-                chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), only_chain.chain_value_pools.into()));
-            }
+            chain_values.insert(block.height.into(), (block.chain_value_pool_change.into(), only_chain.chain_value_pools.into()));
+        }
 
-            prop_assert_eq!(only_chain.blocks.len(), count - 1);
-        });
+        prop_assert_eq!(only_chain.blocks.len(), count - 1);
+    });
 
     Ok(())
 }

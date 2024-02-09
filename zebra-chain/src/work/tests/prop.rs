@@ -18,15 +18,15 @@ fn equihash_solution_roundtrip() {
     let _init_guard = zebra_test::init();
 
     proptest!(|(solution in any::<equihash::Solution>())| {
-            let data = solution
-                .zcash_serialize_to_vec()
-                .expect("randomized EquihashSolution should serialize");
-            let solution2 = data
-                .zcash_deserialize_into()
-                .expect("randomized EquihashSolution should deserialize");
+        let data = solution
+            .zcash_serialize_to_vec()
+            .expect("randomized EquihashSolution should serialize");
+        let solution2 = data
+            .zcash_deserialize_into()
+            .expect("randomized EquihashSolution should deserialize");
 
-            prop_assert_eq![solution, solution2];
-        });
+        prop_assert_eq![solution, solution2];
+    });
 }
 
 prop_compose! {
@@ -94,10 +94,10 @@ fn equihash_prop_test_nonce() -> color_eyre::eyre::Result<()> {
         block.header.solution.check(&block.header)?;
 
         proptest!(|(fake_header in randomized_nonce(*block.header.as_ref()))| {
-                fake_header.solution
-                    .check(&fake_header)
-                    .expect_err("block header should not validate on randomized nonce");
-            });
+            fake_header.solution
+                .check(&fake_header)
+                .expect_err("block header should not validate on randomized nonce");
+        });
     }
 
     Ok(())
