@@ -75,7 +75,7 @@ pub async fn start(
     cmd_receiver: Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
-    let sapling_activation_height = storage.min_sapling_birthday_height();
+    let sapling_activation_height = network.sapling_activation_height();
 
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
@@ -125,7 +125,7 @@ pub async fn start(
             }
         }
 
-        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {

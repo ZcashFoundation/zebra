@@ -2,10 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use zebra_chain::{
-    block::Height,
-    parameters::{Network, NetworkUpgrade},
-};
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_state::TransactionIndex;
 
 use crate::config::Config;
@@ -125,20 +122,5 @@ impl Storage {
         sapling_key: &SaplingScanningKey,
     ) -> BTreeMap<Height, Vec<SaplingScannedResult>> {
         self.sapling_results_for_key(sapling_key)
-    }
-
-    // Parameters
-
-    /// Returns the minimum sapling birthday height for the configured network.
-    pub fn min_sapling_birthday_height(&self) -> Height {
-        // Assume that the genesis block never contains shielded inputs or outputs.
-        //
-        // # Consensus
-        //
-        // For Zcash mainnet and the public testnet, Sapling activates above genesis,
-        // so this is always true.
-        NetworkUpgrade::Sapling
-            .activation_height(self.network())
-            .unwrap_or(Height(0))
     }
 }
