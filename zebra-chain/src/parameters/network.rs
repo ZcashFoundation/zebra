@@ -132,12 +132,6 @@ impl Network {
 
     /// Returns the Sapling activation height for this network.
     pub fn sapling_activation_height(self) -> Height {
-        // Assume that the genesis block never contains shielded inputs or outputs.
-        //
-        // # Consensus
-        //
-        // For Zcash mainnet and the public testnet, Sapling activates above genesis,
-        // so this is always true.
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")
