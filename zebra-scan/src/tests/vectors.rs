@@ -156,15 +156,16 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let key_to_be_stored = encode_extended_full_viewing_key("zxviews", &efvk);
 
     // Create a database
-    let mut s = new_test_storage(network);
+    let mut storage = new_test_storage(network);
 
     // Insert the generated key to the database
-    s.add_sapling_key(&key_to_be_stored, None);
+    storage.add_sapling_key(&key_to_be_stored, None);
 
     // Check key was added
-    assert_eq!(s.sapling_keys_last_heights().len(), 1);
+    assert_eq!(storage.sapling_keys_last_heights().len(), 1);
     assert_eq!(
-        s.sapling_keys_last_heights()
+        storage
+            .sapling_keys_last_heights()
             .get(&key_to_be_stored)
             .expect("height is stored")
             .next()
@@ -185,7 +186,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         SaplingScannedResult::from_bytes_in_display_order(*result.transactions()[0].txid.as_ref());
 
     // Add result to database
-    s.add_sapling_results(
+    storage.add_sapling_results(
         &key_to_be_stored,
         Height(1),
         [(TransactionIndex::from_usize(0), result)].into(),
@@ -193,7 +194,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     // Check the result was added
     assert_eq!(
-        s.sapling_results(&key_to_be_stored).get(&Height(1)),
+        storage.sapling_results(&key_to_be_stored).get(&Height(1)),
         Some(&vec![result])
     );
 
