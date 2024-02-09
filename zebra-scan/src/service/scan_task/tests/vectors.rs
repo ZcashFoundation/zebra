@@ -139,14 +139,14 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         "should add 2 keys to parsed_keys after removals"
     );
 
-    let subscribe_keys: HashSet<String> = (0..5).map(|i| i.to_string()).collect();
+    let subscribe_keys: HashSet<String> = sapling_keys[..5].iter().cloned().collect();
     let result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
 
     let (_new_keys, new_results_senders) =
         ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     let processed_subscribe_keys: HashSet<String> = new_results_senders.keys().cloned().collect();
-    let expected_new_subscribe_keys: HashSet<String> = (0..2).map(|i| i.to_string()).collect();
+    let expected_new_subscribe_keys: HashSet<String> = sapling_keys[..2].iter().cloned().collect();
 
     assert_eq!(
         processed_subscribe_keys, expected_new_subscribe_keys,
