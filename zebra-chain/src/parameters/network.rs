@@ -130,7 +130,7 @@ impl Network {
         *self != Network::Mainnet
     }
 
-    /// Returns the minimum Sapling birthday height.
+    /// Returns the Sapling activation height for this network.
     pub fn sapling_activation_height(self) -> Height {
         // Assume that the genesis block never contains shielded inputs or outputs.
         //

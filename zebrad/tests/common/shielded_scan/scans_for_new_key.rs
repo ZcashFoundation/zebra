@@ -108,7 +108,7 @@ pub(crate) async fn run() -> Result<()> {
     scan_task.register_keys(
         parsed_keys
             .into_iter()
-            .map(|key| (key.0, Some(key.1 .2 .0)))
+            .map(|(key, (_, _, Height(h)))| (key, Some(h)))
             .collect(),
     )?;
 

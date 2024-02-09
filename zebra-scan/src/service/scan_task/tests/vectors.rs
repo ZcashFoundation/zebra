@@ -15,7 +15,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Send some keys to be registered
     let num_keys = 10;
-    let sapling_keys = mock_sapling_viewing_keys(num_keys as u8);
+    let sapling_keys = mock_sapling_viewing_keys(num_keys.try_into().expect("should fit in u8"));
     let sapling_keys_with_birth_heights: Vec<(String, Option<u32>)> =
         sapling_keys.into_iter().zip((0..).map(Some)).collect();
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
