@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    scan::{scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
+    scan::{get_min_height, scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
     storage::Storage,
 };
 use color_eyre::eyre::Report;
@@ -104,13 +104,10 @@ pub async fn scan_range(
         .iter()
         .map(|(key, (_, _, height))| (key.clone(), *height))
         .collect();
-    let key_heights = Arc::new(key_heights);
 
-    let mut height = key_heights
-        .values()
-        .cloned()
-        .min()
-        .unwrap_or(sapling_activation_height);
+    let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
+
+    let key_heights = Arc::new(key_heights);
 
     // Parse and convert keys once, then use them to scan all blocks.
     let parsed_keys: HashMap<
@@ -144,6 +141,12 @@ pub async fn scan_range(
             .next()
             .expect("a valid blockchain never reaches the max height");
     }
+
+    info!(
+        start_height = ?height,
+        ?stop_before_height,
+        "finished scanning range"
+    );
 
     Ok(())
 }

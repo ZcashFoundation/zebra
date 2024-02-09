@@ -80,6 +80,8 @@ pub async fn start(
     let network = storage.network();
     let sapling_activation_height = network.sapling_activation_height();
 
+    info!(?network, "starting scan task");
+
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
         sapling_activation_height,
@@ -96,6 +98,8 @@ pub async fn start(
     let key_heights = Arc::new(key_heights);
 
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
+
+    info!(start_height = ?height, "got min scan height");
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
@@ -138,36 +142,53 @@ pub async fn start(
         let (new_keys, new_result_senders) =
             ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
-        // TODO: Check if the `start_height` is at or above the current height
-        if !new_keys.is_empty() {
-            let state = state.clone();
-            let storage = storage.clone();
-
-            scan_task_sender
-                .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
-                .await
-                .expect("scan_until_task channel should not be closed");
-        }
-
+        // Send the latest version of `subscribed_keys` before spawning the scan range task
         if !new_result_senders.is_empty() {
             subscribed_keys.extend(new_result_senders);
             // Ignore send errors, it's okay if there aren't any receivers.
             let _ = subscribed_keys_sender.send(subscribed_keys.clone());
         }
 
-        let scanned_height = scan_height_and_store_results(
-            height,
-            state.clone(),
-            Some(chain_tip_change.clone()),
-            storage.clone(),
-            key_heights.clone(),
-            parsed_keys.clone(),
-            subscribed_keys.clone(),
-        )
-        .await?;
+        // TODO: Check if the `start_height` is at or above the current height
+        if !new_keys.is_empty() {
+            let state = state.clone();
+            let storage = storage.clone();
 
-        // If we've reached the tip, sleep for a while then try and get the same block.
-        if scanned_height.is_none() {
+            let start_height = new_keys
+                .iter()
+                .map(|(_, (_, _, height))| *height)
+                .min()
+                .unwrap_or(sapling_activation_height);
+
+            if parsed_keys.len() == new_keys.len() {
+                info!(?start_height, "setting new start height");
+                height = start_height;
+            } else if start_height < height {
+                scan_task_sender
+                    .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
+                    .await
+                    .expect("scan_until_task channel should not be closed");
+            }
+        }
+
+        if !parsed_keys.is_empty() {
+            let scanned_height = scan_height_and_store_results(
+                height,
+                state.clone(),
+                Some(chain_tip_change.clone()),
+                storage.clone(),
+                key_heights.clone(),
+                parsed_keys.clone(),
+                subscribed_keys.clone(),
+            )
+            .await?;
+
+            // If we've reached the tip, sleep for a while then try and get the same block.
+            if scanned_height.is_none() {
+                tokio::time::sleep(CHECK_INTERVAL).await;
+                continue;
+            }
+        } else {
             tokio::time::sleep(CHECK_INTERVAL).await;
             continue;
         }
@@ -191,10 +212,16 @@ pub async fn wait_for_height(
                 "scanner is waiting for {height_name}. Current tip: {}, {height_name}: {}",
                 tip_height.0, height.0
             );
+
             tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
+        } else {
+            info!(
+                "scanner finished waiting for {height_name}. Current tip: {}, {height_name}: {}",
+                tip_height.0, height.0
+            );
+
+            break;
         }
-        break;
     }
 
     Ok(())
@@ -255,6 +282,12 @@ pub async fn scan_height_and_store_results(
                         key_index_in_task, last_scanned_height.next().expect("height is not maximum").as_usize(),
                         height.as_usize(),
                         chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
+                    );
+                } else {
+                    info!(
+                        "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}",
+                        key_index_in_task, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                        height.as_usize(),
                     );
                 }
             }

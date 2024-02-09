@@ -27,7 +27,7 @@ use crate::common::{
 const REQUIRED_MIN_TIP_HEIGHT: Height = Height(1_000_000);
 
 /// How long this test waits after registering keys to check if there are any results.
-const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(10 * 60);
+const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(60);
 
 /// Initialize Zebra's state service with a cached state, add a new key to the scan task, and
 /// check that it stores results for the new key without errors.
@@ -107,6 +107,8 @@ pub(crate) async fn run() -> Result<()> {
     let storage = Storage::new(&shielded_scan_config, network, true);
 
     let results = storage.sapling_results(&ZECPAGES_SAPLING_VIEWING_KEY.to_string());
+
+    tracing::info!(?results, "got the results");
 
     // Check that some results were added for the zecpages key that was not in the config or the db when ScanTask started.
     assert!(

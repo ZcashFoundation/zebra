@@ -28,7 +28,7 @@ use crate::common::{
 const REQUIRED_MIN_TIP_HEIGHT: Height = Height(1_000_000);
 
 /// How long this test waits for a result before failing.
-const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(10 * 60);
+const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(30 * 60);
 
 /// Initialize Zebra's state service with a cached state, add a new key to the scan task, and
 /// check that it stores results for the new key without errors.
@@ -54,8 +54,6 @@ pub(crate) async fn run() -> Result<()> {
         .zebrad_state_path(test_name)
         .expect("already checked that there is a cached state path");
 
-    let shielded_scan_config = zebra_scan::Config::default();
-
     let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
         start_state_service_with_cache_dir(network, zebrad_state_path).await?;
 
@@ -79,22 +77,30 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("opened state service with valid chain tip height, starting scan task",);
 
-    // Before spawning `ScanTask`, delete past results for the zecpages key, if any.
-    let mut storage = Storage::new(&shielded_scan_config, network, false);
-    storage.delete_sapling_keys(vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]);
-
     let state = ServiceBuilder::new().buffer(10).service(state_service);
 
+    // Create an ephemeral `Storage` instance
+    let storage = Storage::new(&zebra_scan::Config::ephemeral(), network, false);
     let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
 
     tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
 
     let keys = [ZECPAGES_SAPLING_VIEWING_KEY.to_string()];
-    scan_task.register_keys(keys.iter().cloned().map(|key| (key, None)).collect())?;
+    scan_task.register_keys(
+        keys.iter()
+            .cloned()
+            .map(|key| (key, Some(736000)))
+            .collect(),
+    )?;
     let result_receiver = scan_task.subscribe(keys.into_iter().collect())?;
 
     // Wait for the scanner to send a result in the channel
-    let _result = result_receiver.recv_timeout(WAIT_FOR_RESULTS_DURATION)?;
+    let result = tokio::task::spawn_blocking(move || {
+        result_receiver.recv_timeout(WAIT_FOR_RESULTS_DURATION)
+    })
+    .await??;
+
+    tracing::info!(?result, "received a result from the channel");
 
     Ok(())
 }
