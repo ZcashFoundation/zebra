@@ -129,6 +129,13 @@ impl Network {
     pub fn is_a_test_network(&self) -> bool {
         *self != Network::Mainnet
     }
+
+    /// Returns the Sapling activation height for this network.
+    pub fn sapling_activation_height(self) -> Height {
+        super::NetworkUpgrade::Sapling
+            .activation_height(self)
+            .expect("Sapling activation height needs to be set")
+    }
 }
 
 impl FromStr for Network {

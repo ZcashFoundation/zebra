@@ -5,7 +5,8 @@ use std::sync::Arc;
 use color_eyre::Result;
 
 use zcash_client_backend::{
-    encoding::decode_extended_full_viewing_key, proto::compact_formats::ChainMetadata,
+    encoding::{decode_extended_full_viewing_key, encode_extended_full_viewing_key},
+    proto::compact_formats::ChainMetadata,
 };
 use zcash_primitives::{
     constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -24,7 +25,7 @@ use zebra_state::{SaplingScannedResult, TransactionIndex};
 use crate::{
     scan::{block_to_compact, scan_block},
     storage::db::tests::new_test_storage,
-    tests::{fake_block, ZECPAGES_SAPLING_VIEWING_KEY},
+    tests::{fake_block, mock_sapling_efvk, ZECPAGES_SAPLING_VIEWING_KEY},
 };
 
 /// This test:
@@ -146,31 +147,30 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 ///
 /// The purpose of this test is to check if our database and our scanning code are compatible.
 #[test]
-#[allow(deprecated)]
 fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
+    let network = Network::Mainnet;
+
     // Generate a key
-    let extsk = ExtendedSpendingKey::master(&[]);
-    // TODO: find out how to do it with `to_diversifiable_full_viewing_key` as `to_extended_full_viewing_key` is deprecated.
-    let extfvk = extsk.to_extended_full_viewing_key();
-    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
-    let key_to_be_stored =
-        zcash_client_backend::encoding::encode_extended_full_viewing_key("zxviews", &extfvk);
+    let efvk = mock_sapling_efvk(&[]);
+    let dfvk = efvk.to_diversifiable_full_viewing_key();
+    let key_to_be_stored = encode_extended_full_viewing_key("zxviews", &efvk);
 
     // Create a database
-    let mut s = new_test_storage(Network::Mainnet);
+    let mut storage = new_test_storage(network);
 
     // Insert the generated key to the database
-    s.add_sapling_key(&key_to_be_stored, None);
+    storage.add_sapling_key(&key_to_be_stored, None);
 
     // Check key was added
-    assert_eq!(s.sapling_keys_last_heights().len(), 1);
+    assert_eq!(storage.sapling_keys_last_heights().len(), 1);
     assert_eq!(
-        s.sapling_keys_last_heights()
+        storage
+            .sapling_keys_last_heights()
             .get(&key_to_be_stored)
             .expect("height is stored")
             .next()
             .expect("height is not maximum"),
-        s.min_sapling_birthday_height()
+        network.sapling_activation_height()
     );
 
     let nf = Nullifier([7; 32]);
@@ -186,7 +186,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
         SaplingScannedResult::from_bytes_in_display_order(*result.transactions()[0].txid.as_ref());
 
     // Add result to database
-    s.add_sapling_results(
+    storage.add_sapling_results(
         &key_to_be_stored,
         Height(1),
         [(TransactionIndex::from_usize(0), result)].into(),
@@ -194,7 +194,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     // Check the result was added
     assert_eq!(
-        s.sapling_results(&key_to_be_stored).get(&Height(1)),
+        storage.sapling_results(&key_to_be_stored).get(&Height(1)),
         Some(&vec![result])
     );
 

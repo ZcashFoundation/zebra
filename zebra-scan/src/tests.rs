@@ -12,8 +12,11 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use rand::{rngs::OsRng, thread_rng, RngCore};
 
-use zcash_client_backend::proto::compact_formats::{
-    ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+use zcash_client_backend::{
+    encoding::encode_extended_full_viewing_key,
+    proto::compact_formats::{
+        ChainMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+    },
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -27,7 +30,7 @@ use zcash_primitives::{
         value::NoteValue,
         Note, Nullifier,
     },
-    zip32::DiversifiableFullViewingKey,
+    zip32,
 };
 
 use zebra_chain::{
@@ -41,6 +44,7 @@ use zebra_chain::{
     transparent::{CoinbaseData, Input},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
+use zebra_state::SaplingScanningKey;
 
 #[cfg(test)]
 mod vectors;
@@ -50,6 +54,31 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 
 /// A fake viewing key in an incorrect format.
 pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
+
+/// Generates `num_keys` of [`SaplingScanningKey`]s for tests.
+///
+/// The keys are seeded only from their index in the returned `Vec`, so repeated calls return same
+/// keys at a particular index.
+pub fn mock_sapling_scanning_keys(num_keys: u8) -> Vec<SaplingScanningKey> {
+    let mut keys: Vec<SaplingScanningKey> = vec![];
+
+    for seed in 0..num_keys {
+        keys.push(encode_extended_full_viewing_key(
+            "zxviews",
+            &mock_sapling_efvk(&[seed]),
+        ));
+    }
+
+    keys
+}
+
+/// Generates an [`zip32::sapling::ExtendedFullViewingKey`] from `seed` for tests.
+#[allow(deprecated)]
+pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::sapling::ExtendedFullViewingKey {
+    // TODO: Use `to_diversifiable_full_viewing_key` since `to_extended_full_viewing_key` is
+    // deprecated.
+    zip32::sapling::ExtendedSpendingKey::master(seed).to_extended_full_viewing_key()
+}
 
 /// Generates a fake block containing a Sapling output decryptable by `dfvk`.
 ///
@@ -61,7 +90,7 @@ pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
 pub fn fake_block(
     height: BlockHeight,
     nf: Nullifier,
-    dfvk: &DiversifiableFullViewingKey,
+    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,
@@ -135,7 +164,7 @@ pub fn fake_compact_block(
     height: BlockHeight,
     prev_hash: BlockHash,
     nf: Nullifier,
-    dfvk: &DiversifiableFullViewingKey,
+    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,

@@ -91,7 +91,7 @@ pub async fn scan_range(
         HashMap<String, Sender<transaction::Hash>>,
     >,
 ) -> Result<(), Report> {
-    let sapling_activation_height = storage.min_sapling_birthday_height();
+    let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
         sapling_activation_height,

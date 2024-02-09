@@ -91,7 +91,7 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     Ok(Response::Info {
-                        min_sapling_birthday_height: db.min_sapling_birthday_height(),
+                        min_sapling_birthday_height: db.network().sapling_activation_height(),
                     })
                 }
                 .boxed();
@@ -101,10 +101,15 @@ impl Service<Request> for ScanService {
                 // TODO: check that these entries exist in db
             }
 
-            Request::RegisterKeys(_viewing_key_with_hashes) => {
-                // TODO:
-                //  - add these keys as entries in db
-                //  - send new keys to scan task
+            Request::RegisterKeys(keys) => {
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    Ok(Response::RegisteredKeys(
+                        scan_task.register_keys(keys)?.await?,
+                    ))
+                }
+                .boxed();
             }
 
             Request::DeleteKeys(keys) => {

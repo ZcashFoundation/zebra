@@ -4,26 +4,26 @@ use std::collections::{HashMap, HashSet};
 
 use color_eyre::Report;
 
-use zebra_chain::{block::Height, transaction};
+use zebra_chain::transaction;
 
-use crate::service::ScanTask;
+use crate::{service::ScanTask, tests::mock_sapling_scanning_keys};
 
 /// Test that [`ScanTask::process_messages`] adds and removes keys as expected for `RegisterKeys` and `DeleteKeys` command
 #[tokio::test]
 async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let (mut mock_scan_task, cmd_receiver) = ScanTask::mock();
     let mut parsed_keys = HashMap::new();
+    let network = Default::default();
 
     // Send some keys to be registered
     let num_keys = 10;
-    mock_scan_task.register_keys(
-        (0..num_keys)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MIN)))
-            .collect(),
-    )?;
+    let sapling_keys = mock_sapling_scanning_keys(num_keys.try_into().expect("should fit in u8"));
+    let sapling_keys_with_birth_heights: Vec<(String, Option<u32>)> =
+        sapling_keys.into_iter().zip((0..).map(Some)).collect();
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it updated parsed_keys correctly and returned the right new keys when starting with an empty state
 
@@ -39,16 +39,12 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         "should add all received keys to parsed keys"
     );
 
-    mock_scan_task.register_keys(
-        (0..num_keys)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MIN)))
-            .collect(),
-    )?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
     // Check that no key should be added if they are all already known and the heights are the same
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -61,22 +57,20 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         "should not return known keys as new keys"
     );
 
-    // Check that it returns the last seen start height for a key as the new key when receiving 2 register key messages
+    // Check that keys can't be overridden.
 
-    mock_scan_task.register_keys(
-        (10..20)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MIN)))
-            .collect(),
-    )?;
+    let sapling_keys = mock_sapling_scanning_keys(20);
+    let sapling_keys_with_birth_heights: Vec<(String, Option<u32>)> = sapling_keys
+        .clone()
+        .into_iter()
+        .map(|key| (key, Some(0)))
+        .collect();
 
-    mock_scan_task.register_keys(
-        (10..15)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MAX)))
-            .collect(),
-    )?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights[10..20].to_vec())?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights[10..15].to_vec())?;
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -90,23 +84,13 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         "should add 10 of received keys to new keys"
     );
 
-    for (new_key, (_, _, start_height)) in new_keys {
-        if (10..15).contains(&new_key.parse::<i32>().expect("should parse into int")) {
-            assert_eq!(
-                start_height,
-                Height::MAX,
-                "these key heights should have been overwritten by the second message"
-            );
-        }
-    }
-
     // Check that it removes keys correctly
 
-    let done_rx =
-        mock_scan_task.remove_keys(&(0..200).map(|i| i.to_string()).collect::<Vec<_>>())?;
+    let sapling_keys = mock_sapling_scanning_keys(30);
+    let done_rx = mock_scan_task.remove_keys(&sapling_keys)?;
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it sends the done notification successfully before returning and dropping `done_tx`
     done_rx.await?;
@@ -120,16 +104,12 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that it doesn't return removed keys as new keys when processing a batch of messages
 
-    mock_scan_task.register_keys(
-        (0..200)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MAX)))
-            .collect(),
-    )?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
-    mock_scan_task.remove_keys(&(0..200).map(|i| i.to_string()).collect::<Vec<_>>())?;
+    mock_scan_task.remove_keys(&sapling_keys)?;
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     assert!(
         new_keys.is_empty(),
@@ -138,22 +118,14 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that it does return registered keys if they were removed in a prior message when processing a batch of messages
 
-    mock_scan_task.register_keys(
-        (0..200)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MAX)))
-            .collect(),
-    )?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
-    mock_scan_task.remove_keys(&(0..200).map(|i| i.to_string()).collect::<Vec<_>>())?;
+    mock_scan_task.remove_keys(&sapling_keys)?;
 
-    mock_scan_task.register_keys(
-        (0..2)
-            .map(|i| (i.to_string(), (vec![], vec![], Height::MAX)))
-            .collect(),
-    )?;
+    mock_scan_task.register_keys(sapling_keys_with_birth_heights[..2].to_vec())?;
 
     let (new_keys, _new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         new_keys.len(),
@@ -171,7 +143,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
 
     let (_new_keys, new_results_senders) =
-        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
 
     let processed_subscribe_keys: HashSet<String> = new_results_senders.keys().cloned().collect();
     let expected_new_subscribe_keys: HashSet<String> = (0..2).map(|i| i.to_string()).collect();
