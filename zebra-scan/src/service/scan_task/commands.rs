@@ -9,11 +9,7 @@ use color_eyre::{eyre::eyre, Report};
 use tokio::sync::oneshot;
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{
-    block::Height,
-    parameters::Network,
-    transaction::{self, Transaction},
-};
+use zebra_chain::{block::Height, parameters::Network, transaction};
 use zebra_state::SaplingScanningKey;
 
 use crate::scan::sapling_key_to_scan_block_keys;

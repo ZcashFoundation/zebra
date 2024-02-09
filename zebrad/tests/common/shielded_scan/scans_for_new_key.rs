@@ -6,7 +6,7 @@
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! cargo test scans_for_new_key --release --features="shielded-scan" -- --ignored --nocapture
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use color_eyre::{eyre::eyre, Result};
 
@@ -16,11 +16,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
 };
-use zebra_scan::{
-    scan::sapling_key_to_scan_block_keys, service::ScanTask, storage::Storage,
-    tests::ZECPAGES_SAPLING_VIEWING_KEY, DiversifiableFullViewingKey, SaplingIvk,
-};
-use zebra_state::SaplingScanningKey;
+use zebra_scan::{service::ScanTask, storage::Storage, tests::ZECPAGES_SAPLING_VIEWING_KEY};
 
 use crate::common::{
     cached_state::start_state_service_with_cache_dir, launch::can_spawn_zebrad_for_test_type,
@@ -90,25 +86,11 @@ pub(crate) async fn run() -> Result<()> {
 
     let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
 
-    let (zecpages_dfvks, zecpages_ivks) =
-        sapling_key_to_scan_block_keys(&ZECPAGES_SAPLING_VIEWING_KEY.to_string(), network)?;
-
-    let mut parsed_keys: HashMap<
-        SaplingScanningKey,
-        (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
-    > = HashMap::new();
-
-    parsed_keys.insert(
-        ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
-        (zecpages_dfvks, zecpages_ivks, Height::MIN),
-    );
-
     tracing::info!("started scan task, sending register keys message with zecpages key to start scanning for a new key",);
 
     scan_task.register_keys(
-        parsed_keys
+        [(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), None)]
             .into_iter()
-            .map(|(key, (_, _, Height(h)))| (key, Some(h)))
             .collect(),
     )?;
 
