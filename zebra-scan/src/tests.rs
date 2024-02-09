@@ -44,6 +44,7 @@ use zebra_chain::{
     transparent::{CoinbaseData, Input},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
+use zebra_state::SaplingScanningKey;
 
 #[cfg(test)]
 mod vectors;
@@ -54,14 +55,17 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 /// A fake viewing key in an incorrect format.
 pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
 
-/// Generates fake Sapling viewing keys.
-pub fn mock_sapling_viewing_keys(i: u8) -> Vec<String> {
-    let mut keys: Vec<String> = vec![];
+/// Generates `num_keys` of [`SaplingScanningKey`]s for tests.
+///
+/// The keys are seeded only from their index in the returned `Vec`, so repeated calls return same
+/// keys at a particular index.
+pub fn mock_sapling_scanning_keys(num_keys: u8) -> Vec<SaplingScanningKey> {
+    let mut keys: Vec<SaplingScanningKey> = vec![];
 
-    for i in 0..i {
+    for seed in 0..num_keys {
         keys.push(encode_extended_full_viewing_key(
             "zxviews",
-            &mock_sapling_efvk(&[i]),
+            &mock_sapling_efvk(&[seed]),
         ));
     }
 
