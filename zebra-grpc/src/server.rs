@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, net::SocketAddr};
 
 use futures_util::future::TryFutureExt;
-use tonic::{transport::Server, Response, Status};
+use tonic::{transport::Server, Request, Response, Status};
 use tower::ServiceExt;
 
 use zebra_node_services::scan_service::{
@@ -42,10 +42,7 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    async fn get_info(
-        &self,
-        _request: tonic::Request<Empty>,
-    ) -> Result<Response<InfoReply>, Status> {
+    async fn get_info(&self, _request: Request<Empty>) -> Result<Response<InfoReply>, Status> {
         let ScanServiceResponse::Info {
             min_sapling_birthday_height,
         } = self
@@ -70,7 +67,7 @@ where
 
     async fn clear_results(
         &self,
-        request: tonic::Request<ClearResultsRequest>,
+        request: Request<ClearResultsRequest>,
     ) -> Result<Response<Empty>, Status> {
         let keys = request.into_inner().keys;
 
@@ -97,7 +94,7 @@ where
 
     async fn delete_keys(
         &self,
-        request: tonic::Request<DeleteKeysRequest>,
+        request: Request<DeleteKeysRequest>,
     ) -> Result<Response<Empty>, Status> {
         let keys = request.into_inner().keys;
 
@@ -124,7 +121,7 @@ where
 
     async fn get_results(
         &self,
-        request: tonic::Request<GetResultsRequest>,
+        request: Request<GetResultsRequest>,
     ) -> Result<Response<GetResultsResponse>, Status> {
         let keys = request.into_inner().keys;
 
