@@ -2,16 +2,13 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{
-        mpsc::{self, Sender},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc::Sender, task::JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
@@ -114,7 +111,7 @@ pub async fn start(
         })
         .try_collect()?;
 
-    let mut subscribed_keys: HashMap<SaplingScanningKey, mpsc::Sender<transaction::Hash>> =
+    let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<transaction::Hash>> =
         HashMap::new();
 
     let (subscribed_keys_sender, subscribed_keys_receiver) =
@@ -326,8 +323,8 @@ pub async fn scan_height_and_store_results(
                 let results = dfvk_res.iter().chain(ivk_res.iter());
 
                 for (_tx_index, &tx_id) in results {
-                    // TODO: Handle `SendErrors`
-                    let _ = results_sender.send(tx_id.into());
+                    // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
+                    let _ = results_sender.try_send(tx_id.into());
                 }
             }
 

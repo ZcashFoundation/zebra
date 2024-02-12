@@ -1,6 +1,6 @@
 //! `zebra_scan::service::ScanService` response types.
 
-use std::{collections::BTreeMap, sync::mpsc};
+use std::collections::BTreeMap;
 
 use zebra_chain::{block::Height, transaction};
 
@@ -30,5 +30,5 @@ pub enum Response {
     ClearedResults,
 
     /// Response to [`SubscribeResults`](super::request::Request::SubscribeResults) request
-    SubscribeResults(mpsc::Receiver<transaction::Hash>),
+    SubscribeResults(tokio::sync::mpsc::Receiver<transaction::Hash>),
 }

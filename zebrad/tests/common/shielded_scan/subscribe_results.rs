@@ -92,13 +92,11 @@ pub(crate) async fn run() -> Result<()> {
             .map(|key| (key, Some(736000)))
             .collect(),
     )?;
-    let result_receiver = scan_task.subscribe(keys.into_iter().collect())?;
+
+    let mut result_receiver = scan_task.subscribe(keys.into_iter().collect())?;
 
     // Wait for the scanner to send a result in the channel
-    let result = tokio::task::spawn_blocking(move || {
-        result_receiver.recv_timeout(WAIT_FOR_RESULTS_DURATION)
-    })
-    .await??;
+    let result = tokio::time::timeout(WAIT_FOR_RESULTS_DURATION, result_receiver.recv()).await?;
 
     tracing::info!(?result, "received a result from the channel");
 

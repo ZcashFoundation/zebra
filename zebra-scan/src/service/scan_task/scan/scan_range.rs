@@ -1,16 +1,16 @@
 //! Functions for registering new keys in the scan task
 
-use std::{
-    collections::HashMap,
-    sync::{mpsc::Sender, Arc},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     scan::{get_min_height, scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
     storage::Storage,
 };
 use color_eyre::eyre::Report;
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{mpsc::Sender, watch},
+    task::JoinHandle,
+};
 use tracing::Instrument;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, transaction};
@@ -55,9 +55,7 @@ impl ScanRangeTaskBuilder {
     // TODO: return a tuple with a shutdown sender
     pub fn spawn(
         self,
-        subscribed_keys_receiver: tokio::sync::watch::Receiver<
-            HashMap<String, Sender<transaction::Hash>>,
-        >,
+        subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<transaction::Hash>>>,
     ) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
@@ -87,9 +85,7 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
-    subscribed_keys_receiver: tokio::sync::watch::Receiver<
-        HashMap<String, Sender<transaction::Hash>>,
-    >,
+    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<transaction::Hash>>>,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.

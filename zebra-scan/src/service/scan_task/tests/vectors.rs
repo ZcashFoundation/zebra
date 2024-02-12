@@ -140,7 +140,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     );
 
     let subscribe_keys: HashSet<String> = sapling_keys[..5].iter().cloned().collect();
-    let result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
+    let mut result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
 
     let (_new_keys, new_results_senders) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
@@ -155,13 +155,17 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     for sender in new_results_senders.values() {
         // send a fake tx id for each key
-        sender.send(transaction::Hash([0; 32]))?;
+        sender.send(transaction::Hash([0; 32])).await?;
     }
 
-    let results: Vec<_> = result_receiver.try_iter().collect();
+    let mut num_results = 0;
+
+    while result_receiver.try_recv().is_ok() {
+        num_results += 1;
+    }
 
     assert_eq!(
-        results.len(),
+        num_results,
         expected_new_subscribe_keys.len(),
         "there should be a fake result sent for each subscribed key"
     );

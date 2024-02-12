@@ -1,12 +1,12 @@
 //! Types and method implementations for [`ScanTaskCommand`]
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::mpsc::{self, Receiver},
-};
+use std::collections::{HashMap, HashSet};
 
 use color_eyre::{eyre::eyre, Report};
-use tokio::sync::{mpsc::error::TrySendError, oneshot};
+use tokio::sync::{
+    mpsc::{error::TrySendError, Receiver, Sender},
+    oneshot,
+};
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, parameters::Network, transaction};
@@ -15,6 +15,8 @@ use zebra_state::SaplingScanningKey;
 use crate::scan::sapling_key_to_scan_block_keys;
 
 use super::ScanTask;
+
+const RESULTS_SENDER_BUFFER_SIZE: usize = 100;
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
@@ -39,7 +41,7 @@ pub enum ScanTaskCommand {
     /// Start sending results for key hashes to `result_sender`
     SubscribeResults {
         /// Sender for results
-        result_sender: mpsc::Sender<transaction::Hash>,
+        result_sender: Sender<transaction::Hash>,
 
         /// Key hashes to send the results of to result channel
         keys: HashSet<String>,
@@ -65,7 +67,7 @@ impl ScanTask {
                 SaplingScanningKey,
                 (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
             >,
-            HashMap<SaplingScanningKey, mpsc::Sender<transaction::Hash>>,
+            HashMap<SaplingScanningKey, Sender<transaction::Hash>>,
         ),
         Report,
     > {
@@ -202,7 +204,8 @@ impl ScanTask {
         keys: HashSet<SaplingScanningKey>,
     ) -> Result<Receiver<transaction::Hash>, TrySendError<ScanTaskCommand>> {
         // TODO: Use a bounded channel
-        let (result_sender, result_receiver) = mpsc::channel();
+        let (result_sender, result_receiver) =
+            tokio::sync::mpsc::channel(RESULTS_SENDER_BUFFER_SIZE);
 
         self.send(ScanTaskCommand::SubscribeResults {
             result_sender,

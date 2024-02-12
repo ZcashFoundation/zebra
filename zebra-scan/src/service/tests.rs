@@ -1,5 +1,6 @@
 //! Tests for ScanService.
 
+use tokio::sync::mpsc::error::TryRecvError;
 use tower::{Service, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
@@ -109,14 +110,16 @@ pub async fn scan_service_subscribes_to_results_correctly() -> Result<()> {
     let (response, join_result) = tokio::join!(response_fut, cmd_handler_fut);
     join_result?;
 
-    let results_receiver = match response.map_err(|err| eyre!(err))? {
+    let mut results_receiver = match response.map_err(|err| eyre!(err))? {
         Response::SubscribeResults(results_receiver) => results_receiver,
         _ => panic!("scan service returned unexpected response variant"),
     };
 
-    results_receiver
-        .try_recv()
-        .expect_err("channel should be disconnected");
+    assert_eq!(
+        results_receiver.try_recv(),
+        Err(TryRecvError::Disconnected),
+        "channel with no items and dropped sender should be closed"
+    );
 
     Ok(())
 }

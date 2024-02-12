@@ -5829,6 +5829,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
  "zebra-chain",
 ]
 
