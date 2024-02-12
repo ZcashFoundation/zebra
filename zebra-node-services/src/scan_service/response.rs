@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, sync::mpsc};
 
-use zebra_chain::{block::Height, transaction::Hash};
+use zebra_chain::{block::Height, transaction};
 
 #[derive(Debug)]
 /// Response types for `zebra_scan::service::ScanService`
@@ -21,7 +21,7 @@ pub enum Response {
     /// Response to [`Results`](super::request::Request::Results) request
     ///
     /// We use the nested `BTreeMap` so we don't repeat any piece of response data.
-    Results(BTreeMap<String, BTreeMap<Height, Vec<Hash>>>),
+    Results(BTreeMap<String, BTreeMap<Height, Vec<transaction::Hash>>>),
 
     /// Response to [`DeleteKeys`](super::request::Request::DeleteKeys) request
     DeletedKeys,
@@ -29,6 +29,6 @@ pub enum Response {
     /// Response to [`ClearResults`](super::request::Request::ClearResults) request
     ClearedResults,
 
-    /// Response to `SubscribeResults` request
-    SubscribeResults(mpsc::Receiver<Hash>),
+    /// Response to [`SubscribeResults`](super::request::Request::SubscribeResults) request
+    SubscribeResults(mpsc::Receiver<transaction::Hash>),
 }

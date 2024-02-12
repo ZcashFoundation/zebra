@@ -25,7 +25,7 @@ pub enum Request {
     /// Accept keys and return transaction data
     Results(Vec<String>),
 
-    /// TODO: Accept `KeyHash`es and return a channel receiver
+    /// Accept keys and return a channel receiver for transaction data
     SubscribeResults(HashSet<String>),
 
     /// Clear the results for a set of viewing keys

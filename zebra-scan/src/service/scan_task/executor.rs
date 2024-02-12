@@ -20,7 +20,6 @@ pub fn spawn_init(
         HashMap<String, std::sync::mpsc::Sender<transaction::Hash>>,
     >,
 ) -> (Sender<ScanRangeTaskBuilder>, JoinHandle<Result<(), Report>>) {
-    // TODO: Use a bounded channel.
     let (scan_task_sender, scan_task_receiver) = tokio::sync::mpsc::channel(EXECUTOR_BUFFER_SIZE);
 
     (

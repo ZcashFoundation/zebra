@@ -131,7 +131,7 @@
 //! Example of how to run the scan_subscribe_results test:
 //!
 //! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_subscribe_results --features shielded-scan --release -- --ignored --nocapture
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_subscribe_results --features shielded-scan -- --ignored --nocapture
 //! ```
 //!
 //! ## Checkpoint Generation Tests

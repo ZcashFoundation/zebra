@@ -99,7 +99,7 @@ pub async fn scan_service_subscribes_to_results_correctly() -> Result<()> {
             keys,
         }) = cmd_receiver.recv()
         else {
-            panic!("should successfully receive RemoveKeys message");
+            panic!("should successfully receive SubscribeResults message");
         };
 
         assert_eq!(keys, expected_keys, "keys should match the request keys");

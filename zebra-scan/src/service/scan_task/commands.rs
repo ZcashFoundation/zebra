@@ -37,10 +37,8 @@ pub enum ScanTaskCommand {
     },
 
     /// Start sending results for key hashes to `result_sender`
-    // TODO: Implement this command (#8206)
     SubscribeResults {
         /// Sender for results
-        // TODO: Update type to return full `WalletTx`
         result_sender: mpsc::Sender<transaction::Hash>,
 
         /// Key hashes to send the results of to result channel

@@ -4,7 +4,7 @@
 //! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`]
 //!
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
-//! cargo test scan_subscribe_results --release --features="shielded-scan" -- --ignored --nocapture
+//! cargo test scan_subscribe_results --features="shielded-scan" -- --ignored --nocapture
 
 use std::time::Duration;
 
