@@ -4,7 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use color_eyre::Report;
 
-use zebra_chain::transaction;
+use zebra_chain::{block::Height, transaction};
+use zebra_node_services::scan_service::response::ScanResult;
 
 use crate::{service::ScanTask, tests::mock_sapling_scanning_keys};
 
@@ -155,7 +156,13 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     for sender in new_results_senders.values() {
         // send a fake tx id for each key
-        sender.send(transaction::Hash([0; 32])).await?;
+        sender
+            .send(ScanResult {
+                key: String::new(),
+                height: Height::MIN,
+                tx_id: transaction::Hash([0; 32]),
+            })
+            .await?;
     }
 
     let mut num_results = 0;

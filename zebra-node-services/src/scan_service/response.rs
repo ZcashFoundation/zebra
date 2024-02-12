@@ -4,6 +4,20 @@ use std::collections::BTreeMap;
 
 use zebra_chain::{block::Height, transaction};
 
+/// A relevant transaction for a key and the block height where it was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanResult {
+    /// The key that successfully decrypts the transaction
+    pub key: String,
+
+    /// The height of the block with the transaction
+    pub height: Height,
+
+    /// A transaction ID, which uniquely identifies mined v5 transactions,
+    /// and all v1-v4 transactions.
+    pub tx_id: transaction::Hash,
+}
+
 #[derive(Debug)]
 /// Response types for `zebra_scan::service::ScanService`
 pub enum Response {
@@ -30,5 +44,5 @@ pub enum Response {
     ClearedResults,
 
     /// Response to [`SubscribeResults`](super::request::Request::SubscribeResults) request
-    SubscribeResults(tokio::sync::mpsc::Receiver<transaction::Hash>),
+    SubscribeResults(tokio::sync::mpsc::Receiver<ScanResult>),
 }

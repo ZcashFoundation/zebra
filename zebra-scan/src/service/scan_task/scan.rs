@@ -32,8 +32,9 @@ use zebra_chain::{
     diagnostic::task::WaitForPanics,
     parameters::Network,
     serialization::ZcashSerialize,
-    transaction::{self, Transaction},
+    transaction::Transaction,
 };
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::{
@@ -111,8 +112,7 @@ pub async fn start(
         })
         .try_collect()?;
 
-    let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<transaction::Hash>> =
-        HashMap::new();
+    let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
 
     let (subscribed_keys_sender, subscribed_keys_receiver) =
         tokio::sync::watch::channel(subscribed_keys.clone());
@@ -240,7 +240,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-    subscribed_keys: HashMap<SaplingScanningKey, Sender<transaction::Hash>>,
+    subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -326,7 +326,11 @@ pub async fn scan_height_and_store_results(
 
                 for (_tx_index, &tx_id) in results {
                     // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
-                    let _ = results_sender.try_send(tx_id.into());
+                    let _ = results_sender.try_send(ScanResult {
+                        key: sapling_key.clone(),
+                        height,
+                        tx_id: tx_id.into(),
+                    });
                 }
             }
 

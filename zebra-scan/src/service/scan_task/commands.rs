@@ -9,7 +9,8 @@ use tokio::sync::{
 };
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, parameters::Network, transaction};
+use zebra_chain::{block::Height, parameters::Network};
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
 
 use crate::scan::sapling_key_to_scan_block_keys;
@@ -41,7 +42,7 @@ pub enum ScanTaskCommand {
     /// Start sending results for key hashes to `result_sender`
     SubscribeResults {
         /// Sender for results
-        result_sender: Sender<transaction::Hash>,
+        result_sender: Sender<ScanResult>,
 
         /// Key hashes to send the results of to result channel
         keys: HashSet<String>,
@@ -67,7 +68,7 @@ impl ScanTask {
                 SaplingScanningKey,
                 (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
             >,
-            HashMap<SaplingScanningKey, Sender<transaction::Hash>>,
+            HashMap<SaplingScanningKey, Sender<ScanResult>>,
         ),
         Report,
     > {
@@ -202,7 +203,7 @@ impl ScanTask {
     pub fn subscribe(
         &mut self,
         keys: HashSet<SaplingScanningKey>,
-    ) -> Result<Receiver<transaction::Hash>, TrySendError<ScanTaskCommand>> {
+    ) -> Result<Receiver<ScanResult>, TrySendError<ScanTaskCommand>> {
         // TODO: Use a bounded channel
         let (result_sender, result_receiver) =
             tokio::sync::mpsc::channel(RESULTS_SENDER_BUFFER_SIZE);

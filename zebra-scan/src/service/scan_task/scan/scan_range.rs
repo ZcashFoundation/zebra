@@ -13,7 +13,8 @@ use tokio::{
 };
 use tracing::Instrument;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, transaction};
+use zebra_chain::block::Height;
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
 
 /// A builder for a scan until task
@@ -55,7 +56,7 @@ impl ScanRangeTaskBuilder {
     // TODO: return a tuple with a shutdown sender
     pub fn spawn(
         self,
-        subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<transaction::Hash>>>,
+        subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
     ) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
@@ -85,7 +86,7 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
-    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<transaction::Hash>>>,
+    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.
