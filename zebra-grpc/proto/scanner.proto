@@ -60,7 +60,7 @@ message GetResultsResponse {
     map<string, Results> results = 1;
 }
 
-// A response to `RegisterKeysRequest` containin registered keys
+// A response to `RegisterKeysRequest` containing registered keys
 message RegisterKeysResponse {
     // Keys that were registered
     repeated string keys = 1;
