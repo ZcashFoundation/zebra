@@ -13,7 +13,7 @@ use zebra_node_services::scan_service::{
 use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
     ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
-    InfoReply, Results, TransactionHash,
+    InfoReply, RegisterKeysRequest, RegisterKeysResponse, Results, TransactionHash,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -63,6 +63,33 @@ where
         };
 
         Ok(Response::new(reply))
+    }
+
+    async fn register_keys(
+        &self,
+        request: Request<RegisterKeysRequest>,
+    ) -> Result<Response<RegisterKeysResponse>, Status> {
+        let keys = request
+            .into_inner()
+            .keys
+            .into_iter()
+            .map(|key_with_height| (key_with_height.key, key_with_height.height))
+            .collect();
+
+        let ScanServiceResponse::RegisteredKeys(keys) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys)))
+            .await
+            .map_err(|_| Status::unknown("scan service was unavailable"))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        Ok(Response::new(RegisterKeysResponse { keys }))
     }
 
     async fn clear_results(
