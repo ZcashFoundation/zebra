@@ -1,9 +1,6 @@
 //! Tests for the scan task.
 
-use std::sync::{
-    mpsc::{self, Receiver},
-    Arc,
-};
+use std::sync::Arc;
 
 use super::{ScanTask, ScanTaskCommand};
 
@@ -12,8 +9,8 @@ mod vectors;
 
 impl ScanTask {
     /// Spawns a new [`ScanTask`] for tests.
-    pub fn mock() -> (Self, Receiver<ScanTaskCommand>) {
-        let (cmd_sender, cmd_receiver) = mpsc::channel();
+    pub fn mock() -> (Self, tokio::sync::mpsc::Receiver<ScanTaskCommand>) {
+        let (cmd_sender, cmd_receiver) = tokio::sync::mpsc::channel(1);
 
         (
             Self {

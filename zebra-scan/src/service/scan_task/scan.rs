@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Sender},
         Arc,
     },
     time::Duration,
@@ -75,7 +75,7 @@ pub async fn start(
     state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    mut cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
     let sapling_activation_height = network.sapling_activation_height();
@@ -140,7 +140,7 @@ pub async fn start(
         }
 
         let (new_keys, new_result_senders) =
-            ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
+            ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
         // Send the latest version of `subscribed_keys` before spawning the scan range task
         if !new_result_senders.is_empty() {
@@ -554,7 +554,7 @@ pub fn spawn_init(
     storage: Storage,
     state: State,
     chain_tip_change: ChainTipChange,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
     tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
 }

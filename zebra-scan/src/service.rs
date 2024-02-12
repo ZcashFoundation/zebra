@@ -19,7 +19,7 @@ pub mod scan_task;
 pub use scan_task::{ScanTask, ScanTaskCommand};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use std::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Receiver;
 
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]

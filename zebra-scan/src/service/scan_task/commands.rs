@@ -2,11 +2,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::mpsc::{self, Receiver, TryRecvError},
+    sync::mpsc::{self, Receiver},
 };
 
 use color_eyre::{eyre::eyre, Report};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc::error::TrySendError, oneshot};
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, parameters::Network, transaction};
@@ -53,7 +53,7 @@ impl ScanTask {
     ///
     /// Returns newly registered keys for scanning.
     pub fn process_messages(
-        cmd_receiver: &Receiver<ScanTaskCommand>,
+        cmd_receiver: &mut tokio::sync::mpsc::Receiver<ScanTaskCommand>,
         registered_keys: &mut HashMap<
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
@@ -69,6 +69,8 @@ impl ScanTask {
         ),
         Report,
     > {
+        use tokio::sync::mpsc::error::TryRecvError;
+
         let mut new_keys = HashMap::new();
         let mut new_result_senders = HashMap::new();
         let sapling_activation_height = network.sapling_activation_height();
@@ -159,8 +161,8 @@ impl ScanTask {
     pub fn send(
         &mut self,
         command: ScanTaskCommand,
-    ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
-        self.cmd_sender.send(command)
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<ScanTaskCommand>> {
+        self.cmd_sender.try_send(command)
     }
 
     /// Sends a message to the scan task to remove the provided viewing keys.
@@ -169,7 +171,7 @@ impl ScanTask {
     pub fn remove_keys(
         &mut self,
         keys: &[String],
-    ) -> Result<oneshot::Receiver<()>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<oneshot::Receiver<()>, TrySendError<ScanTaskCommand>> {
         let (done_tx, done_rx) = oneshot::channel();
 
         self.send(ScanTaskCommand::RemoveKeys {
@@ -184,7 +186,7 @@ impl ScanTask {
     pub fn register_keys(
         &mut self,
         keys: Vec<(String, Option<u32>)>,
-    ) -> Result<oneshot::Receiver<Vec<String>>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<oneshot::Receiver<Vec<String>>, TrySendError<ScanTaskCommand>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         self.send(ScanTaskCommand::RegisterKeys { keys, rsp_tx })?;
@@ -198,7 +200,7 @@ impl ScanTask {
     pub fn subscribe(
         &mut self,
         keys: HashSet<SaplingScanningKey>,
-    ) -> Result<Receiver<transaction::Hash>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<Receiver<transaction::Hash>, TrySendError<ScanTaskCommand>> {
         // TODO: Use a bounded channel
         let (result_sender, result_receiver) = mpsc::channel();
 
