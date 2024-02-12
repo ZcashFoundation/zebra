@@ -19,6 +19,9 @@ service Scanner {
 
     // Get all data we have stored for the given keys.
     rpc GetResults(GetResultsRequest) returns (GetResultsResponse);
+
+    // Submits scanning keys to the scanner.
+    rpc RegisterKeys(RegisterKeysRequest) returns (RegisterKeysResponse);
 }
 
 // A response to a GetInfo call.
@@ -45,10 +48,22 @@ message GetResultsRequest {
     repeated string keys = 1;
 }
 
+// A request to register scanning keys
+message RegisterKeysRequest {
+    // Keys to register
+    repeated KeyWithHeight keys = 1;
+}
+
 // A set of responses for each provided key of a GetResults call.
 message GetResultsResponse {
     // Results for each key.
     map<string, Results> results = 1;
+}
+
+// A response to `RegisterKeysRequest` containin registered keys
+message RegisterKeysResponse {
+    // Keys that were registered
+    repeated string keys = 1;
 }
 
 // A result for a single key.
@@ -61,4 +76,12 @@ message Results {
 message TransactionHash {
     // A transaction id hash
     repeated string hash = 1;
+}
+
+// A scanning key with an optional birth height
+message KeyWithHeight {
+    // Scanning key
+    string key = 1;
+    // Birth height of the key
+    optional uint32 height = 2;
 }
