@@ -136,6 +136,8 @@ pub async fn start(
             }
         }
 
+        let was_parsed_keys_empty = parsed_keys.is_empty();
+
         let (new_keys, new_result_senders) =
             ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
@@ -157,7 +159,7 @@ pub async fn start(
                 .min()
                 .unwrap_or(sapling_activation_height);
 
-            if parsed_keys.len() == new_keys.len() {
+            if was_parsed_keys_empty {
                 info!(?start_height, "setting new start height");
                 height = start_height;
             } else if start_height < height {
