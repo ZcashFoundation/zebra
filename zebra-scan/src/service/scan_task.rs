@@ -28,6 +28,7 @@ pub struct ScanTask {
     pub cmd_sender: tokio::sync::mpsc::Sender<ScanTaskCommand>,
 }
 
+/// The size of the command channel buffer
 const SCAN_TASK_BUFFER_SIZE: usize = 100;
 
 impl ScanTask {
