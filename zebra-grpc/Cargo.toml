@@ -17,7 +17,7 @@ categories = ["cryptography::cryptocurrencies"]
 [dependencies]
 
 futures-util = "0.3.28"
-tonic = "0.10.2"
+tonic = "0.11.0"
 prost = "0.12.3"
 tokio = { version = "1.36.0", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["util", "buffer"] }
@@ -28,4 +28,4 @@ zcash_primitives = { version = "0.13.0-rc.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.34", features = ["shielded-scan"] }
 
 [build-dependencies]
-tonic-build = "0.10.2"
+tonic-build = "0.11.0"
