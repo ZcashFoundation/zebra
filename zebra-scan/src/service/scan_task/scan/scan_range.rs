@@ -2,16 +2,20 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::task::JoinHandle;
-use tracing::Instrument;
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, BoxError};
-use zebra_state::SaplingScanningKey;
-
 use crate::{
-    scan::{scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
+    scan::{get_min_height, scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
     storage::Storage,
 };
+use color_eyre::eyre::Report;
+use tokio::{
+    sync::{mpsc::Sender, watch},
+    task::JoinHandle,
+};
+use tracing::Instrument;
+use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
+use zebra_chain::block::Height;
+use zebra_node_services::scan_service::response::ScanResult;
+use zebra_state::SaplingScanningKey;
 
 /// A builder for a scan until task
 pub struct ScanRangeTaskBuilder {
@@ -50,7 +54,10 @@ impl ScanRangeTaskBuilder {
 
     /// Spawns a `scan_range()` task and returns its [`JoinHandle`]
     // TODO: return a tuple with a shutdown sender
-    pub fn spawn(self) -> JoinHandle<Result<(), BoxError>> {
+    pub fn spawn(
+        self,
+        subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+    ) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
             keys,
@@ -58,7 +65,16 @@ impl ScanRangeTaskBuilder {
             storage,
         } = self;
 
-        tokio::spawn(scan_range(height_range.end, keys, state, storage).in_current_span())
+        tokio::spawn(
+            scan_range(
+                height_range.end,
+                keys,
+                state,
+                storage,
+                subscribed_keys_receiver,
+            )
+            .in_current_span(),
+        )
     }
 }
 
@@ -70,7 +86,8 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
-) -> Result<(), BoxError> {
+    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+) -> Result<(), Report> {
     let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
@@ -84,13 +101,10 @@ pub async fn scan_range(
         .iter()
         .map(|(key, (_, _, height))| (key.clone(), *height))
         .collect();
-    let key_heights = Arc::new(key_heights);
 
-    let mut height = key_heights
-        .values()
-        .cloned()
-        .min()
-        .unwrap_or(sapling_activation_height);
+    let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
+
+    let key_heights = Arc::new(key_heights);
 
     // Parse and convert keys once, then use them to scan all blocks.
     let parsed_keys: HashMap<
@@ -102,6 +116,7 @@ pub async fn scan_range(
         .collect();
 
     while height < stop_before_height {
+        let subscribed_keys = subscribed_keys_receiver.borrow().clone();
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
@@ -109,6 +124,7 @@ pub async fn scan_range(
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
+            subscribed_keys,
         )
         .await?;
 
@@ -122,6 +138,12 @@ pub async fn scan_range(
             .next()
             .expect("a valid blockchain never reaches the max height");
     }
+
+    info!(
+        start_height = ?height,
+        ?stop_before_height,
+        "finished scanning range"
+    );
 
     Ok(())
 }

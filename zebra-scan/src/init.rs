@@ -57,7 +57,7 @@ pub fn spawn_init(
                     tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
                         .wait_for_panics()
                         .await;
-                let (_cmd_sender, cmd_receiver) = std::sync::mpsc::channel();
+                let (_cmd_sender, cmd_receiver) = tokio::sync::mpsc::channel(1);
                 scan::start(state, chain_tip_change, storage, cmd_receiver).await
             }
             .in_current_span(),
