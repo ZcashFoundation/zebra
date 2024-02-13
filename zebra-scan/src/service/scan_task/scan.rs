@@ -2,13 +2,13 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{mpsc::Receiver, Arc},
+    sync::Arc,
     time::Duration,
 };
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc::Sender, task::JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
@@ -34,6 +34,7 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::Transaction,
 };
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::{
@@ -72,10 +73,12 @@ pub async fn start(
     state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    mut cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
     let sapling_activation_height = network.sapling_activation_height();
+
+    info!(?network, "starting scan task");
 
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
@@ -94,6 +97,8 @@ pub async fn start(
 
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
+    info!(start_height = ?height, "got min scan height");
+
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
     let mut parsed_keys: HashMap<
@@ -107,7 +112,13 @@ pub async fn start(
         })
         .try_collect()?;
 
-    let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
+    let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
+
+    let (subscribed_keys_sender, subscribed_keys_receiver) =
+        tokio::sync::watch::channel(subscribed_keys.clone());
+
+    let (scan_task_sender, scan_task_executor_handle) =
+        executor::spawn_init(subscribed_keys_receiver);
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
     // Give empty states time to verify some blocks before we start scanning.
@@ -125,31 +136,58 @@ pub async fn start(
             }
         }
 
-        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys, network)?;
+        let was_parsed_keys_empty = parsed_keys.is_empty();
+
+        let (new_keys, new_result_senders) =
+            ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
+
+        // Send the latest version of `subscribed_keys` before spawning the scan range task
+        if !new_result_senders.is_empty() {
+            subscribed_keys.extend(new_result_senders);
+            // Ignore send errors, it's okay if there aren't any receivers.
+            let _ = subscribed_keys_sender.send(subscribed_keys.clone());
+        }
 
         // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
             let state = state.clone();
             let storage = storage.clone();
 
-            scan_task_sender
-                .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
-                .await
-                .expect("scan_until_task channel should not be closed");
+            let start_height = new_keys
+                .iter()
+                .map(|(_, (_, _, height))| *height)
+                .min()
+                .unwrap_or(sapling_activation_height);
+
+            if was_parsed_keys_empty {
+                info!(?start_height, "setting new start height");
+                height = start_height;
+            } else if start_height < height {
+                scan_task_sender
+                    .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
+                    .await
+                    .expect("scan_until_task channel should not be closed");
+            }
         }
 
-        let scanned_height = scan_height_and_store_results(
-            height,
-            state.clone(),
-            Some(chain_tip_change.clone()),
-            storage.clone(),
-            key_heights.clone(),
-            parsed_keys.clone(),
-        )
-        .await?;
+        if !parsed_keys.is_empty() {
+            let scanned_height = scan_height_and_store_results(
+                height,
+                state.clone(),
+                Some(chain_tip_change.clone()),
+                storage.clone(),
+                key_heights.clone(),
+                parsed_keys.clone(),
+                subscribed_keys.clone(),
+            )
+            .await?;
 
-        // If we've reached the tip, sleep for a while then try and get the same block.
-        if scanned_height.is_none() {
+            // If we've reached the tip, sleep for a while then try and get the same block.
+            if scanned_height.is_none() {
+                tokio::time::sleep(CHECK_INTERVAL).await;
+                continue;
+            }
+        } else {
             tokio::time::sleep(CHECK_INTERVAL).await;
             continue;
         }
@@ -173,10 +211,16 @@ pub async fn wait_for_height(
                 "scanner is waiting for {height_name}. Current tip: {}, {height_name}: {}",
                 tip_height.0, height.0
             );
+
             tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
+        } else {
+            info!(
+                "scanner finished waiting for {height_name}. Current tip: {}, {height_name}: {}",
+                tip_height.0, height.0
+            );
+
+            break;
         }
-        break;
     }
 
     Ok(())
@@ -196,6 +240,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+    subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -237,11 +282,19 @@ pub async fn scan_height_and_store_results(
                         height.as_usize(),
                         chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
                     );
+                } else {
+                    info!(
+                        "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}",
+                        key_index_in_task, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                        height.as_usize(),
+                    );
                 }
             }
 
             _other => {}
         };
+
+        let results_sender = subscribed_keys.get(&sapling_key).cloned();
 
         let sapling_key = sapling_key.clone();
         let block = block.clone();
@@ -267,6 +320,19 @@ pub async fn scan_height_and_store_results(
 
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
+
+            if let Some(results_sender) = results_sender {
+                let results = dfvk_res.iter().chain(ivk_res.iter());
+
+                for (_tx_index, &tx_id) in results {
+                    // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
+                    let _ = results_sender.try_send(ScanResult {
+                        key: sapling_key.clone(),
+                        height,
+                        tx_id: tx_id.into(),
+                    });
+                }
+            }
 
             storage.add_sapling_results(&sapling_key, height, dfvk_res);
             storage.add_sapling_results(&sapling_key, height, ivk_res);
@@ -491,7 +557,7 @@ pub fn spawn_init(
     storage: Storage,
     state: State,
     chain_tip_change: ChainTipChange,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
     tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
 }

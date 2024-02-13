@@ -13,4 +13,5 @@ pub mod rpc_client;
 /// parameterized by 'a), *not* that the object itself has 'static lifetime.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+#[cfg(feature = "shielded-scan")]
 pub mod scan_service;

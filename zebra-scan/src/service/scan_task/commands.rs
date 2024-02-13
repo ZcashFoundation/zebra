@@ -1,23 +1,23 @@
 //! Types and method implementations for [`ScanTaskCommand`]
 
-use std::{
-    collections::HashMap,
-    sync::{
-        mpsc::{self, Receiver, TryRecvError},
-        Arc,
-    },
-};
+use std::collections::{HashMap, HashSet};
 
 use color_eyre::{eyre::eyre, Report};
-use tokio::sync::oneshot;
+use tokio::sync::{
+    mpsc::{error::TrySendError, Receiver, Sender},
+    oneshot,
+};
 
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
-use zebra_chain::{block::Height, parameters::Network, transaction::Transaction};
+use zebra_chain::{block::Height, parameters::Network};
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
 
 use crate::scan::sapling_key_to_scan_block_keys;
 
 use super::ScanTask;
+
+const RESULTS_SENDER_BUFFER_SIZE: usize = 100;
 
 #[derive(Debug)]
 /// Commands that can be sent to [`ScanTask`]
@@ -40,13 +40,12 @@ pub enum ScanTaskCommand {
     },
 
     /// Start sending results for key hashes to `result_sender`
-    // TODO: Implement this command (#8206)
     SubscribeResults {
         /// Sender for results
-        result_sender: mpsc::Sender<Arc<Transaction>>,
+        result_sender: Sender<ScanResult>,
 
         /// Key hashes to send the results of to result channel
-        keys: Vec<String>,
+        keys: HashSet<String>,
     },
 }
 
@@ -57,17 +56,26 @@ impl ScanTask {
     ///
     /// Returns newly registered keys for scanning.
     pub fn process_messages(
-        cmd_receiver: &Receiver<ScanTaskCommand>,
-        parsed_keys: &mut HashMap<
+        cmd_receiver: &mut tokio::sync::mpsc::Receiver<ScanTaskCommand>,
+        registered_keys: &mut HashMap<
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
         network: Network,
     ) -> Result<
-        HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+        (
+            HashMap<
+                SaplingScanningKey,
+                (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
+            >,
+            HashMap<SaplingScanningKey, Sender<ScanResult>>,
+        ),
         Report,
     > {
+        use tokio::sync::mpsc::error::TryRecvError;
+
         let mut new_keys = HashMap::new();
+        let mut new_result_senders = HashMap::new();
         let sapling_activation_height = network.sapling_activation_height();
 
         loop {
@@ -90,7 +98,9 @@ impl ScanTask {
                             // Don't accept keys that:
                             // 1. the scanner already has, and
                             // 2. were already submitted.
-                            if parsed_keys.contains_key(&key.0) && !new_keys.contains_key(&key.0) {
+                            if registered_keys.contains_key(&key.0)
+                                && !new_keys.contains_key(&key.0)
+                            {
                                 return None;
                             }
 
@@ -116,7 +126,7 @@ impl ScanTask {
 
                     new_keys.extend(keys.clone());
 
-                    parsed_keys.extend(
+                    registered_keys.extend(
                         keys.into_iter()
                             .map(|(key, (dfvks, ivks, _))| (key, (dfvks, ivks))),
                     );
@@ -124,7 +134,7 @@ impl ScanTask {
 
                 ScanTaskCommand::RemoveKeys { done_tx, keys } => {
                     for key in keys {
-                        parsed_keys.remove(&key);
+                        registered_keys.remove(&key);
                         new_keys.remove(&key);
                     }
 
@@ -132,26 +142,39 @@ impl ScanTask {
                     let _ = done_tx.send(());
                 }
 
-                _ => continue,
+                ScanTaskCommand::SubscribeResults {
+                    result_sender,
+                    keys,
+                } => {
+                    let keys = keys
+                        .into_iter()
+                        .filter(|key| registered_keys.contains_key(key));
+
+                    for key in keys {
+                        new_result_senders.insert(key, result_sender.clone());
+                    }
+                }
             }
         }
 
-        Ok(new_keys)
+        Ok((new_keys, new_result_senders))
     }
 
     /// Sends a command to the scan task
     pub fn send(
         &mut self,
         command: ScanTaskCommand,
-    ) -> Result<(), mpsc::SendError<ScanTaskCommand>> {
-        self.cmd_sender.send(command)
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<ScanTaskCommand>> {
+        self.cmd_sender.try_send(command)
     }
 
     /// Sends a message to the scan task to remove the provided viewing keys.
+    ///
+    /// Returns a oneshot channel receiver to notify the caller when the keys have been removed.
     pub fn remove_keys(
         &mut self,
         keys: &[String],
-    ) -> Result<oneshot::Receiver<()>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<oneshot::Receiver<()>, TrySendError<ScanTaskCommand>> {
         let (done_tx, done_rx) = oneshot::channel();
 
         self.send(ScanTaskCommand::RemoveKeys {
@@ -166,11 +189,29 @@ impl ScanTask {
     pub fn register_keys(
         &mut self,
         keys: Vec<(String, Option<u32>)>,
-    ) -> Result<oneshot::Receiver<Vec<String>>, mpsc::SendError<ScanTaskCommand>> {
+    ) -> Result<oneshot::Receiver<Vec<String>>, TrySendError<ScanTaskCommand>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         self.send(ScanTaskCommand::RegisterKeys { keys, rsp_tx })?;
 
         Ok(rsp_rx)
+    }
+
+    /// Sends a message to the scan task to start sending the results for the provided viewing keys to a channel.
+    ///
+    /// Returns the channel receiver.
+    pub fn subscribe(
+        &mut self,
+        keys: HashSet<SaplingScanningKey>,
+    ) -> Result<Receiver<ScanResult>, TrySendError<ScanTaskCommand>> {
+        // TODO: Use a bounded channel
+        let (result_sender, result_receiver) =
+            tokio::sync::mpsc::channel(RESULTS_SENDER_BUFFER_SIZE);
+
+        self.send(ScanTaskCommand::SubscribeResults {
+            result_sender,
+            keys,
+        })
+        .map(|_| result_receiver)
     }
 }

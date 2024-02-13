@@ -1,5 +1,6 @@
 //! Tests for ScanService.
 
+use tokio::sync::mpsc::error::TryRecvError;
 use tower::{Service, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
@@ -38,7 +39,7 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
         "there should be some results for this key in the db"
     );
 
-    let (mut scan_service, cmd_receiver) = ScanService::new_with_mock_scanner(db);
+    let (mut scan_service, mut cmd_receiver) = ScanService::new_with_mock_scanner(db);
 
     let response_fut = scan_service
         .ready()
@@ -47,8 +48,8 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
         .call(Request::DeleteKeys(vec![zec_pages_sapling_efvk.clone()]));
 
     let expected_keys = vec![zec_pages_sapling_efvk.clone()];
-    let cmd_handler_fut = tokio::task::spawn_blocking(move || {
-        let Ok(ScanTaskCommand::RemoveKeys { done_tx, keys }) = cmd_receiver.recv() else {
+    let cmd_handler_fut = tokio::spawn(async move {
+        let Some(ScanTaskCommand::RemoveKeys { done_tx, keys }) = cmd_receiver.recv().await else {
             panic!("should successfully receive RemoveKeys message");
         };
 
@@ -72,6 +73,52 @@ pub async fn scan_service_deletes_keys_correctly() -> Result<()> {
             .sapling_results(&zec_pages_sapling_efvk)
             .is_empty(),
         "all results for this key should have been deleted"
+    );
+
+    Ok(())
+}
+
+/// Tests that keys are deleted correctly
+#[tokio::test]
+pub async fn scan_service_subscribes_to_results_correctly() -> Result<()> {
+    let db = new_test_storage(Network::Mainnet);
+
+    let (mut scan_service, mut cmd_receiver) = ScanService::new_with_mock_scanner(db);
+
+    let keys = [String::from("fake key")];
+
+    let response_fut = scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::SubscribeResults(keys.iter().cloned().collect()));
+
+    let expected_keys = keys.iter().cloned().collect();
+    let cmd_handler_fut = tokio::spawn(async move {
+        let Some(ScanTaskCommand::SubscribeResults {
+            result_sender: _,
+            keys,
+        }) = cmd_receiver.recv().await
+        else {
+            panic!("should successfully receive SubscribeResults message");
+        };
+
+        assert_eq!(keys, expected_keys, "keys should match the request keys");
+    });
+
+    // Poll futures
+    let (response, join_result) = tokio::join!(response_fut, cmd_handler_fut);
+    join_result?;
+
+    let mut results_receiver = match response.map_err(|err| eyre!(err))? {
+        Response::SubscribeResults(results_receiver) => results_receiver,
+        _ => panic!("scan service returned unexpected response variant"),
+    };
+
+    assert_eq!(
+        results_receiver.try_recv(),
+        Err(TryRecvError::Disconnected),
+        "channel with no items and dropped sender should be closed"
     );
 
     Ok(())
