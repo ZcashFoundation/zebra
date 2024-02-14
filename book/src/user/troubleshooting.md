@@ -7,7 +7,7 @@ for:
 - macOS,
 - Ubuntu,
 - Docker:
-  - Debian Bullseye.
+  - Debian Bookworm.
 
 ## Memory Issues
 

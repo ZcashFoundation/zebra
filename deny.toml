@@ -73,6 +73,9 @@ skip-tree = [
     # wait for `color-eyre` to upgrade
     { name = "owo-colors", version = "=3.5.0" },
 
+    # wait for `serde_with_macros` to upgrade `darling_core`
+    { name = "strsim", version = "=0.10.0" },
+
     # ZF crates
 
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
@@ -111,10 +114,13 @@ skip-tree = [
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
-    { name = "windows-sys", version = "=0.45.0" },
 
     # wait for proptest's rusty-fork dependency to upgrade quick-error
     { name = "quick-error", version = "=1.2.3" },
+
+    # wait for console-subscriber to update tonic.
+    { name = "tonic", version = "=0.10.2" },
+    { name = "tonic-build", version = "=0.10.2" },
 
     # Optional dependencies
 

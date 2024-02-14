@@ -47,24 +47,24 @@ elasticsearch = [
 
 [dependencies]
 bincode = "1.3.3"
-chrono = { version = "0.4.33", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 futures = "0.3.30"
 hex = "0.4.3"
 hex-literal = "0.4.1"
 humantime-serde = "1.1.1"
-indexmap = "2.2.2"
+indexmap = "2.2.3"
 itertools = "0.12.1"
 lazy_static = "1.4.0"
-metrics = "0.22.0"
+metrics = "0.22.1"
 mset = "0.1.1"
 regex = "1.10.3"
 rlimit = "0.10.1"
 rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
 semver = "1.0.21"
 serde = { version = "1.0.196", features = ["serde_derive"] }
-tempfile = "3.9.0"
-thiserror = "1.0.56"
+tempfile = "3.10.0"
+thiserror = "1.0.57"
 
 rayon = "1.8.1"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "tracing"] }
