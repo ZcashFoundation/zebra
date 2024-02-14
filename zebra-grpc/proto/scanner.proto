@@ -104,6 +104,7 @@ message ScanResponse {
     map<string, ScanResults> results = 2;
 }
 
+// The scan results for a provided key of a Scan call.
 message ScanResults {
     // Transaction hashes/ids of transaction that were successfully 
     // trial decrypted with the provided keys.
