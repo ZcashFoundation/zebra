@@ -123,6 +123,10 @@ where
                 );
 
                 for (height, results_for_key) in results_by_height {
+                    if results_for_key.is_empty() {
+                        continue;
+                    }
+
                     let results_for_height = initial_results.entry(height).or_default();
                     results_for_height.entry(key.clone()).or_default().extend(
                         results_for_key
@@ -151,7 +155,7 @@ where
                 tx_id,
             }) = results_receiver.recv().await
             {
-                response_sender
+                let send_result = response_sender
                     .send(Ok(ScanResponse {
                         height,
                         results: [(
@@ -163,8 +167,12 @@ where
                         .into_iter()
                         .collect(),
                     }))
-                    .await
-                    .expect("sender should not be dropped");
+                    .await;
+
+                // Finish task if the client has disconnected
+                if send_result.is_err() {
+                    break;
+                }
             }
         });
 
