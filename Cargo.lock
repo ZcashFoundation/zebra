@@ -5819,6 +5819,7 @@ dependencies = [
  "prost",
  "serde",
  "tokio",
+ "tokio-stream",
  "tonic 0.11.0",
  "tonic-build 0.11.0",
  "tower",

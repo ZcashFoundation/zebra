@@ -1,19 +1,23 @@
 //! The gRPC server implementation
 
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::{collections::BTreeMap, net::SocketAddr, pin::Pin};
 
 use futures_util::future::TryFutureExt;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::{transport::Server, Request, Response, Status};
 use tower::ServiceExt;
 
+use zebra_chain::block::Height;
 use zebra_node_services::scan_service::{
-    request::Request as ScanServiceRequest, response::Response as ScanServiceResponse,
+    request::Request as ScanServiceRequest,
+    response::{Response as ScanServiceResponse, ScanResult},
 };
 
 use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
     ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
-    InfoReply, RegisterKeysRequest, RegisterKeysResponse, Results, TransactionHash,
+    InfoReply, KeyWithHeight, RegisterKeysRequest, RegisterKeysResponse, Results, ScanRequest,
+    ScanResponse, ScanResults, TransactionHash,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -42,7 +46,135 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    async fn get_info(&self, _request: Request<Empty>) -> Result<Response<InfoReply>, Status> {
+    type ScanStream = Pin<Box<dyn Stream<Item = Result<ScanResponse, Status>> + Send>>;
+
+    async fn scan(
+        &self,
+        request: tonic::Request<ScanRequest>,
+    ) -> Result<Response<Self::ScanStream>, Status> {
+        let keys = request.into_inner().keys;
+
+        if keys.is_empty() {
+            let msg = "must provide at least 1 key in scan request";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        let keys: Vec<_> = keys
+            .into_iter()
+            .map(|KeyWithHeight { key, height }| (key, height))
+            .collect();
+
+        let ScanServiceResponse::RegisteredKeys(_) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
+
+        let ScanServiceResponse::SubscribeResults(mut results_receiver) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| {
+                service.call(ScanServiceRequest::SubscribeResults(
+                    keys.iter().cloned().collect(),
+                ))
+            })
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let ScanServiceResponse::Results(results) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::Results(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(10_000);
+        let response_stream = ReceiverStream::new(response_receiver);
+
+        tokio::spawn(async move {
+            // Transpose the nested BTreeMaps
+            let mut initial_results: BTreeMap<Height, BTreeMap<String, Vec<Vec<u8>>>> =
+                BTreeMap::new();
+            for (key, results_by_height) in results {
+                assert!(
+                    keys.contains(&key),
+                    "should not return results for keys that weren't provided"
+                );
+
+                for (height, results_for_key) in results_by_height {
+                    let results_for_height = initial_results.entry(height).or_default();
+                    results_for_height.entry(key.clone()).or_default().extend(
+                        results_for_key
+                            .into_iter()
+                            .map(|result| result.bytes_in_display_order().to_vec()),
+                    );
+                }
+            }
+
+            for (Height(height), results) in initial_results {
+                response_sender
+                    .send(Ok(ScanResponse {
+                        height,
+                        results: results
+                            .into_iter()
+                            .map(|(key, results)| (key, ScanResults { tx_ids: results }))
+                            .collect(),
+                    }))
+                    .await
+                    .expect("channel should not be disconnected");
+            }
+
+            while let Some(ScanResult {
+                key,
+                height: Height(height),
+                tx_id,
+            }) = results_receiver.recv().await
+            {
+                response_sender
+                    .send(Ok(ScanResponse {
+                        height,
+                        results: [(
+                            key,
+                            ScanResults {
+                                tx_ids: vec![tx_id.bytes_in_display_order().to_vec()],
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                    }))
+                    .await
+                    .expect("sender should not be dropped");
+            }
+        });
+
+        Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn get_info(
+        &self,
+        _request: tonic::Request<Empty>,
+    ) -> Result<Response<InfoReply>, Status> {
         let ScanServiceResponse::Info {
             min_sapling_birthday_height,
         } = self

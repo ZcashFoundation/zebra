@@ -22,6 +22,9 @@ service Scanner {
 
     // Submits scanning keys to the scanner.
     rpc RegisterKeys(RegisterKeysRequest) returns (RegisterKeysResponse);
+
+    // Register keys and listen to the results
+    rpc Scan (ScanRequest) returns (stream ScanResponse);
 }
 
 // A response to a GetInfo call.
@@ -84,4 +87,25 @@ message KeyWithHeight {
     string key = 1;
     // Birth height of the key
     optional uint32 height = 2;
+}
+
+// A request for registering keys and getting their transactions
+message ScanRequest {
+    // A set of viewing keys
+    repeated KeyWithHeight keys = 2;
+}
+
+// Response to Scan calls
+message ScanResponse {
+    // The height of the block the scan results were found in.
+    uint32 height = 1;
+
+    // Scan results for this block height.
+    map<string, ScanResults> results = 2;
+}
+
+message ScanResults {
+    // Transaction hashes/ids of transaction that were successfully 
+    // trial decrypted with the provided keys.
+    repeated bytes tx_ids = 1;
 }
