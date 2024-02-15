@@ -20,7 +20,7 @@ ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 
 # This stage implements cargo-chef for docker layer caching
-FROM rust:bullseye as chef
+FROM rust:bookworm as chef
 RUN cargo install cargo-chef --locked
 WORKDIR /opt/zebrad
 
@@ -181,7 +181,7 @@ RUN chmod u+x /entrypoint.sh
 #
 # To save space, this step starts from scratch using debian, and only adds the resulting
 # binary from the `release` stage
-FROM debian:bullseye-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
 COPY --from=release /entrypoint.sh /
 

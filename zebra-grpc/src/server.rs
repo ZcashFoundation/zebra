@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, net::SocketAddr};
 
 use futures_util::future::TryFutureExt;
-use tonic::{transport::Server, Response, Status};
+use tonic::{transport::Server, Request, Response, Status};
 use tower::ServiceExt;
 
 use zebra_node_services::scan_service::{
@@ -13,7 +13,7 @@ use zebra_node_services::scan_service::{
 use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
     ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
-    InfoReply, Results, TransactionHash,
+    InfoReply, RegisterKeysRequest, RegisterKeysResponse, Results, TransactionHash,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -42,10 +42,7 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    async fn get_info(
-        &self,
-        _request: tonic::Request<Empty>,
-    ) -> Result<Response<InfoReply>, Status> {
+    async fn get_info(&self, _request: Request<Empty>) -> Result<Response<InfoReply>, Status> {
         let ScanServiceResponse::Info {
             min_sapling_birthday_height,
         } = self
@@ -68,9 +65,36 @@ where
         Ok(Response::new(reply))
     }
 
+    async fn register_keys(
+        &self,
+        request: Request<RegisterKeysRequest>,
+    ) -> Result<Response<RegisterKeysResponse>, Status> {
+        let keys = request
+            .into_inner()
+            .keys
+            .into_iter()
+            .map(|key_with_height| (key_with_height.key, key_with_height.height))
+            .collect();
+
+        let ScanServiceResponse::RegisteredKeys(keys) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys)))
+            .await
+            .map_err(|_| Status::unknown("scan service was unavailable"))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        Ok(Response::new(RegisterKeysResponse { keys }))
+    }
+
     async fn clear_results(
         &self,
-        request: tonic::Request<ClearResultsRequest>,
+        request: Request<ClearResultsRequest>,
     ) -> Result<Response<Empty>, Status> {
         let keys = request.into_inner().keys;
 
@@ -97,7 +121,7 @@ where
 
     async fn delete_keys(
         &self,
-        request: tonic::Request<DeleteKeysRequest>,
+        request: Request<DeleteKeysRequest>,
     ) -> Result<Response<Empty>, Status> {
         let keys = request.into_inner().keys;
 
@@ -124,7 +148,7 @@ where
 
     async fn get_results(
         &self,
-        request: tonic::Request<GetResultsRequest>,
+        request: Request<GetResultsRequest>,
     ) -> Result<Response<GetResultsResponse>, Status> {
         let keys = request.into_inner().keys;
 
