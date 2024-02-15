@@ -1691,12 +1691,10 @@ fn non_blocking_logger() -> Result<()> {
         Ok(())
     });
 
-    // Wait until the spawned task finishes or return an error in 45 seconds
-    if done_rx.recv_timeout(Duration::from_secs(45)).is_err() {
-        return Err(eyre!("unexpected test task hang"));
+    // Wait until the spawned task finishes up to 45 seconds before shutting down tokio runtime
+    if done_rx.recv_timeout(Duration::from_secs(45)).is_ok() {
+        rt.shutdown_timeout(Duration::from_secs(3));
     }
-
-    rt.shutdown_timeout(Duration::from_secs(3));
 
     match test_task_handle.now_or_never() {
         Some(Ok(result)) => result,
