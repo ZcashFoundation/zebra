@@ -704,6 +704,8 @@ jobs:
         get-block-template-test,
         submit-block-test,
         scan-start-where-left-test,
+        scans-for-new-key-test,
+        scan-subscribe-results-test,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
