@@ -89,7 +89,7 @@ pub(crate) async fn run() -> Result<()> {
     scan_task.register_keys(
         keys.iter()
             .cloned()
-            .map(|key| (key, Some(736000)))
+            .map(|key| (key, Some(780_000)))
             .collect(),
     )?;
 

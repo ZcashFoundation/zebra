@@ -53,8 +53,6 @@ pub(crate) async fn run() -> Result<()> {
         .zebrad_state_path(test_name)
         .expect("already checked that there is a cached state path");
 
-    let shielded_scan_config = zebra_scan::Config::default();
-
     let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
         start_state_service_with_cache_dir(network, zebrad_state_path).await?;
 
@@ -78,18 +76,15 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("opened state service with valid chain tip height, deleting any past keys in db and starting scan task",);
 
-    // Before spawning `ScanTask`, delete past results for the zecpages key, if any.
-    let mut storage = Storage::new(&shielded_scan_config, network, false);
-    storage.delete_sapling_keys(vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]);
-
+    let storage = Storage::new(&zebra_scan::Config::ephemeral(), network, false);
     let state = ServiceBuilder::new().buffer(10).service(state_service);
 
-    let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
+    let mut scan_task = ScanTask::spawn(storage.clone(), state, chain_tip_change);
 
     tracing::info!("started scan task, sending register keys message with zecpages key to start scanning for a new key",);
 
     scan_task.register_keys(
-        [(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), None)]
+        [(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), Some(780_000))]
             .into_iter()
             .collect(),
     )?;
@@ -103,8 +98,6 @@ pub(crate) async fn run() -> Result<()> {
     tokio::time::sleep(WAIT_FOR_RESULTS_DURATION).await;
 
     // Check that there are some results in the database for the key
-
-    let storage = Storage::new(&shielded_scan_config, network, true);
 
     let results = storage.sapling_results(&ZECPAGES_SAPLING_VIEWING_KEY.to_string());
 
