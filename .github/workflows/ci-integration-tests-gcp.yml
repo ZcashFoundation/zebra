@@ -631,6 +631,58 @@ jobs:
       zebra_state_dir: "zebrad-cache"
     secrets: inherit
 
+  # Test that the scanner can start scanning for a new key while running.
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  scans-for-new-key-test:
+    name: Scans for new key
+    needs: [test-full-sync, get-available-disks]
+    uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    with:
+      app_name: zebrad
+      test_id: scans-for-new-key
+      test_description: Test that the scanner can start scanning for a new key while running.
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCANS_FOR_NEW_KEY=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: true
+      disk_suffix: tip
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+    secrets: inherit
+
+  # Test that the scanner can send new scan results to a results channel for subscribed keys.
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  scan-subscribe-results-test:
+    name: Scan subscribe results
+    needs: [test-full-sync, get-available-disks]
+    uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
+    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    with:
+      app_name: zebrad
+      test_id: scan-subscribe-results
+      test_description: Test that the scanner can start scanning for a new key while running.
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_SUBSCRIBE_RESULTS=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: true
+      disk_suffix: tip
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+    secrets: inherit
+
   failure-issue:
     name: Open or update issues for main branch failures
     # When a new test is added to this workflow, add it to this list.

@@ -77,7 +77,7 @@ fi
 : "${TEST_GET_BLOCK_TEMPLATE:=}"
 : "${TEST_SUBMIT_BLOCK:=}"
 : "${TEST_SCAN_START_WHERE_LEFT:=}"
-: "${TEST_SCAN_FOR_NEW_KEY:=}"
+: "${TEST_SCANS_FOR_NEW_KEY:=}"
 : "${TEST_SCAN_SUBSCRIBE_RESULTS:=}"
 : "${ENTRYPOINT_FEATURES:=}"
 
@@ -352,7 +352,7 @@ case "$1" in
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         run_cargo_test "shielded-scan" "scan_start_where_left"
 
-      elif [[ "${TEST_SCAN_FOR_NEW_KEY}" -eq "1" ]]; then
+      elif [[ "${TEST_SCANS_FOR_NEW_KEY}" -eq "1" ]]; then
         # Test that the scanner can scan for a newly registered key while it's running.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         run_cargo_test "shielded-scan" "scans_for_new_key"

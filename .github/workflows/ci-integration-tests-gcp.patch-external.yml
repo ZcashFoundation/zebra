@@ -86,6 +86,20 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  scans-for-new-key:
+    name: Scans for new key / Run scans-for-new-key test
+    needs: get-available-disks
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  scan-subscribe-results:
+    name: Scan subscribe results / Run scan-subscribe-results test
+    needs: get-available-disks
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     needs: get-available-disks
