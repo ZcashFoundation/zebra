@@ -77,6 +77,8 @@ fi
 : "${TEST_GET_BLOCK_TEMPLATE:=}"
 : "${TEST_SUBMIT_BLOCK:=}"
 : "${TEST_SCAN_START_WHERE_LEFT:=}"
+: "${TEST_SCAN_FOR_NEW_KEY:=}"
+: "${TEST_SCAN_SUBSCRIBE_RESULTS:=}"
 : "${ENTRYPOINT_FEATURES:=}"
 
 # Configuration file path
@@ -349,6 +351,16 @@ case "$1" in
         # Test that the scanner can continue scanning where it was left when zebrad restarts.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         run_cargo_test "shielded-scan" "scan_start_where_left"
+
+      elif [[ "${TEST_SCAN_FOR_NEW_KEY}" -eq "1" ]]; then
+        # Test that the scanner can scan for a newly registered key while it's running.
+        check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+        run_cargo_test "shielded-scan" "scans_for_new_key"
+
+      elif [[ "${TEST_SCAN_SUBSCRIBE_RESULTS}" -eq "1" ]]; then
+        # Test that the scanner can send new scan results to a results channel for subscribed keys.
+        check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+        run_cargo_test "shielded-scan" "scan_subscribe_results"
 
       else
           exec "$@"
