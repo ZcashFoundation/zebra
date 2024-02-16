@@ -81,6 +81,7 @@ pub async fn start(
     info!(?network, "starting scan task");
 
     // Do not scan and notify if we are below sapling activation height.
+    #[cfg(not(test))]
     wait_for_height(
         sapling_activation_height,
         "Sapling activation",
