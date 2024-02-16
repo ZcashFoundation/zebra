@@ -22,6 +22,10 @@ use crate::scanner::{
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// The maximum number of messages that can be queued to be streamed to a client
+/// from the `scan` method.
+const SCAN_RESPONDER_BUFFER_SIZE: usize = 10_000;
+
 #[derive(Debug)]
 /// The server implementation
 pub struct ScannerRPC<ScanService>
@@ -109,7 +113,8 @@ where
             ));
         };
 
-        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(10_000);
+        let (response_sender, response_receiver) =
+            tokio::sync::mpsc::channel(SCAN_RESPONDER_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
 
         tokio::spawn(async move {
