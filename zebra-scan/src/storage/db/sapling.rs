@@ -159,7 +159,7 @@ impl Storage {
 
     /// Inserts a batch of scanned sapling result for a key and height.
     /// If a result already exists for that key, height, and index, it is replaced.
-    pub(crate) fn insert_sapling_results(
+    pub fn insert_sapling_results(
         &mut self,
         sapling_key: &SaplingScanningKey,
         height: Height,

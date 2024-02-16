@@ -5815,13 +5815,18 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "color-eyre",
  "futures-util",
+ "insta",
  "prost",
+ "serde",
  "tokio",
  "tonic 0.11.0",
  "tonic-build 0.11.0",
  "tower",
  "zcash_primitives",
+ "zebra-chain",
  "zebra-node-services",
+ "zebra-state",
+ "zebra-test",
 ]
 
 [[package]]
