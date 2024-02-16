@@ -1,18 +1,24 @@
 //! Tests for ScanService.
 
+use std::sync::Arc;
+
+use strum::IntoEnumIterator;
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::{Service, ServiceExt};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::{continuous_deserialized_blocks_for, Block, Height},
+    parameters::Network,
+};
 use zebra_node_services::scan_service::{request::Request, response::Response};
 use zebra_state::TransactionIndex;
 
 use crate::{
     service::{scan_task::ScanTaskCommand, ScanService},
     storage::db::tests::{fake_sapling_results, new_test_storage},
-    tests::ZECPAGES_SAPLING_VIEWING_KEY,
+    tests::{mock_sapling_scanning_keys, ZECPAGES_SAPLING_VIEWING_KEY},
 };
 
 /// Tests that keys are deleted correctly
@@ -251,6 +257,81 @@ pub async fn scan_service_get_results_for_key_correctly() -> Result<()> {
         }
         _ => panic!("scan service returned unexpected response variant"),
     };
+
+    Ok(())
+}
+
+/// Tests that the scan service registers keys correctly.
+#[tokio::test]
+pub async fn scan_service_registers_keys_correctly() -> Result<()> {
+    for network in Network::iter() {
+        scan_service_registers_keys_correctly_for(
+            continuous_deserialized_blocks_for(network),
+            network,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn scan_service_registers_keys_correctly_for(
+    blocks: Vec<Arc<Block>>,
+    network: Network,
+) -> Result<()> {
+    // Mock the state.
+    let (state, _read_state, _latest_chain_tip, chain_tip_change) =
+        zebra_state::populated_state(blocks, network).await;
+
+    // Instantiate the scan service.
+    let mut scan_service = ServiceBuilder::new()
+        .buffer(5)
+        .service(ScanService::new(&Default::default(), network, state, chain_tip_change).await);
+
+    // Mock three Sapling keys.
+    let mocked_keys = mock_sapling_scanning_keys(3, network);
+
+    // Add birth heights to the mocked keys.
+    let keys_to_register: Vec<_> = mocked_keys
+        .clone()
+        .into_iter()
+        .zip((0u32..).map(Some))
+        .collect();
+
+    // Register the first key.
+    match scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::RegisterKeys(keys_to_register[..1].to_vec()))
+        .await
+        .map_err(|err| eyre!(err))?
+    {
+        Response::RegisteredKeys(registered_keys) => {
+            // The key should be registered.
+            assert_eq!(registered_keys, mocked_keys[..1]);
+        }
+
+        _ => panic!("scan service returned unexpected response variant"),
+    }
+
+    // Try registering all three keys.
+    match scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::RegisterKeys(keys_to_register))
+        .await
+        .map_err(|err| eyre!(err))?
+    {
+        Response::RegisteredKeys(registered_keys) => {
+            // Only the last two keys should be registered in this service call since the first one
+            // was registered in the previous call.
+            assert_eq!(registered_keys, mocked_keys[1..3]);
+        }
+
+        _ => panic!("scan service returned unexpected response variant"),
+    }
 
     Ok(())
 }
