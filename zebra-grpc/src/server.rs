@@ -79,6 +79,19 @@ where
 
         let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
 
+        let ScanServiceResponse::Results(results) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::Results(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
         let ScanServiceResponse::SubscribeResults(mut results_receiver) = self
             .scan_service
             .clone()
@@ -88,19 +101,6 @@ where
                     keys.iter().cloned().collect(),
                 ))
             })
-            .await
-            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
-        };
-
-        let ScanServiceResponse::Results(results) = self
-            .scan_service
-            .clone()
-            .ready()
-            .and_then(|service| service.call(ScanServiceRequest::Results(keys.clone())))
             .await
             .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
