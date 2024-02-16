@@ -61,8 +61,9 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 
 /// The amount of time between checking for new blocks and starting new scans.
 ///
-/// This is just under half the target block interval.
-pub const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// TODO: The current value is set to 10 so that tests don't sleep for too long and finish faster.
+/// Set it to 30 after #8250 gets addressed or remove this const completely in the refactor.
+pub const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// We log an info log with progress after this many blocks.
 const INFO_LOG_INTERVAL: u32 = 10_000;
