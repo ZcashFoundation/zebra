@@ -35,7 +35,6 @@ tonic-build = "0.11.0"
 insta = { version = "1.33.0", features = ["redactions", "json", "ron"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
-zebra-scan = { path = "../zebra-scan" }
 zebra-state = { path = "../zebra-state" }
 zebra-test = { path = "../zebra-test" }
 

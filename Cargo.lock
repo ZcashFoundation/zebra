@@ -5825,7 +5825,6 @@ dependencies = [
  "zcash_primitives",
  "zebra-chain",
  "zebra-node-services",
- "zebra-scan",
  "zebra-state",
  "zebra-test",
 ]

@@ -5,12 +5,11 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review
+//! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 use std::{collections::BTreeMap, thread::sleep, time::Duration};
 
 use zebra_chain::{block::Height, parameters::Network, transaction};
-use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
 use zebra_test::mock_service::MockService;
 
 use zebra_node_services::scan_service::{
@@ -23,6 +22,9 @@ use crate::{
     },
     server::init,
 };
+
+/// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
+pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_grpc_response_data() {
@@ -67,7 +69,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
 
     // insta settings
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_mocked", network_string(network)));
+    settings.set_snapshot_suffix(network.lowercase_name());
 
     // snapshot the get_info grpc call
     let get_info_response_fut = {
@@ -143,12 +145,4 @@ fn snapshot_rpc_getinfo(info: InfoReply, settings: &insta::Settings) {
 /// Snapshot `getresults` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getresults(results: GetResultsResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_results", results));
-}
-
-/// Utility function to convert a `Network` to a lowercase string.
-// TODO: move this to a common location.
-fn network_string(network: Network) -> String {
-    let mut net_suffix = network.to_string();
-    net_suffix.make_ascii_lowercase();
-    net_suffix
 }
