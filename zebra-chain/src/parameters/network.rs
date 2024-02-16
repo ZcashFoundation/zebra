@@ -12,6 +12,8 @@ use crate::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+use strum_macros::EnumIter;
+
 #[cfg(test)]
 mod tests;
 
@@ -52,7 +54,7 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, EnumIter)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Network {
     /// The production mainnet.
