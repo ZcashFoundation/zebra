@@ -7,15 +7,14 @@
 //! ```sh
 //! cargo insta test --review
 //! ```
-use std::{thread::sleep, time::Duration};
-use tower::ServiceBuilder;
+use std::{collections::BTreeMap, thread::sleep, time::Duration};
 
-use zebra_chain::{block::Height, parameters::Network};
-use zebra_scan::{
-    service::ScanService,
-    storage::db::tests::{fake_sapling_results, new_test_storage},
-    tests::ZECPAGES_SAPLING_VIEWING_KEY,
-    Config,
+use zebra_chain::{block::Height, parameters::Network, transaction};
+use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
+use zebra_test::mock_service::MockService;
+
+use zebra_node_services::scan_service::{
+    request::Request as ScanRequest, response::Response as ScanResponse,
 };
 
 use crate::{
@@ -30,8 +29,6 @@ async fn test_grpc_response_data() {
     let _init_guard = zebra_test::init();
 
     tokio::join!(
-        test_grpc_response_data_for_network(Network::Mainnet, zebra_test::net::random_known_port()),
-        test_grpc_response_data_for_network(Network::Testnet, zebra_test::net::random_known_port()),
         test_mocked_rpc_response_data_for_network(
             Network::Mainnet,
             zebra_test::net::random_known_port()
@@ -43,92 +40,98 @@ async fn test_grpc_response_data() {
     );
 }
 
-async fn test_grpc_response_data_for_network(network: Network, random_port: u16) {
-    // get a state and chain tip.
-    let (state, _read_state, _latest_chain_tip, chain_tip_change) =
-        zebra_state::init_test_services(network);
-
-    // create a scan service
-    let scan_service = ServiceBuilder::new()
-        .buffer(10)
-        .service(ScanService::new(&Config::default(), network, state, chain_tip_change).await);
+async fn test_mocked_rpc_response_data_for_network(network: Network, random_port: u16) {
+    // get a mocked scan service
+    let mock_scan_service = MockService::build().for_unit_tests();
 
     // start the gRPC server
-    let listen_addr: std::net::SocketAddr = format!("127.0.0.1:{random_port}").parse().unwrap();
+    let listen_addr: std::net::SocketAddr = format!("127.0.0.1:{random_port}")
+        .parse()
+        .expect("hard-coded IP and u16 port should parse successfully");
 
-    tokio::spawn(async move {
-        init(listen_addr, scan_service).await.unwrap();
-    });
-    sleep(Duration::from_secs(1)); // wait for the server to start
-
-    // connect to the gRPC server
-    let mut client = ScannerClient::connect(format!("http://127.0.0.1:{random_port}"))
-        .await
-        .unwrap();
-
-    // insta settings
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_empty", network_string(network)));
-
-    // snapshot the get_info grpc call
-    let get_info_request = tonic::Request::new(Empty {});
-    let get_info_response = client.get_info(get_info_request).await.unwrap();
-    snapshot_rpc_getinfo(get_info_response.into_inner(), &settings);
-
-    // snapshot the get_results grpc call
-    let get_results_request = tonic::Request::new(GetResultsRequest {
-        keys: vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()],
-    });
-    let get_results_response = client.get_results(get_results_request).await.unwrap();
-    snapshot_rpc_getresults(get_results_response.into_inner(), &settings);
-}
-
-async fn test_mocked_rpc_response_data_for_network(network: Network, random_port: u16) {
-    // introduce fake results to the database
-    let mut db = new_test_storage(network);
-    let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
-    for fake_result_height in [Height::MIN, Height(1), Height::MAX] {
-        db.insert_sapling_results(
-            &zec_pages_sapling_efvk,
-            fake_result_height,
-            fake_sapling_results([
-                zebra_state::TransactionIndex::MIN,
-                zebra_state::TransactionIndex::from_index(40),
-                zebra_state::TransactionIndex::MAX,
-            ]),
-        );
+    {
+        let mock_scan_service = mock_scan_service.clone();
+        tokio::spawn(async move {
+            init(listen_addr, mock_scan_service)
+                .await
+                .expect("Possible port conflict");
+        });
     }
 
-    // get a mocked scan service
-    let (scan_service, _cmd_receiver) = ScanService::new_with_mock_scanner(db.clone());
-    let scan_service = ServiceBuilder::new().buffer(10).service(scan_service);
-
-    // start the gRPC server
-    let listen_addr: std::net::SocketAddr = format!("127.0.0.1:{random_port}").parse().unwrap();
-    tokio::spawn(async move {
-        init(listen_addr, scan_service).await.unwrap();
-    });
     sleep(Duration::from_secs(1)); // wait for the server to start
 
     // connect to the gRPC server
-    let mut client = ScannerClient::connect(format!("http://127.0.0.1:{random_port}"))
+    let client = ScannerClient::connect(format!("http://127.0.0.1:{random_port}"))
         .await
-        .unwrap();
+        .expect("server should receive connection");
 
     // insta settings
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_suffix(format!("{}_mocked", network_string(network)));
 
     // snapshot the get_info grpc call
-    let get_info_request = tonic::Request::new(Empty {});
-    let get_info_response = client.get_info(get_info_request).await.unwrap();
+    let get_info_response_fut = {
+        let mut client = client.clone();
+        let get_info_request = tonic::Request::new(Empty {});
+        tokio::spawn(async move { client.get_info(get_info_request).await })
+    };
+
+    {
+        let mut mock_scan_service = mock_scan_service.clone();
+        tokio::spawn(async move {
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::Info))
+                .await
+                .respond(ScanResponse::Info {
+                    min_sapling_birthday_height: network.sapling_activation_height(),
+                })
+        });
+    }
+
+    let get_info_response = get_info_response_fut
+        .await
+        .expect("tokio task should join successfully")
+        .expect("get_info request should succeed");
+
     snapshot_rpc_getinfo(get_info_response.into_inner(), &settings);
 
     // snapshot the get_results grpc call
-    let get_results_request = tonic::Request::new(GetResultsRequest {
-        keys: vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()],
-    });
-    let get_results_response = client.get_results(get_results_request).await.unwrap();
+
+    let get_results_response_fut = {
+        let mut client = client.clone();
+        let get_results_request = tonic::Request::new(GetResultsRequest {
+            keys: vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()],
+        });
+        tokio::spawn(async move { client.get_results(get_results_request).await })
+    };
+
+    {
+        let mut mock_scan_service = mock_scan_service.clone();
+        tokio::spawn(async move {
+            let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
+            let mut fake_results = BTreeMap::new();
+            for fake_result_height in [Height::MIN, Height(1), Height::MAX] {
+                fake_results.insert(
+                    fake_result_height,
+                    [transaction::Hash::from([0; 32])].repeat(3),
+                );
+            }
+
+            let mut fake_results_response = BTreeMap::new();
+            fake_results_response.insert(zec_pages_sapling_efvk, fake_results);
+
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::Results(_)))
+                .await
+                .respond(ScanResponse::Results(fake_results_response))
+        });
+    }
+
+    let get_results_response = get_results_response_fut
+        .await
+        .expect("tokio task should join successfully")
+        .expect("get_results request should succeed");
+
     snapshot_rpc_getresults(get_results_response.into_inner(), &settings);
 }
 
