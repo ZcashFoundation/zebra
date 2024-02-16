@@ -72,13 +72,19 @@ message RegisterKeysResponse {
 // A result for a single key.
 message Results {
     // A height, transaction id map
-    map<uint32, TransactionHash> transactions = 1;
+    map<uint32, Transactions> by_height = 1;
 }
 
 // A vector of transaction hashes
-message TransactionHash {
-    // A transaction id hash
-    repeated string hash = 1;
+message Transactions {
+    // Transactions
+    repeated Transaction transactions = 1;
+}
+
+// Transaction data
+message Transaction {
+    // The transaction hash/id
+    string hash = 1;
 }
 
 // A scanning key with an optional birth height
@@ -97,16 +103,6 @@ message ScanRequest {
 
 // Response to Scan calls
 message ScanResponse {
-    // The height of the block the scan results were found in.
-    uint32 height = 1;
-
-    // Scan results for this block height.
-    map<string, ScanResults> results = 2;
-}
-
-// The scan results for a provided key of a Scan call.
-message ScanResults {
-    // Transaction hashes/ids of transaction that were successfully 
-    // trial decrypted with the provided keys.
-    repeated bytes tx_ids = 1;
+    // Results for each key.
+    map<string, Results> results = 1;
 }

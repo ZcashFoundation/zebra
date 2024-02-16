@@ -7,7 +7,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::{transport::Server, Request, Response, Status};
 use tower::ServiceExt;
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction};
 use zebra_node_services::scan_service::{
     request::Request as ScanServiceRequest,
     response::{Response as ScanServiceResponse, ScanResult},
@@ -17,7 +17,7 @@ use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
     ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
     InfoReply, KeyWithHeight, RegisterKeysRequest, RegisterKeysResponse, Results, ScanRequest,
-    ScanResponse, ScanResults, TransactionHash,
+    ScanResponse, Transaction, Transactions,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -113,61 +113,21 @@ where
         let response_stream = ReceiverStream::new(response_receiver);
 
         tokio::spawn(async move {
-            // Transpose the nested BTreeMaps
-            let mut initial_results: BTreeMap<Height, BTreeMap<String, Vec<Vec<u8>>>> =
-                BTreeMap::new();
-            for (key, results_by_height) in results {
-                assert!(
-                    keys.contains(&key),
-                    "should not return results for keys that weren't provided"
-                );
+            let initial_results = process_results(keys, results);
 
-                for (height, results_for_key) in results_by_height {
-                    if results_for_key.is_empty() {
-                        continue;
-                    }
+            let send_result = response_sender
+                .send(Ok(ScanResponse {
+                    results: initial_results,
+                }))
+                .await;
 
-                    let results_for_height = initial_results.entry(height).or_default();
-                    results_for_height.entry(key.clone()).or_default().extend(
-                        results_for_key
-                            .into_iter()
-                            .map(|result| result.bytes_in_display_order().to_vec()),
-                    );
-                }
+            if send_result.is_err() {
+                // return early if the client has disconnected
+                return;
             }
 
-            for (Height(height), results) in initial_results {
-                response_sender
-                    .send(Ok(ScanResponse {
-                        height,
-                        results: results
-                            .into_iter()
-                            .map(|(key, results)| (key, ScanResults { tx_ids: results }))
-                            .collect(),
-                    }))
-                    .await
-                    .expect("channel should not be disconnected");
-            }
-
-            while let Some(ScanResult {
-                key,
-                height: Height(height),
-                tx_id,
-            }) = results_receiver.recv().await
-            {
-                let send_result = response_sender
-                    .send(Ok(ScanResponse {
-                        height,
-                        results: [(
-                            key,
-                            ScanResults {
-                                tx_ids: vec![tx_id.bytes_in_display_order().to_vec()],
-                            },
-                        )]
-                        .into_iter()
-                        .collect(),
-                    }))
-                    .await;
+            while let Some(scan_result) = results_receiver.recv().await {
+                let send_result = response_sender.send(Ok(scan_result.into())).await;
 
                 // Finish task if the client has disconnected
                 if send_result.is_err() {
@@ -310,31 +270,71 @@ where
             ));
         };
 
-        // If there are no results for a key, we still want to return it with empty results.
-        let empty_map = BTreeMap::new();
-
-        let results = keys
-            .into_iter()
-            .map(|key| {
-                let values = response.get(&key).unwrap_or(&empty_map);
-
-                // Skip heights with no transactions, they are scanner markers and should not be returned.
-                let transactions = Results {
-                    transactions: values
-                        .iter()
-                        .filter(|(_, transactions)| !transactions.is_empty())
-                        .map(|(height, transactions)| {
-                            let txs = transactions.iter().map(ToString::to_string).collect();
-                            (height.0, TransactionHash { hash: txs })
-                        })
-                        .collect(),
-                };
-
-                (key, transactions)
-            })
-            .collect::<BTreeMap<_, _>>();
+        let results = process_results(keys, response);
 
         Ok(Response::new(GetResultsResponse { results }))
+    }
+}
+
+fn process_results(
+    keys: Vec<String>,
+    results: BTreeMap<String, BTreeMap<Height, Vec<transaction::Hash>>>,
+) -> BTreeMap<String, Results> {
+    // If there are no results for a key, we still want to return it with empty results.
+    let empty_map = BTreeMap::new();
+
+    keys.into_iter()
+        .map(|key| {
+            let values = results.get(&key).unwrap_or(&empty_map);
+
+            // Skip heights with no transactions, they are scanner markers and should not be returned.
+            let transactions = Results {
+                by_height: values
+                    .iter()
+                    .filter(|(_, transactions)| !transactions.is_empty())
+                    .map(|(height, transactions)| {
+                        let transactions = transactions
+                            .iter()
+                            .map(ToString::to_string)
+                            .map(|hash| Transaction { hash })
+                            .collect();
+                        (height.0, Transactions { transactions })
+                    })
+                    .collect(),
+            };
+
+            (key, transactions)
+        })
+        .collect::<BTreeMap<_, _>>()
+}
+
+impl From<ScanResult> for ScanResponse {
+    fn from(
+        ScanResult {
+            key,
+            height: Height(height),
+            tx_id,
+        }: ScanResult,
+    ) -> Self {
+        ScanResponse {
+            results: [(
+                key,
+                Results {
+                    by_height: [(
+                        height,
+                        Transactions {
+                            transactions: [tx_id.to_string()]
+                                .map(|hash| Transaction { hash })
+                                .to_vec(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
     }
 }
 
