@@ -1,7 +1,7 @@
 //! Snapshot tests for Zebra Scan gRPC responses.
 //!
-//! Currently we snapshot the `get_info` and `get_results` responses for both mainnet and testnet with an empty
-//! scanner database and with a mocked one. Calls that return `Empty` responses are not snapshoted in this suite.
+//! Currently we snapshot the `get_info` and `get_results` responses for both mainnet and testnet with a
+//! mocked scanner database. Calls that return `Empty` responses are not snapshoted in this suite.
 //!
 //! To update these snapshots, run:
 //! ```sh
@@ -60,7 +60,8 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
         });
     }
 
-    sleep(Duration::from_secs(1)); // wait for the server to start
+    // wait for the server to start
+    sleep(Duration::from_secs(1));
 
     // connect to the gRPC server
     let client = ScannerClient::connect(format!("http://127.0.0.1:{random_port}"))
@@ -89,6 +90,8 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
                 })
         });
     }
+
+    // snapshot the get_info grpc call
 
     let get_info_response = get_info_response_fut
         .await
