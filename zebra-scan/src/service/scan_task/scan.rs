@@ -21,7 +21,6 @@ use zcash_client_backend::{
     scanning::{ScanError, ScanningKey},
 };
 use zcash_primitives::{
-    constants::*,
     sapling::SaplingIvk,
     zip32::{AccountId, DiversifiableFullViewingKey, Scope},
 };
@@ -407,19 +406,11 @@ pub fn scan_block<K: ScanningKey>(
 //       performance: stop returning both the dfvk and ivk for the same key
 // TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_scan_block_keys(
-    sapling_key: &SaplingScanningKey,
+    key: &SaplingScanningKey,
     network: Network,
 ) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
-    let hrp = if network.is_a_test_network() {
-        // Assume custom testnets have the same HRP
-        //
-        // TODO: add the regtest HRP here
-        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    } else {
-        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    };
-
-    let efvk = decode_extended_full_viewing_key(hrp, sapling_key).map_err(|e| eyre!(e))?;
+    let efvk =
+        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;
 
     // Just return all the keys for now, so we can be sure our code supports them.
     let dfvk = efvk.to_diversifiable_full_viewing_key();
