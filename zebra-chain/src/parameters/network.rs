@@ -12,8 +12,6 @@ use crate::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use strum_macros::EnumIter;
-
 #[cfg(test)]
 mod tests;
 
@@ -54,7 +52,7 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, EnumIter)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Network {
     /// The production mainnet.
@@ -87,6 +85,12 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Returns an iterator over [`Network`] variants.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        // TODO: Use default values of `Testnet` variant when adding fields for #7845.
+        [Self::Mainnet, Self::Testnet].into_iter()
+    }
+
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {

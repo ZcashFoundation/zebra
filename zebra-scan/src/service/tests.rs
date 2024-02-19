@@ -1,6 +1,5 @@
 //! Tests for ScanService.
 
-use strum::IntoEnumIterator;
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{Service, ServiceBuilder, ServiceExt};
 
