@@ -2,8 +2,6 @@
 
 use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
-use lazy_static::lazy_static;
-
 use halo2::pasta::pallas;
 
 use crate::{
@@ -13,7 +11,7 @@ use crate::{
     orchard,
     parameters::{Network, NetworkUpgrade},
     sapling,
-    serialization::{TrustedPreallocate, ZcashDeserializeInto, MAX_PROTOCOL_MESSAGE_LEN},
+    serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     sprout,
     transaction::Transaction,
     transparent,
@@ -260,30 +258,5 @@ impl TrustedPreallocate for Hash {
         // Every vector type requires a length field of at least one byte for de/serialization.
         // Since a block::Hash takes 32 bytes, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / 32 hashes in a single message
         ((MAX_PROTOCOL_MESSAGE_LEN - 1) as u64) / BLOCK_HASH_SIZE
-    }
-}
-
-lazy_static! {
-/// The first few deserialized continuous Mainnet blocks starting from the genesis block
-    static ref CONTINUOUS_DESERIALIZED_MAINNET_BLOCKS: Vec<Arc<Block>> =
-        zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-            .iter()
-            .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
-            .collect();
-
-/// The first few deserialized continuous Testnet blocks starting from the genesis block
-    static ref CONTINUOUS_DESERIALIZED_TESTNET_BLOCKS: Vec<Arc<Block>> =
-        zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS
-            .iter()
-            .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
-            .collect();
-}
-
-/// Returns the first few deserialized continuous blocks for the given [`Network`], starting from
-/// the genesis block.
-pub fn continuous_deserialized_blocks_for(network: Network) -> Vec<Arc<Block>> {
-    match network {
-        Network::Mainnet => CONTINUOUS_DESERIALIZED_MAINNET_BLOCKS.to_vec(),
-        Network::Testnet => CONTINUOUS_DESERIALIZED_TESTNET_BLOCKS.to_vec(),
     }
 }

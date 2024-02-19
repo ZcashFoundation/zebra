@@ -1,17 +1,12 @@
 //! Tests for ScanService.
 
-use std::sync::Arc;
-
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{Service, ServiceBuilder, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
 
-use zebra_chain::{
-    block::{continuous_deserialized_blocks_for, Block, Height},
-    parameters::Network,
-};
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_node_services::scan_service::{request::Request, response::Response};
 use zebra_state::TransactionIndex;
 
@@ -266,23 +261,15 @@ pub async fn scan_service_get_results_for_key_correctly() -> Result<()> {
 #[tokio::test]
 pub async fn scan_service_registers_keys_correctly() -> Result<()> {
     for network in Network::iter() {
-        scan_service_registers_keys_correctly_for(
-            continuous_deserialized_blocks_for(network),
-            network,
-        )
-        .await?;
+        scan_service_registers_keys_correctly_for(network).await?;
     }
 
     Ok(())
 }
 
-async fn scan_service_registers_keys_correctly_for(
-    blocks: Vec<Arc<Block>>,
-    network: Network,
-) -> Result<()> {
+async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<()> {
     // Mock the state.
-    let (state, _read_state, _latest_chain_tip, chain_tip_change) =
-        zebra_state::populated_state(blocks, network).await;
+    let (state, _, _, chain_tip_change) = zebra_state::populated_state(vec![], network).await;
 
     // Instantiate the scan service.
     let mut scan_service = ServiceBuilder::new()
