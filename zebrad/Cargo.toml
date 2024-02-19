@@ -172,12 +172,12 @@ zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.3", optional = tru
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.34", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.5.0", features = ["cargo"] }
+clap = { version = "4.5.1", features = ["cargo"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.2.3"
 lazy_static = "1.4.0"
-semver = "1.0.21"
+semver = "1.0.22"
 serde = { version = "1.0.196", features = ["serde_derive"] }
 toml = "0.8.10"
 
