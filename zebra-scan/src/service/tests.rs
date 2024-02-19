@@ -300,7 +300,7 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
             assert_eq!(registered_keys, mocked_keys[..1]);
         }
 
-        _ => panic!("scan service returned unexpected response variant"),
+        _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
     }
 
     // Try registering all three keys.
@@ -318,7 +318,7 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
             assert_eq!(registered_keys, mocked_keys[1..3]);
         }
 
-        _ => panic!("scan service returned unexpected response variant"),
+        _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
     }
 
     Ok(())
