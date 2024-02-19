@@ -1,7 +1,7 @@
 //! Tests for ScanService.
 
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::{Service, ServiceExt};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
 
@@ -12,7 +12,8 @@ use zebra_state::TransactionIndex;
 use crate::{
     service::{scan_task::ScanTaskCommand, ScanService},
     storage::db::tests::{fake_sapling_results, new_test_storage},
-    tests::ZECPAGES_SAPLING_VIEWING_KEY,
+    tests::{mock_sapling_scanning_keys, ZECPAGES_SAPLING_VIEWING_KEY},
+    Config,
 };
 
 /// Tests that keys are deleted correctly
@@ -251,6 +252,81 @@ pub async fn scan_service_get_results_for_key_correctly() -> Result<()> {
         }
         _ => panic!("scan service returned unexpected response variant"),
     };
+
+    Ok(())
+}
+
+/// Tests that the scan service registers keys correctly.
+#[tokio::test]
+pub async fn scan_service_registers_keys_correctly() -> Result<()> {
+    for network in Network::iter() {
+        scan_service_registers_keys_correctly_for(network).await?;
+    }
+
+    Ok(())
+}
+
+async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<()> {
+    // Mock the state.
+    let (state, _, _, chain_tip_change) = zebra_state::populated_state(vec![], network).await;
+
+    // Instantiate the scan service.
+    let mut scan_service = ServiceBuilder::new()
+        .buffer(2)
+        .service(ScanService::new(&Config::ephemeral(), network, state, chain_tip_change).await);
+
+    // Mock three Sapling keys.
+    let mocked_keys = mock_sapling_scanning_keys(3, network);
+
+    // Add birth heights to the mocked keys.
+    let keys_to_register: Vec<_> = mocked_keys
+        .clone()
+        .into_iter()
+        .zip((0u32..).map(Some))
+        .collect();
+
+    // Register the first key.
+    match scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::RegisterKeys(keys_to_register[..1].to_vec()))
+        .await
+        .map_err(|err| eyre!(err))?
+    {
+        Response::RegisteredKeys(registered_keys) => {
+            // The key should be registered.
+            assert_eq!(
+                registered_keys,
+                mocked_keys[..1],
+                "response should match newly registered key"
+            );
+        }
+
+        _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
+    }
+
+    // Try registering all three keys.
+    match scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::RegisterKeys(keys_to_register))
+        .await
+        .map_err(|err| eyre!(err))?
+    {
+        Response::RegisteredKeys(registered_keys) => {
+            // Only the last two keys should be registered in this service call since the first one
+            // was registered in the previous call.
+            assert_eq!(
+                registered_keys,
+                mocked_keys[1..3],
+                "response should match newly registered keys"
+            );
+        }
+
+        _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
+    }
 
     Ok(())
 }

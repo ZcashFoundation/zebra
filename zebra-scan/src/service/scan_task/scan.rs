@@ -21,7 +21,6 @@ use zcash_client_backend::{
     scanning::{ScanError, ScanningKey},
 };
 use zcash_primitives::{
-    constants::*,
     sapling::SaplingIvk,
     zip32::{AccountId, DiversifiableFullViewingKey, Scope},
 };
@@ -61,8 +60,9 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 
 /// The amount of time between checking for new blocks and starting new scans.
 ///
-/// This is just under half the target block interval.
-pub const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// TODO: The current value is set to 10 so that tests don't sleep for too long and finish faster.
+///       Set it to 30 after #8250 gets addressed or remove this const completely in the refactor.
+pub const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// We log an info log with progress after this many blocks.
 const INFO_LOG_INTERVAL: u32 = 10_000;
@@ -81,6 +81,7 @@ pub async fn start(
     info!(?network, "starting scan task");
 
     // Do not scan and notify if we are below sapling activation height.
+    #[cfg(not(test))]
     wait_for_height(
         sapling_activation_height,
         "Sapling activation",
@@ -405,19 +406,11 @@ pub fn scan_block<K: ScanningKey>(
 //       performance: stop returning both the dfvk and ivk for the same key
 // TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_scan_block_keys(
-    sapling_key: &SaplingScanningKey,
+    key: &SaplingScanningKey,
     network: Network,
 ) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
-    let hrp = if network.is_a_test_network() {
-        // Assume custom testnets have the same HRP
-        //
-        // TODO: add the regtest HRP here
-        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    } else {
-        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    };
-
-    let efvk = decode_extended_full_viewing_key(hrp, sapling_key).map_err(|e| eyre!(e))?;
+    let efvk =
+        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;
 
     // Just return all the keys for now, so we can be sure our code supports them.
     let dfvk = efvk.to_diversifiable_full_viewing_key();

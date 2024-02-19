@@ -85,6 +85,12 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Returns an iterator over [`Network`] variants.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        // TODO: Use default values of `Testnet` variant when adding fields for #7845.
+        [Self::Mainnet, Self::Testnet].into_iter()
+    }
+
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
