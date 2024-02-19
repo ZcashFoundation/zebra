@@ -19,6 +19,7 @@ use crate::{
     service::{scan_task::ScanTaskCommand, ScanService},
     storage::db::tests::{fake_sapling_results, new_test_storage},
     tests::{mock_sapling_scanning_keys, ZECPAGES_SAPLING_VIEWING_KEY},
+    Config,
 };
 
 /// Tests that keys are deleted correctly
@@ -285,8 +286,8 @@ async fn scan_service_registers_keys_correctly_for(
 
     // Instantiate the scan service.
     let mut scan_service = ServiceBuilder::new()
-        .buffer(5)
-        .service(ScanService::new(&Default::default(), network, state, chain_tip_change).await);
+        .buffer(2)
+        .service(ScanService::new(&Config::ephemeral(), network, state, chain_tip_change).await);
 
     // Mock three Sapling keys.
     let mocked_keys = mock_sapling_scanning_keys(3, network);
