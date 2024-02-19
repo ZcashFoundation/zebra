@@ -297,7 +297,11 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
     {
         Response::RegisteredKeys(registered_keys) => {
             // The key should be registered.
-            assert_eq!(registered_keys, mocked_keys[..1]);
+            assert_eq!(
+                registered_keys,
+                mocked_keys[..1],
+                "response should match newly registered key"
+            );
         }
 
         _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
@@ -315,7 +319,11 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
         Response::RegisteredKeys(registered_keys) => {
             // Only the last two keys should be registered in this service call since the first one
             // was registered in the previous call.
-            assert_eq!(registered_keys, mocked_keys[1..3]);
+            assert_eq!(
+                registered_keys,
+                mocked_keys[1..3],
+                "response should match newly registered keys"
+            );
         }
 
         _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
