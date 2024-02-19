@@ -66,7 +66,7 @@ pub fn mock_sapling_scanning_keys(num_keys: u8, network: Network) -> Vec<Sapling
     for seed in 0..num_keys {
         keys.push(encode_extended_full_viewing_key(
             network.sapling_efvk_hrp(),
-            &mock_sapling_efvk(&[seed; 32]),
+            &mock_sapling_efvk(&[seed]),
         ));
     }
 
