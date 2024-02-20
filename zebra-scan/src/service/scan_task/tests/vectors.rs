@@ -18,7 +18,8 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Send some keys to be registered
     let num_keys = 10;
-    let sapling_keys = mock_sapling_scanning_keys(num_keys.try_into().expect("should fit in u8"));
+    let sapling_keys =
+        mock_sapling_scanning_keys(num_keys.try_into().expect("should fit in u8"), network);
     let sapling_keys_with_birth_heights: Vec<(String, Option<u32>)> =
         sapling_keys.into_iter().zip((0..).map(Some)).collect();
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
@@ -60,7 +61,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that keys can't be overridden.
 
-    let sapling_keys = mock_sapling_scanning_keys(20);
+    let sapling_keys = mock_sapling_scanning_keys(20, network);
     let sapling_keys_with_birth_heights: Vec<(String, Option<u32>)> = sapling_keys
         .clone()
         .into_iter()
@@ -87,7 +88,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that it removes keys correctly
 
-    let sapling_keys = mock_sapling_scanning_keys(30);
+    let sapling_keys = mock_sapling_scanning_keys(30, network);
     let done_rx = mock_scan_task.remove_keys(&sapling_keys)?;
 
     let (new_keys, _new_results_senders) =

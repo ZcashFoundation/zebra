@@ -37,6 +37,7 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed},
     block::{self, merkle, Block, Header, Height},
     fmt::HexDebug,
+    parameters::Network,
     primitives::{redjubjub, Groth16Proof},
     sapling::{self, PerSpendAnchor, Spend, TransferData},
     serialization::AtLeastOne,
@@ -55,16 +56,16 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 /// A fake viewing key in an incorrect format.
 pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
 
-/// Generates `num_keys` of [`SaplingScanningKey`]s for tests.
+/// Generates `num_keys` of [`SaplingScanningKey`]s for tests for the given [`Network`].
 ///
 /// The keys are seeded only from their index in the returned `Vec`, so repeated calls return same
 /// keys at a particular index.
-pub fn mock_sapling_scanning_keys(num_keys: u8) -> Vec<SaplingScanningKey> {
+pub fn mock_sapling_scanning_keys(num_keys: u8, network: Network) -> Vec<SaplingScanningKey> {
     let mut keys: Vec<SaplingScanningKey> = vec![];
 
     for seed in 0..num_keys {
         keys.push(encode_extended_full_viewing_key(
-            "zxviews",
+            network.sapling_efvk_hrp(),
             &mock_sapling_efvk(&[seed]),
         ));
     }

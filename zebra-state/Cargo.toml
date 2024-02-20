@@ -60,8 +60,8 @@ metrics = "0.22.1"
 mset = "0.1.1"
 regex = "1.10.3"
 rlimit = "0.10.1"
-rocksdb = { version = "0.21.0", default-features = false, features = ["lz4"] }
-semver = "1.0.21"
+rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
+semver = "1.0.22"
 serde = { version = "1.0.196", features = ["serde_derive"] }
 tempfile = "3.10.0"
 thiserror = "1.0.57"
