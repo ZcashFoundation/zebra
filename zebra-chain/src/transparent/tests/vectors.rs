@@ -92,10 +92,7 @@ fn get_transparent_output_address_with_blocks() {
 /// Test that the block test vector indexes match the heights in the block data,
 /// and that each post-sapling block has a corresponding final sapling root.
 fn get_transparent_output_address_with_blocks_for_network(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.get_block_iter();
 
     let mut valid_addresses = 0;
 

@@ -349,10 +349,7 @@ fn fake_v5_round_trip() {
 }
 
 fn fake_v5_round_trip_for_network(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.get_block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
         .activation_height(network)
@@ -500,10 +497,7 @@ fn fake_v5_librustzcash_round_trip() {
 }
 
 fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.get_block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
         .activation_height(network)
@@ -943,10 +937,7 @@ fn binding_signatures() {
 }
 
 fn binding_signatures_for_network(network: Network) {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.get_block_iter();
 
     for (height, bytes) in block_iter {
         let upgrade = NetworkUpgrade::current(network, Height(*height));

@@ -35,7 +35,6 @@ pub mod serialization;
 pub mod shutdown;
 pub mod sprout;
 pub mod subtree;
-pub mod test_utils;
 pub mod transaction;
 pub mod transparent;
 pub mod value_balance;
@@ -43,6 +42,9 @@ pub mod work;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
+
+#[cfg(test)]
+pub mod test_utils;
 
 /// Error type alias to make working with generic errors easier.
 ///

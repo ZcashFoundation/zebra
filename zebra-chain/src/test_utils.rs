@@ -1,6 +1,4 @@
-//!Chain functionality for loading test vectors
+//!Chain functionality for fetching test vectors.
 //!
 
 mod vectors;
-
-pub use vectors::*;

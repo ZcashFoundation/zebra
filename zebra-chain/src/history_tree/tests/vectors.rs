@@ -13,9 +13,6 @@ use crate::{
 
 use color_eyre::eyre;
 use eyre::Result;
-use zebra_test::vectors::{
-    MAINNET_BLOCKS, MAINNET_FINAL_SAPLING_ROOTS, TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS,
-};
 
 /// Test the history tree using the activation block of a network upgrade
 /// and its next block.
@@ -36,10 +33,8 @@ fn push_and_prune_for_network_upgrade(
     network: Network,
     network_upgrade: NetworkUpgrade,
 ) -> Result<()> {
-    let (blocks, sapling_roots) = match network {
-        Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
-    };
+    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+
     let height = network_upgrade.activation_height(network).unwrap().0;
 
     // Load first block (activation block of the given network upgrade)
@@ -120,10 +115,8 @@ fn upgrade() -> Result<()> {
 }
 
 fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
-    let (blocks, sapling_roots) = match network {
-        Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
-    };
+    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+
     let height = network_upgrade.activation_height(network).unwrap().0;
 
     // Load previous block (the block before the activation block of the given network upgrade)

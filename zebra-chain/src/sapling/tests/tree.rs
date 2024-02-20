@@ -9,9 +9,6 @@ use crate::parameters::NetworkUpgrade;
 use crate::sapling::{self, tree::*};
 use crate::serialization::ZcashDeserializeInto;
 use crate::{parameters::Network, sapling::tests::test_vectors};
-use zebra_test::vectors::{
-    MAINNET_BLOCKS, MAINNET_FINAL_SAPLING_ROOTS, TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS,
-};
 
 #[test]
 fn empty_roots() {
@@ -60,10 +57,8 @@ fn incremental_roots_with_blocks() -> Result<()> {
 }
 
 fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
-    let (blocks, sapling_roots) = match network {
-        Network::Mainnet => (&*MAINNET_BLOCKS, &*MAINNET_FINAL_SAPLING_ROOTS),
-        Network::Testnet => (&*TESTNET_BLOCKS, &*TESTNET_FINAL_SAPLING_ROOTS),
-    };
+    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+
     let height = NetworkUpgrade::Sapling
         .activation_height(network)
         .unwrap()
