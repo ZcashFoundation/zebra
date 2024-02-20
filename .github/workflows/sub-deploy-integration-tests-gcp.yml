@@ -136,7 +136,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.6.1
+        uses: shimataro/ssh-key-action@v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -433,7 +433,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.6.1
+        uses: shimataro/ssh-key-action@v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
