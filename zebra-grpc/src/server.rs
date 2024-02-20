@@ -18,6 +18,9 @@ use crate::scanner::{
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// The maximum number of keys that can be requested in a single request.
+const MAX_KEYS_PER_REQUEST: usize = 10;
+
 #[derive(Debug)]
 /// The server implementation
 pub struct ScannerRPC<ScanService>
@@ -69,12 +72,25 @@ where
         &self,
         request: Request<RegisterKeysRequest>,
     ) -> Result<Response<RegisterKeysResponse>, Status> {
-        let keys = request
+        let keys: Vec<_> = request
             .into_inner()
             .keys
             .into_iter()
             .map(|key_with_height| (key_with_height.key, key_with_height.height))
             .collect();
+
+        if keys.is_empty() {
+            let msg = "must provide at least 1 key for which to register keys";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        if keys.len() > MAX_KEYS_PER_REQUEST {
+            let msg = format!(
+                "must provide at most {} keys to register keys",
+                MAX_KEYS_PER_REQUEST
+            );
+            return Err(Status::invalid_argument(msg));
+        }
 
         let ScanServiceResponse::RegisteredKeys(keys) = self
             .scan_service
@@ -100,6 +116,14 @@ where
 
         if keys.is_empty() {
             let msg = "must provide at least 1 key for which to clear results";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        if keys.len() > MAX_KEYS_PER_REQUEST {
+            let msg = format!(
+                "must provide at most {} keys to clear results",
+                MAX_KEYS_PER_REQUEST
+            );
             return Err(Status::invalid_argument(msg));
         }
 
@@ -130,6 +154,14 @@ where
             return Err(Status::invalid_argument(msg));
         }
 
+        if keys.len() > MAX_KEYS_PER_REQUEST {
+            let msg = format!(
+                "must provide at most {} keys to delete",
+                MAX_KEYS_PER_REQUEST
+            );
+            return Err(Status::invalid_argument(msg));
+        }
+
         let ScanServiceResponse::DeletedKeys = self
             .scan_service
             .clone()
@@ -154,6 +186,14 @@ where
 
         if keys.is_empty() {
             let msg = "must provide at least 1 key to get results";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        if keys.len() > MAX_KEYS_PER_REQUEST {
+            let msg = format!(
+                "must provide at most {} keys to get results",
+                MAX_KEYS_PER_REQUEST
+            );
             return Err(Status::invalid_argument(msg));
         }
 
