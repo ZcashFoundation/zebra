@@ -1,22 +1,30 @@
 //! The gRPC server implementation
 
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::{collections::BTreeMap, net::SocketAddr, pin::Pin};
 
 use futures_util::future::TryFutureExt;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::{transport::Server, Request, Response, Status};
 use tower::ServiceExt;
 
+use zebra_chain::{block::Height, transaction};
 use zebra_node_services::scan_service::{
-    request::Request as ScanServiceRequest, response::Response as ScanServiceResponse,
+    request::Request as ScanServiceRequest,
+    response::{Response as ScanServiceResponse, ScanResult},
 };
 
 use crate::scanner::{
     scanner_server::{Scanner, ScannerServer},
     ClearResultsRequest, DeleteKeysRequest, Empty, GetResultsRequest, GetResultsResponse,
-    InfoReply, RegisterKeysRequest, RegisterKeysResponse, Results, TransactionHash,
+    InfoReply, KeyWithHeight, RegisterKeysRequest, RegisterKeysResponse, Results, ScanRequest,
+    ScanResponse, Transaction, Transactions,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// The maximum number of messages that can be queued to be streamed to a client
+/// from the `scan` method.
+const SCAN_RESPONDER_BUFFER_SIZE: usize = 10_000;
 
 #[derive(Debug)]
 /// The server implementation
@@ -42,7 +50,104 @@ where
         + 'static,
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
-    async fn get_info(&self, _request: Request<Empty>) -> Result<Response<InfoReply>, Status> {
+    type ScanStream = Pin<Box<dyn Stream<Item = Result<ScanResponse, Status>> + Send>>;
+
+    async fn scan(
+        &self,
+        request: tonic::Request<ScanRequest>,
+    ) -> Result<Response<Self::ScanStream>, Status> {
+        let keys = request.into_inner().keys;
+
+        if keys.is_empty() {
+            let msg = "must provide at least 1 key in scan request";
+            return Err(Status::invalid_argument(msg));
+        }
+
+        let keys: Vec<_> = keys
+            .into_iter()
+            .map(|KeyWithHeight { key, height }| (key, height))
+            .collect();
+
+        let ScanServiceResponse::RegisteredKeys(_) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
+
+        let ScanServiceResponse::Results(results) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| service.call(ScanServiceRequest::Results(keys.clone())))
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let ScanServiceResponse::SubscribeResults(mut results_receiver) = self
+            .scan_service
+            .clone()
+            .ready()
+            .and_then(|service| {
+                service.call(ScanServiceRequest::SubscribeResults(
+                    keys.iter().cloned().collect(),
+                ))
+            })
+            .await
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
+
+        let (response_sender, response_receiver) =
+            tokio::sync::mpsc::channel(SCAN_RESPONDER_BUFFER_SIZE);
+        let response_stream = ReceiverStream::new(response_receiver);
+
+        tokio::spawn(async move {
+            let initial_results = process_results(keys, results);
+
+            let send_result = response_sender
+                .send(Ok(ScanResponse {
+                    results: initial_results,
+                }))
+                .await;
+
+            if send_result.is_err() {
+                // return early if the client has disconnected
+                return;
+            }
+
+            while let Some(scan_result) = results_receiver.recv().await {
+                let send_result = response_sender.send(Ok(scan_result.into())).await;
+
+                // Finish task if the client has disconnected
+                if send_result.is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn get_info(
+        &self,
+        _request: tonic::Request<Empty>,
+    ) -> Result<Response<InfoReply>, Status> {
         let ScanServiceResponse::Info {
             min_sapling_birthday_height,
         } = self
@@ -170,31 +275,71 @@ where
             ));
         };
 
-        // If there are no results for a key, we still want to return it with empty results.
-        let empty_map = BTreeMap::new();
-
-        let results = keys
-            .into_iter()
-            .map(|key| {
-                let values = response.get(&key).unwrap_or(&empty_map);
-
-                // Skip heights with no transactions, they are scanner markers and should not be returned.
-                let transactions = Results {
-                    transactions: values
-                        .iter()
-                        .filter(|(_, transactions)| !transactions.is_empty())
-                        .map(|(height, transactions)| {
-                            let txs = transactions.iter().map(ToString::to_string).collect();
-                            (height.0, TransactionHash { hash: txs })
-                        })
-                        .collect(),
-                };
-
-                (key, transactions)
-            })
-            .collect::<BTreeMap<_, _>>();
+        let results = process_results(keys, response);
 
         Ok(Response::new(GetResultsResponse { results }))
+    }
+}
+
+fn process_results(
+    keys: Vec<String>,
+    results: BTreeMap<String, BTreeMap<Height, Vec<transaction::Hash>>>,
+) -> BTreeMap<String, Results> {
+    // If there are no results for a key, we still want to return it with empty results.
+    let empty_map = BTreeMap::new();
+
+    keys.into_iter()
+        .map(|key| {
+            let values = results.get(&key).unwrap_or(&empty_map);
+
+            // Skip heights with no transactions, they are scanner markers and should not be returned.
+            let transactions = Results {
+                by_height: values
+                    .iter()
+                    .filter(|(_, transactions)| !transactions.is_empty())
+                    .map(|(height, transactions)| {
+                        let transactions = transactions
+                            .iter()
+                            .map(ToString::to_string)
+                            .map(|hash| Transaction { hash })
+                            .collect();
+                        (height.0, Transactions { transactions })
+                    })
+                    .collect(),
+            };
+
+            (key, transactions)
+        })
+        .collect::<BTreeMap<_, _>>()
+}
+
+impl From<ScanResult> for ScanResponse {
+    fn from(
+        ScanResult {
+            key,
+            height: Height(height),
+            tx_id,
+        }: ScanResult,
+    ) -> Self {
+        ScanResponse {
+            results: [(
+                key,
+                Results {
+                    by_height: [(
+                        height,
+                        Transactions {
+                            transactions: [tx_id.to_string()]
+                                .map(|hash| Transaction { hash })
+                                .to_vec(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
     }
 }
 
