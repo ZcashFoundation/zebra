@@ -13,12 +13,14 @@ use zebra_chain::{block::Height, parameters::Network, transaction};
 use zebra_test::mock_service::MockService;
 
 use zebra_node_services::scan_service::{
-    request::Request as ScanRequest, response::Response as ScanResponse,
+    request::Request as ScanRequest,
+    response::{Response as ScanResponse, ScanResult},
 };
 
 use crate::{
     scanner::{
-        scanner_client::ScannerClient, Empty, GetResultsRequest, GetResultsResponse, InfoReply,
+        self, scanner_client::ScannerClient, Empty, GetResultsRequest, GetResultsResponse,
+        InfoReply, KeyWithHeight,
     },
     server::init,
 };
@@ -138,6 +140,85 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
         .expect("get_results request should succeed");
 
     snapshot_rpc_getresults(get_results_response.into_inner(), &settings);
+
+    // snapshot the scan grpc method
+
+    let scan_response_fut = {
+        let mut client = client.clone();
+        let get_results_request = tonic::Request::new(scanner::ScanRequest {
+            keys: vec![KeyWithHeight {
+                key: ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
+                height: None,
+            }],
+        });
+        tokio::spawn(async move { client.scan(get_results_request).await })
+    };
+
+    let (fake_results_sender, fake_results_receiver) = tokio::sync::mpsc::channel(1);
+
+    {
+        let mut mock_scan_service = mock_scan_service.clone();
+        tokio::spawn(async move {
+            let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
+            let mut fake_results = BTreeMap::new();
+            for fake_result_height in [Height::MIN, Height(1), Height::MAX] {
+                fake_results.insert(
+                    fake_result_height,
+                    [transaction::Hash::from([0; 32])].repeat(3),
+                );
+            }
+
+            let mut fake_results_response = BTreeMap::new();
+            fake_results_response.insert(zec_pages_sapling_efvk.clone(), fake_results);
+
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::RegisterKeys(_)))
+                .await
+                .respond(ScanResponse::RegisteredKeys(vec![]));
+
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::Results(_)))
+                .await
+                .respond(ScanResponse::Results(fake_results_response));
+
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::SubscribeResults(_)))
+                .await
+                .respond(ScanResponse::SubscribeResults(fake_results_receiver));
+        });
+    }
+
+    let scan_response = scan_response_fut
+        .await
+        .expect("tokio task should join successfully")
+        .expect("get_results request should succeed");
+
+    let mut scan_response_stream = scan_response.into_inner();
+
+    let scan_response_message = scan_response_stream
+        .message()
+        .await
+        .expect("scan response message should be ok")
+        .expect("scan response message should be some");
+
+    snapshot_rpc_scan("cached", scan_response_message, &settings);
+
+    fake_results_sender
+        .send(ScanResult {
+            key: ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
+            height: Height::MIN,
+            tx_id: transaction::Hash::from([0; 32]),
+        })
+        .await
+        .expect("should send fake result successfully");
+
+    let scan_response_message = scan_response_stream
+        .message()
+        .await
+        .expect("scan response message should be ok")
+        .expect("scan response message should be some");
+
+    snapshot_rpc_scan("subscribed", scan_response_message, &settings);
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
@@ -148,4 +229,13 @@ fn snapshot_rpc_getinfo(info: InfoReply, settings: &insta::Settings) {
 /// Snapshot `getresults` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getresults(results: GetResultsResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_results", results));
+}
+
+/// Snapshot `scan` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_scan(
+    variant: &'static str,
+    scan_response: scanner::ScanResponse,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!(format!("scan_{variant}"), scan_response));
 }

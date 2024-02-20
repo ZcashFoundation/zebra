@@ -1,6 +1,6 @@
 ---
 source: zebra-grpc/src/tests/snapshot.rs
-expression: results
+expression: scan_response
 ---
 {
   "results": {
