@@ -21,12 +21,14 @@ tonic = "0.11.0"
 prost = "0.12.3"
 serde = { version = "1.0.196", features = ["serde_derive"] }
 tokio = { version = "1.36.0", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1.14"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
 color-eyre = "0.6.2"
 
 zcash_primitives = { version = "0.13.0-rc.1" }
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.34", features = ["shielded-scan"] }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.34" }
 
 [build-dependencies]
 tonic-build = "0.11.0"

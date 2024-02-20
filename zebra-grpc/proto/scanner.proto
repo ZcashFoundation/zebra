@@ -22,6 +22,9 @@ service Scanner {
 
     // Submits scanning keys to the scanner.
     rpc RegisterKeys(RegisterKeysRequest) returns (RegisterKeysResponse);
+
+    // Register keys and listen to the results
+    rpc Scan (ScanRequest) returns (stream ScanResponse);
 }
 
 // A response to a GetInfo call.
@@ -69,13 +72,19 @@ message RegisterKeysResponse {
 // A result for a single key.
 message Results {
     // A height, transaction id map
-    map<uint32, TransactionHash> transactions = 1;
+    map<uint32, Transactions> by_height = 1;
 }
 
 // A vector of transaction hashes
-message TransactionHash {
-    // A transaction id hash
-    repeated string hash = 1;
+message Transactions {
+    // Transactions
+    repeated Transaction transactions = 1;
+}
+
+// Transaction data
+message Transaction {
+    // The transaction hash/id
+    string hash = 1;
 }
 
 // A scanning key with an optional birth height
@@ -84,4 +93,16 @@ message KeyWithHeight {
     string key = 1;
     // Birth height of the key
     optional uint32 height = 2;
+}
+
+// A request for registering keys and getting their transactions
+message ScanRequest {
+    // A set of viewing keys
+    repeated KeyWithHeight keys = 2;
+}
+
+// Response to Scan calls
+message ScanResponse {
+    // Results for each key.
+    map<string, Results> results = 1;
 }
