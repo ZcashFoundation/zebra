@@ -107,8 +107,6 @@ jobs:
             #
             # `semver` adds a "latest" tag if `inputs.latest_tag` is `true`.
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=ref,event=tag
             # DockerHub release and CI tags.
             # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
