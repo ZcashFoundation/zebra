@@ -2,11 +2,11 @@
 use std::{collections::BTreeMap, thread::sleep, time::Duration};
 
 use tonic::transport::Channel;
-use zebra_chain::{block::Height, parameters::Network, transaction};
-use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use zebra_node_services::scan_service::{
-    request::Request as ScanRequest, response::Response as ScanResponse,
+use zebra_chain::{block::Height, parameters::Network, transaction};
+use zebra_test::{
+    mock_service::{MockService, PanicAssertion},
+    net::random_known_port,
 };
 
 use crate::{
@@ -15,7 +15,10 @@ use crate::{
         GetResultsRequest, GetResultsResponse, InfoReply, KeyWithHeight, RegisterKeysRequest,
         RegisterKeysResponse,
     },
-    server::init,
+    server::{init, MAX_KEYS_PER_REQUEST},
+};
+use zebra_node_services::scan_service::{
+    request::Request as ScanRequest, response::Response as ScanResponse,
 };
 
 /// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
@@ -26,63 +29,45 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 async fn test_grpc_methods_mocked() {
     let _init_guard = zebra_test::init();
 
-    tokio::join!(
-        test_mocked_getinfo_for_network(Network::Mainnet, zebra_test::net::random_known_port()),
-        test_mocked_getinfo_for_network(Network::Testnet, zebra_test::net::random_known_port()),
-        test_mocked_getresults_for_network(Network::Mainnet, zebra_test::net::random_known_port()),
-        test_mocked_getresults_for_network(Network::Testnet, zebra_test::net::random_known_port()),
-        test_mocked_register_keys_for_network(
-            Network::Mainnet,
-            zebra_test::net::random_known_port()
-        ),
-        test_mocked_register_keys_for_network(
-            Network::Testnet,
-            zebra_test::net::random_known_port()
-        ),
-        test_mocked_clear_results_for_network(
-            Network::Mainnet,
-            zebra_test::net::random_known_port()
-        ),
-        test_mocked_clear_results_for_network(
-            Network::Testnet,
-            zebra_test::net::random_known_port()
-        ),
-        test_mocked_delete_keys_for_network(Network::Mainnet, zebra_test::net::random_known_port()),
-        test_mocked_delete_keys_for_network(Network::Testnet, zebra_test::net::random_known_port()),
-    );
+    let (client, mock_scan_service) = start_server_and_get_client(random_known_port()).await;
+
+    test_get_results_errors(client.clone()).await;
+    test_register_keys_errors(client.clone()).await;
+    test_clear_results_errors(client.clone()).await;
+    test_delete_keys_errors(client.clone()).await;
+
+    for network in Network::iter() {
+        test_mocked_getinfo_for_network(&client, &mock_scan_service, network).await;
+        test_mocked_getresults_for_network(&client, &mock_scan_service, network).await;
+        test_mocked_register_keys_for_network(&client, &mock_scan_service, network).await;
+        test_mocked_clear_results_for_network(&client, &mock_scan_service, network).await;
+        test_mocked_delete_keys_for_network(&client, &mock_scan_service, network).await;
+    }
 }
 
-/// Test the `get_info` gRPC method
-async fn test_mocked_getinfo_for_network(network: Network, random_port: u16) {
-    let (client, mock_scan_service) = start_server_and_get_client(random_port).await;
-
+/// Test the `get_info` gRPC method with a mocked service response.
+async fn test_mocked_getinfo_for_network(
+    client: &ScannerClient<Channel>,
+    mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
+    network: Network,
+) {
     // create request, fake results and get response
     let get_info_response = call_get_info(client.clone(), mock_scan_service.clone(), network).await;
 
     // test the response
-    match network {
-        Network::Mainnet => {
-            assert_eq!(
-                get_info_response.into_inner().min_sapling_birthday_height,
-                419_200
-            );
-        }
-        Network::Testnet => {
-            assert_eq!(
-                get_info_response.into_inner().min_sapling_birthday_height,
-                280_000
-            );
-        }
-    }
+    assert_eq!(
+        get_info_response.into_inner().min_sapling_birthday_height,
+        network.sapling_activation_height().0,
+        "get_info response min sapling height should match network sapling activation height"
+    );
 }
 
 /// Test the `get_results` gRPC method with populated and empty results
-async fn test_mocked_getresults_for_network(network: Network, random_port: u16) {
-    let (client, mock_scan_service) = start_server_and_get_client(random_port).await;
-
-    // trigger errors
-    call_get_results_errors(client.clone()).await;
-
+async fn test_mocked_getresults_for_network(
+    client: &ScannerClient<Channel>,
+    mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
+    network: Network,
+) {
     // create request, fake populated results and get response
     let get_results_response =
         call_get_results(client.clone(), mock_scan_service.clone(), network, false).await;
@@ -92,16 +77,22 @@ async fn test_mocked_getresults_for_network(network: Network, random_port: u16) 
         .into_inner()
         .results
         .first_key_value()
-        .unwrap()
+        .expect("should have at least 1 value")
         .1
         .transactions
         .len();
     match network {
         Network::Mainnet => {
-            assert_eq!(transaction_heights, 3);
+            assert_eq!(
+                transaction_heights, 3,
+                "there should be 3 transaction heights"
+            );
         }
         Network::Testnet => {
-            assert_eq!(transaction_heights, 1);
+            assert_eq!(
+                transaction_heights, 1,
+                "there should be 1 transaction height"
+            );
         }
     }
 
@@ -110,60 +101,42 @@ async fn test_mocked_getresults_for_network(network: Network, random_port: u16) 
         call_get_results(client.clone(), mock_scan_service.clone(), network, true).await;
 
     // test the response
-    let transaction_heights = get_results_response
+    let is_results_empty = get_results_response
         .into_inner()
         .results
         .first_key_value()
-        .unwrap()
+        .expect("should have at least 1 value")
         .1
         .transactions
-        .len();
-    match network {
-        Network::Mainnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-        Network::Testnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-    }
+        .is_empty();
+
+    assert!(is_results_empty, "results should be empty");
 }
 
 /// Test the `register_keys` gRPC method
-async fn test_mocked_register_keys_for_network(network: Network, random_port: u16) {
-    // get client and mock service
-    let (client, mock_scan_service) = start_server_and_get_client(random_port).await;
-
-    // trigger errors
-    call_register_keys_errors(client.clone()).await;
-
+async fn test_mocked_register_keys_for_network(
+    client: &ScannerClient<Channel>,
+    mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
+    network: Network,
+) {
     // create request, fake return value and get response
-    let register_keys_response = call_register_keys(client, mock_scan_service, network).await;
+    let register_keys_response =
+        call_register_keys(client.clone(), mock_scan_service.clone(), network).await;
 
     // test the response
-    match network {
-        Network::Mainnet => {
-            assert_eq!(
-                register_keys_response.into_inner().keys,
-                vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]
-            );
-        }
-        Network::Testnet => {
-            assert_eq!(
-                register_keys_response.into_inner().keys,
-                vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]
-            );
-        }
-    }
+    assert_eq!(
+        register_keys_response.into_inner().keys,
+        vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()],
+        "keys should match mocked response"
+    );
 }
 
 /// Test the `clear_results` gRPC method
-async fn test_mocked_clear_results_for_network(network: Network, random_port: u16) {
-    // get client and mock service
-    let (client, mock_scan_service) = start_server_and_get_client(random_port).await;
-
-    // trigger errors
-    call_clear_results_errors(client.clone()).await;
-
+async fn test_mocked_clear_results_for_network(
+    client: &ScannerClient<Channel>,
+    mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
+    network: Network,
+) {
     // create request, fake results and get response
     let get_results_response =
         call_get_results(client.clone(), mock_scan_service.clone(), network, false).await;
@@ -198,51 +171,33 @@ async fn test_mocked_clear_results_for_network(network: Network, random_port: u1
         call_get_results(client.clone(), mock_scan_service.clone(), network, true).await;
 
     // test the response
-    let transaction_heights = get_results_response
+    let is_results_empty = get_results_response
         .into_inner()
         .results
         .first_key_value()
         .unwrap()
         .1
         .transactions
-        .len();
-    match network {
-        Network::Mainnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-        Network::Testnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-    }
+        .is_empty();
+
+    assert!(is_results_empty, "results should be empty");
 }
 
 /// Test the `delete_keys` gRPC method
-async fn test_mocked_delete_keys_for_network(network: Network, random_port: u16) {
-    // get client and mock service
-    let (client, mock_scan_service) = start_server_and_get_client(random_port).await;
-
-    // trigger errors
-    call_delete_keys_errors(client.clone()).await;
-
+async fn test_mocked_delete_keys_for_network(
+    client: &ScannerClient<Channel>,
+    mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
+    network: Network,
+) {
     // create request, fake results and get response
     let register_keys_response =
         call_register_keys(client.clone(), mock_scan_service.clone(), network).await;
 
     // test the response
-    match network {
-        Network::Mainnet => {
-            assert_eq!(
-                register_keys_response.into_inner().keys,
-                vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]
-            );
-        }
-        Network::Testnet => {
-            assert_eq!(
-                register_keys_response.into_inner().keys,
-                vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]
-            );
-        }
-    }
+    assert_eq!(
+        register_keys_response.into_inner().keys,
+        vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string()]
+    );
 
     // create request, fake results and get response
     let get_results_response =
@@ -271,22 +226,16 @@ async fn test_mocked_delete_keys_for_network(network: Network, random_port: u16)
 
     let get_results_response =
         call_get_results(client.clone(), mock_scan_service.clone(), network, true).await;
-    let transaction_heights = get_results_response
+    let is_results_empty = get_results_response
         .into_inner()
         .results
         .first_key_value()
         .unwrap()
         .1
         .transactions
-        .len();
-    match network {
-        Network::Mainnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-        Network::Testnet => {
-            assert_eq!(transaction_heights, 0);
-        }
-    }
+        .is_empty();
+
+    assert!(is_results_empty, "results should be empty");
 }
 
 /// Start the gRPC server, get a client and a mock service
@@ -400,29 +349,39 @@ async fn call_get_results(
         .expect("get_results request should succeed")
 }
 
-/// Call the `get_results` gRPC method with errors
-async fn call_get_results_errors(client: ScannerClient<Channel>) {
-    let fut = {
-        let mut client = client.clone();
-        let request = tonic::Request::new(GetResultsRequest { keys: vec![] });
-        tokio::spawn(async move { client.get_results(request).await })
-    };
+/// Calls the `get_results` gRPC method with bad request data and asserts that it returns errors
+async fn test_get_results_errors(mut client: ScannerClient<Channel>) {
+    let request = tonic::Request::new(GetResultsRequest { keys: vec![] });
+    let response = client.get_results(request).await;
 
-    let response = fut.await.expect("tokio task should join successfully");
-    assert!(response.is_err());
-    assert_eq!(response.err().unwrap().code(), tonic::Code::InvalidArgument);
+    let response_error_code = response
+        .expect_err("calling get_results with no keys should return an error")
+        .code();
 
-    let fut = {
-        let mut client = client.clone();
-        let request = tonic::Request::new(GetResultsRequest {
-            keys: vec![ZECPAGES_SAPLING_VIEWING_KEY.to_string(); 11],
-        });
-        tokio::spawn(async move { client.get_results(request).await })
-    };
+    assert_eq!(
+        response_error_code,
+        tonic::Code::InvalidArgument,
+        "error code should be an invalid argument error"
+    );
 
-    let response = fut.await.expect("tokio task should join successfully");
-    assert!(response.is_err());
-    assert_eq!(response.err().unwrap().code(), tonic::Code::InvalidArgument);
+    let request = tonic::Request::new(GetResultsRequest {
+        keys: vec![
+            ZECPAGES_SAPLING_VIEWING_KEY.to_string();
+            MAX_KEYS_PER_REQUEST
+                .checked_add(1)
+                .expect("should fit in usize")
+        ],
+    });
+    let response = client.get_results(request).await;
+    let response_error_code = response
+        .expect_err("calling get_results too with many keys should return an error")
+        .code();
+
+    assert_eq!(
+        response_error_code,
+        tonic::Code::InvalidArgument,
+        "error code should be an invalid argument error"
+    );
 }
 
 /// Call the `get_info` gRPC method, mock and return the response
@@ -488,8 +447,8 @@ async fn call_register_keys(
         .expect("register_keys request should succeed")
 }
 
-/// Call the `register_keys` gRPC method with errors
-async fn call_register_keys_errors(client: ScannerClient<Channel>) {
+/// Calls the `register_keys` gRPC method with bad request data and asserts that it returns errors
+async fn test_register_keys_errors(client: ScannerClient<Channel>) {
     let key_with_height = KeyWithHeight {
         key: ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
         height: None,
@@ -545,8 +504,8 @@ async fn call_clear_results(
         .expect("register_keys request should succeed")
 }
 
-/// Call the `get_results` gRPC method with errors
-async fn call_clear_results_errors(client: ScannerClient<Channel>) {
+/// Calls the `clear_results` gRPC method with bad request data and asserts that it returns errors
+async fn test_clear_results_errors(client: ScannerClient<Channel>) {
     let fut = {
         let mut client = client.clone();
         let request = tonic::Request::new(ClearResultsRequest { keys: vec![] });
@@ -597,8 +556,8 @@ async fn call_delete_keys(
         .expect("delete_keys request should succeed")
 }
 
-/// Call the `delete_keys` gRPC method with errors
-async fn call_delete_keys_errors(client: ScannerClient<Channel>) {
+/// Calls the `delete_keys` gRPC method with bad request data and asserts that it returns errors
+async fn test_delete_keys_errors(client: ScannerClient<Channel>) {
     let fut = {
         let mut client = client.clone();
         let request = tonic::Request::new(DeleteKeysRequest { keys: vec![] });

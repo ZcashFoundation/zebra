@@ -19,7 +19,7 @@ use crate::scanner::{
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The maximum number of keys that can be requested in a single request.
-const MAX_KEYS_PER_REQUEST: usize = 10;
+pub const MAX_KEYS_PER_REQUEST: usize = 10;
 
 #[derive(Debug)]
 /// The server implementation
