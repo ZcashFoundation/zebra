@@ -43,7 +43,7 @@ grpcurl -plaintext -d '{ "keys": { "key": ["sapling_extended_full_viewing_key"] 
 
 This will start scanning for transactions in Zebra's state and in new blocks as they're validated.
 
-Or, to use the scanner gRPC server without streaming, try calling `RegisterKeys` with your Sapling extended full viewing key, waiting the scanner to cache some results, then calling `GetResults`.
+Or, to use the scanner gRPC server without streaming, try calling `RegisterKeys` with your Sapling extended full viewing key, waiting for the scanner to cache some results, then calling `GetResults`.
 
 ## gRPC Reflection
 
