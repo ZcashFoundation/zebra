@@ -1,7 +1,4 @@
-//!
-//!
-
-//!
+//! Unit tests for gRPC methods
 use std::{collections::BTreeMap, thread::sleep, time::Duration};
 
 use tonic::transport::Channel;
