@@ -79,7 +79,7 @@ async fn test_mocked_getresults_for_network(
         .first_key_value()
         .expect("should have at least 1 value")
         .1
-        .transactions
+        .by_height
         .len();
     match network {
         Network::Mainnet => {
@@ -107,7 +107,7 @@ async fn test_mocked_getresults_for_network(
         .first_key_value()
         .expect("should have at least 1 value")
         .1
-        .transactions
+        .by_height
         .is_empty();
 
     assert!(is_results_empty, "results should be empty");
@@ -148,7 +148,7 @@ async fn test_mocked_clear_results_for_network(
         .first_key_value()
         .unwrap()
         .1
-        .transactions
+        .by_height
         .len();
     match network {
         Network::Mainnet => {
@@ -177,7 +177,7 @@ async fn test_mocked_clear_results_for_network(
         .first_key_value()
         .unwrap()
         .1
-        .transactions
+        .by_height
         .is_empty();
 
     assert!(is_results_empty, "results should be empty");
@@ -208,7 +208,7 @@ async fn test_mocked_delete_keys_for_network(
         .first_key_value()
         .unwrap()
         .1
-        .transactions
+        .by_height
         .len();
     match network {
         Network::Mainnet => {
@@ -232,7 +232,7 @@ async fn test_mocked_delete_keys_for_network(
         .first_key_value()
         .unwrap()
         .1
-        .transactions
+        .by_height
         .is_empty();
 
     assert!(is_results_empty, "results should be empty");
