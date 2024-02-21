@@ -1,15 +1,16 @@
-//! Test registering and subscribing to the results for a new key in the scan task while zebrad is running.
+//! Test registering keys, subscribing to their results, and deleting keys in the scan task while zebrad is running.
 //!
 //! This test requires a cached chain state that is partially synchronized past the
 //! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`]
 //!
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
-//! cargo test scan_subscribe_results --features="shielded-scan" -- --ignored --nocapture
+//! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
 
 use std::time::Duration;
 
 use color_eyre::{eyre::eyre, Result};
 
+use tokio::sync::mpsc::error::TryRecvError;
 use tower::ServiceBuilder;
 use zebra_chain::{
     block::Height,
@@ -28,7 +29,7 @@ use crate::common::{
 const REQUIRED_MIN_TIP_HEIGHT: Height = Height(1_000_000);
 
 /// How long this test waits for a result before failing.
-const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(30 * 60);
+const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(60);
 
 /// Initialize Zebra's state service with a cached state, add a new key to the scan task, and
 /// check that it stores results for the new key without errors.
@@ -94,7 +95,7 @@ pub(crate) async fn run() -> Result<()> {
     )?;
 
     let mut result_receiver = scan_task
-        .subscribe(keys.into_iter().collect())
+        .subscribe(keys.iter().cloned().collect())
         .await
         .expect("should send and receive message successfully");
 
@@ -102,6 +103,28 @@ pub(crate) async fn run() -> Result<()> {
     let result = tokio::time::timeout(WAIT_FOR_RESULTS_DURATION, result_receiver.recv()).await?;
 
     tracing::info!(?result, "received a result from the channel");
+
+    scan_task.remove_keys(keys.to_vec())?;
+
+    // Wait for scan task to drop results sender
+    tokio::time::sleep(WAIT_FOR_RESULTS_DURATION).await;
+
+    loop {
+        match result_receiver.try_recv() {
+            // Empty any messages in the buffer
+            Ok(_) => continue,
+
+            Err(recv_error) => {
+                assert_eq!(
+                    recv_error,
+                    TryRecvError::Disconnected,
+                    "any result senders should have been dropped"
+                );
+
+                break;
+            }
+        }
+    }
 
     Ok(())
 }
