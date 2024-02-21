@@ -43,7 +43,7 @@ pub mod work;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub mod test_utils;
 
 /// Error type alias to make working with generic errors easier.

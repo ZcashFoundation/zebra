@@ -1,17 +1,17 @@
 //! Network methods for fetching blockchain vectors.
 //!
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 use std::collections::BTreeMap;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 use crate::{
     block::Block,
     parameters::Network,
     serialization::{SerializationError, ZcashDeserializeInto},
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 use zebra_test::vectors::{
     BLOCK_MAINNET_1046400_BYTES, BLOCK_MAINNET_653599_BYTES, BLOCK_MAINNET_982681_BYTES,
     BLOCK_TESTNET_1116000_BYTES, BLOCK_TESTNET_583999_BYTES, BLOCK_TESTNET_925483_BYTES,
@@ -22,7 +22,7 @@ use zebra_test::vectors::{
 };
 
 /// Network methods for fetching blockchain vectors.
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 impl Network {
     /// Returns true if network is of type Mainnet.
     pub fn is_mainnet(&self) -> bool {
