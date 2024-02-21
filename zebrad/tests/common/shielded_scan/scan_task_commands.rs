@@ -29,7 +29,11 @@ use crate::common::{
 const REQUIRED_MIN_TIP_HEIGHT: Height = Height(1_000_000);
 
 /// How long this test waits for a result before failing.
+/// Should be long enough for ScanTask to start and scan ~500 blocks
 const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(60);
+
+/// A block height where a scan result can be found with the [`ZECPAGES_SAPLING_VIEWING_KEY`]
+const EXPECTED_RESULT_HEIGHT: Height = Height(780_532);
 
 /// Initialize Zebra's state service with a cached state, add a new key to the scan task, and
 /// check that it stores results for the new key without errors.
@@ -90,7 +94,7 @@ pub(crate) async fn run() -> Result<()> {
     scan_task.register_keys(
         keys.iter()
             .cloned()
-            .map(|key| (key, Some(780_000)))
+            .map(|key| (key, Some(EXPECTED_RESULT_HEIGHT.0)))
             .collect(),
     )?;
 
@@ -103,6 +107,13 @@ pub(crate) async fn run() -> Result<()> {
     let result = tokio::time::timeout(WAIT_FOR_RESULTS_DURATION, result_receiver.recv()).await?;
 
     tracing::info!(?result, "received a result from the channel");
+
+    let result = result.expect("there should be some scan result");
+
+    assert_eq!(
+        EXPECTED_RESULT_HEIGHT, result.height,
+        "result height should match expected height for hard-coded key"
+    );
 
     scan_task.remove_keys(keys.to_vec())?;
 
