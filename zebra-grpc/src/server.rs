@@ -124,7 +124,7 @@ where
         tokio::spawn(async move {
             let mut initial_results = process_results(keys, results);
 
-            // Empty results receiver channel to filter out duplicates results between the channel and cache
+            // Empty results receiver channel to filter out duplicate results between the channel and cache
             while let Ok(ScanResult { key, height, tx_id }) = results_receiver.try_recv() {
                 let entry = initial_results
                     .entry(key)

@@ -56,7 +56,7 @@ impl ScanRangeTaskBuilder {
     // TODO: return a tuple with a shutdown sender
     pub fn spawn(
         self,
-        subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+        subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
     ) -> JoinHandle<Result<(), Report>> {
         let Self {
             height_range,
@@ -86,7 +86,7 @@ pub async fn scan_range(
     keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
     state: State,
     storage: Storage,
-    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<(), Report> {
     let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.

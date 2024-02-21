@@ -119,7 +119,7 @@ pub async fn start(
     let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
 
     let (subscribed_keys_sender, subscribed_keys_receiver) =
-        tokio::sync::watch::channel(subscribed_keys.clone());
+        tokio::sync::watch::channel(Arc::new(subscribed_keys.clone()));
 
     let (scan_task_sender, scan_task_executor_handle) =
         executor::spawn_init(subscribed_keys_receiver.clone());
@@ -150,11 +150,12 @@ pub async fn start(
         subscribed_keys.retain(|_k, sender| !sender.is_closed());
 
         // Send the latest version of `subscribed_keys` before spawning the scan range task
-        // Ignore send errors, it's okay if there aren't any receivers.
-        let _ = subscribed_keys_sender.send(subscribed_keys.clone());
+        subscribed_keys_sender
+            .send(Arc::new(subscribed_keys.clone()))
+            .expect("last receiver should not be dropped while this task is running");
 
         for (result_receiver, rsp_tx) in new_result_receivers {
-            // Ignore send errors, we drop any results channels that are closed.
+            // Ignore send errors, we drop any closed results channels above.
             let _ = rsp_tx.send(result_receiver);
         }
 
@@ -251,7 +252,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-    subscribed_keys_receiver: watch::Receiver<HashMap<SaplingScanningKey, Sender<ScanResult>>>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -332,8 +333,8 @@ pub async fn scan_height_and_store_results(
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
 
-            let results_sender = subscribed_keys_receiver.borrow().get(&sapling_key).cloned();
-            if let Some(results_sender) = results_sender {
+            let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
+            if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
                 let results = dfvk_res.iter().chain(ivk_res.iter());
 
                 for (_tx_index, &tx_id) in results {
