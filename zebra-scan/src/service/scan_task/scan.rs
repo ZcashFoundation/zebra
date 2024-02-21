@@ -147,7 +147,7 @@ pub async fn start(
 
         subscribed_keys.extend(new_result_senders);
         // Drop any results senders that are closed from subscribed_keys
-        subscribed_keys.retain(|_k, sender| !sender.is_closed());
+        subscribed_keys.retain(|key, sender| !sender.is_closed() && parsed_keys.contains_key(key));
 
         // Send the latest version of `subscribed_keys` before spawning the scan range task
         subscribed_keys_sender
