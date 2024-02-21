@@ -204,6 +204,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(any(test, feature = "bench"))]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     continuous_blockchain(None, Mainnet).await?;
     continuous_blockchain(None, Testnet).await?;
@@ -211,6 +212,7 @@ async fn continuous_blockchain_no_restart() -> Result<(), Report> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(any(test, feature = "bench"))]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
         continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
@@ -226,6 +228,7 @@ async fn continuous_blockchain_restart() -> Result<(), Report> {
 // This span is far too verbose for use during normal testing.
 // Turn the SPANDOC: comments into doc comments to re-enable.
 //#[spandoc::spandoc]
+#[cfg(any(test, feature = "bench"))]
 async fn continuous_blockchain(
     restart_height: Option<block::Height>,
     network: Network,
@@ -233,10 +236,12 @@ async fn continuous_blockchain(
     let _init_guard = zebra_test::init();
 
     // A continuous blockchain
-    let blockchain = match network {
-        Mainnet => zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter(),
-        Testnet => zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.iter(),
-    };
+    // let blockchain = match network {
+    //     Mainnet => zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter(),
+    //     Testnet => zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.iter(),
+    // };
+    let blockchain = network.get_blockchain_iter();
+
     let blockchain: Vec<_> = blockchain
         .map(|(height, b)| {
             let block = Arc::<Block>::zcash_deserialize(*b).unwrap();
