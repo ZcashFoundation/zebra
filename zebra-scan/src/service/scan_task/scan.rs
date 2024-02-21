@@ -158,7 +158,6 @@ pub async fn start(
             let _ = rsp_tx.send(result_receiver);
         }
 
-        // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
             let state = state.clone();
             let storage = storage.clone();
@@ -172,7 +171,9 @@ pub async fn start(
             if was_parsed_keys_empty {
                 info!(?start_height, "setting new start height");
                 height = start_height;
-            } else if start_height < height {
+            }
+            // Skip spawning ScanRange task if `start_height` is at or above the current height
+            else if start_height < height {
                 scan_task_sender
                     .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
                     .await
