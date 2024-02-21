@@ -96,14 +96,15 @@ pub async fn scan_service_subscribes_to_results_correctly() -> Result<()> {
 
     let expected_keys = keys.iter().cloned().collect();
     let cmd_handler_fut = tokio::spawn(async move {
-        let Some(ScanTaskCommand::SubscribeResults {
-            result_sender: _,
-            keys,
-        }) = cmd_receiver.recv().await
+        let Some(ScanTaskCommand::SubscribeResults { rsp_tx, keys }) = cmd_receiver.recv().await
         else {
             panic!("should successfully receive SubscribeResults message");
         };
 
+        let (_results_sender, results_receiver) = tokio::sync::mpsc::channel(1);
+        rsp_tx
+            .send(results_receiver)
+            .expect("should send response successfully");
         assert_eq!(keys, expected_keys, "keys should match the request keys");
     });
 

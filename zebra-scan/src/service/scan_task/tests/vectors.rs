@@ -1,6 +1,9 @@
 //! Fixed test vectors for the scan task.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use color_eyre::Report;
 
@@ -24,7 +27,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
         sapling_keys.into_iter().zip((0..).map(Some)).collect();
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it updated parsed_keys correctly and returned the right new keys when starting with an empty state
@@ -45,7 +48,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     // Check that no key should be added if they are all already known and the heights are the same
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
@@ -71,7 +74,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[10..20].to_vec())?;
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[10..15].to_vec())?;
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
@@ -91,7 +94,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let sapling_keys = mock_sapling_scanning_keys(30, network);
     let done_rx = mock_scan_task.remove_keys(&sapling_keys)?;
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it sends the done notification successfully before returning and dropping `done_tx`
@@ -110,7 +113,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     mock_scan_task.remove_keys(&sapling_keys)?;
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert!(
@@ -126,7 +129,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[..2].to_vec())?;
 
-    let (new_keys, _new_results_senders) =
+    let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
@@ -142,10 +145,30 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     );
 
     let subscribe_keys: HashSet<String> = sapling_keys[..5].iter().cloned().collect();
-    let mut result_receiver = mock_scan_task.subscribe(subscribe_keys.clone())?;
+    let result_receiver_fut = {
+        let mut mock_scan_task = mock_scan_task.clone();
+        tokio::spawn(async move { mock_scan_task.subscribe(subscribe_keys.clone()).await })
+    };
 
-    let (_new_keys, new_results_senders) =
+    // Wait for spawned task to send subscribe message
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let (_new_keys, new_results_senders, new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
+
+    let (result_receiver, rsp_tx) = new_results_receivers
+        .into_iter()
+        .next()
+        .expect("there should be a new result receiver");
+
+    rsp_tx
+        .send(result_receiver)
+        .expect("should send response successfully");
+
+    let mut result_receiver = result_receiver_fut
+        .await
+        .expect("tokio task should join successfully")
+        .expect("should send and receive message successfully");
 
     let processed_subscribe_keys: HashSet<String> = new_results_senders.keys().cloned().collect();
     let expected_new_subscribe_keys: HashSet<String> = sapling_keys[..2].iter().cloned().collect();

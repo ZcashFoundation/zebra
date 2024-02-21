@@ -116,7 +116,6 @@ pub async fn scan_range(
         .collect();
 
     while height < stop_before_height {
-        let subscribed_keys = subscribed_keys_receiver.borrow().clone();
         let scanned_height = scan_height_and_store_results(
             height,
             state.clone(),
@@ -124,7 +123,7 @@ pub async fn scan_range(
             storage.clone(),
             key_heights.clone(),
             parsed_keys.clone(),
-            subscribed_keys,
+            subscribed_keys_receiver.clone(),
         )
         .await?;
 
