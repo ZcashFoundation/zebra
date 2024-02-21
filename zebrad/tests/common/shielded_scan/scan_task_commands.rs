@@ -6,7 +6,7 @@
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
 
-use std::time::Duration;
+use std::{fs, time::Duration};
 
 use color_eyre::{eyre::eyre, Result};
 
@@ -18,7 +18,11 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-use zebra_scan::{service::ScanTask, storage::Storage, tests::ZECPAGES_SAPLING_VIEWING_KEY};
+use zebra_scan::{
+    service::ScanTask,
+    storage::{db::SCANNER_DATABASE_KIND, Storage},
+    tests::ZECPAGES_SAPLING_VIEWING_KEY,
+};
 
 use crate::common::{
     cached_state::start_state_service_with_cache_dir, launch::can_spawn_zebrad_for_test_type,
@@ -35,13 +39,18 @@ const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(60);
 /// A block height where a scan result can be found with the [`ZECPAGES_SAPLING_VIEWING_KEY`]
 const EXPECTED_RESULT_HEIGHT: Height = Height(780_532);
 
-/// Initialize Zebra's state service with a cached state, add a new key to the scan task, and
-/// check that it stores results for the new key without errors.
+/// Initialize Zebra's state service with a cached state, then:
+/// - Start the scan task,
+/// - Add a new key,
+/// - Subscribe to results for that key,
+/// - Check that the scanner sends an expected result,
+/// - Remove the key and,
+/// - Check that the results channel is disconnected
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let test_type = TestType::UpdateZebraCachedStateNoRpc;
-    let test_name = "scan_subscribe_results";
+    let test_name = "scan_task_commands";
     let network = Network::Mainnet;
 
     // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
@@ -59,8 +68,15 @@ pub(crate) async fn run() -> Result<()> {
         .zebrad_state_path(test_name)
         .expect("already checked that there is a cached state path");
 
+    let mut scan_config = zebra_scan::Config::default();
+    scan_config.db_config_mut().cache_dir = zebrad_state_path.clone();
+
+    // Remove the scan directory before starting.
+    let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
+    fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
+
     let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
-        start_state_service_with_cache_dir(network, zebrad_state_path).await?;
+        start_state_service_with_cache_dir(network, zebrad_state_path.clone()).await?;
 
     let chain_tip_height = latest_chain_tip
         .best_tip_height()
@@ -85,7 +101,7 @@ pub(crate) async fn run() -> Result<()> {
     let state = ServiceBuilder::new().buffer(10).service(state_service);
 
     // Create an ephemeral `Storage` instance
-    let storage = Storage::new(&zebra_scan::Config::ephemeral(), network, false);
+    let storage = Storage::new(&scan_config, network, false);
     let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
 
     tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
