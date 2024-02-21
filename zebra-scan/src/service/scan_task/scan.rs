@@ -8,7 +8,10 @@ use std::{
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
-use tokio::{sync::mpsc::Sender, task::JoinHandle};
+use tokio::{
+    sync::{mpsc::Sender, watch},
+    task::JoinHandle,
+};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
@@ -116,10 +119,10 @@ pub async fn start(
     let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
 
     let (subscribed_keys_sender, subscribed_keys_receiver) =
-        tokio::sync::watch::channel(subscribed_keys.clone());
+        tokio::sync::watch::channel(Arc::new(subscribed_keys.clone()));
 
     let (scan_task_sender, scan_task_executor_handle) =
-        executor::spawn_init(subscribed_keys_receiver);
+        executor::spawn_init(subscribed_keys_receiver.clone());
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
     // Give empty states time to verify some blocks before we start scanning.
@@ -139,17 +142,23 @@ pub async fn start(
 
         let was_parsed_keys_empty = parsed_keys.is_empty();
 
-        let (new_keys, new_result_senders) =
+        let (new_keys, new_result_senders, new_result_receivers) =
             ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
+        subscribed_keys.extend(new_result_senders);
+        // Drop any results senders that are closed from subscribed_keys
+        subscribed_keys.retain(|key, sender| !sender.is_closed() && parsed_keys.contains_key(key));
+
         // Send the latest version of `subscribed_keys` before spawning the scan range task
-        if !new_result_senders.is_empty() {
-            subscribed_keys.extend(new_result_senders);
-            // Ignore send errors, it's okay if there aren't any receivers.
-            let _ = subscribed_keys_sender.send(subscribed_keys.clone());
+        subscribed_keys_sender
+            .send(Arc::new(subscribed_keys.clone()))
+            .expect("last receiver should not be dropped while this task is running");
+
+        for (result_receiver, rsp_tx) in new_result_receivers {
+            // Ignore send errors, we drop any closed results channels above.
+            let _ = rsp_tx.send(result_receiver);
         }
 
-        // TODO: Check if the `start_height` is at or above the current height
         if !new_keys.is_empty() {
             let state = state.clone();
             let storage = storage.clone();
@@ -163,7 +172,9 @@ pub async fn start(
             if was_parsed_keys_empty {
                 info!(?start_height, "setting new start height");
                 height = start_height;
-            } else if start_height < height {
+            }
+            // Skip spawning ScanRange task if `start_height` is at or above the current height
+            else if start_height < height {
                 scan_task_sender
                     .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
                     .await
@@ -179,7 +190,7 @@ pub async fn start(
                 storage.clone(),
                 key_heights.clone(),
                 parsed_keys.clone(),
-                subscribed_keys.clone(),
+                subscribed_keys_receiver.clone(),
             )
             .await?;
 
@@ -241,7 +252,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-    subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -295,7 +306,7 @@ pub async fn scan_height_and_store_results(
             _other => {}
         };
 
-        let results_sender = subscribed_keys.get(&sapling_key).cloned();
+        let subscribed_keys_receiver = subscribed_keys_receiver.clone();
 
         let sapling_key = sapling_key.clone();
         let block = block.clone();
@@ -322,7 +333,8 @@ pub async fn scan_height_and_store_results(
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
 
-            if let Some(results_sender) = results_sender {
+            let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
+            if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
                 let results = dfvk_res.iter().chain(ivk_res.iter());
 
                 for (_tx_index, &tx_id) in results {

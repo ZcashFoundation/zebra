@@ -1,6 +1,6 @@
 //! The scan task executor
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use color_eyre::eyre::Report;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -19,7 +19,7 @@ use super::scan::ScanRangeTaskBuilder;
 const EXECUTOR_BUFFER_SIZE: usize = 100;
 
 pub fn spawn_init(
-    subscribed_keys_receiver: tokio::sync::watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> (Sender<ScanRangeTaskBuilder>, JoinHandle<Result<(), Report>>) {
     let (scan_task_sender, scan_task_receiver) = tokio::sync::mpsc::channel(EXECUTOR_BUFFER_SIZE);
 
@@ -33,7 +33,7 @@ pub fn spawn_init(
 
 pub async fn scan_task_executor(
     mut scan_task_receiver: Receiver<ScanRangeTaskBuilder>,
-    subscribed_keys_receiver: watch::Receiver<HashMap<String, Sender<ScanResult>>>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<(), Report> {
     let mut scan_range_tasks = FuturesUnordered::new();
 

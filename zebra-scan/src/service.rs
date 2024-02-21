@@ -169,7 +169,7 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    let results_receiver = scan_task.subscribe(keys)?;
+                    let results_receiver = scan_task.subscribe(keys).await?;
 
                     Ok(Response::SubscribeResults(results_receiver))
                 }
