@@ -203,7 +203,6 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     continuous_blockchain(None, Mainnet).await?;
@@ -211,7 +210,6 @@ async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     Ok(())
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
@@ -228,7 +226,6 @@ async fn continuous_blockchain_restart() -> Result<(), Report> {
 // This span is far too verbose for use during normal testing.
 // Turn the SPANDOC: comments into doc comments to re-enable.
 //#[spandoc::spandoc]
-#[cfg(any(test, feature = "proptest-impl"))]
 async fn continuous_blockchain(
     restart_height: Option<block::Height>,
     network: Network,
