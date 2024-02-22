@@ -13,10 +13,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{
-        network::{AllParameters as _, Magic},
-        Network,
-    },
+    parameters::Network,
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
         CompactSizeMessage, FakeWriter, ReadZcashExt, SerializationError as Error,

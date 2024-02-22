@@ -63,58 +63,6 @@ pub enum Network {
     Testnet,
 }
 
-/// A magic number identifying the network.
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct Magic(pub [u8; 4]);
-
-impl fmt::Debug for Magic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Magic").field(&hex::encode(self.0)).finish()
-    }
-}
-
-/// Magic numbers used to identify different Zcash networks.
-pub mod magics {
-    use super::*;
-    /// The production mainnet.
-    pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
-    /// The testnet.
-    pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
-}
-pub trait AllParameters: zcash_primitives::consensus::Parameters {
-    fn height_for_first_halving(&self) -> Height;
-    fn genesis_hash(&self) -> crate::block::Hash;
-    fn magic_value(&self) -> Magic;
-}
-impl AllParameters for Network {
-    fn height_for_first_halving(&self) -> Height {
-        match self {
-            Network::Mainnet => Canopy
-                .activation_height(*self)
-                .expect("canopy activation height should be available"),
-            Network::Testnet => constants::FIRST_HALVING_TESTNET,
-        }
-    }
-
-    fn genesis_hash(&self) -> crate::block::Hash {
-        match self {
-            // zcash-cli getblockhash 0
-            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
-            // zcash-cli -testnet getblockhash 0
-            Network::Testnet => "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
-        }
-        .parse()
-        .expect("hard-coded hash parses")
-    }
-
-    fn magic_value(&self) -> Magic {
-        match self {
-            Network::Mainnet => magics::MAINNET,
-            Network::Testnet => magics::TESTNET,
-        }
-    }
-}
 impl zcash_primitives::consensus::Parameters for Network {
     fn activation_height(
         &self,

@@ -16,20 +16,6 @@ use crate::{
 #[cfg(test)]
 use proptest::prelude::*;
 
-/// Magic numbers used to identify what networks Transparent Addresses
-/// are associated with.
-mod magics {
-    pub mod p2sh {
-        pub const MAINNET: [u8; 2] = [0x1C, 0xBD];
-        pub const TESTNET: [u8; 2] = [0x1C, 0xBA];
-    }
-
-    pub mod p2pkh {
-        pub const MAINNET: [u8; 2] = [0x1C, 0xB8];
-        pub const TESTNET: [u8; 2] = [0x1D, 0x25];
-    }
-}
-
 /// Transparent Zcash Addresses
 ///
 /// In Bitcoin a single byte is used for the version field identifying

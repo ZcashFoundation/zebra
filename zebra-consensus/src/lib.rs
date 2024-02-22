@@ -49,7 +49,7 @@ pub use block::{
     subsidy::{
         funding_streams::{
             funding_stream_address, funding_stream_recipient_info, funding_stream_values,
-            height_for_first_halving, new_coinbase_script,
+            new_coinbase_script,
         },
         general::miner_subsidy,
     },
@@ -60,7 +60,7 @@ pub use checkpoint::{
 };
 pub use config::Config;
 pub use error::BlockError;
-pub use parameters::FundingStreamReceiver;
+pub use parameters::{FundingStreamReceiver, ParameterSubsidy};
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 pub use router::RouterError;
 
