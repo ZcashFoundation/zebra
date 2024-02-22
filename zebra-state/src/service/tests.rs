@@ -562,10 +562,7 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
     any::<Network>()
         .prop_flat_map(|network| {
             // Select the test vector based on the network
-            let raw_blocks = match network {
-                Network::Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-                Network::Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-            };
+            let raw_blocks = network.get_blockchain_map();
 
             // Transform the test vector's block bytes into a vector of `SemanticallyVerifiedBlock`s.
             let blocks: Vec<_> = raw_blocks

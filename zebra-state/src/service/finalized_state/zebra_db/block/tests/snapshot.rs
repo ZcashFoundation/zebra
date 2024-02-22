@@ -181,10 +181,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     // Snapshot block and transaction database data for:
     // - mainnet and testnet
     // - genesis, block 1, and block 2
-    let blocks = match network {
-        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-    };
+    let blocks = network.get_blockchain_map();
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.
     //

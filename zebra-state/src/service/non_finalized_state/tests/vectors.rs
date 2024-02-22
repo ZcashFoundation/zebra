@@ -141,17 +141,10 @@ fn best_chain_wins() -> Result<()> {
 }
 
 fn best_chain_wins_for_network(network: Network) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let block2 = block1.make_fake_child().set_work(10);
     let child = block1.make_fake_child().set_work(1);
@@ -186,17 +179,10 @@ fn finalize_pops_from_best_chain() -> Result<()> {
 }
 
 fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let block2 = block1.make_fake_child().set_work(10);
     let child = block1.make_fake_child().set_work(1);
@@ -242,17 +228,10 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
 fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     network: Network,
 ) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let block2 = block1.make_fake_child().set_work(10);
     let child1 = block1.make_fake_child().set_work(1);
@@ -293,17 +272,10 @@ fn shorter_chain_can_be_best_chain() -> Result<()> {
 }
 
 fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let long_chain_block1 = block1.make_fake_child().set_work(1);
     let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -343,17 +315,10 @@ fn longer_chain_with_more_work_wins() -> Result<()> {
 }
 
 fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let long_chain_block1 = block1.make_fake_child().set_work(1);
     let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -396,17 +361,10 @@ fn equal_length_goes_to_more_work() -> Result<()> {
     Ok(())
 }
 fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
-    let block1: Arc<Block> = match network {
-        // Since the brand new FinalizedState below will pass a None history tree
-        // to the NonFinalizedState, we must use pre-Heartwood blocks since
-        // they won't trigger the history tree update in the NonFinalizedState.
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into()?
-        }
-    };
+    // Since the brand new FinalizedState below will pass a None history tree
+    // to the NonFinalizedState, we must use pre-Heartwood blocks since
+    // they won't trigger the history tree update in the NonFinalizedState.
+    let block1: Arc<Block> = Arc::new(network.get_block_bytes(653599, 583999)?);
 
     let less_work_child = block1.make_fake_child().set_work(1);
     let more_work_child = block1.make_fake_child().set_work(3);
@@ -447,10 +405,8 @@ fn history_tree_is_updated_for_network_upgrade(
     network: Network,
     network_upgrade: NetworkUpgrade,
 ) -> Result<()> {
-    let blocks = match network {
-        Network::Mainnet => &*zebra_test::vectors::MAINNET_BLOCKS,
-        Network::Testnet => &*zebra_test::vectors::TESTNET_BLOCKS,
-    };
+    let blocks = network.get_block_map();
+
     let height = network_upgrade.activation_height(network).unwrap().0;
 
     let prev_block = Arc::new(
@@ -548,10 +504,7 @@ fn commitment_is_validated() {
 }
 
 fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) {
-    let blocks = match network {
-        Network::Mainnet => &*zebra_test::vectors::MAINNET_BLOCKS,
-        Network::Testnet => &*zebra_test::vectors::TESTNET_BLOCKS,
-    };
+    let blocks = network.get_block_map();
     let height = network_upgrade.activation_height(network).unwrap().0;
 
     let prev_block = Arc::new(
