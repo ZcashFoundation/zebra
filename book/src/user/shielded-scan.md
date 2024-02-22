@@ -15,7 +15,7 @@ keys for experimental use or publicly known keys.
 
 ## Build & Install
 
-Use [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0)
+Use [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0)
 or greater, or the `main` branch to get the latest features, and enable the
 `shielded-scan` feature during the build. You can also use Rust's `cargo` to
 install the latest release:
@@ -23,6 +23,12 @@ install the latest release:
 ```bash
 cargo install --features shielded-scan --locked --git https://github.com/ZcashFoundation/zebra zebrad
 ```
+
+> [!NOTE] Enabling the `shielded-scan` feature will make Zebra use the
+> `--experimental_allow_proto3_optional` flag of `protoc` during compilation.
+> This flag was introduced in [Protocol Buffers
+> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
+> released in May 16, 2020, so make sure you're not using a version of `protoc` older than 3.12.
 
 Zebra binary will be at `~/.cargo/bin/zebrad`, which should be in your `PATH`.
 
