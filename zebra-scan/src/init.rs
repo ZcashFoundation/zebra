@@ -13,7 +13,7 @@ use zebra_state::ChainTipChange;
 use crate::{scan, service::ScanService, storage::Storage, Config};
 
 /// The timeout applied to scan service calls
-const SCAN_SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
+pub const SCAN_SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Initialize [`ScanService`] based on its config.
 ///

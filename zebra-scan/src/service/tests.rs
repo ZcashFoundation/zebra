@@ -1,5 +1,8 @@
 //! Tests for ScanService.
 
+use std::time::Duration;
+
+use futures::{stream::FuturesOrdered, StreamExt};
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{Service, ServiceBuilder, ServiceExt};
 
@@ -10,6 +13,7 @@ use zebra_node_services::scan_service::{request::Request, response::Response};
 use zebra_state::TransactionIndex;
 
 use crate::{
+    init::SCAN_SERVICE_TIMEOUT,
     service::{scan_task::ScanTaskCommand, ScanService},
     storage::db::tests::{fake_sapling_results, new_test_storage},
     tests::{mock_sapling_scanning_keys, ZECPAGES_SAPLING_VIEWING_KEY},
@@ -346,6 +350,56 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
         register_keys_error_message.starts_with("no keys were registered"),
         "error message should say that no keys were registered"
     );
+
+    Ok(())
+}
+
+/// Test that the scan service with a timeout layer returns timeout errors after expected timeout
+#[tokio::test]
+async fn scan_service_timeout() -> Result<()> {
+    let db = new_test_storage(Network::Mainnet);
+
+    let (scan_service, _cmd_receiver) = ScanService::new_with_mock_scanner(db);
+    let mut scan_service = ServiceBuilder::new()
+        .buffer(10)
+        .timeout(SCAN_SERVICE_TIMEOUT)
+        .service(scan_service);
+
+    let keys = vec![String::from("fake key")];
+    let mut response_futs = FuturesOrdered::new();
+
+    for request in [
+        Request::RegisterKeys(keys.iter().cloned().map(|key| (key, None)).collect()),
+        Request::SubscribeResults(keys.iter().cloned().collect()),
+        Request::DeleteKeys(keys),
+    ] {
+        let response_fut = scan_service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(request);
+
+        response_futs.push_back(tokio::time::timeout(
+            SCAN_SERVICE_TIMEOUT
+                .checked_add(Duration::from_secs(1))
+                .expect("should not overflow"),
+            response_fut,
+        ));
+    }
+
+    while let Some(response) = response_futs.next().await {
+        let response =
+            response.expect("service should respond with timeout error before outer timeout");
+
+        let response_error = response
+            .expect_err("service response should be a timeout error")
+            .to_string();
+
+        assert!(
+            response_error.starts_with("request timed out"),
+            "error message should say the request timed out"
+        );
+    }
 
     Ok(())
 }
