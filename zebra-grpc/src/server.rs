@@ -417,8 +417,13 @@ where
     <ScanService as tower::Service<ScanServiceRequest>>::Future: Send,
 {
     let service = ScannerRPC { scan_service };
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(crate::scanner::FILE_DESCRIPTOR_SET)
+        .build()
+        .unwrap();
 
     Server::builder()
+        .add_service(reflection_service)
         .add_service(ScannerServer::new(service))
         .serve(listen_addr)
         .await?;
