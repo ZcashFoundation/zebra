@@ -4,7 +4,7 @@
 
 ### Setup
 
-After setting up Zebra Shielded Scanning, add a `listen_addr` field to the shielded-scan configuration:
+After setting up [Zebra Shielded Scanning](shielded-scan.md), add a `listen_addr` field to the shielded-scan configuration:
 
 ```toml
 [shielded_scan]
@@ -24,7 +24,7 @@ The types can be accessed through the `zebra-grpc` crate's root `scanner` module
 To check that the gRPC server is running, try calling `scanner.Scanner/GetInfo`, for example with `grpcurl`:
 
 ```bash
-$ grpcurl -plaintext '127.0.0.1:8231' scanner.Scanner/GetInfo
+grpcurl -plaintext '127.0.0.1:8231' scanner.Scanner/GetInfo
 ```
 
 The response should look like:
@@ -43,14 +43,19 @@ grpcurl -plaintext -d '{ "keys": { "key": ["sapling_extended_full_viewing_key"] 
 
 This will start scanning for transactions in Zebra's state and in new blocks as they're validated.
 
-Or, to use the scanner gRPC server without streaming, try calling `RegisterKeys` with your Sapling extended full viewing key, waiting for the scanner to cache some results, then calling `GetResults`.
+Or, to use the scanner gRPC server without streaming, try calling `RegisterKeys` with your Sapling extended full viewing key, waiting for the scanner to cache some results, then calling `GetResults`:
+
+```bash
+grpcurl -plaintext -d '{ "keys": { "key": ["sapling_extended_full_viewing_key"] } }' '127.0.0.1:8231' scanner.Scanner/RegisterKeys
+grpcurl -plaintext -d '{ "keys": ["sapling_extended_full_viewing_key"] }' '127.0.0.1:8231' scanner.Scanner/GetResults
+```
 
 ## gRPC Reflection
 
 To see all of the provided methods with `grpcurl`, try:
 
 ```bash
-$ grpcurl -plaintext '127.0.0.1:8231' list scanner.Scanner
+grpcurl -plaintext '127.0.0.1:8231' list scanner.Scanner
 ```
 
 This will list the paths to each method in the `Scanner` service:
@@ -66,7 +71,7 @@ To see the the request and response types for a method, for example the `GetResu
 
 
 ```bash
-$ grpcurl -plaintext '127.0.0.1:8231' describe scanner.Scanner.GetResults \
+grpcurl -plaintext '127.0.0.1:8231' describe scanner.Scanner.GetResults \
 && grpcurl -plaintext '127.0.0.1:8231' describe scanner.GetResultsRequest \
 && grpcurl -plaintext '127.0.0.1:8231' describe scanner.GetResultsResponse \
 && grpcurl -plaintext '127.0.0.1:8231' describe scanner.Results \
