@@ -179,7 +179,7 @@ where
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::Info))
             .await
-            .map_err(|_| Status::unknown("scan service was unavailable"))?
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
             return Err(Status::unknown(
                 "scan service returned an unexpected response",
@@ -223,7 +223,7 @@ where
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys)))
             .await
-            .map_err(|_| Status::unknown("scan service was unavailable"))?
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
             return Err(Status::unknown(
                 "scan service returned an unexpected response",
