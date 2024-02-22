@@ -105,9 +105,13 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    Ok(Response::RegisteredKeys(
-                        scan_task.register_keys(keys)?.await?,
-                    ))
+                    let newly_registered_keys = scan_task.register_keys(keys)?.await?;
+                    if !newly_registered_keys.is_empty() {
+                        Ok(Response::RegisteredKeys(newly_registered_keys))
+                    } else {
+                        Err("no keys were registered, check that keys are not already registered and \
+                        are valid Sapling extended full viewing keys".into())
+                    }
                 }
                 .boxed();
             }
