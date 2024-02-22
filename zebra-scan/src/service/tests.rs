@@ -329,5 +329,23 @@ async fn scan_service_registers_keys_correctly_for(network: Network) -> Result<(
         _ => panic!("scan service should have responded with the `RegisteredKeys` response"),
     }
 
+    // Try registering invalid keys.
+    let register_keys_error_message = scan_service
+        .ready()
+        .await
+        .map_err(|err| eyre!(err))?
+        .call(Request::RegisterKeys(vec![(
+            "invalid key".to_string(),
+            None,
+        )]))
+        .await
+        .expect_err("response should be an error when there are no valid keys to be added")
+        .to_string();
+
+    assert!(
+        register_keys_error_message.starts_with("no keys were registered"),
+        "error message should say that no keys were registered"
+    );
+
     Ok(())
 }
