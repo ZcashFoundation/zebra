@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
     block::{Block, Height},
-    parameters::Network::{self, *},
+    parameters::Network::{self},
     serialization::ZcashDeserializeInto,
     transaction,
 };
@@ -45,10 +45,7 @@ pub fn add_fake_results(
     height: Height,
     add_progress_marker: bool,
 ) {
-    let blocks = match network {
-        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-    };
+    let blocks = network.get_blockchain_map();
 
     let block: Arc<Block> = blocks
         .get(&height.0)

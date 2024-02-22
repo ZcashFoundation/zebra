@@ -117,23 +117,24 @@ impl Network {
     /// Returns block and sapling root bytes
     pub fn get_block_sapling_roots_bytes(
         &self,
-        version: u32,
+        main_bytes: u32,
+        test_bytes: u32,
     ) -> Result<(&[u8], [u8; 32]), SerializationError> {
         if self.is_mainnet() {
-            match version {
+            match main_bytes {
                 1_046_400_ => Ok((
                     &BLOCK_MAINNET_1046400_BYTES[..],
                     *SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
                 )),
-                _ => Err(SerializationError::UnsupportedVersion(version)),
+                _ => Err(SerializationError::UnsupportedVersion(main_bytes)),
             }
         } else {
-            match version {
+            match test_bytes {
                 1_116_000 => Ok((
                     &BLOCK_TESTNET_1116000_BYTES[..],
                     *SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
                 )),
-                _ => Err(SerializationError::UnsupportedVersion(version)),
+                _ => Err(SerializationError::UnsupportedVersion(test_bytes)),
             }
         }
     }

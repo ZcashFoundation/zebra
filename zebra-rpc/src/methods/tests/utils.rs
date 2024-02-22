@@ -9,20 +9,11 @@ use zebra_chain::{
     serialization::ZcashDeserialize,
 };
 
-use zebra_test::vectors;
-
 /// Create a history tree with one single block for a network by using Zebra test vectors.
 pub fn fake_history_tree(network: Network) -> Arc<HistoryTree> {
-    let (block, sapling_root) = match network {
-        Network::Mainnet => (
-            &vectors::BLOCK_MAINNET_1046400_BYTES[..],
-            *vectors::SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
-        ),
-        Network::Testnet => (
-            &vectors::BLOCK_TESTNET_1116000_BYTES[..],
-            *vectors::SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
-        ),
-    };
+    let (block, sapling_root) = network
+        .get_block_sapling_roots_bytes(1046400, 1116000)
+        .unwrap();
 
     let block = Arc::<Block>::zcash_deserialize(block).expect("block should deserialize");
     let first_sapling_root = Root::try_from(sapling_root).unwrap();
