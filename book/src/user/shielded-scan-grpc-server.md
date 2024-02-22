@@ -4,7 +4,7 @@
 
 ### Setup
 
-After setting up [Zebra Shielded Scanning](shielded-scan.md), add a `listen_addr` field to the shielded-scan configuration:
+After setting up [Zebra Shielded Scanning](https://zebra.zfnd.org/user/shielded-scan.html), add a `listen_addr` field to the shielded-scan configuration:
 
 ```toml
 [shielded_scan]
