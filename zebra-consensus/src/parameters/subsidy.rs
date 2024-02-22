@@ -198,6 +198,18 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRE
     "t3XHAGxRP2FNfhAjxGjxbrQPYtQQjc3RCQD",
 ];
 
+pub trait ParameterSubsidy {
+    fn num_funding_streams(&self) -> usize;
+}
+
+impl ParameterSubsidy for Network {
+    fn num_funding_streams(&self) -> usize {
+        match self {
+            Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
+            Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
+        }
+    }
+}
 /// List of addresses for the Zcash Foundation funding stream in the Mainnet.
 pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];

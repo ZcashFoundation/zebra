@@ -13,7 +13,10 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::Network,
+    parameters::{
+        network::{AllParameters as _, Magic},
+        Network,
+    },
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
         CompactSizeMessage, FakeWriter, ReadZcashExt, SerializationError as Error,
@@ -163,7 +166,7 @@ impl Encoder<Message> for Codec {
         let start_len = dst.len();
         {
             let dst = &mut dst.writer();
-            dst.write_all(&Magic::from(self.builder.network).0[..])?;
+            dst.write_all(&self.builder.network.magic_value().0[..])?;
             dst.write_all(command)?;
             dst.write_u32::<LittleEndian>(body_length as u32)?;
 
@@ -389,7 +392,7 @@ impl Decoder for Codec {
                     "read header from src buffer"
                 );
 
-                if magic != Magic::from(self.builder.network) {
+                if magic != self.builder.network.magic_value() {
                     return Err(Parse("supplied magic did not meet expectations"));
                 }
                 if body_len > self.builder.max_len {

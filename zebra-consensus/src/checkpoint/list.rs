@@ -94,7 +94,7 @@ impl CheckpointList {
         };
 
         match checkpoint_list.hash(block::Height(0)) {
-            Some(hash) if hash == genesis_hash(network) => checkpoint_list,
+            Some(hash) if hash == network.genesis_hash() => checkpoint_list,
             Some(_) => {
                 panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
             }
@@ -123,8 +123,8 @@ impl CheckpointList {
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
             Some((block::Height(0), hash))
-                if (hash == &genesis_hash(Network::Mainnet)
-                    || hash == &genesis_hash(Network::Testnet)) => {}
+                if (hash == &Network::Mainnet.genesis_hash()
+                    || hash == &Network::Testnet.genesis_hash()) => {}
             Some((block::Height(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }

@@ -25,24 +25,12 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
 
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
-            let recovery = match network {
-                Network::Mainnet => {
-                    zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
-                        &zcash_primitives::consensus::MAIN_NETWORK,
-                        alt_height,
-                        &null_sapling_ovk,
-                        output,
-                    )
-                }
-                Network::Testnet => {
-                    zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
-                        &zcash_primitives::consensus::TEST_NETWORK,
-                        alt_height,
-                        &null_sapling_ovk,
-                        output,
-                    )
-                }
-            };
+            let recovery = zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
+                &network,
+                alt_height,
+                &null_sapling_ovk,
+                output,
+            );
             if recovery.is_none() {
                 return false;
             }

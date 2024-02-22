@@ -56,12 +56,7 @@ pub fn height_for_first_halving(network: Network) -> Height {
     // First halving on Mainnet is at Canopy
     // while in Testnet is at block constant height of `1_116_000`
     // https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    match network {
-        Network::Mainnet => Canopy
-            .activation_height(network)
-            .expect("canopy activation height should be available"),
-        Network::Testnet => FIRST_HALVING_TESTNET,
-    }
+    network.height_for_first_halving()
 }
 
 /// Returns the address change period
@@ -93,10 +88,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_index(height: Height, network: Network) -> usize {
-    let num_addresses = match network {
-        Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
-        Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
-    };
+    let num_addresses = network.num_funding_streams();
 
     let index = 1u32
         .checked_add(funding_stream_address_period(height, network))

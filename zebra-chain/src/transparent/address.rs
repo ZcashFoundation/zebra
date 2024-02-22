@@ -5,6 +5,7 @@ use std::{fmt, io};
 use ripemd::{Digest, Ripemd160};
 use secp256k1::PublicKey;
 use sha2::Sha256;
+use zcash_primitives::consensus::Parameters as _;
 
 use crate::{
     parameters::Network,
@@ -118,24 +119,14 @@ impl ZcashSerialize for Address {
                 network,
                 script_hash,
             } => {
-                // Dev network doesn't have a recommendation so we
-                // default to testnet bytes if it's not mainnet.
-                match *network {
-                    Network::Mainnet => writer.write_all(&magics::p2sh::MAINNET[..])?,
-                    _ => writer.write_all(&magics::p2sh::TESTNET[..])?,
-                }
+                writer.write_all(&network.b58_script_address_prefix())?;
                 writer.write_all(script_hash)?
             }
             Address::PayToPublicKeyHash {
                 network,
                 pub_key_hash,
             } => {
-                // Dev network doesn't have a recommendation so we
-                // default to testnet bytes if it's not mainnet.
-                match *network {
-                    Network::Mainnet => writer.write_all(&magics::p2pkh::MAINNET[..])?,
-                    _ => writer.write_all(&magics::p2pkh::TESTNET[..])?,
-                }
+                writer.write_all(&network.b58_pubkey_address_prefix())?;
                 writer.write_all(pub_key_hash)?
             }
         }
@@ -153,22 +144,30 @@ impl ZcashDeserialize for Address {
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
-            magics::p2sh::MAINNET => Ok(Address::PayToScriptHash {
-                network: Network::Mainnet,
-                script_hash: hash_bytes,
-            }),
-            magics::p2sh::TESTNET => Ok(Address::PayToScriptHash {
-                network: Network::Testnet,
-                script_hash: hash_bytes,
-            }),
-            magics::p2pkh::MAINNET => Ok(Address::PayToPublicKeyHash {
-                network: Network::Mainnet,
-                pub_key_hash: hash_bytes,
-            }),
-            magics::p2pkh::TESTNET => Ok(Address::PayToPublicKeyHash {
-                network: Network::Testnet,
-                pub_key_hash: hash_bytes,
-            }),
+            zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
+                Ok(Address::PayToScriptHash {
+                    network: Network::Mainnet,
+                    script_hash: hash_bytes,
+                })
+            }
+            zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+                Ok(Address::PayToScriptHash {
+                    network: Network::Testnet,
+                    script_hash: hash_bytes,
+                })
+            }
+            zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
+                Ok(Address::PayToPublicKeyHash {
+                    network: Network::Mainnet,
+                    pub_key_hash: hash_bytes,
+                })
+            }
+            zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+                Ok(Address::PayToPublicKeyHash {
+                    network: Network::Testnet,
+                    pub_key_hash: hash_bytes,
+                })
+            }
             _ => Err(SerializationError::Parse("bad t-addr version/type")),
         }
     }
