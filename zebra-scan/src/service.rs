@@ -171,7 +171,9 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    let results_receiver = scan_task.subscribe(keys)?.await?;
+                    let results_receiver = scan_task.subscribe(keys)?.await.map_err(|_| {
+                        "scan task dropped responder, check that keys are already registered"
+                    })?;
 
                     Ok(Response::SubscribeResults(results_receiver))
                 }
