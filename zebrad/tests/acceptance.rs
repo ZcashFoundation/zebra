@@ -128,6 +128,12 @@
 //! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scans_for_new_key --features shielded-scan --release -- --ignored --nocapture
 //! ```
 //!
+//! Example of how to run the scan_subscribe_results test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_subscribe_results --features shielded-scan -- --ignored --nocapture
+//! ```
+//!
 //! ## Checkpoint Generation Tests
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
@@ -1685,12 +1691,10 @@ fn non_blocking_logger() -> Result<()> {
         Ok(())
     });
 
-    // Wait until the spawned task finishes or return an error in 45 seconds
-    if done_rx.recv_timeout(Duration::from_secs(45)).is_err() {
-        return Err(eyre!("unexpected test task hang"));
+    // Wait until the spawned task finishes up to 45 seconds before shutting down tokio runtime
+    if done_rx.recv_timeout(Duration::from_secs(45)).is_ok() {
+        rt.shutdown_timeout(Duration::from_secs(3));
     }
-
-    rt.shutdown_timeout(Duration::from_secs(3));
 
     match test_task_handle.now_or_never() {
         Some(Ok(result)) => result,
@@ -2866,6 +2870,53 @@ fn scan_task_starts() -> Result<()> {
     Ok(())
 }
 
+/// Test that the scanner gRPC server starts when the node starts.
+#[tokio::test]
+#[cfg(feature = "shielded-scan")]
+async fn scan_rpc_server_starts() -> Result<()> {
+    use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
+
+    let _init_guard = zebra_test::init();
+
+    let test_type = TestType::LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
+
+    let port = random_known_port();
+    let listen_addr = format!("127.0.0.1:{port}");
+    let mut config = default_test_config(Mainnet)?;
+    config.shielded_scan.listen_addr = Some(listen_addr.parse()?);
+
+    // Start zebra with the config.
+    let mut zebrad = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(test_type.zebrad_timeout());
+
+    // Wait until gRPC server is starting.
+    tokio::time::sleep(LAUNCH_DELAY).await;
+    zebrad.expect_stdout_line_matches("starting scan gRPC server")?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
+
+    let request = tonic::Request::new(Empty {});
+
+    client.get_info(request).await?;
+
+    // Kill the node.
+    zebrad.kill(false)?;
+
+    // Check that scan task started and the first scanning is done.
+    let output = zebrad.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+    output.assert_failure()?;
+
+    Ok(())
+}
+
 /// Test that the scanner can continue scanning where it was left when zebrad restarts.
 ///
 /// Needs a cache state close to the tip. A possible way to run it locally is:
@@ -2964,11 +3015,22 @@ fn scan_start_where_left() -> Result<()> {
 
 /// Test successful registration of a new key in the scan task.
 ///
-/// See [`common::shielded_scan::register_key`] for more information.
+/// See [`common::shielded_scan::scans_for_new_key`] for more information.
 // TODO: Add this test to CI (#8236)
 #[tokio::test]
 #[ignore]
 #[cfg(feature = "shielded-scan")]
 async fn scans_for_new_key() -> Result<()> {
     common::shielded_scan::scans_for_new_key::run().await
+}
+
+/// Tests SubscribeResults ScanService request.
+///
+/// See [`common::shielded_scan::subscribe_results`] for more information.
+// TODO: Add this test to CI (#8236)
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "shielded-scan")]
+async fn scan_subscribe_results() -> Result<()> {
+    common::shielded_scan::subscribe_results::run().await
 }

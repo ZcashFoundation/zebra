@@ -159,7 +159,7 @@ impl Storage {
 
     /// Inserts a batch of scanned sapling result for a key and height.
     /// If a result already exists for that key, height, and index, it is replaced.
-    pub(crate) fn insert_sapling_results(
+    pub fn insert_sapling_results(
         &mut self,
         sapling_key: &SaplingScanningKey,
         height: Height,
@@ -213,7 +213,7 @@ impl Storage {
         sapling_key: &SaplingScanningKey,
         birthday_height: Option<Height>,
     ) {
-        let min_birthday_height = self.min_sapling_birthday_height();
+        let min_birthday_height = self.network().sapling_activation_height();
 
         // The birthday height must be at least the minimum height for that pool.
         let birthday_height = birthday_height

@@ -82,7 +82,7 @@ group = "0.13.0"
 incrementalmerkletree = "0.5.0"
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
-num-integer = "0.1.45"
+num-integer = "0.1.46"
 primitive-types = "0.11.1"
 rand_core = "0.6.4"
 ripemd = "0.1.3"
@@ -90,7 +90,7 @@ ripemd = "0.1.3"
 secp256k1 = { version = "0.26.0", features = ["serde"] }
 sha2 = { version = "0.10.7", features = ["compress"] }
 uint = "0.9.5"
-x25519-dalek = { version = "2.0.0-rc.3", features = ["serde"] }
+x25519-dalek = { version = "2.0.1", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
@@ -101,19 +101,19 @@ zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.13.0-rc.1", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.33", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.34", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
 displaydoc = "0.2.4"
 static_assertions = "1.1.0"
-thiserror = "1.0.56"
+thiserror = "1.0.57"
 tracing = "0.1.39"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.196", features = ["serde_derive", "rc"] }
-serde_with = "3.5.1"
+serde_with = "3.6.1"
 serde-big-array = "0.5.1"
 
 # Processing
@@ -130,7 +130,7 @@ reddsa = "0.5.1"
 serde_json = { version = "1.0.113", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
-tokio = { version = "1.35.1", optional = true }
+tokio = { version = "1.36.0", optional = true }
 
 # Production feature getblocktemplate-rpcs
 zcash_address = { version = "0.3.1", optional = true }
@@ -166,7 +166,7 @@ proptest-derive = "0.4.0"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.35.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.33" }
 

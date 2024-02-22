@@ -1,6 +1,6 @@
 //! Configuration for blockchain scanning tasks.
 
-use std::fmt::Debug;
+use std::{fmt::Debug, net::SocketAddr};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,20 @@ pub struct Config {
     //
     // TODO: allow keys without birthdays
     pub sapling_keys_to_scan: IndexMap<SaplingScanningKey, u32>,
+
+    /// IP address and port for the zebra-scan gRPC server.
+    ///
+    /// Note: The gRPC server is disabled by default.
+    /// To enable the gRPC server, set a listen address in the config:
+    /// ```toml
+    /// [shielded-scan]
+    /// listen_addr = '127.0.0.1:8231'
+    /// ```
+    ///
+    /// The recommended ports for the gRPC server are:
+    /// - Mainnet: 127.0.0.1:8231
+    /// - Testnet: 127.0.0.1:18231
+    pub listen_addr: Option<SocketAddr>,
 
     /// The scanner results database config.
     //
@@ -41,6 +55,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             sapling_keys_to_scan: IndexMap::new(),
+            listen_addr: None,
+
+            // TODO: Add a const generic for specifying the default cache_dir path, like 'zebra' or 'zebra-scan'?
             db_config: DbConfig::default(),
         }
     }

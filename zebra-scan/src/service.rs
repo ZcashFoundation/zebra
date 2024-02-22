@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Dur
 use futures::future::FutureExt;
 use tower::Service;
 
-use zebra_chain::{parameters::Network, transaction::Hash};
+use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Hash};
 
 use zebra_state::ChainTipChange;
 
@@ -19,7 +19,7 @@ pub mod scan_task;
 pub use scan_task::{ScanTask, ScanTaskCommand};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use std::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Receiver;
 
 /// Zebra-scan [`tower::Service`]
 #[derive(Debug)]
@@ -36,15 +36,20 @@ const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
     /// Create a new [`ScanService`].
-    pub fn new(
+    pub async fn new(
         config: &Config,
         network: Network,
         state: scan::State,
         chain_tip_change: ChainTipChange,
     ) -> Self {
+        let config = config.clone();
+        let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
+            .wait_for_panics()
+            .await;
+
         Self {
-            db: Storage::new(config, network, false),
-            scan_task: ScanTask::spawn(config, network, state, chain_tip_change),
+            scan_task: ScanTask::spawn(storage.clone(), state, chain_tip_change),
+            db: storage,
         }
     }
 
@@ -86,7 +91,7 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     Ok(Response::Info {
-                        min_sapling_birthday_height: db.min_sapling_birthday_height(),
+                        min_sapling_birthday_height: db.network().sapling_activation_height(),
                     })
                 }
                 .boxed();
@@ -96,10 +101,15 @@ impl Service<Request> for ScanService {
                 // TODO: check that these entries exist in db
             }
 
-            Request::RegisterKeys(_viewing_key_with_hashes) => {
-                // TODO:
-                //  - add these keys as entries in db
-                //  - send new keys to scan task
+            Request::RegisterKeys(keys) => {
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    Ok(Response::RegisteredKeys(
+                        scan_task.register_keys(keys)?.await?,
+                    ))
+                }
+                .boxed();
             }
 
             Request::DeleteKeys(keys) => {
@@ -155,8 +165,15 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
 
-            Request::SubscribeResults(_key_hashes) => {
-                // TODO: send key_hashes and mpsc::Sender to scanner task, return mpsc::Receiver to caller
+            Request::SubscribeResults(keys) => {
+                let mut scan_task = self.scan_task.clone();
+
+                return async move {
+                    let results_receiver = scan_task.subscribe(keys).await?;
+
+                    Ok(Response::SubscribeResults(results_receiver))
+                }
+                .boxed();
             }
 
             Request::ClearResults(keys) => {

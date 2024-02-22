@@ -2,13 +2,16 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{mpsc::Receiver, Arc},
+    sync::Arc,
     time::Duration,
 };
 
 use color_eyre::{eyre::eyre, Report};
 use itertools::Itertools;
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{mpsc::Sender, watch},
+    task::JoinHandle,
+};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
@@ -21,7 +24,6 @@ use zcash_client_backend::{
     scanning::{ScanError, ScanningKey},
 };
 use zcash_primitives::{
-    constants::*,
     sapling::SaplingIvk,
     zip32::{AccountId, DiversifiableFullViewingKey, Scope},
 };
@@ -34,12 +36,12 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::Transaction,
 };
+use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
 
 use crate::{
     service::{ScanTask, ScanTaskCommand},
     storage::{SaplingScanningKey, Storage},
-    Config,
 };
 
 use super::executor;
@@ -61,8 +63,9 @@ const INITIAL_WAIT: Duration = Duration::from_secs(15);
 
 /// The amount of time between checking for new blocks and starting new scans.
 ///
-/// This is just under half the target block interval.
-pub const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// TODO: The current value is set to 10 so that tests don't sleep for too long and finish faster.
+///       Set it to 30 after #8250 gets addressed or remove this const completely in the refactor.
+pub const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// We log an info log with progress after this many blocks.
 const INFO_LOG_INTERVAL: u32 = 10_000;
@@ -73,12 +76,15 @@ pub async fn start(
     state: State,
     chain_tip_change: ChainTipChange,
     storage: Storage,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    mut cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
-    let sapling_activation_height = storage.min_sapling_birthday_height();
+    let sapling_activation_height = network.sapling_activation_height();
+
+    info!(?network, "starting scan task");
 
     // Do not scan and notify if we are below sapling activation height.
+    #[cfg(not(test))]
     wait_for_height(
         sapling_activation_height,
         "Sapling activation",
@@ -95,6 +101,8 @@ pub async fn start(
 
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
 
+    info!(start_height = ?height, "got min scan height");
+
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
     let mut parsed_keys: HashMap<
@@ -108,7 +116,13 @@ pub async fn start(
         })
         .try_collect()?;
 
-    let (scan_task_sender, scan_task_executor_handle) = executor::spawn_init();
+    let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
+
+    let (subscribed_keys_sender, subscribed_keys_receiver) =
+        tokio::sync::watch::channel(Arc::new(subscribed_keys.clone()));
+
+    let (scan_task_sender, scan_task_executor_handle) =
+        executor::spawn_init(subscribed_keys_receiver.clone());
     let mut scan_task_executor_handle = Some(scan_task_executor_handle);
 
     // Give empty states time to verify some blocks before we start scanning.
@@ -126,31 +140,66 @@ pub async fn start(
             }
         }
 
-        let new_keys = ScanTask::process_messages(&cmd_receiver, &mut parsed_keys)?;
+        let was_parsed_keys_empty = parsed_keys.is_empty();
 
-        // TODO: Check if the `start_height` is at or above the current height
+        let (new_keys, new_result_senders, new_result_receivers) =
+            ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
+
+        subscribed_keys.extend(new_result_senders);
+        // Drop any results senders that are closed from subscribed_keys
+        subscribed_keys.retain(|key, sender| !sender.is_closed() && parsed_keys.contains_key(key));
+
+        // Send the latest version of `subscribed_keys` before spawning the scan range task
+        subscribed_keys_sender
+            .send(Arc::new(subscribed_keys.clone()))
+            .expect("last receiver should not be dropped while this task is running");
+
+        for (result_receiver, rsp_tx) in new_result_receivers {
+            // Ignore send errors, we drop any closed results channels above.
+            let _ = rsp_tx.send(result_receiver);
+        }
+
         if !new_keys.is_empty() {
             let state = state.clone();
             let storage = storage.clone();
 
-            scan_task_sender
-                .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
-                .await
-                .expect("scan_until_task channel should not be closed");
+            let start_height = new_keys
+                .iter()
+                .map(|(_, (_, _, height))| *height)
+                .min()
+                .unwrap_or(sapling_activation_height);
+
+            if was_parsed_keys_empty {
+                info!(?start_height, "setting new start height");
+                height = start_height;
+            }
+            // Skip spawning ScanRange task if `start_height` is at or above the current height
+            else if start_height < height {
+                scan_task_sender
+                    .send(ScanRangeTaskBuilder::new(height, new_keys, state, storage))
+                    .await
+                    .expect("scan_until_task channel should not be closed");
+            }
         }
 
-        let scanned_height = scan_height_and_store_results(
-            height,
-            state.clone(),
-            Some(chain_tip_change.clone()),
-            storage.clone(),
-            key_heights.clone(),
-            parsed_keys.clone(),
-        )
-        .await?;
+        if !parsed_keys.is_empty() {
+            let scanned_height = scan_height_and_store_results(
+                height,
+                state.clone(),
+                Some(chain_tip_change.clone()),
+                storage.clone(),
+                key_heights.clone(),
+                parsed_keys.clone(),
+                subscribed_keys_receiver.clone(),
+            )
+            .await?;
 
-        // If we've reached the tip, sleep for a while then try and get the same block.
-        if scanned_height.is_none() {
+            // If we've reached the tip, sleep for a while then try and get the same block.
+            if scanned_height.is_none() {
+                tokio::time::sleep(CHECK_INTERVAL).await;
+                continue;
+            }
+        } else {
             tokio::time::sleep(CHECK_INTERVAL).await;
             continue;
         }
@@ -174,10 +223,16 @@ pub async fn wait_for_height(
                 "scanner is waiting for {height_name}. Current tip: {}, {height_name}: {}",
                 tip_height.0, height.0
             );
+
             tokio::time::sleep(CHECK_INTERVAL).await;
-            continue;
+        } else {
+            info!(
+                "scanner finished waiting for {height_name}. Current tip: {}, {height_name}: {}",
+                tip_height.0, height.0
+            );
+
+            break;
         }
-        break;
     }
 
     Ok(())
@@ -197,6 +252,7 @@ pub async fn scan_height_and_store_results(
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
     parsed_keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+    subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
 
@@ -238,11 +294,19 @@ pub async fn scan_height_and_store_results(
                         height.as_usize(),
                         chain_tip_change.latest_chain_tip().best_tip_height().expect("we should have a tip to scan").as_usize(),
                     );
+                } else {
+                    info!(
+                        "Scanning the blockchain for key {}, started at block {:?}, now at block {:?}",
+                        key_index_in_task, last_scanned_height.next().expect("height is not maximum").as_usize(),
+                        height.as_usize(),
+                    );
                 }
             }
 
             _other => {}
         };
+
+        let subscribed_keys_receiver = subscribed_keys_receiver.clone();
 
         let sapling_key = sapling_key.clone();
         let block = block.clone();
@@ -268,6 +332,20 @@ pub async fn scan_height_and_store_results(
 
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
+
+            let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
+            if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
+                let results = dfvk_res.iter().chain(ivk_res.iter());
+
+                for (_tx_index, &tx_id) in results {
+                    // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
+                    let _ = results_sender.try_send(ScanResult {
+                        key: sapling_key.clone(),
+                        height,
+                        tx_id: tx_id.into(),
+                    });
+                }
+            }
 
             storage.add_sapling_results(&sapling_key, height, dfvk_res);
             storage.add_sapling_results(&sapling_key, height, ivk_res);
@@ -340,19 +418,11 @@ pub fn scan_block<K: ScanningKey>(
 //       performance: stop returning both the dfvk and ivk for the same key
 // TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_scan_block_keys(
-    sapling_key: &SaplingScanningKey,
+    key: &SaplingScanningKey,
     network: Network,
 ) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
-    let hrp = if network.is_a_test_network() {
-        // Assume custom testnets have the same HRP
-        //
-        // TODO: add the regtest HRP here
-        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    } else {
-        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    };
-
-    let efvk = decode_extended_full_viewing_key(hrp, sapling_key).map_err(|e| eyre!(e))?;
+    let efvk =
+        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;
 
     // Just return all the keys for now, so we can be sure our code supports them.
     let dfvk = efvk.to_diversifiable_full_viewing_key();
@@ -489,32 +559,10 @@ async fn tip_height(mut state: State) -> Result<Height, Report> {
 ///
 /// TODO: add a test for this function.
 pub fn spawn_init(
-    config: &Config,
-    network: Network,
+    storage: Storage,
     state: State,
     chain_tip_change: ChainTipChange,
-    cmd_receiver: Receiver<ScanTaskCommand>,
+    cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
-    let config = config.clone();
-
-    // TODO: spawn an entirely new executor here, to avoid timing attacks.
-    tokio::spawn(init(config, network, state, chain_tip_change, cmd_receiver).in_current_span())
-}
-
-/// Initialize the scanner based on its config.
-///
-/// TODO: add a test for this function.
-pub async fn init(
-    config: Config,
-    network: Network,
-    state: State,
-    chain_tip_change: ChainTipChange,
-    cmd_receiver: Receiver<ScanTaskCommand>,
-) -> Result<(), Report> {
-    let storage = tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
-        .wait_for_panics()
-        .await;
-
-    // TODO: add more tasks here?
-    start(state, chain_tip_change, storage, cmd_receiver).await
+    tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
 }

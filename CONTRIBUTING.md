@@ -3,7 +3,6 @@
 * [Running and Debugging](#running-and-debugging)
 * [Bug Reports](#bug-reports)
 * [Pull Requests](#pull-requests)
-* [Zebra RFCs](#zebra-rfcs)
 
 ## Running and Debugging
 [running-and-debugging]: #running-and-debugging
@@ -49,40 +48,3 @@ to the "re-run jobs" button on the `Coverage (+nightly)` CI job's tab
 
 To access a report download and extract the zip artifact then open the top
 level `index.html`.
-
-## Zebra RFCs
-[zebra-rfcs]: #zebra-rfcs
-
-Significant changes to the Zebra codebase are planned using Zebra RFCs. These
-allow structured discussion about a proposed change and provide a record of
-the planned design.
-
-To make a Zebra RFC:
-
-1. Choose a short feature name like `my-feature`.
-
-2. Copy the `book/src/dev/rfcs/0000-template.md` file to
-`book/src/dev/rfcs/drafts/xxxx-my-feature.md`.
-
-3. Edit the template header to add the feature name and the date, but leave
-the other fields blank for now.
-
-4. Write the design! The template has a suggested list of sections that are a
-useful guide.
-
-5. Create an design PR using the RFC template.
-
-6. After creating an RFC PR, update the RFC header and the PR description
-with the PR number.
-
-7. Make changes to the RFC in collaboration with the Zebra team.
-
-8. When the RFC is merged, take the next available RFC number (not conflicting
-with any existing RFCs or design PRs) and name the RFC file accordingly, e.g.,
-`0027-my-feature.md` for number 27.
-
-9. Make sure that `book/src/SUMMARY.md` links to the new number for the RFC.
-
-10. After the RFC is accepted, create an issue for the implementation of the
-design, and update the RFC header and PR description with the implementation
-issue number.

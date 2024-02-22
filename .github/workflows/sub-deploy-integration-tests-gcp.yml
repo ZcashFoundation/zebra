@@ -136,7 +136,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.6.1
+        uses: shimataro/ssh-key-action@v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -150,7 +150,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.0
+        uses: google-github-actions/auth@v2.1.1
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
@@ -197,7 +197,7 @@ jobs:
           echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
           echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
           echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
-          echo "DISK_OPTION=image=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
+          echo "DISK_OPTION=image=$CACHED_DISK_NAME," >> "${GITHUB_ENV}"
 
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
@@ -212,7 +212,7 @@ jobs:
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk=${DISK_OPTION},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=400GB,type=pd-ssd \
+          --create-disk=${DISK_OPTION}name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=400GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -433,7 +433,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.6.1
+        uses: shimataro/ssh-key-action@v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -447,7 +447,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.0
+        uses: google-github-actions/auth@v2.1.1
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -724,7 +724,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.0
+        uses: google-github-actions/auth@v2.1.1
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'

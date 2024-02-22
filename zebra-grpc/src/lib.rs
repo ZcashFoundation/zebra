@@ -5,3 +5,11 @@
 #![doc(html_root_url = "https://docs.rs/zebra_grpc")]
 
 pub mod server;
+
+#[cfg(test)]
+mod tests;
+
+/// The generated scanner proto
+pub mod scanner {
+    tonic::include_proto!("scanner");
+}

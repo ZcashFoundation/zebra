@@ -85,6 +85,12 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Returns an iterator over [`Network`] variants.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        // TODO: Use default values of `Testnet` variant when adding fields for #7845.
+        [Self::Mainnet, Self::Testnet].into_iter()
+    }
+
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
@@ -128,6 +134,13 @@ impl Network {
     /// Returns `true` if this network is a testing network.
     pub fn is_a_test_network(&self) -> bool {
         *self != Network::Mainnet
+    }
+
+    /// Returns the Sapling activation height for this network.
+    pub fn sapling_activation_height(self) -> Height {
+        super::NetworkUpgrade::Sapling
+            .activation_height(self)
+            .expect("Sapling activation height needs to be set")
     }
 }
 

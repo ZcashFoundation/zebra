@@ -74,7 +74,7 @@ impl SaplingViewingKey {
 impl Network {
     /// Returns the human-readable prefix for an Zcash Sapling extended full viewing key
     /// for this network.
-    fn sapling_efvk_hrp(&self) -> &'static str {
+    pub fn sapling_efvk_hrp(&self) -> &'static str {
         if self.is_a_test_network() {
             // Assume custom testnets have the same HRP
             //
