@@ -30,7 +30,7 @@ impl Network {
     }
 
     /// Returns iterator over blocks.
-    pub fn get_block_iter(&self) -> std::collections::btree_map::Iter<'_, u32, &[u8]> {
+    pub fn get_block_iter(&self) -> std::collections::btree_map::Iter<'static, u32, &'static [u8]> {
         if self.is_mainnet() {
             MAINNET_BLOCKS.iter()
         } else {

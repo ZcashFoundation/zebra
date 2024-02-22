@@ -909,12 +909,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
         let nu5_activation_height = nu5
             .activation_height(network)
             .expect("NU5 activation height is specified");
-
-        let blocks = match network {
-            Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-            Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-        };
-        // let blocks = network.get_block_iter();
+        let blocks = network.get_block_iter();
 
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(network, state_service);
