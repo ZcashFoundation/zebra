@@ -70,13 +70,24 @@ where
             .into_iter()
             .map(|KeyWithHeight { key, height }| (key, height))
             .collect();
-
-        let ScanServiceResponse::RegisteredKeys(_) = self
+        let register_keys_response_fut = self
             .scan_service
             .clone()
-            .ready()
-            .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys.clone())))
-            .await
+            .oneshot(ScanServiceRequest::RegisterKeys(keys.clone()));
+
+        let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
+
+        let subscribe_results_response_fut =
+            self.scan_service
+                .clone()
+                .oneshot(ScanServiceRequest::SubscribeResults(
+                    keys.iter().cloned().collect(),
+                ));
+
+        let (register_keys_response, subscribe_results_response) =
+            tokio::join!(register_keys_response_fut, subscribe_results_response_fut);
+
+        let ScanServiceResponse::RegisteredKeys(_) = register_keys_response
             .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
             return Err(Status::unknown(
@@ -84,7 +95,14 @@ where
             ));
         };
 
-        let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
+        let ScanServiceResponse::SubscribeResults(mut results_receiver) =
+            subscribe_results_response
+                .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+        else {
+            return Err(Status::unknown(
+                "scan service returned an unexpected response",
+            ));
+        };
 
         let ScanServiceResponse::Results(results) = self
             .scan_service
@@ -99,29 +117,31 @@ where
             ));
         };
 
-        let ScanServiceResponse::SubscribeResults(mut results_receiver) = self
-            .scan_service
-            .clone()
-            .ready()
-            .and_then(|service| {
-                service.call(ScanServiceRequest::SubscribeResults(
-                    keys.iter().cloned().collect(),
-                ))
-            })
-            .await
-            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
-        };
-
         let (response_sender, response_receiver) =
             tokio::sync::mpsc::channel(SCAN_RESPONDER_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
 
         tokio::spawn(async move {
-            let initial_results = process_results(keys, results);
+            let mut initial_results = process_results(keys, results);
+
+            // Empty results receiver channel to filter out duplicate results between the channel and cache
+            while let Ok(ScanResult { key, height, tx_id }) = results_receiver.try_recv() {
+                let entry = initial_results
+                    .entry(key)
+                    .or_default()
+                    .by_height
+                    .entry(height.0)
+                    .or_default();
+
+                let tx_id = Transaction {
+                    hash: tx_id.to_string(),
+                };
+
+                // Add the scan result to the initial results if it's not already present.
+                if !entry.transactions.contains(&tx_id) {
+                    entry.transactions.push(tx_id);
+                }
+            }
 
             let send_result = response_sender
                 .send(Ok(ScanResponse {

@@ -177,14 +177,14 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
                 .respond(ScanResponse::RegisteredKeys(vec![]));
 
             mock_scan_service
-                .expect_request_that(|req| matches!(req, ScanRequest::Results(_)))
-                .await
-                .respond(ScanResponse::Results(fake_results_response));
-
-            mock_scan_service
                 .expect_request_that(|req| matches!(req, ScanRequest::SubscribeResults(_)))
                 .await
                 .respond(ScanResponse::SubscribeResults(fake_results_receiver));
+
+            mock_scan_service
+                .expect_request_that(|req| matches!(req, ScanRequest::Results(_)))
+                .await
+                .respond(ScanResponse::Results(fake_results_response));
         });
     }
 
