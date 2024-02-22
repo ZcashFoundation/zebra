@@ -8,7 +8,6 @@ use zebra_chain::{
     amount::Amount,
     block::{Block, Height},
     parameters::Network,
-    serialization::ZcashDeserializeInto,
     transaction::{UnminedTxId, VerifiedUnminedTx},
 };
 
@@ -252,14 +251,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
         ..Default::default()
     });
 
-    let block: Block = match network {
-        Network::Mainnet => {
-            zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?
-        }
-        Network::Testnet => {
-            zebra_test::vectors::BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into()?
-        }
-    };
+    let block: Block = network.get_block_bytes(982681, 925483)?;
 
     // Get a test transaction
     let tx = &*(block.transactions[1]).clone();

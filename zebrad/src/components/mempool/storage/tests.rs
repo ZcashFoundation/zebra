@@ -17,10 +17,7 @@ pub fn unmined_transactions_in_blocks(
     block_height_range: impl RangeBounds<u32>,
     network: Network,
 ) -> impl DoubleEndedIterator<Item = VerifiedUnminedTx> {
-    let blocks = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let blocks = network.get_block_iter();
 
     // Deserialize the blocks that are selected based on the specified `block_height_range`.
     let selected_blocks = blocks

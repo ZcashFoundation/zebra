@@ -48,18 +48,22 @@ impl Network {
     }
 
     /// Returns block bytes
-    pub fn get_block_bytes(&self, version: u32) -> Result<Block, SerializationError> {
+    pub fn get_block_bytes(
+        &self,
+        main_bytes: u32,
+        test_bytes: u32,
+    ) -> Result<Block, SerializationError> {
         if self.is_mainnet() {
-            match version {
+            match main_bytes {
                 653_599 => BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into(),
                 982_681 => BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into(),
-                _ => Err(SerializationError::UnsupportedVersion(version)),
+                _ => Err(SerializationError::UnsupportedVersion(main_bytes)),
             }
         } else {
-            match version {
+            match test_bytes {
                 583_999 => BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into(),
                 925_483 => BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into(),
-                _ => Err(SerializationError::UnsupportedVersion(version)),
+                _ => Err(SerializationError::UnsupportedVersion(test_bytes)),
             }
         }
     }
