@@ -62,13 +62,14 @@ pub enum Network {
     /// The oldest public test network.
     Testnet,
 }
-
 impl zcash_primitives::consensus::Parameters for Network {
     fn activation_height(
         &self,
         nu: zcash_primitives::consensus::NetworkUpgrade,
     ) -> Option<zcash_primitives::consensus::BlockHeight> {
-        todo!()
+        // Convert `self` (zebra-chain's Network) to librustzcash's Network
+        let librustzcash_network: zcash_primitives::consensus::Network = (*self).into();
+        librustzcash_network.activation_height(nu)
     }
 
     fn coin_type(&self) -> u32 {
