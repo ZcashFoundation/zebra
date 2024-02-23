@@ -35,6 +35,6 @@ cargo release commit --verbose --execute --no-confirm --allow-branch '*'
 # Dry run to check the release
 # Workaround for unpublished dependency version errors: https://github.com/crate-ci/cargo-release/issues/691
 # TODO: check all crates after fixing these errors
-cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad
+cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad --exclude zebra-scan
 
 echo "Release process completed."
