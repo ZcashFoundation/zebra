@@ -22,14 +22,9 @@ fi
 # Update everything except for alpha crates and zebrad:
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
 
-# # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-#
-# # TODO: Uncomment the two lines below when
-# # https://github.com/crate-ci/cargo-release/issues/691 gets resolved, and set
-# # the appropriate versions
-#
-# cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.5
-# cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.3
+# Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
+cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.5
+cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.3
 
 # Update zebrad:
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
@@ -40,6 +35,6 @@ cargo release commit --verbose --execute --no-confirm --allow-branch '*'
 # Dry run to check the release
 # Workaround for unpublished dependency version errors: https://github.com/crate-ci/cargo-release/issues/691
 # TODO: check all crates after fixing these errors
-cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad
+# cargo release publish --verbose --dry-run --allow-branch '*' --workspace --exclude zebra-consensus --exclude zebra-utils --exclude zebrad
 
 echo "Release process completed."
