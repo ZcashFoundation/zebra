@@ -26,21 +26,21 @@ Book](https://zebra.zfnd.org/user/shielded-scan-grpc-server.html).
 
 - Add a new `zebra-grpc` crate ([#8167](https://github.com/ZcashFoundation/zebra/pull/8167))
 - Start scanner gRPC server with `zebrad` ([#8241](https://github.com/ZcashFoundation/zebra/pull/8241))
-- Add gRPC reflection and document how to use the gRPC server ([#8288](https://github.com/ZcashFoundation/zebra/pull/8288))
-- Add the `Getinfo` gRPC ([#8178](https://github.com/ZcashFoundation/zebra/pull/8178))
-- Add the `get_results` gRPC ([#8255](https://github.com/ZcashFoundation/zebra/pull/8255))
-- Add the `scan` gRPC ([#8268](https://github.com/ZcashFoundation/zebra/pull/8268), [#8303](https://github.com/ZcashFoundation/zebra/pull/8303))
-- Add the `RegisterKeys` gRPC ([#8266](https://github.com/ZcashFoundation/zebra/pull/8266))
-- Add the `ClearResults` and `DeleteKeys` gRPCs ([#8237](https://github.com/ZcashFoundation/zebra/pull/8237))
+- Add gRPC server reflection and document how to use the gRPC server ([#8288](https://github.com/ZcashFoundation/zebra/pull/8288))
+- Add the `GetInfo` gRPC method ([#8178](https://github.com/ZcashFoundation/zebra/pull/8178))
+- Add the `GetResults` gRPC method ([#8255](https://github.com/ZcashFoundation/zebra/pull/8255))
+- Add the `Scan` gRPC method ([#8268](https://github.com/ZcashFoundation/zebra/pull/8268), [#8303](https://github.com/ZcashFoundation/zebra/pull/8303))
+- Add the `RegisterKeys` gRPC method ([#8266](https://github.com/ZcashFoundation/zebra/pull/8266))
+- Add the `ClearResults` and `DeleteKeys` gRPC methods ([#8237](https://github.com/ZcashFoundation/zebra/pull/8237))
 - Add snapshot tests for new gRPCs ([#8277](https://github.com/ZcashFoundation/zebra/pull/8277))
 - Add unit tests for new gRPCs ([#8293](https://github.com/ZcashFoundation/zebra/pull/8293))
 - Create a tower Service in `zebra-scan` ([#8185](https://github.com/ZcashFoundation/zebra/pull/8185))
-- Implement the `SubscribeResults` scan service call ([#8253](https://github.com/ZcashFoundation/zebra/pull/8253))
-- Implement the `ClearResults` scan service call ([#8219](https://github.com/ZcashFoundation/zebra/pull/8219))
-- Implement the `DeleteKeys` scan service call ([#8217](https://github.com/ZcashFoundation/zebra/pull/8217))
-- Implement the `RegisterKeys` scan service call ([#8251](https://github.com/ZcashFoundation/zebra/pull/8251))
-- Implement the `Results` scan service call ([#8224](https://github.com/ZcashFoundation/zebra/pull/8224))
-- Test the `RegisterKeys` scan service call ([#8281](https://github.com/ZcashFoundation/zebra/pull/8281))
+- Implement the `SubscribeResults` scan service request ([#8253](https://github.com/ZcashFoundation/zebra/pull/8253))
+- Implement the `ClearResults` scan service request ([#8219](https://github.com/ZcashFoundation/zebra/pull/8219))
+- Implement the `DeleteKeys` scan service request ([#8217](https://github.com/ZcashFoundation/zebra/pull/8217))
+- Implement the `RegisterKeys` scan service request ([#8251](https://github.com/ZcashFoundation/zebra/pull/8251))
+- Implement the `Results` scan service request ([#8224](https://github.com/ZcashFoundation/zebra/pull/8224))
+- Test the `RegisterKeys` scan service request ([#8281](https://github.com/ZcashFoundation/zebra/pull/8281))
 - Add `ViewingKey` type in `zebra-chain` ([#8198](https://github.com/ZcashFoundation/zebra/pull/8198))
 - Handle `RegisterKeys` messages in scan task ([#8222](https://github.com/ZcashFoundation/zebra/pull/8222))
 
@@ -49,8 +49,8 @@ Book](https://zebra.zfnd.org/user/shielded-scan-grpc-server.html).
 - Remove `rfc.md` file ([#8228](https://github.com/ZcashFoundation/zebra/pull/8228))
 - Update Debian from Bullseye to Bookworm in Docker ([#8273](https://github.com/ZcashFoundation/zebra/pull/8273))
 - Remove Zebra RFCs from `CONTRIBUTING.md` ([#8304](https://github.com/ZcashFoundation/zebra/pull/8304))
-- Publish less tags in Docker Hub ([#8300](https://github.com/ZcashFoundation/zebra/pull/8300))
-- Add Zebra crate versions to dev-dependencies ([#8171](https://github.com/ZcashFoundation/zebra/pull/8171))
+- Publish fewer tags in Docker Hub ([#8300](https://github.com/ZcashFoundation/zebra/pull/8300))
+- Add Zebra crate versions to dev-dependencies and remove circular dev-dependencies ([#8171](https://github.com/ZcashFoundation/zebra/pull/8171))
 - Update docs for building Zebra ([#8315](https://github.com/ZcashFoundation/zebra/pull/8315))
 
 ### Fixed
@@ -61,7 +61,7 @@ Book](https://zebra.zfnd.org/user/shielded-scan-grpc-server.html).
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
-@arya2, @chairulakmal, @gustavovalverde, @mpguerra, @oxarbitrage and @upbqdn.
+@arya2, @bishopcheckmate, @chairulakmal, @gustavovalverde, @mpguerra, @oxarbitrage and @upbqdn.
 
 ## [Zebra 1.5.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.2) - 2024-01-23
 
