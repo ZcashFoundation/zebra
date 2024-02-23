@@ -15,7 +15,7 @@ keys for experimental use or publicly known keys.
 
 ## Build & Install
 
-Use [Zebra 1.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.5.0)
+Use [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0)
 or greater, or the `main` branch to get the latest features, and enable the
 `shielded-scan` feature during the build. You can also use Rust's `cargo` to
 install the latest release:
