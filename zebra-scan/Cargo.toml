@@ -26,17 +26,17 @@ required-features = ["proptest-impl"]
 # Test features
 
 proptest-impl = [
-    "proptest",
-    "proptest-derive",
-    "zebra-state/proptest-impl",
-    "zebra-chain/proptest-impl",
-    "zebra-test",
-    "bls12_381",
-    "ff",
-    "group",
-    "jubjub",
-    "rand",
-    "zcash_note_encryption",
+  "proptest",
+  "proptest-derive",
+  "zebra-state/proptest-impl",
+  "zebra-chain/proptest-impl",
+  "zebra-test",
+  "bls12_381",
+  "ff",
+  "group",
+  "jubjub",
+  "rand",
+  "zcash_note_encryption",
 ]
 
 [dependencies]
