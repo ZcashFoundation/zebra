@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+set -ex
 
 # Check if necessary tools are installed
 if ! command -v git &> /dev/null || ! command -v cargo &> /dev/null; then
@@ -21,8 +23,7 @@ fi
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
 cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.5
-# cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
-# cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
+cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.3
 # Update zebrad:
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
 # Continue with the release process:
