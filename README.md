@@ -61,8 +61,8 @@ For more information, read our [Docker documentation](https://zebra.zfnd.org/use
 ### Building Zebra
 
 Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/doxygen/group__CINDEX.html),
-[pkg-config](http://pkgconf.org/), and a C++ compiler.
+[libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
+compiler.
 
 Zebra is tested with the latest `stable` Rust version. Earlier versions are not
 supported or tested. Any Zebra release can start depending on new features in the
@@ -86,7 +86,14 @@ Below are quick summaries for installing the dependencies on your machine.
      package manager. Typical names are `libclang`, `libclang-dev`, `llvm`, or
      `llvm-dev`.
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS).
-   - **pkg-config**
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**
+
+> [!NOTE]
+> Zebra uses the `--experimental_allow_proto3_optional` flag with `protoc`
+> during compilation. This flag was introduced in [Protocol Buffers
+> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
+> released in May 16, 2020, so make sure you're not using a version of `protoc`
+> older than 3.12.
 
 </details>
 
@@ -97,7 +104,7 @@ Below are quick summaries for installing the dependencies on your machine.
 </summary>
 
 ```sh
-sudo pacman -S rust clang pkgconf
+sudo pacman -S rust clang protobuf
 ```
 
 Note that the package `clang` includes `libclang` as well as the C++ compiler.
