@@ -1,10 +1,7 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.41-beta.10"
-authors = [
-  "Zcash Foundation <zebra@zfnd.org>",
-  "Tower Maintainers <team@tower-rs.com>",
-]
+version = "0.2.41-beta.11"
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
 #
@@ -46,7 +43,7 @@ rand = "0.8.5"
 
 tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.3"
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.10" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.11" }
 tower-test = "0.4.0"
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.34" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.35" }
