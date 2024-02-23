@@ -92,7 +92,14 @@ impl zcash_primitives::consensus::Parameters for Network {
     }
 
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-        todo!()
+        match self {
+            Network::Mainnet => {
+                zcash_primitives::consensus::MAIN_NETWORK.hrp_sapling_extended_full_viewing_key()
+            }
+            Network::Testnet => {
+                zcash_primitives::consensus::TEST_NETWORK.hrp_sapling_extended_full_viewing_key()
+            }
+        }
     }
 
     fn hrp_sapling_payment_address(&self) -> &str {
