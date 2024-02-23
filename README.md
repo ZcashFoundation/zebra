@@ -86,6 +86,14 @@ Below are quick summaries for installing the dependencies on your machine.
      package manager. Typical names are `libclang`, `libclang-dev`, `llvm`, or
      `llvm-dev`.
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS).
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**
+
+> [!NOTE]
+> Zebra uses the `--experimental_allow_proto3_optional` flag with `protoc`
+> during compilation. This flag was introduced in [Protocol Buffers
+> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
+> released in May 16, 2020, so make sure you're not using a version of `protoc`
+> older than 3.12.
 
 </details>
 
@@ -96,7 +104,7 @@ Below are quick summaries for installing the dependencies on your machine.
 </summary>
 
 ```sh
-sudo pacman -S rust clang
+sudo pacman -S rust clang protobuf
 ```
 
 Note that the package `clang` includes `libclang` as well as the C++ compiler.

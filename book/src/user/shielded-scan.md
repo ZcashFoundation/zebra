@@ -24,12 +24,6 @@ install the latest release:
 cargo install --features shielded-scan --locked --git https://github.com/ZcashFoundation/zebra zebrad
 ```
 
-> [!NOTE] Enabling the `shielded-scan` feature will make Zebra use the
-> `--experimental_allow_proto3_optional` flag of `protoc` during compilation.
-> This flag was introduced in [Protocol Buffers
-> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
-> released in May 16, 2020, so make sure you're not using a version of `protoc` older than 3.12.
-
 Zebra binary will be at `~/.cargo/bin/zebrad`, which should be in your `PATH`.
 
 ## Configuration
