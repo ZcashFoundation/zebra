@@ -83,15 +83,22 @@ Check that the release will work:
 - [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
 
 ```sh
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan beta
-# Due to a bug in cargo-release, we need to pass an exact version here
-cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.1
+# Update everything except for alpha crates and zebrad:
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
+# Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
+cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
+cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
+# Update zebrad:
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
+# Continue with the release process:
 cargo release replace --verbose --execute --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --allow-branch '*'
 ```
 
-Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode.
+Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode, however due to a bug in `cargo-release` we need to pass exact versions to the alpha crates:
+
+- [ ] Update `zebra-scan` and `zebra-grpc` alpha crates in the [release-crates-dry-run workflow script](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/scripts/release-crates-dry-run.sh)
+- [ ] Push the above version changes to the release branch.
 
 ## Update End of Support
 
