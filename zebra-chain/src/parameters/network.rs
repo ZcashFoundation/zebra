@@ -103,18 +103,36 @@ impl zcash_primitives::consensus::Parameters for Network {
     }
 
     fn hrp_sapling_payment_address(&self) -> &str {
-        todo!()
+        match self {
+            Network::Mainnet => {
+                zcash_primitives::consensus::MAIN_NETWORK.hrp_sapling_payment_address()
+            }
+            Network::Testnet => {
+                zcash_primitives::consensus::TEST_NETWORK.hrp_sapling_payment_address()
+            }
+        }
     }
 
     fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
         match self {
-            Network::Mainnet => zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
-            Network::Testnet => zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Network::Mainnet => {
+                zcash_primitives::consensus::MAIN_NETWORK.b58_pubkey_address_prefix()
+            }
+            Network::Testnet => {
+                zcash_primitives::consensus::TEST_NETWORK.b58_pubkey_address_prefix()
+            }
         }
     }
 
     fn b58_script_address_prefix(&self) -> [u8; 2] {
-        todo!()
+        match self {
+            Network::Mainnet => {
+                zcash_primitives::consensus::MAIN_NETWORK.b58_script_address_prefix()
+            }
+            Network::Testnet => {
+                zcash_primitives::consensus::TEST_NETWORK.b58_script_address_prefix()
+            }
+        }
     }
 }
 impl From<Network> for &'static str {
