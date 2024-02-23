@@ -62,29 +62,33 @@ pub enum Network {
     /// The oldest public test network.
     Testnet,
 }
+use zcash_primitives::consensus::Network as ZcashPrimitivesNetwork;
 impl zcash_primitives::consensus::Parameters for Network {
     fn activation_height(
         &self,
         nu: zcash_primitives::consensus::NetworkUpgrade,
     ) -> Option<zcash_primitives::consensus::BlockHeight> {
         // Convert `self` (zebra-chain's Network) to librustzcash's Network
-        let librustzcash_network: zcash_primitives::consensus::Network = (*self).into();
-        librustzcash_network.activation_height(nu)
+        ZcashPrimitivesNetwork::from(*self).activation_height(nu)
     }
 
     fn coin_type(&self) -> u32 {
-        match self {
-            Network::Mainnet => zcash_primitives::constants::mainnet::COIN_TYPE,
-            Network::Testnet => zcash_primitives::constants::testnet::COIN_TYPE,
-        }
+        ZcashPrimitivesNetwork::from(*self).coin_type()
     }
 
     fn address_network(&self) -> Option<zcash_address::Network> {
-        todo!()
+        ZcashPrimitivesNetwork::from(*self).address_network()
     }
 
     fn hrp_sapling_extended_spending_key(&self) -> &str {
-        todo!()
+        match self {
+            Network::Mainnet => {
+                zcash_primitives::consensus::MAIN_NETWORK.hrp_sapling_extended_spending_key()
+            }
+            Network::Testnet => {
+                zcash_primitives::consensus::TEST_NETWORK.hrp_sapling_extended_spending_key()
+            }
+        }
     }
 
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
