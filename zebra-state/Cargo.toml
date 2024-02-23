@@ -107,5 +107,5 @@ jubjub = "0.10.0"
 
 tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.34", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.34" }

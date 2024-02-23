@@ -26,17 +26,17 @@ required-features = ["proptest-impl"]
 # Test features
 
 proptest-impl = [
-    "proptest",
-    "proptest-derive",
-    "zebra-state/proptest-impl",
-    "zebra-chain/proptest-impl",
-    "zebra-test",
-    "bls12_381",
-    "ff",
-    "group",
-    "jubjub",
-    "rand",
-    "zcash_note_encryption",
+  "proptest",
+  "proptest-derive",
+  "zebra-state/proptest-impl",
+  "zebra-chain/proptest-impl",
+  "zebra-test",
+  "bls12_381",
+  "ff",
+  "group",
+  "jubjub",
+  "rand",
+  "zcash_note_encryption",
 ]
 
 [dependencies]
@@ -87,5 +87,7 @@ jubjub = "0.10.0"
 rand = "0.8.5"
 zcash_note_encryption = "0.4.0"
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.34", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.34", features = [
+  "proptest-impl",
+] }
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.34" }

@@ -4702,7 +4702,6 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-futures",
- "zebra-consensus",
  "zebra-test",
 ]
 
