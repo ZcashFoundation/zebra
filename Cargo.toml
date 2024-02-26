@@ -14,6 +14,7 @@ members = [
 	"zebra-grpc",
         "tower-batch-control",
         "tower-fallback",
+        "zebra-app/src-tauri"
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
