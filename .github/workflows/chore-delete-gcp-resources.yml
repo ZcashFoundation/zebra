@@ -136,6 +136,5 @@ jobs:
         with:
           args: >-
             -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/zebrad-test
-            -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/lightwalletd
             -grace=${{ env.DELETE_IMAGE_HOURS }}
             -keep=${{ env.KEEP_LATEST_IMAGE_COUNT }}
