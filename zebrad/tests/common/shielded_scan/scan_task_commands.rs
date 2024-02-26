@@ -71,6 +71,10 @@ pub(crate) async fn run() -> Result<()> {
     let mut scan_config = zebra_scan::Config::default();
     scan_config.db_config_mut().cache_dir = zebrad_state_path.clone();
 
+    // Logs the network as zebrad would as part of the metadata when starting up.
+    // This is currently needed for the 'Check startup logs' step in CI to pass.
+    tracing::info!("Zcash network: {network}");
+
     // Remove the scan directory before starting.
     let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
     fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
