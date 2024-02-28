@@ -77,6 +77,9 @@ where
 
         let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
 
+        // TODO: Make sure the service is ready and has been called with RegisterKeys request first.
+        //       `Oneshot` could call the service with these requests in either order, and
+        //       if it calls subscribe first, it will return an error.
         let subscribe_results_response_fut =
             self.scan_service
                 .clone()
@@ -87,6 +90,8 @@ where
         let (register_keys_response, subscribe_results_response) =
             tokio::join!(register_keys_response_fut, subscribe_results_response_fut);
 
+        // TODO: Ignore errors here where no key was registered, unless the subscribe results request also returns an error that
+        //       the results sender was dropped because the keys didn't match any registered keys.
         let ScanServiceResponse::RegisteredKeys(_) = register_keys_response
             .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
