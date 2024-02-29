@@ -391,23 +391,7 @@ impl ExpandedDifficulty {
     /// See `PoWLimit` in the Zcash specification:
     /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub fn target_difficulty_limit(network: Network) -> ExpandedDifficulty {
-        let limit: U256 = match network {
-            /* 2^243 - 1 */
-            Network::Mainnet => (U256::one() << 243) - 1,
-            /* 2^251 - 1 */
-            Network::Testnet => (U256::one() << 251) - 1,
-        };
-
-        // `zcashd` converts the PoWLimit into a compact representation before
-        // using it to perform difficulty filter checks.
-        //
-        // The Zcash specification converts to compact for the default difficulty
-        // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
-        // ZIP 208 don't specify this conversion either.) See #1277 for details.
-        ExpandedDifficulty(limit)
-            .to_compact()
-            .to_expanded()
-            .expect("difficulty limits are valid expanded values")
+        network.target_difficulty_limit()
     }
 
     /// Calculate the CompactDifficulty for an expanded difficulty.
@@ -702,6 +686,38 @@ impl PartialCumulativeWork {
         let work = self.as_u128() as f64;
 
         work.log2()
+    }
+}
+
+trait ParameterDifficulty {
+    fn target_difficulty_limit(&self) -> ExpandedDifficulty;
+}
+
+impl ParameterDifficulty for Network {
+    /// Returns the easiest target difficulty allowed on `network`.
+    ///
+    /// # Consensus
+    ///
+    /// See `PoWLimit` in the Zcash specification:
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
+    fn target_difficulty_limit(&self) -> ExpandedDifficulty {
+        let limit: U256 = match self {
+            /* 2^243 - 1 */
+            Network::Mainnet => (U256::one() << 243) - 1,
+            /* 2^251 - 1 */
+            Network::Testnet => (U256::one() << 251) - 1,
+        };
+
+        // `zcashd` converts the PoWLimit into a compact representation before
+        // using it to perform difficulty filter checks.
+        //
+        // The Zcash specification converts to compact for the default difficulty
+        // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
+        // ZIP 208 don't specify this conversion either.) See #1277 for details.
+        ExpandedDifficulty(limit)
+            .to_compact()
+            .to_expanded()
+            .expect("difficulty limits are valid expanded values")
     }
 }
 
