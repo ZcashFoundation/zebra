@@ -98,7 +98,7 @@ ENV CARGO_HOME="/opt/zebrad/.cargo/"
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-COPY --from=us-docker.pkg.dev/zfnd-dev-zebra/zebra/lightwalletd:edge /opt/lightwalletd /usr/local/bin
+COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 
 # cargo uses timestamps for its cache, so they need to be in this order:
 # unmodified source files < previous build cache < modified source files
