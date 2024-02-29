@@ -337,11 +337,11 @@ pub(crate) fn transparent_output_address(
     }
 }
 
-impl From<Network> for zcash_primitives::consensus::Network {
+impl From<Network> for &zcash_primitives::consensus::Network {
     fn from(network: Network) -> Self {
         match network {
-            Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-            Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
+            Network::Mainnet => &zcash_primitives::consensus::Network::MainNetwork,
+            Network::Testnet => &zcash_primitives::consensus::Network::TestNetwork,
         }
     }
 }
