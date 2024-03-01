@@ -995,10 +995,7 @@ fn sapling_spend_v4_to_fake_v5(
 pub fn test_transactions(
     network: Network,
 ) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
-    let blocks = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let blocks = network.get_block_iter();
 
     transactions_from_blocks(blocks)
 }
