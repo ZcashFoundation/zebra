@@ -1,6 +1,6 @@
 [package]
 name = "zebra-utils"
-version = "1.0.0-beta.34"
+version = "1.0.0-beta.35"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
@@ -87,12 +87,12 @@ tracing-error = "0.2.0"
 tracing-subscriber = "0.3.18"
 thiserror = "1.0.57"
 
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.34" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.34" }
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.3", optional = true }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.35" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35" }
+zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.4", optional = true }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.34", optional = true }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.35", optional = true }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { version = "0.12.1", optional = true }

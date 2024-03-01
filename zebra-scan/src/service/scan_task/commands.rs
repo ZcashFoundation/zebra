@@ -8,6 +8,7 @@ use tokio::sync::{
     oneshot,
 };
 
+use tower::BoxError;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_node_services::scan_service::response::ScanResult;
@@ -41,11 +42,11 @@ pub enum ScanTaskCommand {
 
     /// Start sending results for key hashes to `result_sender`
     SubscribeResults {
-        /// Sender for results
-        result_sender: Sender<ScanResult>,
-
         /// Key hashes to send the results of to result channel
         keys: HashSet<String>,
+
+        /// Returns the result receiver once the subscribed keys have been added.
+        rsp_tx: oneshot::Sender<Receiver<ScanResult>>,
     },
 }
 
@@ -69,6 +70,7 @@ impl ScanTask {
                 (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
             >,
             HashMap<SaplingScanningKey, Sender<ScanResult>>,
+            Vec<(Receiver<ScanResult>, oneshot::Sender<Receiver<ScanResult>>)>,
         ),
         Report,
     > {
@@ -76,6 +78,7 @@ impl ScanTask {
 
         let mut new_keys = HashMap::new();
         let mut new_result_senders = HashMap::new();
+        let mut new_result_receivers = Vec::new();
         let sapling_activation_height = network.sapling_activation_height();
 
         loop {
@@ -142,13 +145,20 @@ impl ScanTask {
                     let _ = done_tx.send(());
                 }
 
-                ScanTaskCommand::SubscribeResults {
-                    result_sender,
-                    keys,
-                } => {
-                    let keys = keys
+                ScanTaskCommand::SubscribeResults { rsp_tx, keys } => {
+                    let keys: Vec<_> = keys
                         .into_iter()
-                        .filter(|key| registered_keys.contains_key(key));
+                        .filter(|key| registered_keys.contains_key(key))
+                        .collect();
+
+                    if keys.is_empty() {
+                        continue;
+                    }
+
+                    let (result_sender, result_receiver) =
+                        tokio::sync::mpsc::channel(RESULTS_SENDER_BUFFER_SIZE);
+
+                    new_result_receivers.push((result_receiver, rsp_tx));
 
                     for key in keys {
                         new_result_senders.insert(key, result_sender.clone());
@@ -157,7 +167,7 @@ impl ScanTask {
             }
         }
 
-        Ok((new_keys, new_result_senders))
+        Ok((new_keys, new_result_senders, new_result_receivers))
     }
 
     /// Sends a command to the scan task
@@ -200,18 +210,14 @@ impl ScanTask {
     /// Sends a message to the scan task to start sending the results for the provided viewing keys to a channel.
     ///
     /// Returns the channel receiver.
-    pub fn subscribe(
+    pub async fn subscribe(
         &mut self,
         keys: HashSet<SaplingScanningKey>,
-    ) -> Result<Receiver<ScanResult>, TrySendError<ScanTaskCommand>> {
-        // TODO: Use a bounded channel
-        let (result_sender, result_receiver) =
-            tokio::sync::mpsc::channel(RESULTS_SENDER_BUFFER_SIZE);
+    ) -> Result<Receiver<ScanResult>, BoxError> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        self.send(ScanTaskCommand::SubscribeResults {
-            result_sender,
-            keys,
-        })
-        .map(|_| result_receiver)
+        self.send(ScanTaskCommand::SubscribeResults { keys, rsp_tx })?;
+
+        Ok(rsp_rx.await?)
     }
 }

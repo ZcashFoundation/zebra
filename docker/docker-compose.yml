@@ -16,6 +16,10 @@ services:
           memory: 16G
     env_file:
       - .env
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
     #! Uncomment the `configs` mapping below to use the `zebrad.toml` config file from the host machine
     #! NOTE: This will override the zebrad.toml in the image and make some variables irrelevant
     # configs:
