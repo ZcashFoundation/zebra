@@ -50,8 +50,4 @@ pub enum SerializationError {
     /// rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus).
     #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
     BadTransactionBalance,
-
-    ///  Invalid BLOCK_MAINNET_******_BYTES vector ID given to vector fetcher
-    #[error("invalid mainnet / testnet bytes id given to vector fetcher")]
-    UnsupportedVersion(u32),
 }

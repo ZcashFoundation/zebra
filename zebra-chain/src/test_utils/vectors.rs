@@ -1,17 +1,10 @@
 //! Network methods for fetching blockchain vectors.
 //!
 
-#[cfg(any(test, feature = "proptest-impl"))]
 use std::collections::BTreeMap;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use crate::{
-    block::Block,
-    parameters::Network,
-    serialization::{SerializationError, ZcashDeserializeInto},
-};
+use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 
-#[cfg(any(test, feature = "proptest-impl"))]
 use zebra_test::vectors::{
     BLOCK_MAINNET_1046400_BYTES, BLOCK_MAINNET_653599_BYTES, BLOCK_MAINNET_982681_BYTES,
     BLOCK_TESTNET_1116000_BYTES, BLOCK_TESTNET_583999_BYTES, BLOCK_TESTNET_925483_BYTES,
@@ -22,7 +15,6 @@ use zebra_test::vectors::{
 };
 
 /// Network methods for fetching blockchain vectors.
-#[cfg(any(test, feature = "proptest-impl"))]
 impl Network {
     /// Returns true if network is of type Mainnet.
     pub fn is_mainnet(&self) -> bool {
@@ -57,24 +49,15 @@ impl Network {
     }
 
     /// Returns block bytes
-    pub fn get_block_bytes(
-        &self,
-        main_bytes: u32,
-        test_bytes: u32,
-    ) -> Result<Block, SerializationError> {
-        if self.is_mainnet() {
-            match main_bytes {
-                653_599 => BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into(),
-                982_681 => BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into(),
-                _ => Err(SerializationError::UnsupportedVersion(main_bytes)),
-            }
-        } else {
-            match test_bytes {
-                583_999 => BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into(),
-                925_483 => BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into(),
-                _ => Err(SerializationError::UnsupportedVersion(test_bytes)),
-            }
-        }
+    pub fn get_test_block(&self, main_height: u32, test_height: u32) -> Option<Block> {
+        let block_bytes = match (self.is_mainnet(), main_height, test_height) {
+            (true, 653_599, _) => BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into().ok(),
+            (true, 982_681, _) => BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into().ok(),
+            (false, _, 583_999) => BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into().ok(),
+            (false, _, 925_483) => BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into().ok(),
+            _ => return None,
+        };
+        block_bytes
     }
 
     /// Returns iterator over blockchain.
@@ -124,28 +107,24 @@ impl Network {
     }
 
     /// Returns block and sapling root bytes
-    pub fn get_block_sapling_roots_bytes(
+    pub fn get_test_block_sapling_roots(
         &self,
-        main_bytes: u32,
-        test_bytes: u32,
-    ) -> Result<(&[u8], [u8; 32]), SerializationError> {
-        if self.is_mainnet() {
-            match main_bytes {
-                1_046_400_ => Ok((
+        main_height: u32,
+        test_height: u32,
+    ) -> Option<(&[u8], [u8; 32])> {
+        let block_bytes: Option<(&[u8], [u8; 32])> =
+            match (self.is_mainnet(), main_height, test_height) {
+                (true, 1_046_400, _) => Some((
                     &BLOCK_MAINNET_1046400_BYTES[..],
                     *SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
                 )),
-                _ => Err(SerializationError::UnsupportedVersion(main_bytes)),
-            }
-        } else {
-            match test_bytes {
-                1_116_000 => Ok((
+                (false, _, 1_116_000) => Some((
                     &BLOCK_TESTNET_1116000_BYTES[..],
                     *SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
                 )),
-                _ => Err(SerializationError::UnsupportedVersion(test_bytes)),
-            }
-        }
+                _ => return None,
+            };
+        block_bytes
     }
 
     /// Returns BTreemap of blocks and sprout roots, and last split height.
