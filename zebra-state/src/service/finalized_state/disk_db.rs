@@ -21,7 +21,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::ReadOptions;
+use rocksdb::{ReadOptions, ColumnFamilyDescriptor, Options};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -512,6 +512,38 @@ impl DiskWriteBatch {
 }
 
 impl DiskDb {
+    /// Prints rocksdb metrics for each column family along with total database disk size, live data disk size and database memory size.
+    pub fn print_db_metrics(&self) {
+        let mut total_size_on_disk = 0;
+        let mut total_size_in_mem = 0;
+        let mut total_live_size_on_disk = 0;
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options(); 
+
+        let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
+    
+        for cf_descriptor in column_families {
+            let cf_name = &cf_descriptor.name();
+            let cf_handle = db.cf_handle(cf_name).expect("Column family handle must exist");
+    
+            let live_data_size = db.property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size").unwrap_or(Some(0));
+            let total_sst_files_size = db.property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size").unwrap_or(Some(0));
+    
+            let cf_disk_size = live_data_size.unwrap_or(0) + total_sst_files_size.unwrap_or(0);
+            total_size_on_disk += cf_disk_size;
+            total_live_size_on_disk += live_data_size.unwrap_or(0);
+    
+            let mem_table_size = db.property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables").unwrap_or(Some(0));
+            total_size_in_mem += mem_table_size.unwrap_or(0);
+    
+            info!("Column Family: {}, Disk Size: {} bytes, Memory Size: {} bytes", cf_name, cf_disk_size, mem_table_size.unwrap_or(0));
+        }
+    
+        info!("Total Database Disk Size: {} bytes", total_size_on_disk);
+        info!("Total Live Data Disk Size: {} bytes", total_live_size_on_disk);
+        info!("Total Database Memory Size: {} bytes", total_size_in_mem);
+    }
+
     /// Returns a forward iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
@@ -719,6 +751,33 @@ impl DiskDb {
     ///
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
+
+    /// Build a vector of current column families on the disk and optionally any new column families.
+    /// 
+    /// Returns an iterable collection of all column families.
+    fn construct_column_families(
+        db_options: &Options,
+        path: &Path,
+        column_families_in_code: &[String],
+    ) -> Vec<ColumnFamilyDescriptor> {
+        // When opening the database in read/write mode, all column families must be opened.
+        //
+        // To make Zebra forward-compatible with databases updated by later versions,
+        // we read any existing column families off the disk, then add any new column families
+        // from the current implementation.
+        //
+        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference
+        let column_families_on_disk = DB::list_cf(db_options, path).unwrap_or_default();
+    
+        let column_families = column_families_on_disk.into_iter()
+            .chain(column_families_in_code.iter().cloned())
+            .unique() 
+            .collect::<Vec<_>>();
+    
+        column_families.into_iter()
+            .map(|cf_name| ColumnFamilyDescriptor::new(cf_name, db_options.clone()))
+            .collect()
+    }
 
     /// Opens or creates the database at a path based on the kind, major version and network,
     /// with the supplied column families, preserving any existing column families,
