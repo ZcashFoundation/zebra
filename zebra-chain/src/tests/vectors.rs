@@ -33,9 +33,9 @@ impl Network {
     ///
     pub fn block_map(&self) -> &BTreeMap<u32, &'static [u8]> {
         if self.is_mainnet() {
-            &*zebra_test::vectors::MAINNET_BLOCKS
+            &zebra_test::vectors::MAINNET_BLOCKS
         } else {
-            &*zebra_test::vectors::TESTNET_BLOCKS
+            &zebra_test::vectors::TESTNET_BLOCKS
         }
     }
 
@@ -50,14 +50,13 @@ impl Network {
 
     /// Returns block bytes
     pub fn test_block(&self, main_height: u32, test_height: u32) -> Option<Block> {
-        let block_bytes = match (self.is_mainnet(), main_height, test_height) {
+        match (self.is_mainnet(), main_height, test_height) {
             (true, 653_599, _) => BLOCK_MAINNET_653599_BYTES.zcash_deserialize_into().ok(),
             (true, 982_681, _) => BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into().ok(),
             (false, _, 583_999) => BLOCK_TESTNET_583999_BYTES.zcash_deserialize_into().ok(),
             (false, _, 925_483) => BLOCK_TESTNET_925483_BYTES.zcash_deserialize_into().ok(),
-            _ => return None,
-        };
-        block_bytes
+            _ => None,
+        }
     }
 
     /// Returns iterator over blockchain.
@@ -112,19 +111,17 @@ impl Network {
         main_height: u32,
         test_height: u32,
     ) -> Option<(&[u8], [u8; 32])> {
-        let block_bytes: Option<(&[u8], [u8; 32])> =
-            match (self.is_mainnet(), main_height, test_height) {
-                (true, 1_046_400, _) => Some((
-                    &BLOCK_MAINNET_1046400_BYTES[..],
-                    *SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
-                )),
-                (false, _, 1_116_000) => Some((
-                    &BLOCK_TESTNET_1116000_BYTES[..],
-                    *SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
-                )),
-                _ => return None,
-            };
-        block_bytes
+        match (self.is_mainnet(), main_height, test_height) {
+            (true, 1_046_400, _) => Some((
+                &BLOCK_MAINNET_1046400_BYTES[..],
+                *SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
+            )),
+            (false, _, 1_116_000) => Some((
+                &BLOCK_TESTNET_1116000_BYTES[..],
+                *SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
+            )),
+            _ => None,
+        }
     }
 
     /// Returns BTreemap of blocks and sprout roots, and last split height.
