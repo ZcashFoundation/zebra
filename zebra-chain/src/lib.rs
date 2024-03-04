@@ -44,7 +44,7 @@ pub mod work;
 pub use block::LedgerState;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub mod test;
+pub mod tests;
 
 /// Error type alias to make working with generic errors easier.
 ///
