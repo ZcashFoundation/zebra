@@ -23,10 +23,11 @@ impl fmt::Debug for Magic {
         f.debug_tuple("Magic").field(&hex::encode(self.0)).finish()
     }
 }
-pub trait ParameterMagic {
+pub(crate) trait ParameterMagic {
     fn magic_value(&self) -> Magic;
 }
 impl ParameterMagic for Network {
+    /// Get the magic value associated to this `Network`.
     fn magic_value(&self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
