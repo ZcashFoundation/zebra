@@ -33,7 +33,7 @@ fn push_and_prune_for_network_upgrade(
     network: Network,
     network_upgrade: NetworkUpgrade,
 ) -> Result<()> {
-    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+    let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
     let height = network_upgrade.activation_height(network).unwrap().0;
 
@@ -115,7 +115,7 @@ fn upgrade() -> Result<()> {
 }
 
 fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
-    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+    let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
     let height = network_upgrade.activation_height(network).unwrap().0;
 

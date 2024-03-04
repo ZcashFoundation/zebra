@@ -44,7 +44,7 @@ async fn test_rpc_response_data() {
 
 async fn test_rpc_response_data_for_network(network: Network) {
     // Create a continuous chain of mainnet and testnet blocks from genesis
-    let block_data = network.get_blockchain_map();
+    let block_data = network.blockchain_map();
 
     let blocks: Vec<Arc<Block>> = block_data
         .iter()

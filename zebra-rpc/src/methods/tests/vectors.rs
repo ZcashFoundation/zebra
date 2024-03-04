@@ -656,7 +656,7 @@ async fn rpc_getaddresstxids_response() {
 
     for network in [Mainnet, Testnet] {
         let blocks: Vec<Arc<Block>> = network
-            .get_blockchain_map()
+            .blockchain_map()
             .iter()
             .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
             .collect();

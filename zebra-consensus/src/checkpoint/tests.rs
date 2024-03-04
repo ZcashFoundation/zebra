@@ -233,7 +233,7 @@ async fn continuous_blockchain(
     let _init_guard = zebra_test::init();
 
     // A continuous blockchain
-    let blockchain = network.get_blockchain_iter();
+    let blockchain = network.blockchain_iter();
 
     let blockchain: Vec<_> = blockchain
         .map(|(height, b)| {

@@ -19,7 +19,7 @@ fn tree() -> Result<()> {
 }
 
 fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
-    let (blocks, sapling_roots) = network.get_block_sapling_roots_map();
+    let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
     let height = network_upgrade.activation_height(network).unwrap().0;
 

@@ -273,7 +273,7 @@ fn block_difficulty() -> Result<(), Report> {
 fn block_difficulty_for_network(network: Network) -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let block_iter = network.get_block_iter();
+    let block_iter = network.block_iter();
 
     let diff_zero = ExpandedDifficulty(U256::zero());
     let diff_one = ExpandedDifficulty(U256::one());
@@ -359,7 +359,7 @@ fn genesis_block_difficulty() -> Result<(), Report> {
 fn genesis_block_difficulty_for_network(network: Network) -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let block = network.get_gen_block();
+    let block = network.gen_block();
 
     let block = block.expect("test vectors contain the genesis block");
     let block = Block::zcash_deserialize(&block[..]).expect("block test vector should deserialize");

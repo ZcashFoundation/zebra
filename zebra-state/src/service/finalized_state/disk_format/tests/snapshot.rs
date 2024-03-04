@@ -89,7 +89,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
     // Snapshot raw database data for:
     // - mainnet and testnet
     // - genesis, block 1, and block 2
-    let blocks = network.get_blockchain_map();
+    let blocks = network.blockchain_map();
 
     // We limit the number of blocks, because the serialized data is a few kilobytes per block.
     for height in 0..=2 {

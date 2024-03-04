@@ -995,7 +995,7 @@ fn sapling_spend_v4_to_fake_v5(
 pub fn test_transactions(
     network: Network,
 ) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
-    let blocks = network.get_block_iter();
+    let blocks = network.block_iter();
 
     transactions_from_blocks(blocks)
 }

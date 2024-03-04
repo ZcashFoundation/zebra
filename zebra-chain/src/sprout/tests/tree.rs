@@ -87,7 +87,7 @@ fn incremental_roots_with_blocks() -> Result<()> {
 
 fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     // Load the test data.
-    let (blocks, sprout_roots, next_height) = network.get_block_sprout_roots_height();
+    let (blocks, sprout_roots, next_height) = network.block_sprout_roots_height();
 
     // Load the Genesis height.
     let genesis_height = NetworkUpgrade::Genesis

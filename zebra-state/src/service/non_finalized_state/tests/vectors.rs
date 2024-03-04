@@ -144,7 +144,7 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let block2 = block1.make_fake_child().set_work(10);
     let child = block1.make_fake_child().set_work(1);
@@ -182,7 +182,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let block2 = block1.make_fake_child().set_work(10);
     let child = block1.make_fake_child().set_work(1);
@@ -231,7 +231,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let block2 = block1.make_fake_child().set_work(10);
     let child1 = block1.make_fake_child().set_work(1);
@@ -275,7 +275,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let long_chain_block1 = block1.make_fake_child().set_work(1);
     let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -318,7 +318,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let long_chain_block1 = block1.make_fake_child().set_work(1);
     let long_chain_block2 = long_chain_block1.make_fake_child().set_work(1);
@@ -364,7 +364,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     // Since the brand new FinalizedState below will pass a None history tree
     // to the NonFinalizedState, we must use pre-Heartwood blocks since
     // they won't trigger the history tree update in the NonFinalizedState.
-    let block1: Arc<Block> = Arc::new(network.get_test_block(653599, 583999).unwrap());
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
 
     let less_work_child = block1.make_fake_child().set_work(1);
     let more_work_child = block1.make_fake_child().set_work(3);
@@ -405,7 +405,7 @@ fn history_tree_is_updated_for_network_upgrade(
     network: Network,
     network_upgrade: NetworkUpgrade,
 ) -> Result<()> {
-    let blocks = network.get_block_map();
+    let blocks = network.block_map();
 
     let height = network_upgrade.activation_height(network).unwrap().0;
 
@@ -504,7 +504,7 @@ fn commitment_is_validated() {
 }
 
 fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) {
-    let blocks = network.get_block_map();
+    let blocks = network.block_map();
     let height = network_upgrade.activation_height(network).unwrap().0;
 
     let prev_block = Arc::new(

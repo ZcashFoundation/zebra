@@ -251,7 +251,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
         ..Default::default()
     });
 
-    let block: Block = network.get_test_block(982681, 925483).unwrap();
+    let block: Block = network.test_block(982681, 925483).unwrap();
 
     // Get a test transaction
     let tx = &*(block.transactions[1]).clone();

@@ -208,7 +208,7 @@ fn block_test_vectors_height_testnet() {
 /// Test that the block test vector indexes match the heights in the block data,
 /// and that each post-sapling block has a corresponding final sapling root.
 fn block_test_vectors_height(network: Network) {
-    let (block_iter, sapling_roots) = network.get_block_sapling_roots_iter();
+    let (block_iter, sapling_roots) = network.block_sapling_roots_iter();
 
     for (&height, block) in block_iter {
         let block = block
@@ -253,7 +253,7 @@ fn block_commitment_testnet() {
 ///
 /// TODO: add chain history test vectors?
 fn block_commitment(network: Network) {
-    let (block_iter, sapling_roots) = network.get_block_sapling_roots_iter();
+    let (block_iter, sapling_roots) = network.block_sapling_roots_iter();
 
     for (height, block) in block_iter {
         let block = block

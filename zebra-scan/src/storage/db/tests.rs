@@ -45,7 +45,7 @@ pub fn add_fake_results(
     height: Height,
     add_progress_marker: bool,
 ) {
-    let blocks = network.get_blockchain_map();
+    let blocks = network.blockchain_map();
 
     let block: Arc<Block> = blocks
         .get(&height.0)
