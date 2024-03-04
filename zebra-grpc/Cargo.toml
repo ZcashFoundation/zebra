@@ -26,7 +26,7 @@ tokio-stream = "0.1.14"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
 color-eyre = "0.6.2"
 
-zcash_primitives = { version = "0.13.0-rc.1" }
+zcash_primitives = { version = "0.14.0" }
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.35", features = ["shielded-scan"] }
 zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.35" }
@@ -35,7 +35,7 @@ zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.35" }
 tonic-build = "0.11.0"
 
 [dev-dependencies]
-insta = { version = "1.33.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.36.1", features = ["redactions", "json", "ron"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state" }

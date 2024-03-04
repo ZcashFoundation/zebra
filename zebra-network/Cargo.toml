@@ -47,17 +47,17 @@ chrono = { version = "0.4.34", default-features = false, features = ["clock", "s
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
-indexmap = { version = "2.2.3", features = ["serde"] }
+indexmap = { version = "2.2.5", features = ["serde"] }
 itertools = "0.12.1"
 lazy_static = "1.4.0"
 num-integer = "0.1.46"
 ordered-map = "0.4.2"
 pin-project = "1.1.4"
 rand = "0.8.5"
-rayon = "1.8.1"
+rayon = "1.9.0"
 regex = "1.10.3"
 serde = { version = "1.0.196", features = ["serde_derive"] }
-tempfile = "3.10.0"
+tempfile = "3.10.1"
 thiserror = "1.0.57"
 
 futures = "0.3.30"
