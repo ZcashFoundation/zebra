@@ -125,7 +125,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.1
+        uses: google-github-actions/auth@v2.1.2
         with:
           retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
