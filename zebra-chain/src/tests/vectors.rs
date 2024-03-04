@@ -31,11 +31,11 @@ impl Network {
     }
 
     ///
-    pub fn block_map(&self) -> &BTreeMap<u32, &'static [u8]> {
+    pub fn block_map(&self) -> BTreeMap<u32, &'static [u8]> {
         if self.is_mainnet() {
-            &zebra_test::vectors::MAINNET_BLOCKS
+            zebra_test::vectors::MAINNET_BLOCKS.clone()
         } else {
-            &zebra_test::vectors::TESTNET_BLOCKS
+            zebra_test::vectors::TESTNET_BLOCKS.clone()
         }
     }
 
