@@ -62,44 +62,26 @@ pub enum Network {
     /// The oldest public test network.
     Testnet,
 }
-use zcash_primitives::consensus::Network as ZcashPrimitivesNetwork;
-impl zcash_primitives::consensus::Parameters for Network {
-    fn activation_height(
-        &self,
-        nu: zcash_primitives::consensus::NetworkUpgrade,
-    ) -> Option<zcash_primitives::consensus::BlockHeight> {
-        // Convert `self` (zebra-chain's Network) to librustzcash's Network
-        <&ZcashPrimitivesNetwork>::from(*self).activation_height(nu)
-    }
 
-    fn coin_type(&self) -> u32 {
-        <&ZcashPrimitivesNetwork>::from(*self).coin_type()
-    }
-
-    fn address_network(&self) -> Option<zcash_address::Network> {
-        <&ZcashPrimitivesNetwork>::from(*self).address_network()
-    }
-
-    fn hrp_sapling_extended_spending_key(&self) -> &str {
-        <&ZcashPrimitivesNetwork>::from(*self).hrp_sapling_extended_spending_key()
-    }
-
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-        <&ZcashPrimitivesNetwork>::from(*self).hrp_sapling_extended_full_viewing_key()
-    }
-
-    fn hrp_sapling_payment_address(&self) -> &str {
-        <&ZcashPrimitivesNetwork>::from(*self).hrp_sapling_payment_address()
-    }
-
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
+impl Network {
+    /// Returns the human-readable prefix for Base58Check-encoded transparent
+    /// pay-to-public-key-hash payment addresses for the network.
+    pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
         <&ZcashPrimitivesNetwork>::from(*self).b58_pubkey_address_prefix()
     }
 
-    fn b58_script_address_prefix(&self) -> [u8; 2] {
+    /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
+    /// payment addresses for the network.
+    pub fn b58_script_address_prefix(&self) -> [u8; 2] {
         <&ZcashPrimitivesNetwork>::from(*self).b58_script_address_prefix()
     }
 }
+
+// impl NetworkSubsetExt for Network {
+//     type NetworkOffload = ZcashPrimitivesNetwork;
+// }
+
 impl From<Network> for &'static str {
     fn from(network: Network) -> &'static str {
         match network {
