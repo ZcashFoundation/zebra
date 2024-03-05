@@ -383,7 +383,7 @@ pub fn scan_block<K: ScanningKey>(
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
 
-    let network: &zcash_primitives::consensus::Network = Into::into(network);
+    let network: zcash_primitives::consensus::Network = Into::into(network);
 
     let chain_metadata = ChainMetadata {
         sapling_commitment_tree_size: sapling_tree_size,
@@ -399,7 +399,7 @@ pub fn scan_block<K: ScanningKey>(
         .collect();
 
     zcash_client_backend::scanning::scan_block(
-        network,
+        &network,
         block_to_compact(block, chain_metadata),
         scanning_keys.as_slice(),
         // Ignore whether notes are change from a viewer's own spends for now.
