@@ -73,10 +73,13 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
     let mainnet_transcript = &[&COMMIT_FINALIZED_BLOCK_MAINNET];
     let testnet_transcript = &[&COMMIT_FINALIZED_BLOCK_TESTNET];
 
-    for transcript_data in match network {
-        Network::Mainnet => mainnet_transcript,
-        Network::Testnet => testnet_transcript,
-    } {
+    let net_data = if network.is_mainnet() {
+        mainnet_transcript
+    } else {
+        testnet_transcript
+    };
+
+    for transcript_data in net_data {
         // We're not verifying UTXOs here.
         let (service, _, _, _) = zebra_state::init(Config::ephemeral(), network, Height::MAX, 0);
         let transcript = Transcript::from(transcript_data.iter().cloned());

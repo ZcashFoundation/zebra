@@ -413,9 +413,10 @@ pub async fn test_responses<State, ReadState>(
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
 
     // `validateaddress`
-    let founder_address = match network {
-        Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
-        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+    let founder_address = if network.is_mainnet() {
+        "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR"
+    } else {
+        "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi"
     };
 
     let validate_address = get_block_template_rpc
@@ -431,9 +432,10 @@ pub async fn test_responses<State, ReadState>(
     snapshot_rpc_validateaddress("invalid", validate_address, &settings);
 
     // `z_validateaddress`
-    let founder_address = match network {
-        Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
-        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+    let founder_address = if network.is_mainnet() {
+        "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR"
+    } else {
+        "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi"
     };
 
     let z_validate_address = get_block_template_rpc
