@@ -86,6 +86,13 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  scan-task-commands:
+    name: scan task commands / Run scan-task-commands test
+    needs: get-available-disks
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+    
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     needs: get-available-disks

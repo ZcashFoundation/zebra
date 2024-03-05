@@ -183,14 +183,11 @@ impl ScanTask {
     /// Returns a oneshot channel receiver to notify the caller when the keys have been removed.
     pub fn remove_keys(
         &mut self,
-        keys: &[String],
+        keys: Vec<String>,
     ) -> Result<oneshot::Receiver<()>, TrySendError<ScanTaskCommand>> {
         let (done_tx, done_rx) = oneshot::channel();
 
-        self.send(ScanTaskCommand::RemoveKeys {
-            keys: keys.to_vec(),
-            done_tx,
-        })?;
+        self.send(ScanTaskCommand::RemoveKeys { keys, done_tx })?;
 
         Ok(done_rx)
     }
