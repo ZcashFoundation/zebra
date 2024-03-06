@@ -1,7 +1,10 @@
 use proptest::prelude::*;
 
 use super::super::{Network, ZIP_212_GRACE_PERIOD_DURATION};
-use crate::parameters::NetworkUpgrade;
+use crate::{
+    block::Height,
+    parameters::{NetworkUpgrade, TESTNET_MAX_TIME_START_HEIGHT},
+};
 
 proptest! {
     /// Check that the mandatory checkpoint is after the ZIP-212 grace period.
@@ -22,5 +25,17 @@ proptest! {
             .expect("ZIP-212 grace period ends in a valid block height");
 
         assert!(network.mandatory_checkpoint_height() >= grace_period_end_height);
+    }
+
+    #[test]
+    /// Asserts that the activation height is correct for the block
+    /// maximum time rule on Testnet is correct.
+    fn max_block_times_correct_enforcement(height in any::<Height>()) {
+        let _init_guard = zebra_test::init();
+
+        assert!(Network::Mainnet.is_max_block_time_enforced(height));
+        assert_eq!(Network::Testnet.is_max_block_time_enforced(height), TESTNET_MAX_TIME_START_HEIGHT <= height);
+
+
     }
 }
