@@ -18,7 +18,9 @@ use zcash_script::{
 };
 
 use zebra_chain::{
-    parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
+    parameters::ConsensusBranchId,
+    serialization::ZcashSerialize,
+    transaction::{HashType, Transaction},
     transparent,
 };
 
@@ -185,21 +187,74 @@ impl CachedFfiTransaction {
 
         let mut err = 0;
 
+        // TODO: get network upgrade somehow
+        let network_upgrade = self.transaction.network_upgrade().unwrap();
+        // TODO: get hash_type from script?
+        let hash_type = HashType::ALL;
+        let sighash = self.transaction.sighash(
+            network_upgrade,
+            hash_type,
+            &self.all_previous_outputs,
+            Some(input_index),
+        );
+        let sighash: &[u8] = sighash.as_ref();
+        // TODO: check if this is reliable. tx.lock_time() does not always return the original lock time.
+        let mut lock_time_bytes = Vec::new();
+        self.transaction
+            .lock_time()
+            .unwrap()
+            .zcash_serialize(&mut lock_time_bytes)
+            .expect("lock_time should serialize");
+        let lock_time = u32::from_le_bytes(
+            lock_time_bytes
+                .try_into()
+                .expect("should serialize as 4 bytes"),
+        ) as i64;
+        let is_final = if self.transaction.inputs()[input_index].sequence() == u32::MAX {
+            1
+        } else {
+            0
+        };
+        let signature_script = match &self.transaction.inputs()[input_index] {
+            transparent::Input::PrevOut {
+                outpoint: _,
+                unlock_script,
+                sequence: _,
+            } => unlock_script.as_raw_bytes(),
+            // TODO: how to handle this?
+            transparent::Input::Coinbase { .. } => todo!(),
+        };
+
         // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
         //         The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
-            zcash_script::zcash_script_verify_precomputed(
-                self.precomputed,
-                n_in,
+            zcash_script::zcash_script_verify_prehashed(
+                sighash.as_ptr(),
+                sighash.len() as u32,
+                lock_time,
+                is_final,
                 script_ptr,
-                script_len
-                    .try_into()
-                    .expect("script lengths are much less than u32::MAX"),
+                script_len as u32,
+                signature_script.as_ptr(),
+                signature_script.len() as u32,
                 amount,
+                n_in,
                 flags,
                 consensus_branch_id,
                 &mut err,
             )
+            // zcash_script::zcash_script_verify_precomputed(
+            //     self.precomputed,
+            //     n_in,
+            //     script_ptr,
+            //     script_len
+            //         .try_into()
+            //         .expect("script lengths are much less than u32::MAX"),
+            //     amount,
+            //     flags,
+            //     consensus_branch_id,
+            //     &mut err,
+            // )
         };
 
         if ret == 1 {
