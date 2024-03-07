@@ -5,6 +5,18 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Added 
+- `zebra_chain::Network` methods:
+  - `b58_pubkey_address_prefix`, `b58_script_address_prefix`, `num_funding_streams`
+
+### Changed
+- Functions that take a `zebra_chain::Network` as an argument have been moved to be methods of `Network`, including
+  - `zebra_chain::parameters`: 
+    - `genesis::genesis_hash`, `NetworkUpgrade::activation_list`, `NetworkUpgrade::is_max_block_time_enforced`, 
+  - `zebra_consensus::height_for_first_halving`
+
 ## [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0) - 2024-02-23
 
 This release exposes the shielded scanning functionality through an initial
