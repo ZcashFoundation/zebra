@@ -71,7 +71,15 @@ impl tower::Service<Request> for Verifier {
                 let span = tracing::trace_span!("script", ?outpoint);
 
                 async move {
-                    cached_ffi_transaction.is_valid(branch_id, input_index)?;
+                    cached_ffi_transaction
+                        .is_valid(branch_id, input_index)
+                        .map_err(|e| {
+                            tracing::warn!(
+                                "script verification failed {:?}",
+                                cached_ffi_transaction
+                            );
+                            e
+                        })?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())

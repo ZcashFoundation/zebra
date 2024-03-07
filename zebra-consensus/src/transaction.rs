@@ -627,9 +627,10 @@ where
         Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
 
         let shielded_sighash = tx.sighash(
-            upgrade,
+            upgrade.branch_id().expect("must have branch ID"),
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
+            None,
             None,
         );
 
@@ -719,9 +720,10 @@ where
         Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
 
         let shielded_sighash = transaction.sighash(
-            upgrade,
+            upgrade.branch_id().expect("must have branch ID"),
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
+            None,
             None,
         );
 

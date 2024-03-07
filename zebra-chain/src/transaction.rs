@@ -41,9 +41,11 @@ pub use unmined::{
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::NetworkUpgrade,
+    parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
-    sapling, sprout,
+    sapling,
+    serialization::ZcashSerialize,
+    sprout,
     transparent::{
         self, outputs_from_utxos,
         CoinbaseSpendRestriction::{self, *},
@@ -209,17 +211,19 @@ impl Transaction {
     /// - if the input index is out of bounds for self.inputs()
     pub fn sighash(
         &self,
-        network_upgrade: NetworkUpgrade,
+        branch_id: ConsensusBranchId,
         hash_type: sighash::HashType,
         all_previous_outputs: &[transparent::Output],
         input: Option<usize>,
+        script_code: Option<Vec<u8>>,
     ) -> SigHash {
         sighash::SigHasher::new(
             self,
             hash_type,
-            network_upgrade,
+            branch_id,
             all_previous_outputs,
             input,
+            script_code,
         )
         .sighash()
     }
@@ -369,6 +373,26 @@ impl Transaction {
         } else {
             None
         }
+    }
+
+    /// Get the raw lock time value.
+    pub fn raw_lock_time(&self) -> u32 {
+        let lock_time = match self {
+            Transaction::V1 { lock_time, .. }
+            | Transaction::V2 { lock_time, .. }
+            | Transaction::V3 { lock_time, .. }
+            | Transaction::V4 { lock_time, .. }
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+        };
+        let mut lock_time_bytes = Vec::new();
+        lock_time
+            .zcash_serialize(&mut lock_time_bytes)
+            .expect("lock_time should serialize");
+        u32::from_le_bytes(
+            lock_time_bytes
+                .try_into()
+                .expect("should serialize as 4 bytes"),
+        )
     }
 
     /// Returns `true` if this transaction's `lock_time` is a [`LockTime::Time`].

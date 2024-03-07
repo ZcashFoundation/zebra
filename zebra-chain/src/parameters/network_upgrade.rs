@@ -140,7 +140,7 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct ConsensusBranchId(u32);
+pub struct ConsensusBranchId(pub(crate) u32);
 
 impl ConsensusBranchId {
     /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.

@@ -608,8 +608,9 @@ fn test_vec143_1() -> Result<()> {
     let hasher = SigHasher::new(
         &transaction,
         HashType::ALL,
-        NetworkUpgrade::Overwinter,
+        NetworkUpgrade::Overwinter.branch_id().unwrap(),
         &[],
+        None,
         None,
     );
 
@@ -637,15 +638,19 @@ fn test_vec143_2() -> Result<()> {
     let value = hex::decode("2f6e04963b4c0100")?.zcash_deserialize_into::<Amount<_>>()?;
     let lock_script = Script::new(&hex::decode("53")?);
     let input_ind = 1;
-    let output = transparent::Output { value, lock_script };
+    let output = transparent::Output {
+        value,
+        lock_script: lock_script.clone(),
+    };
     let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::SINGLE,
-        NetworkUpgrade::Overwinter,
+        NetworkUpgrade::Overwinter.branch_id().unwrap(),
         &all_previous_outputs,
         Some(input_ind),
+        Some(lock_script.as_raw_bytes().to_vec()),
     );
 
     let hash = hasher.sighash();
@@ -673,8 +678,9 @@ fn test_vec243_1() -> Result<()> {
     let hasher = SigHasher::new(
         &transaction,
         HashType::ALL,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &[],
+        None,
         None,
     );
 
@@ -693,8 +699,9 @@ fn test_vec243_1() -> Result<()> {
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &transaction,
         HashType::ALL,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &[],
+        None,
         None,
     );
     let result = hex::encode(alt_sighash);
@@ -712,15 +719,19 @@ fn test_vec243_2() -> Result<()> {
     let value = hex::decode("adedf02996510200")?.zcash_deserialize_into::<Amount<_>>()?;
     let lock_script = Script::new(&[]);
     let input_ind = 1;
-    let output = transparent::Output { value, lock_script };
+    let output = transparent::Output {
+        value,
+        lock_script: lock_script.clone(),
+    };
     let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::NONE,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
         Some(input_ind),
+        Some(lock_script.as_raw_bytes().to_vec()),
     );
 
     let hash = hasher.sighash();
@@ -736,16 +747,20 @@ fn test_vec243_2() -> Result<()> {
     assert_eq!(expected, result);
 
     let lock_script = Script::new(&[]);
-    let prevout = transparent::Output { value, lock_script };
+    let prevout = transparent::Output {
+        value,
+        lock_script: lock_script.clone(),
+    };
     let index = input_ind;
     let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &transaction,
         HashType::NONE,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
         Some(index),
+        Some(lock_script.as_raw_bytes().to_vec()),
     );
     let result = hex::encode(alt_sighash);
     assert_eq!(expected, result);
@@ -764,14 +779,18 @@ fn test_vec243_3() -> Result<()> {
         "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
     )?);
     let input_ind = 0;
-    let all_previous_outputs = vec![transparent::Output { value, lock_script }];
+    let all_previous_outputs = vec![transparent::Output {
+        value,
+        lock_script: lock_script.clone(),
+    }];
 
     let hasher = SigHasher::new(
         &transaction,
         HashType::ALL,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
         Some(input_ind),
+        Some(lock_script.as_raw_bytes().to_vec()),
     );
 
     let hash = hasher.sighash();
@@ -789,15 +808,19 @@ fn test_vec243_3() -> Result<()> {
     let lock_script = Script::new(&hex::decode(
         "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
     )?);
-    let prevout = transparent::Output { value, lock_script };
+    let prevout = transparent::Output {
+        value,
+        lock_script: lock_script.clone(),
+    };
     let index = input_ind;
 
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &transaction,
         HashType::ALL,
-        NetworkUpgrade::Sapling,
+        NetworkUpgrade::Sapling.branch_id().unwrap(),
         &[prevout],
         Some(index),
+        Some(lock_script.as_raw_bytes().to_vec()),
     );
     let result = hex::encode(alt_sighash);
     assert_eq!(expected, result);
@@ -821,19 +844,17 @@ fn zip143_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
-        let all_previous_outputs: Vec<_> = match output {
+        let all_previous_outputs: Vec<_> = match output.clone() {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(
-            transaction.sighash(
-                NetworkUpgrade::from_branch_id(test.consensus_branch_id)
-                    .expect("must be a valid branch ID"),
-                HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-                &all_previous_outputs,
-                input_index,
-            ),
-        );
+        let result = hex::encode(transaction.sighash(
+            ConsensusBranchId(test.consensus_branch_id),
+            HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+            &all_previous_outputs,
+            input_index,
+            output.map(|o| o.lock_script.as_raw_bytes().to_vec()),
+        ));
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
@@ -857,19 +878,17 @@ fn zip243_sighash() -> Result<()> {
             ),
             None => (None, None),
         };
-        let all_previous_outputs: Vec<_> = match output {
+        let all_previous_outputs: Vec<_> = match output.clone() {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(
-            transaction.sighash(
-                NetworkUpgrade::from_branch_id(test.consensus_branch_id)
-                    .expect("must be a valid branch ID"),
-                HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-                &all_previous_outputs,
-                input_index,
-            ),
-        );
+        let result = hex::encode(transaction.sighash(
+            ConsensusBranchId(test.consensus_branch_id),
+            HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+            &all_previous_outputs,
+            input_index,
+            output.map(|o| o.lock_script.as_raw_bytes().to_vec()),
+        ));
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
@@ -895,21 +914,26 @@ fn zip244_sighash() -> Result<()> {
             .collect();
 
         let result = hex::encode(transaction.sighash(
-            NetworkUpgrade::Nu5,
+            NetworkUpgrade::Nu5.branch_id().unwrap(),
             HashType::ALL,
             &all_previous_outputs,
+            None,
             None,
         ));
         let expected = hex::encode(test.sighash_shielded);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
 
         if let Some(sighash_all) = test.sighash_all {
-            let result = hex::encode(transaction.sighash(
-                NetworkUpgrade::Nu5,
-                HashType::ALL,
-                &all_previous_outputs,
-                test.transparent_input.map(|idx| idx as _),
-            ));
+            let result = hex::encode(
+                transaction.sighash(
+                    NetworkUpgrade::Nu5.branch_id().unwrap(),
+                    HashType::ALL,
+                    &all_previous_outputs,
+                    test.transparent_input.map(|idx| idx as _),
+                    test.transparent_input
+                        .map(|idx| test.script_pubkeys[idx as usize].clone()),
+                ),
+            );
             let expected = hex::encode(sighash_all);
             assert_eq!(expected, result, "test #{i}: sighash does not match");
         }
@@ -944,7 +968,13 @@ fn binding_signatures_for_network(network: Network) {
                     ..
                 } => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, &[], None);
+                        let shielded_sighash = tx.sighash(
+                            upgrade.branch_id().unwrap(),
+                            HashType::ALL,
+                            &[],
+                            None,
+                            None,
+                        );
 
                         let bvk = redjubjub::VerificationKey::try_from(
                             sapling_shielded_data.binding_verification_key(),
@@ -963,7 +993,13 @@ fn binding_signatures_for_network(network: Network) {
                     ..
                 } => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash = tx.sighash(upgrade, HashType::ALL, &[], None);
+                        let shielded_sighash = tx.sighash(
+                            upgrade.branch_id().unwrap(),
+                            HashType::ALL,
+                            &[],
+                            None,
+                            None,
+                        );
 
                         let bvk = redjubjub::VerificationKey::try_from(
                             sapling_shielded_data.binding_verification_key(),

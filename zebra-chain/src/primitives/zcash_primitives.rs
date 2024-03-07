@@ -7,7 +7,7 @@ use zcash_primitives::transaction as zp_tx;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkUpgrade},
+    parameters::{ConsensusBranchId, Network},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -127,6 +127,7 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
+#[derive(Debug)]
 struct PrecomputedAuth<'a> {
     _phantom: std::marker::PhantomData<&'a ()>,
 }
@@ -159,19 +160,19 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
             | Transaction::V4 { .. } => panic!("Zebra only uses librustzcash for V5 transactions"),
         };
 
-        convert_tx_to_librustzcash(trans, *network_upgrade)
+        convert_tx_to_librustzcash(
+            trans,
+            network_upgrade.branch_id().expect("V5 txs have branch IDs"),
+        )
     }
 }
 
 pub(crate) fn convert_tx_to_librustzcash(
     trans: &Transaction,
-    network_upgrade: NetworkUpgrade,
+    branch_id: ConsensusBranchId,
 ) -> Result<zp_tx::Transaction, io::Error> {
     let serialized_tx = trans.zcash_serialize_to_vec()?;
-    let branch_id: u32 = network_upgrade
-        .branch_id()
-        .expect("Network upgrade must have a Branch ID")
-        .into();
+    let branch_id: u32 = branch_id.into();
     // We've already parsed this transaction, so its network upgrade must be valid.
     let branch_id: zcash_primitives::consensus::BranchId = branch_id
         .try_into()
@@ -244,23 +245,26 @@ impl From<Script> for zcash_primitives::legacy::Script {
 pub(crate) fn sighash(
     trans: &Transaction,
     hash_type: HashType,
-    network_upgrade: NetworkUpgrade,
+    branch_id: ConsensusBranchId,
     all_previous_outputs: &[transparent::Output],
     input_index: Option<usize>,
+    script_code: Option<Vec<u8>>,
 ) -> SigHash {
-    let alt_tx = convert_tx_to_librustzcash(trans, network_upgrade)
+    let alt_tx = convert_tx_to_librustzcash(trans, branch_id)
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
-    let script: zcash_primitives::legacy::Script;
+    let lock_script: zcash_primitives::legacy::Script;
+    let unlock_script: zcash_primitives::legacy::Script;
     let signable_input = match input_index {
         Some(input_index) => {
-            let output = all_previous_outputs[input_index].clone();
-            script = output.lock_script.into();
+            let output = &all_previous_outputs[input_index];
+            lock_script = output.lock_script.clone().into();
+            unlock_script = zcash_primitives::legacy::Script(script_code.unwrap());
             zp_tx::sighash::SignableInput::Transparent {
                 hash_type: hash_type.bits() as _,
                 index: input_index,
-                script_code: &script,
-                script_pubkey: &script,
+                script_code: &unlock_script,
+                script_pubkey: &lock_script,
                 value: output
                     .value
                     .try_into()
