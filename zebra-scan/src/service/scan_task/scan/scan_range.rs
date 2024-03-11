@@ -88,7 +88,7 @@ pub async fn scan_range(
     storage: Storage,
     subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<(), Report> {
-    let sapling_activation_height = &storage.network().sapling_activation_height();
+    let sapling_activation_height = storage.network().sapling_activation_height();
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
         sapling_activation_height,

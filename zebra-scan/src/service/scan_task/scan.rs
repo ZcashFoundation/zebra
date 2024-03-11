@@ -79,7 +79,7 @@ pub async fn start(
     mut cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> Result<(), Report> {
     let network = storage.network();
-    let sapling_activation_height = &network.sapling_activation_height();
+    let sapling_activation_height = network.sapling_activation_height();
 
     info!(?network, "starting scan task");
 

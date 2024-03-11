@@ -213,7 +213,7 @@ impl Storage {
         sapling_key: &SaplingScanningKey,
         birthday_height: Option<Height>,
     ) {
-        let min_birthday_height = &self.network().sapling_activation_height();
+        let min_birthday_height = self.network().sapling_activation_height();
 
         // The birthday height must be at least the minimum height for that pool.
         let birthday_height = birthday_height
