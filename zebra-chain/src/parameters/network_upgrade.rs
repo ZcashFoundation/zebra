@@ -443,7 +443,7 @@ impl NetworkUpgrade {
     ///
     /// See [`NetworkUpgrade::averaging_window_timespan`] for details.
     pub fn averaging_window_timespan_for_height(
-        network: Network,
+        network: &Network,
         height: block::Height,
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()

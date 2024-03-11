@@ -204,7 +204,7 @@ impl AdjustedDifficulty {
     /// Testnet minimum difficulty adjustment.)
     fn threshold_bits(&self) -> CompactDifficulty {
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
-            self.network,
+            &self.network,
             self.candidate_height,
         );
 
@@ -263,7 +263,7 @@ impl AdjustedDifficulty {
     /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
     fn median_timespan_bounded(&self) -> Duration {
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
-            self.network,
+            &self.network,
             self.candidate_height,
         );
         // This value is exact, but we need to truncate its nanoseconds component
