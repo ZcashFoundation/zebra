@@ -308,7 +308,7 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("valid blocks have in-range times");
 
     let minimum_difficulty_spacing =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, previous_block_height)
             .expect("just checked testnet, and the RPC returns an error for low heights");
     let minimum_difficulty_spacing: Duration32 = minimum_difficulty_spacing
         .try_into()

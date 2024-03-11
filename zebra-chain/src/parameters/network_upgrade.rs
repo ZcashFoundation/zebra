@@ -388,7 +388,7 @@ impl NetworkUpgrade {
     ///
     /// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
     pub fn minimum_difficulty_spacing_for_height(
-        network: Network,
+        network: &Network,
         height: block::Height,
     ) -> Option<Duration> {
         match (network, height) {

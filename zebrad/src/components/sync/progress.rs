@@ -90,7 +90,7 @@ pub async fn show_block_chain_progress(
 
     let target_block_spacing = NetworkUpgrade::target_spacing_for_height(&network, Height::MAX);
     let max_block_spacing =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, Height::MAX);
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, Height::MAX);
 
     // We expect the state height to increase at least once in this interval.
     //
