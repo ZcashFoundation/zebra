@@ -45,7 +45,7 @@ impl NetworkChainTipHeightEstimator {
         current_height: block::Height,
         network: Network,
     ) -> Self {
-        let mut target_spacings = NetworkUpgrade::target_spacings(network);
+        let mut target_spacings = NetworkUpgrade::target_spacings(&network);
         let (_genesis_height, initial_target_spacing) =
             target_spacings.next().expect("No target spacings were set");
 

@@ -363,7 +363,7 @@ impl NetworkUpgrade {
     }
 
     /// Returns all the target block spacings for `network` and the heights where they start.
-    pub fn target_spacings(network: Network) -> impl Iterator<Item = (block::Height, Duration)> {
+    pub fn target_spacings(network: &Network) -> impl Iterator<Item = (block::Height, Duration)> {
         [
             (NetworkUpgrade::Genesis, PRE_BLOSSOM_POW_TARGET_SPACING),
             (
