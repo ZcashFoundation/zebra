@@ -319,7 +319,7 @@ impl NetworkUpgrade {
     ///
     /// Use [`NetworkUpgrade::activation_height`] to get the specific network
     /// upgrade.
-    pub fn is_activation_height(network: Network, height: block::Height) -> bool {
+    pub fn is_activation_height(network: &Network, height: block::Height) -> bool {
         network.activation_list().contains_key(&height)
     }
 

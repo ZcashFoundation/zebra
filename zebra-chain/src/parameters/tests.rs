@@ -51,7 +51,7 @@ fn activation_extremes(network: Network) {
     );
     assert_eq!(Genesis.activation_height(network), Some(block::Height(0)));
     assert!(NetworkUpgrade::is_activation_height(
-        network,
+        &network,
         block::Height(0)
     ));
 
@@ -70,7 +70,7 @@ fn activation_extremes(network: Network) {
         Some(block::Height(1))
     );
     assert!(NetworkUpgrade::is_activation_height(
-        network,
+        &network,
         block::Height(1)
     ));
 
@@ -84,7 +84,7 @@ fn activation_extremes(network: Network) {
     );
 
     assert!(!NetworkUpgrade::is_activation_height(
-        network,
+        &network,
         block::Height(2)
     ));
 
@@ -95,7 +95,7 @@ fn activation_extremes(network: Network) {
         Some(&Genesis)
     );
     assert!(!NetworkUpgrade::is_activation_height(
-        network,
+        &network,
         block::Height::MAX
     ));
 
@@ -128,13 +128,13 @@ fn activation_consistent(network: Network) {
         let height = network_upgrade
             .activation_height(network)
             .expect("activations must have a height");
-        assert!(NetworkUpgrade::is_activation_height(network, height));
+        assert!(NetworkUpgrade::is_activation_height(&network, height));
 
         if height > block::Height(0) {
             // Genesis is immediately followed by BeforeOverwinter,
             // but the other network upgrades have multiple blocks between them
             assert!(!NetworkUpgrade::is_activation_height(
-                network,
+                &network,
                 (height + 1).unwrap()
             ));
         }
