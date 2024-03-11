@@ -178,7 +178,7 @@ impl AdjustedDifficulty {
     /// minimum difficulty adjustment from ZIPs 205 and 208.
     pub fn expected_difficulty_threshold(&self) -> CompactDifficulty {
         if NetworkUpgrade::is_testnet_min_difficulty_block(
-            self.network,
+            &self.network,
             self.candidate_height,
             self.candidate_time,
             self.relevant_times[0],

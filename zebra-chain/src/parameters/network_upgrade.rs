@@ -417,7 +417,7 @@ impl NetworkUpgrade {
     /// check for the time gap. This function implements the correct "greater than"
     /// check.
     pub fn is_testnet_min_difficulty_block(
-        network: Network,
+        network: &Network,
         block_height: block::Height,
         block_time: DateTime<Utc>,
         previous_block_time: DateTime<Utc>,
