@@ -358,7 +358,7 @@ impl NetworkUpgrade {
     /// Returns the target block spacing for `network` and `height`.
     ///
     /// See [`NetworkUpgrade::target_spacing`] for details.
-    pub fn target_spacing_for_height(network: Network, height: block::Height) -> Duration {
+    pub fn target_spacing_for_height(network: &Network, height: block::Height) -> Duration {
         NetworkUpgrade::current(network, height).target_spacing()
     }
 

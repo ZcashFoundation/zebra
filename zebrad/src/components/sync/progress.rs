@@ -88,7 +88,7 @@ pub async fn show_block_chain_progress(
         .add(min_after_checkpoint_blocks)
         .expect("hard-coded checkpoint height is far below Height::MAX");
 
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, Height::MAX);
+    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(&network, Height::MAX);
     let max_block_spacing =
         NetworkUpgrade::minimum_difficulty_spacing_for_height(network, Height::MAX);
 

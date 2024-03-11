@@ -65,7 +65,7 @@ pub fn check(tip_height: Height, network: Network) {
     info!("Checking if Zebra release is inside support range ...");
 
     // Get the current block spacing
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
+    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(&network, tip_height);
 
     // Get the number of blocks per day
     let estimated_blocks_per_day =

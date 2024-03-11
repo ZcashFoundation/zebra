@@ -323,7 +323,7 @@ impl FakeChainTip {
         match self {
             Self::Grow(chain_tip_block) => {
                 let height = block::Height(previous.height.0 + 1);
-                let target_spacing = NetworkUpgrade::target_spacing_for_height(network, height);
+                let target_spacing = NetworkUpgrade::target_spacing_for_height(&network, height);
 
                 let mock_block_time_delta = Duration::seconds(
                     previous.time.timestamp() % (2 * target_spacing.num_seconds()),
