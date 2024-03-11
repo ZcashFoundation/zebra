@@ -84,7 +84,7 @@ impl Network {
     /// Returns false otherwise.
     ///
     /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-    pub fn is_max_block_time_enforced(self, height: block::Height) -> bool {
+    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
         match self {
             Network::Mainnet => true,
             Network::Testnet => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
