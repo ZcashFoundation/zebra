@@ -100,12 +100,12 @@ itertools = { version = "0.12.1", optional = true }
 # These crates are needed for the search-issue-refs binary
 regex = { version = "1.10.3", optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts. 
-reqwest = { version = "0.11.24", default-features = false, features = ["rustls-tls"], optional = true }
+reqwest = { version = "0.11.25", default-features = false, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
 tokio = { version = "1.36.0", features = ["full"], optional = true }
 
 jsonrpc = { version = "0.17.0", optional = true }
 
-zcash_primitives = { version = "0.13.0-rc.1", optional = true }
-zcash_client_backend = {version = "0.10.0-rc.1", optional = true}
+zcash_primitives = { version = "0.14.0", optional = true }
+zcash_client_backend = {version = "0.11.1", optional = true}
