@@ -88,7 +88,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network, random_port
                 .expect_request_that(|req| matches!(req, ScanRequest::Info))
                 .await
                 .respond(ScanResponse::Info {
-                    min_sapling_birthday_height: network.sapling_activation_height(),
+                    min_sapling_birthday_height: &network.sapling_activation_height(),
                 })
         });
     }

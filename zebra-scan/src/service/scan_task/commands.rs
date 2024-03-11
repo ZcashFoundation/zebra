@@ -78,7 +78,7 @@ impl ScanTask {
         let mut new_keys = HashMap::new();
         let mut new_result_senders = HashMap::new();
         let mut new_result_receivers = Vec::new();
-        let sapling_activation_height = network.sapling_activation_height();
+        let sapling_activation_height = &network.sapling_activation_height();
 
         loop {
             let cmd = match cmd_receiver.try_recv() {

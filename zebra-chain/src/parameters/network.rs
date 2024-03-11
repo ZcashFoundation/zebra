@@ -166,7 +166,7 @@ impl Network {
     }
 
     /// Returns the Sapling activation height for this network.
-    pub fn sapling_activation_height(self) -> Height {
+    pub fn sapling_activation_height(&self) -> Height {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")
