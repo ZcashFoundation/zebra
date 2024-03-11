@@ -568,14 +568,14 @@ fn different_blocks_different_chains() -> Result<()> {
         let height1 = prev_block1.coinbase_height().unwrap();
         let height2 = prev_block1.coinbase_height().unwrap();
 
-        let finalized_tree1: Arc<HistoryTree> = if height1 >= Heartwood.activation_height(Network::Mainnet).unwrap() {
+        let finalized_tree1: Arc<HistoryTree> = if height1 >= Heartwood.activation_height(&Network::Mainnet).unwrap() {
             Arc::new(
                 NonEmptyHistoryTree::from_block(Network::Mainnet, prev_block1, &Default::default(), &Default::default()).unwrap().into()
             )
         } else {
             Default::default()
         };
-        let finalized_tree2: Arc<HistoryTree> = if height2 >= NetworkUpgrade::Heartwood.activation_height(Network::Mainnet).unwrap() {
+        let finalized_tree2: Arc<HistoryTree> = if height2 >= NetworkUpgrade::Heartwood.activation_height(&Network::Mainnet).unwrap() {
             Arc::new(
                 NonEmptyHistoryTree::from_block(Network::Mainnet, prev_block2, &Default::default(), &Default::default()).unwrap().into()
             )

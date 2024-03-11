@@ -25,7 +25,7 @@ pub fn funding_stream_values(
     height: Height,
     network: Network,
 ) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, Error> {
-    let canopy_height = Canopy.activation_height(network).unwrap();
+    let canopy_height = Canopy.activation_height(&network).unwrap();
     let mut results = HashMap::new();
 
     if height >= canopy_height {

@@ -222,7 +222,7 @@ fn block_test_vectors_height(network: Network) {
 
         if height
             >= Sapling
-                .activation_height(network)
+                .activation_height(&network)
                 .expect("sapling activation height is set")
                 .0
         {

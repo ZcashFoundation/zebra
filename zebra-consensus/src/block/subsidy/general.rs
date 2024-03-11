@@ -22,7 +22,7 @@ use crate::{funding_stream_values, parameters::subsidy::*};
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
     let blossom_height = Blossom
-        .activation_height(network)
+        .activation_height(&network)
         .expect("blossom activation height should be available");
 
     if height < SLOW_START_SHIFT {
@@ -66,7 +66,7 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
     let blossom_height = Blossom
-        .activation_height(network)
+        .activation_height(&network)
         .expect("blossom activation height should be available");
 
     // If the halving divisor is larger than u64::MAX, the block subsidy is zero,
@@ -130,7 +130,7 @@ mod test {
     }
 
     fn halving_for_network(network: Network) -> Result<(), Report> {
-        let blossom_height = Blossom.activation_height(network).unwrap();
+        let blossom_height = Blossom.activation_height(&network).unwrap();
         let first_halving_height = network.height_for_first_halving();
 
         assert_eq!(
@@ -256,7 +256,7 @@ mod test {
     }
 
     fn block_subsidy_for_network(network: Network) -> Result<(), Report> {
-        let blossom_height = Blossom.activation_height(network).unwrap();
+        let blossom_height = Blossom.activation_height(&network).unwrap();
         let first_halving_height = network.height_for_first_halving();
 
         // After slow-start mining and before Blossom the block subsidy is 12.5 ZEC

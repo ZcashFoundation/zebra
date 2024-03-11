@@ -429,7 +429,7 @@ impl HistoryTree {
         orchard_root: &orchard::tree::Root,
     ) -> Result<Self, HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Heartwood height is known");
         match block
             .coinbase_height()
@@ -456,7 +456,7 @@ impl HistoryTree {
         orchard_root: orchard::tree::Root,
     ) -> Result<(), HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Heartwood height is known");
         match block
             .coinbase_height()

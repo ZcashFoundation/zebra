@@ -54,7 +54,7 @@ pub(crate) fn partial_nu5_chain_strategy(
         .prop_flat_map(move |(network, random_nu)| {
             // TODO: update this to Nu5 after we have a height #1841
             let mut nu = network_upgrade;
-            let nu_activation = nu.activation_height(network).unwrap();
+            let nu_activation = nu.activation_height(&network).unwrap();
             let height = Height(nu_activation.0 + blocks_after_nu_activation);
 
             // The `network_upgrade_override` will not be enough as when it is `None`,

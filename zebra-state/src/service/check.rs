@@ -260,7 +260,7 @@ fn difficulty_threshold_and_time_are_valid(
     //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let genesis_height = NetworkUpgrade::Genesis
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Zebra always has a genesis height available");
 
     if candidate_time <= median_time_past && candidate_height != genesis_height {

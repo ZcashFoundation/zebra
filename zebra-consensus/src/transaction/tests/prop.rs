@@ -244,7 +244,7 @@ proptest! {
 fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)> {
     any::<Network>().prop_flat_map(|network| {
         let start_height_value = NetworkUpgrade::Sapling
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Sapling to have an activation height")
             .0;
 

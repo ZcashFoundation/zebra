@@ -1238,7 +1238,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1687,7 +1687,7 @@ async fn rpc_getdifficulty() {
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();

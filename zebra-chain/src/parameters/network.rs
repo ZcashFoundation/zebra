@@ -139,7 +139,7 @@ impl Network {
         // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
         let canopy_activation = Canopy
-            .activation_height(*self)
+            .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
         (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)

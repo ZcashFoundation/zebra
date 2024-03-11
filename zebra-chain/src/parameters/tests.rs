@@ -49,7 +49,7 @@ fn activation_extremes(network: Network) {
         network.activation_list().get(&block::Height(0)),
         Some(&Genesis)
     );
-    assert_eq!(Genesis.activation_height(network), Some(block::Height(0)));
+    assert_eq!(Genesis.activation_height(&network), Some(block::Height(0)));
     assert!(NetworkUpgrade::is_activation_height(
         &network,
         block::Height(0)
@@ -66,7 +66,7 @@ fn activation_extremes(network: Network) {
         Some(&BeforeOverwinter)
     );
     assert_eq!(
-        BeforeOverwinter.activation_height(network),
+        BeforeOverwinter.activation_height(&network),
         Some(block::Height(1))
     );
     assert!(NetworkUpgrade::is_activation_height(
@@ -126,7 +126,7 @@ fn activation_consistent(network: Network) {
 
     for &network_upgrade in network_upgrades {
         let height = network_upgrade
-            .activation_height(network)
+            .activation_height(&network)
             .expect("activations must have a height");
         assert!(NetworkUpgrade::is_activation_height(&network, height));
 
@@ -226,7 +226,7 @@ fn branch_id_consistent(network: Network) {
     let network_upgrades: HashSet<&NetworkUpgrade> = branch_id_list.keys().collect();
 
     for &network_upgrade in network_upgrades {
-        let height = network_upgrade.activation_height(network);
+        let height = network_upgrade.activation_height(&network);
 
         // Skip network upgrades that don't have activation heights yet
         if let Some(height) = height {

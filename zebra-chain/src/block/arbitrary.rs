@@ -270,7 +270,7 @@ impl Default for LedgerState {
 
         let most_recent_nu = NetworkUpgrade::current(&default_network, Height::MAX);
         let most_recent_activation_height =
-            most_recent_nu.activation_height(default_network).unwrap();
+            most_recent_nu.activation_height(&default_network).unwrap();
 
         LedgerState {
             height: most_recent_activation_height,
@@ -290,7 +290,7 @@ impl Default for LedgerStateOverride {
         let default_network = Network::default();
 
         // TODO: dynamically select any future network upgrade (#1974)
-        let nu5_activation_height = Nu5.activation_height(default_network);
+        let nu5_activation_height = Nu5.activation_height(&default_network);
         let nu5_override = if nu5_activation_height.is_some() {
             None
         } else {
@@ -473,9 +473,9 @@ impl Block {
                 if generate_valid_commitments {
                     let current_height = block.coinbase_height().unwrap();
                     let heartwood_height = NetworkUpgrade::Heartwood
-                        .activation_height(current.network)
+                        .activation_height(&current.network)
                         .unwrap();
-                    let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
+                    let nu5_height = NetworkUpgrade::Nu5.activation_height(&current.network);
 
                     match current_height.cmp(&heartwood_height) {
                         std::cmp::Ordering::Less => {
@@ -703,7 +703,7 @@ impl Arbitrary for Commitment {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
             .prop_map(|(commitment_bytes, network, block_height)| {
-                if block_height == Heartwood.activation_height(network).unwrap() {
+                if block_height == Heartwood.activation_height(&network).unwrap() {
                     Commitment::ChainHistoryActivationReserved
                 } else {
                     Commitment::from_bytes(commitment_bytes, network, block_height)

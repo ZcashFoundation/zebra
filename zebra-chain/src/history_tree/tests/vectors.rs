@@ -35,7 +35,7 @@ fn push_and_prune_for_network_upgrade(
 ) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     // Load first block (activation block of the given network upgrade)
     let first_block = Arc::new(
@@ -117,7 +117,7 @@ fn upgrade() -> Result<()> {
 fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     // Load previous block (the block before the activation block of the given network upgrade)
     let block_prev = Arc::new(

@@ -374,7 +374,7 @@ impl Arbitrary for BlockHeightPairAcrossNetworkUpgrades {
                 "missing activation height for network upgrade",
                 |(network, upgrade)| {
                     upgrade
-                        .activation_height(network)
+                        .activation_height(&network)
                         .map(|height| (network, height))
                 },
             )

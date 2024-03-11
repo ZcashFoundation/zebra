@@ -420,7 +420,7 @@ impl StateService {
 
         if let Some(tip) = state.best_tip() {
             let nu5_activation_height = NetworkUpgrade::Nu5
-                .activation_height(network)
+                .activation_height(&network)
                 .expect("NU5 activation height is set");
 
             if let Err(error) = check::legacy_chain(

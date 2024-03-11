@@ -250,7 +250,7 @@ mod test {
             Canopy,
             Nu5,
         ] {
-            let height = network_upgrade.activation_height(network);
+            let height = network_upgrade.activation_height(&network);
             if let Some(height) = height {
                 assert_eq!(
                     Version::min_specified_for_upgrade(network, network_upgrade),

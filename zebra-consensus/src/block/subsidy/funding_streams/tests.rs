@@ -11,13 +11,13 @@ fn test_funding_stream_values() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     // funding streams not active
-    let canopy_height_minus1 = Canopy.activation_height(network).unwrap() - 1;
+    let canopy_height_minus1 = Canopy.activation_height(&network).unwrap() - 1;
     assert!(funding_stream_values(canopy_height_minus1.unwrap(), network)?.is_empty());
 
     // funding stream is active
-    let canopy_height = Canopy.activation_height(network);
-    let canopy_height_plus1 = Canopy.activation_height(network).unwrap() + 1;
-    let canopy_height_plus2 = Canopy.activation_height(network).unwrap() + 2;
+    let canopy_height = Canopy.activation_height(&network);
+    let canopy_height_plus1 = Canopy.activation_height(&network).unwrap() + 1;
+    let canopy_height_plus2 = Canopy.activation_height(&network).unwrap() + 2;
 
     let mut hash_map = HashMap::new();
     hash_map.insert(FundingStreamReceiver::Ecc, Amount::try_from(21_875_000)?);

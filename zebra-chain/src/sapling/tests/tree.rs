@@ -60,7 +60,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
     let height = NetworkUpgrade::Sapling
-        .activation_height(network)
+        .activation_height(&network)
         .unwrap()
         .0;
 

@@ -301,7 +301,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
             .expect("block is structurally valid");
 
         let canopy_activation_height = NetworkUpgrade::Canopy
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Canopy activation height is known");
 
         // TODO: first halving, second halving, third halving, and very large halvings
@@ -398,7 +398,7 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
     let block_iter = network.block_iter();
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is known");
 
     for (&height, block) in block_iter {
@@ -587,7 +587,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
         // skip blocks that are before overwinter as they will not have a valid consensus branch id
         if *height
             < NetworkUpgrade::Overwinter
-                .activation_height(network)
+                .activation_height(&network)
                 .expect("a valid overwinter activation height")
                 .0
         {

@@ -90,10 +90,10 @@ impl PreparedChain {
         // Since the network will be chosen later, we pick the larger
         // between the mainnet and testnet Heartwood activation heights.
         let main_height = NetworkUpgrade::Heartwood
-            .activation_height(Network::Mainnet)
+            .activation_height(&Network::Mainnet)
             .expect("must have height");
         let test_height = NetworkUpgrade::Heartwood
-            .activation_height(Network::Testnet)
+            .activation_height(&Network::Testnet)
             .expect("must have height");
         let height = std::cmp::max(main_height, test_height);
 

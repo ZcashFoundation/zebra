@@ -215,7 +215,7 @@ pub fn disabled_add_to_sprout_pool(
     network: Network,
 ) -> Result<(), TransactionError> {
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height must be present for both networks");
 
     // # Consensus
@@ -331,7 +331,7 @@ pub fn coinbase_outputs_are_decryptable(
     // The consensus rule only applies to Heartwood onward.
     if height
         < NetworkUpgrade::Heartwood
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Heartwood height is known")
     {
         return Ok(());
@@ -357,7 +357,7 @@ pub fn coinbase_expiry_height(
     let expiry_height = coinbase.expiry_height();
 
     // TODO: replace `if let` with `expect` after NU5 mainnet activation
-    if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
+    if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(&network) {
         // # Consensus
         //
         // > [NU5 onward] The nExpiryHeight field of a coinbase transaction

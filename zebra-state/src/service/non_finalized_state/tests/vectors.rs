@@ -407,7 +407,7 @@ fn history_tree_is_updated_for_network_upgrade(
 ) -> Result<()> {
     let blocks = network.block_map();
 
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     let prev_block = Arc::new(
         blocks
@@ -505,7 +505,7 @@ fn commitment_is_validated() {
 
 fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) {
     let blocks = network.block_map();
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     let prev_block = Arc::new(
         blocks

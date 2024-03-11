@@ -238,7 +238,7 @@ async fn mempool_request_with_present_input_is_accepted() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -305,7 +305,7 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -384,7 +384,7 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -451,7 +451,7 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (mut input, output, known_utxos) = mock_transparent_transfer(
@@ -521,7 +521,7 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -600,7 +600,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -703,7 +703,7 @@ async fn state_error_converted_correctly() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -876,7 +876,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
                 height: canopy
-                    .activation_height(network)
+                    .activation_height(&network)
                     .expect("Canopy activation height is specified"),
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -907,7 +907,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let nu5 = NetworkUpgrade::Nu5;
         let nu5_activation_height = nu5
-            .activation_height(network)
+            .activation_height(&network)
             .expect("NU5 activation height is specified");
         let blocks = network.block_iter();
 
@@ -953,7 +953,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
     let network = Network::Mainnet;
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is specified");
 
     let transaction_block_height =
@@ -1010,7 +1010,7 @@ async fn v4_transaction_with_last_valid_expiry_height() {
     let verifier = Verifier::new(Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -1057,7 +1057,7 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
     let verifier = Verifier::new(Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
 
     let (input, output) = mock_coinbase_transparent_output(block_height);
@@ -1098,7 +1098,7 @@ async fn v4_transaction_with_too_low_expiry_height() {
     let verifier = Verifier::new(Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
 
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
@@ -1205,7 +1205,7 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
     // for coinbase transactions (it needs to match the block height instead),
     // which is what is used in this test.
     let block_height = (NetworkUpgrade::Nu5
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("NU5 height must be set")
         - 1)
     .expect("will not underflow");
@@ -1251,7 +1251,7 @@ async fn v4_coinbase_transaction_is_accepted() {
     let network = Network::Mainnet;
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is specified");
 
     let transaction_block_height =
@@ -1300,7 +1300,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     let network = Network::Mainnet;
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is specified");
 
     let transaction_block_height =
@@ -1355,7 +1355,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
     let network = Network::Mainnet;
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is specified");
 
     let transaction_block_height =
@@ -1414,7 +1414,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
         let network_upgrade = NetworkUpgrade::Canopy;
 
         let canopy_activation_height = NetworkUpgrade::Canopy
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Canopy activation height is specified");
 
         let transaction_block_height =
@@ -1479,7 +1479,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         let network_upgrade = NetworkUpgrade::Canopy;
 
         let canopy_activation_height = NetworkUpgrade::Canopy
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Canopy activation height is specified");
 
         let transaction_block_height =
@@ -1548,7 +1548,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
-        .activation_height(network)
+        .activation_height(&network)
         .expect("NU5 activation height is specified");
 
     let transaction_block_height =
@@ -1606,7 +1606,7 @@ async fn v5_transaction_with_last_valid_expiry_height() {
     let verifier = Verifier::new(Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(Network::Testnet)
+        .activation_height(&Network::Testnet)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -1651,7 +1651,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let verifier = Verifier::new(Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(Network::Testnet)
+        .activation_height(&Network::Testnet)
         .expect("Nu5 activation height for testnet is specified");
 
     let (input, output) = mock_coinbase_transparent_output(block_height);
@@ -1766,7 +1766,7 @@ async fn v5_transaction_with_too_low_expiry_height() {
     let verifier = Verifier::new(Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(Network::Testnet)
+        .activation_height(&Network::Testnet)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -1868,7 +1868,7 @@ async fn v5_coinbase_transaction_is_accepted() {
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
-        .activation_height(network)
+        .activation_height(&network)
         .expect("NU5 activation height is specified");
 
     let transaction_block_height =
@@ -1920,7 +1920,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
-        .activation_height(network)
+        .activation_height(&network)
         .expect("NU5 activation height is specified");
 
     let transaction_block_height =
@@ -1977,7 +1977,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is specified");
 
     let transaction_block_height =
@@ -2297,7 +2297,7 @@ fn v5_with_sapling_spends() {
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
-        let nu5_activation = NetworkUpgrade::Nu5.activation_height(network);
+        let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
         let transaction =
             fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
@@ -2710,7 +2710,7 @@ fn add_to_sprout_pool_after_nu() {
 
     // create a block height at canopy activation.
     let network = Network::Mainnet;
-    let block_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+    let block_height = NetworkUpgrade::Canopy.activation_height(&network).unwrap();
 
     // create a zero amount.
     let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
@@ -2780,7 +2780,7 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
         let height = Height(*height);
         let heartwood_onward = height
             >= NetworkUpgrade::Heartwood
-                .activation_height(network)
+                .activation_height(&network)
                 .unwrap();
         let coinbase_tx = block
             .transactions
@@ -2875,7 +2875,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
             check::coinbase_outputs_are_decryptable(
                 &transaction,
                 network,
-                NetworkUpgrade::Nu5.activation_height(network).unwrap(),
+                NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
             ),
             Ok(())
         );
@@ -2917,7 +2917,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
             check::coinbase_outputs_are_decryptable(
                 &transaction,
                 network,
-                NetworkUpgrade::Nu5.activation_height(network).unwrap(),
+                NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
             ),
             Err(TransactionError::CoinbaseOutputsNotDecryptable)
         );
@@ -2930,7 +2930,7 @@ async fn mempool_zip317_error() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Nu5 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
 
@@ -3002,7 +3002,7 @@ async fn mempool_zip317_ok() {
     let verifier = Verifier::new(Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
-        .activation_height(Network::Mainnet)
+        .activation_height(&Network::Mainnet)
         .expect("Nu5 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
 

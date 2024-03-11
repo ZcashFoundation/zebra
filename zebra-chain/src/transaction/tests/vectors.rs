@@ -352,7 +352,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
-        .activation_height(network)
+        .activation_height(&network)
         .expect("a valid height")
         .0;
 
@@ -500,12 +500,12 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
-        .activation_height(network)
+        .activation_height(&network)
         .expect("a valid height")
         .0;
 
     let nu5_activation_height = NetworkUpgrade::Nu5
-        .activation_height(network)
+        .activation_height(&network)
         .unwrap_or(Height::MAX_EXPIRY_HEIGHT)
         .0;
 

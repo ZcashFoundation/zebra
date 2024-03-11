@@ -115,7 +115,7 @@ impl Commitment {
                 Ok(root) => Ok(FinalSaplingRoot(root)),
                 _ => Err(InvalidSapingRootBytes),
             },
-            Heartwood if Some(height) == Heartwood.activation_height(network) => {
+            Heartwood if Some(height) == Heartwood.activation_height(&network) => {
                 if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
                 } else {

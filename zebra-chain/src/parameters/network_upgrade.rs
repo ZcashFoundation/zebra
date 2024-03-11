@@ -305,7 +305,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
-    pub fn activation_height(&self, network: Network) -> Option<block::Height> {
+    pub fn activation_height(&self, network: &Network) -> Option<block::Height> {
         network
             .activation_list()
             .iter()
