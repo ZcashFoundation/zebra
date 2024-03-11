@@ -57,7 +57,7 @@ fn activation_extremes(network: Network) {
 
     assert_eq!(NetworkUpgrade::current(&network, block::Height(0)), Genesis);
     assert_eq!(
-        NetworkUpgrade::next(network, block::Height(0)),
+        NetworkUpgrade::next(&network, block::Height(0)),
         Some(BeforeOverwinter)
     );
 
@@ -79,7 +79,7 @@ fn activation_extremes(network: Network) {
         BeforeOverwinter
     );
     assert_eq!(
-        NetworkUpgrade::next(network, block::Height(1)),
+        NetworkUpgrade::next(&network, block::Height(1)),
         Some(Overwinter)
     );
 
@@ -103,7 +103,7 @@ fn activation_extremes(network: Network) {
         NetworkUpgrade::current(&network, block::Height::MAX),
         Genesis
     );
-    assert_eq!(NetworkUpgrade::next(network, block::Height::MAX), None);
+    assert_eq!(NetworkUpgrade::next(&network, block::Height::MAX), None);
 }
 
 #[test]
@@ -141,13 +141,16 @@ fn activation_consistent(network: Network) {
 
         assert_eq!(NetworkUpgrade::current(&network, height), network_upgrade);
         // Network upgrades don't repeat
-        assert_ne!(NetworkUpgrade::next(network, height), Some(network_upgrade));
         assert_ne!(
-            NetworkUpgrade::next(network, block::Height(height.0 + 1)),
+            NetworkUpgrade::next(&network, height),
             Some(network_upgrade)
         );
         assert_ne!(
-            NetworkUpgrade::next(network, block::Height::MAX),
+            NetworkUpgrade::next(&network, block::Height(height.0 + 1)),
+            Some(network_upgrade)
+        );
+        assert_ne!(
+            NetworkUpgrade::next(&network, block::Height::MAX),
             Some(network_upgrade)
         );
     }

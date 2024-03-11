@@ -293,7 +293,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if the next upgrade has not been implemented in Zebra
     /// yet.
-    pub fn next(network: Network, height: block::Height) -> Option<NetworkUpgrade> {
+    pub fn next(network: &Network, height: block::Height) -> Option<NetworkUpgrade> {
         network
             .activation_list()
             .range((Excluded(height), Unbounded))
