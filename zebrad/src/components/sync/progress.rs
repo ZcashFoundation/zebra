@@ -142,7 +142,7 @@ pub async fn show_block_chain_progress(
             let current_height = latest_chain_tip
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
-            let network_upgrade = NetworkUpgrade::current(network, current_height);
+            let network_upgrade = NetworkUpgrade::current(&network, current_height);
 
             // Send progress reports for block height
             //

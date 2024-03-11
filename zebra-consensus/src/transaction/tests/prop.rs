@@ -334,7 +334,7 @@ fn sanitize_transaction_version(
     transaction_version: u8,
     block_height: block::Height,
 ) -> (u8, NetworkUpgrade) {
-    let network_upgrade = NetworkUpgrade::current(network, block_height);
+    let network_upgrade = NetworkUpgrade::current(&network, block_height);
 
     let max_version = {
         use NetworkUpgrade::*;

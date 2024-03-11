@@ -148,7 +148,7 @@ impl<V: Version> Tree<V> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(network, height);
+        let network_upgrade = NetworkUpgrade::current(&network, height);
         let entry0 = Entry::new_leaf::<V>(block, network, sapling_root, orchard_root);
         let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry0);
@@ -182,7 +182,7 @@ impl<V: Version> Tree<V> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(self.network, height);
+        let network_upgrade = NetworkUpgrade::current(&self.network, height);
 
         assert!(
             network_upgrade == self.network_upgrade,
@@ -240,7 +240,7 @@ impl Version for zcash_history::V1 {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(network, height);
+        let network_upgrade = NetworkUpgrade::current(&network, height);
         let branch_id = network_upgrade
             .branch_id()
             .expect("must have branch ID for chain history network upgrades");

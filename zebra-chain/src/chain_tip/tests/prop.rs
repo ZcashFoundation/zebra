@@ -50,7 +50,7 @@ proptest! {
 
         let time_displacement = calculate_time_displacement(
             time_displacement_factor,
-            NetworkUpgrade::current(network, network_height),
+            NetworkUpgrade::current(&network, network_height),
         );
 
         let mock_local_time = current_block_time + estimated_time_difference + time_displacement;

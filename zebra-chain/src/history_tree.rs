@@ -83,7 +83,7 @@ impl NonEmptyHistoryTree {
         peaks: BTreeMap<u32, Entry>,
         current_height: Height,
     ) -> Result<Self, HistoryTreeError> {
-        let network_upgrade = NetworkUpgrade::current(network, current_height);
+        let network_upgrade = NetworkUpgrade::current(&network, current_height);
         let inner = match network_upgrade {
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
@@ -138,7 +138,7 @@ impl NonEmptyHistoryTree {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(network, height);
+        let network_upgrade = NetworkUpgrade::current(&network, height);
         let (tree, entry) = match network_upgrade {
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
@@ -208,7 +208,7 @@ impl NonEmptyHistoryTree {
             self.current_height
         );
 
-        let network_upgrade = NetworkUpgrade::current(self.network, height);
+        let network_upgrade = NetworkUpgrade::current(&self.network, height);
         if network_upgrade != self.network_upgrade {
             // This is the activation block of a network upgrade.
             // Create a new tree.

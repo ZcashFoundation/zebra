@@ -124,7 +124,7 @@ impl Block {
         network: Network,
     ) -> Result<(), error::BlockError> {
         let block_nu =
-            NetworkUpgrade::current(network, self.coinbase_height().expect("a valid height"));
+            NetworkUpgrade::current(&network, self.coinbase_height().expect("a valid height"));
 
         if self
             .transactions

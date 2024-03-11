@@ -219,7 +219,7 @@ impl Request {
     ///
     /// This is based on the block height from the request, and the supplied `network`.
     pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
-        NetworkUpgrade::current(network, self.height())
+        NetworkUpgrade::current(&network, self.height())
     }
 
     /// Returns true if the request is a mempool request.

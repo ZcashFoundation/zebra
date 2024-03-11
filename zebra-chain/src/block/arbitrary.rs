@@ -245,7 +245,7 @@ impl LedgerState {
         if let Some(network_upgrade_override) = self.network_upgrade_override {
             network_upgrade_override
         } else {
-            NetworkUpgrade::current(self.network, self.height)
+            NetworkUpgrade::current(&self.network, self.height)
         }
     }
 
@@ -268,7 +268,7 @@ impl Default for LedgerState {
         let default_network = Network::default();
         let default_override = LedgerStateOverride::default();
 
-        let most_recent_nu = NetworkUpgrade::current(default_network, Height::MAX);
+        let most_recent_nu = NetworkUpgrade::current(&default_network, Height::MAX);
         let most_recent_activation_height =
             most_recent_nu.activation_height(default_network).unwrap();
 

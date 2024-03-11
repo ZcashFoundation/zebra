@@ -864,7 +864,7 @@ pub fn transaction_to_fake_v5(
 ) -> Transaction {
     use Transaction::*;
 
-    let block_nu = NetworkUpgrade::current(network, height);
+    let block_nu = NetworkUpgrade::current(&network, height);
 
     match trans {
         V1 {

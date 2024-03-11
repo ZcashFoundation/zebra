@@ -940,7 +940,7 @@ fn binding_signatures_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     for (height, bytes) in block_iter {
-        let upgrade = NetworkUpgrade::current(network, Height(*height));
+        let upgrade = NetworkUpgrade::current(&network, Height(*height));
 
         let block = bytes
             .zcash_deserialize_into::<Block>()

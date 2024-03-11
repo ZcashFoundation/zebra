@@ -615,13 +615,13 @@ proptest! {
 
                 prop_assert_eq!(
                     info.consensus.chain_tip.0,
-                    NetworkUpgrade::current(network, block_height)
+                    NetworkUpgrade::current(&network, block_height)
                         .branch_id()
                         .unwrap()
                 );
                 prop_assert_eq!(
                     info.consensus.next_block.0,
-                    NetworkUpgrade::current(network, (block_height + 1).unwrap())
+                    NetworkUpgrade::current(&network, (block_height + 1).unwrap())
                         .branch_id()
                         .unwrap()
                 );

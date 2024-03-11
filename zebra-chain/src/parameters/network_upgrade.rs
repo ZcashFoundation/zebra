@@ -280,7 +280,7 @@ impl Network {
 }
 impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
-    pub fn current(network: Network, height: block::Height) -> NetworkUpgrade {
+    pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
         network
             .activation_list()
             .range(..=height)
@@ -472,7 +472,7 @@ impl ConsensusBranchId {
     /// Returns the current consensus branch id for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
-    pub fn current(network: Network, height: block::Height) -> Option<ConsensusBranchId> {
+    pub fn current(network: &Network, height: block::Height) -> Option<ConsensusBranchId> {
         NetworkUpgrade::current(network, height).branch_id()
     }
 }

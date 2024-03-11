@@ -109,7 +109,7 @@ impl Commitment {
         use Commitment::*;
         use CommitmentError::*;
 
-        match NetworkUpgrade::current(network, height) {
+        match NetworkUpgrade::current(&network, height) {
             Genesis | BeforeOverwinter | Overwinter => Ok(PreSaplingReserved(bytes)),
             Sapling | Blossom => match sapling::tree::Root::try_from(bytes) {
                 Ok(root) => Ok(FinalSaplingRoot(root)),

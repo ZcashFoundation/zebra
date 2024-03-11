@@ -78,7 +78,7 @@ impl Transaction {
             // > MUST be 0x26A7270A.
             // > If effectiveVersion ≥ 5, the nConsensusBranchId field MUST match the consensus
             // > branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
-            network_upgrade: NetworkUpgrade::current(network, height),
+            network_upgrade: NetworkUpgrade::current(&network, height),
 
             // There is no documented consensus rule for the lock time field in coinbase
             // transactions, so we just leave it unlocked. (We could also set it to `height`.)
