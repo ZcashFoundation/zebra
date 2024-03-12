@@ -235,8 +235,8 @@ fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
         .parse()
         .expect("hard-coded Testnet checkpoint list should parse");
 
-    let _ = CheckpointList::new(Mainnet);
-    let _ = CheckpointList::new(Testnet);
+    let _ = Mainnet.checkpoint_list();
+    let _ = Testnet.checkpoint_list();
 
     Ok(())
 }
@@ -257,7 +257,7 @@ fn checkpoint_list_hard_coded_mandatory(network: Network) -> Result<(), BoxError
 
     let mandatory_checkpoint = network.mandatory_checkpoint_height();
 
-    let list = CheckpointList::new(network);
+    let list = network.checkpoint_list();
 
     assert!(
         list.max_height() >= mandatory_checkpoint,
@@ -292,7 +292,7 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
         HeightDiff::try_from(div_ceil(MAX_CHECKPOINT_BYTE_COUNT, MAX_BLOCK_BYTES))
             .expect("constant fits in HeightDiff");
 
-    let list = CheckpointList::new(network);
+    let list = network.checkpoint_list();
     let mut heights = list.0.keys();
 
     // Check that we start at the genesis height

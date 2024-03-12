@@ -16,7 +16,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
-use zebra_consensus::CheckpointList;
+use zebra_consensus::ParameterCheckpoint as _;
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::components::sync::SyncStatus;
@@ -82,7 +82,8 @@ pub async fn show_block_chain_progress(
     // The minimum height of the valid best chain, based on:
     // - the hard-coded checkpoint height,
     // - the minimum number of blocks after the highest checkpoint.
-    let after_checkpoint_height = CheckpointList::new(network)
+    let after_checkpoint_height = network
+        .checkpoint_list()
         .max_height()
         .add(min_after_checkpoint_blocks)
         .expect("hard-coded checkpoint height is far below Height::MAX");

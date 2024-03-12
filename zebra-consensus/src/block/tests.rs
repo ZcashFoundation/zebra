@@ -19,7 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
-    work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
+    work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
@@ -241,7 +241,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
         hash,
         difficulty_threshold,
         Network::Mainnet,
-        ExpandedDifficulty::target_difficulty_limit(Network::Mainnet),
+        Network::Mainnet.target_difficulty_limit(),
     );
     assert_eq!(expected, result);
 

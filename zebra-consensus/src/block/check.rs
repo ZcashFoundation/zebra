@@ -9,7 +9,10 @@ use zebra_chain::{
     block::{Block, Hash, Header, Height},
     parameters::{Network, NetworkUpgrade},
     transaction,
-    work::{difficulty::ExpandedDifficulty, equihash},
+    work::{
+        difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
+        equihash,
+    },
 };
 
 use crate::{error::*, parameters::SLOW_START_INTERVAL};
@@ -78,13 +81,13 @@ pub fn difficulty_threshold_is_valid(
 
     // The PowLimit check is part of `Threshold()` in the spec, but it doesn't
     // actually depend on any previous blocks.
-    if difficulty_threshold > ExpandedDifficulty::target_difficulty_limit(network) {
+    if difficulty_threshold > network.target_difficulty_limit() {
         Err(BlockError::TargetDifficultyLimit(
             *height,
             *hash,
             difficulty_threshold,
             network,
-            ExpandedDifficulty::target_difficulty_limit(network),
+            network.target_difficulty_limit(),
         ))?;
     }
 

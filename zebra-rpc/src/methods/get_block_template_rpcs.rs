@@ -20,7 +20,7 @@ use zebra_chain::{
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
-    work::difficulty::{ExpandedDifficulty, U256},
+    work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
@@ -1197,7 +1197,7 @@ where
             // using this calculation.)
 
             // Get expanded difficulties (256 bits), these are the inverse of the work
-            let pow_limit: U256 = ExpandedDifficulty::target_difficulty_limit(network).into();
+            let pow_limit: U256 = network.target_difficulty_limit().into();
             let difficulty: U256 = chain_info
                 .expected_difficulty
                 .to_expanded()

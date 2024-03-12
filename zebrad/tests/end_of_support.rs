@@ -5,7 +5,7 @@ use std::time::Duration;
 use color_eyre::eyre::Result;
 
 use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
-use zebra_consensus::CheckpointList;
+use zebra_consensus::ParameterCheckpoint as _;
 use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
 // Estimated blocks per day with the current 75 seconds block spacing.
@@ -54,7 +54,7 @@ fn end_of_support_function() {
 #[tracing_test::traced_test]
 fn end_of_support_date() {
     // Get the list of checkpoints.
-    let list = CheckpointList::new(Network::Mainnet);
+    let list = Network::Mainnet.checkpoint_list();
 
     // Get the last one we have and use it as tip.
     let higher_checkpoint = list.max_height();

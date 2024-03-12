@@ -122,11 +122,6 @@ impl FromStr for CheckpointList {
 }
 
 impl CheckpointList {
-    /// Returns the hard-coded checkpoint list for `network`.
-    pub fn new(network: Network) -> Self {
-        network.checkpoint_list()
-    }
-
     /// Create a new checkpoint list for `network` from `checkpoint_list`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.

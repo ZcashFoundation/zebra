@@ -23,7 +23,7 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::Transaction,
     transparent,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::difficulty::{CompactDifficulty, ParameterDifficulty as _},
 };
 use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
@@ -115,7 +115,7 @@ pub async fn test_responses<State, ReadState>(
     let fake_max_time = DateTime32::from(1654008728);
 
     // Use a valid fractional difficulty for snapshots
-    let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
+    let pow_limit = network.target_difficulty_limit();
     let fake_difficulty = pow_limit * 2 / 3;
     let fake_difficulty = CompactDifficulty::from(fake_difficulty);
 
