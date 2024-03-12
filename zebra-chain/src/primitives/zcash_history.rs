@@ -23,7 +23,7 @@ pub trait Version: zcash_history::Version {
     /// Convert a Block into the NodeData for this version.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData;
@@ -33,8 +33,8 @@ pub trait Version: zcash_history::Version {
 ///
 /// Currently it should not be used as a long-term data structure because it
 /// may grow without limits.
-pub struct Tree<V: zcash_history::Version> {
-    network: Network,
+pub struct Tree<'a, V: zcash_history::Version> {
+    network: &'a Network,
     network_upgrade: NetworkUpgrade,
     inner: zcash_history::Tree<V>,
 }
@@ -75,7 +75,7 @@ impl Entry {
     ///  (ignored for V1 trees).
     fn new_leaf<V: Version>(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self {
@@ -91,7 +91,7 @@ impl Entry {
     }
 }
 
-impl<V: Version> Tree<V> {
+impl<'a, V: Version> Tree<'a, V> {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the
@@ -106,12 +106,12 @@ impl<V: Version> Tree<V> {
     /// Will panic if `peaks` is empty.
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_cache(
-        network: Network,
+        network: &'a Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
         peaks: &BTreeMap<u32, Entry>,
         extra: &BTreeMap<u32, Entry>,
-    ) -> Result<Self, io::Error> {
+    ) -> Result<Tree<'a, V>, io::Error> {
         let branch_id = network_upgrade
             .branch_id()
             .expect("unexpected pre-Overwinter MMR history tree");
@@ -140,7 +140,7 @@ impl<V: Version> Tree<V> {
     ///  (ignored for V1 trees).
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_block(
-        network: Network,
+        network: &Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
@@ -191,7 +191,7 @@ impl<V: Version> Tree<V> {
             self.network_upgrade
         );
 
-        let node_data = V::block_to_history_node(block, self.network, sapling_root, orchard_root);
+        let node_data = V::block_to_history_node(block, &self.network, sapling_root, orchard_root);
         let appended = self.inner.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
@@ -217,7 +217,7 @@ impl<V: Version> Tree<V> {
     }
 }
 
-impl<V: zcash_history::Version> std::fmt::Debug for Tree<V> {
+impl<'a, V: zcash_history::Version> std::fmt::Debug for Tree<'a, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tree")
             .field("network", &self.network)
@@ -233,7 +233,7 @@ impl Version for zcash_history::V1 {
     /// `orchard_root` is ignored.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         _orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {
@@ -300,7 +300,7 @@ impl Version for V2 {
     /// `orchard_root` is the root of the Orchard note commitment tree of the block.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {

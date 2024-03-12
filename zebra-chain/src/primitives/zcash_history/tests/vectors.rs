@@ -45,7 +45,7 @@ fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -
     let sapling_root0 =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let (mut tree, _) =
-        Tree::<V1>::new_from_block(network, block0, &sapling_root0, &Default::default())?;
+        Tree::<V1>::new_from_block(&network, block0, &sapling_root0, &Default::default())?;
 
     // Compute root hash of the MMR tree, which will be included in the next block
     let hash0 = tree.hash();
