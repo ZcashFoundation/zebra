@@ -384,16 +384,6 @@ impl ExpandedDifficulty {
         U256::from_little_endian(&hash.0).into()
     }
 
-    /// Returns the easiest target difficulty allowed on `network`.
-    ///
-    /// # Consensus
-    ///
-    /// See `PoWLimit` in the Zcash specification:
-    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
-    pub fn target_difficulty_limit(network: Network) -> ExpandedDifficulty {
-        network.target_difficulty_limit()
-    }
-
     /// Calculate the CompactDifficulty for an expanded difficulty.
     ///
     /// # Consensus
@@ -665,7 +655,8 @@ impl PartialCumulativeWork {
     pub fn difficulty_multiplier_for_display(&self, network: Network) -> f64 {
         // This calculation is similar to the `getdifficulty` RPC, see that code for details.
 
-        let pow_limit = ExpandedDifficulty::target_difficulty_limit(network)
+        let pow_limit = network
+            .target_difficulty_limit()
             .to_compact()
             .to_work()
             .expect("target difficult limit is valid work");
@@ -689,17 +680,20 @@ impl PartialCumulativeWork {
     }
 }
 
-trait ParameterDifficulty {
-    fn target_difficulty_limit(&self) -> ExpandedDifficulty;
-}
-
-impl ParameterDifficulty for Network {
+/// Network methods related to Difficulty
+pub trait ParameterDifficulty {
     /// Returns the easiest target difficulty allowed on `network`.
     ///
     /// # Consensus
     ///
     /// See `PoWLimit` in the Zcash specification:
     /// <https://zips.z.cash/protocol/protocol.pdf#constants>
+    fn target_difficulty_limit(&self) -> ExpandedDifficulty;
+}
+
+impl ParameterDifficulty for Network {
+    /// Returns the easiest target difficulty allowed on `network`.
+    /// See [`ParameterDifficulty::target_difficulty_limit`]
     fn target_difficulty_limit(&self) -> ExpandedDifficulty {
         let limit: U256 = match self {
             /* 2^243 - 1 */

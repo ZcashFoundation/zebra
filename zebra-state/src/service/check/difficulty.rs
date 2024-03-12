@@ -15,8 +15,8 @@ use zebra_chain::{
     parameters::Network,
     parameters::NetworkUpgrade,
     parameters::POW_AVERAGING_WINDOW,
-    work::difficulty::ExpandedDifficulty,
     work::difficulty::{CompactDifficulty, U256},
+    work::difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
 };
 
 /// The median block span for time median calculations.
@@ -188,7 +188,7 @@ impl AdjustedDifficulty {
                 Network::Testnet,
                 "invalid network: the minimum difficulty rule only applies on testnet"
             );
-            ExpandedDifficulty::target_difficulty_limit(self.network).to_compact()
+            self.network.target_difficulty_limit().to_compact()
         } else {
             self.threshold_bits()
         }
@@ -210,10 +210,7 @@ impl AdjustedDifficulty {
 
         let threshold = (self.mean_target_difficulty() / averaging_window_timespan.num_seconds())
             * self.median_timespan_bounded().num_seconds();
-        let threshold = min(
-            ExpandedDifficulty::target_difficulty_limit(self.network),
-            threshold,
-        );
+        let threshold = min(self.network.target_difficulty_limit(), threshold);
 
         threshold.to_compact()
     }
