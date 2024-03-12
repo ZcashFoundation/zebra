@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Functions that take a `zebra_chain::Network` as an argument have been moved to be methods of `Network`, including
   - `zebra_chain::parameters`: 
     - `genesis::genesis_hash`, `NetworkUpgrade::activation_list`, `NetworkUpgrade::is_max_block_time_enforced`, 
+  - `zebra_chain::work::difficulty::ExpandedDifficulty::target_difficutly_limit`
   - `zebra_consensus::height_for_first_halving`
+  - `zebra_consensus::checkpoint::CheckpointList::new` (now `Network::checkpoint_list`)
 
 ## [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0) - 2024-02-23
 
