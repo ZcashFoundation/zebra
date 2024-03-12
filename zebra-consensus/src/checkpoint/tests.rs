@@ -233,10 +233,8 @@ async fn continuous_blockchain(
     let _init_guard = zebra_test::init();
 
     // A continuous blockchain
-    let blockchain = match network {
-        Mainnet => zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter(),
-        Testnet => zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.iter(),
-    };
+    let blockchain = network.blockchain_iter();
+
     let blockchain: Vec<_> = blockchain
         .map(|(height, b)| {
             let block = Arc::<Block>::zcash_deserialize(*b).unwrap();

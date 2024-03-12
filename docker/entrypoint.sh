@@ -78,6 +78,7 @@ fi
 : "${TEST_SUBMIT_BLOCK:=}"
 : "${TEST_SCAN_START_WHERE_LEFT:=}"
 : "${ENTRYPOINT_FEATURES:=}"
+: "${TEST_SCAN_TASK_COMMANDS:=}"
 
 # Configuration file path
 if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]] && [[ -z "${ZEBRA_CONF_PATH}" ]]; then
@@ -349,6 +350,11 @@ case "$1" in
         # Test that the scanner can continue scanning where it was left when zebrad restarts.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
         run_cargo_test "shielded-scan" "scan_start_where_left"
+      
+      elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
+        # Test that the scanner can continue scanning where it was left when zebrad restarts.
+        check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+        run_cargo_test "shielded-scan" "scan_task_commands"
 
       else
           exec "$@"

@@ -92,7 +92,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     // Check that it removes keys correctly
 
     let sapling_keys = mock_sapling_scanning_keys(30, network);
-    let done_rx = mock_scan_task.remove_keys(&sapling_keys)?;
+    let done_rx = mock_scan_task.remove_keys(sapling_keys.clone())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
@@ -111,7 +111,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
-    mock_scan_task.remove_keys(&sapling_keys)?;
+    mock_scan_task.remove_keys(sapling_keys.clone())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
         ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
@@ -125,7 +125,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
 
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
-    mock_scan_task.remove_keys(&sapling_keys)?;
+    mock_scan_task.remove_keys(sapling_keys.clone())?;
 
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[..2].to_vec())?;
 
