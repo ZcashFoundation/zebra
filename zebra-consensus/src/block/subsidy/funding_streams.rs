@@ -48,22 +48,6 @@ pub fn funding_stream_values(
     Ok(results)
 }
 
-/// Returns the minimum height after the first halving
-/// as described in [protocol specification §7.10][7.10]
-///
-/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn height_for_first_halving(network: Network) -> Height {
-    // First halving on Mainnet is at Canopy
-    // while in Testnet is at block constant height of `1_116_000`
-    // https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    match network {
-        Network::Mainnet => Canopy
-            .activation_height(network)
-            .expect("canopy activation height should be available"),
-        Network::Testnet => FIRST_HALVING_TESTNET,
-    }
-}
-
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
 ///
@@ -78,7 +62,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
     // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
     //   This is the same as `floor()`, because these numbers are all positive.
 
-    let height_after_first_halving = height - height_for_first_halving(network);
+    let height_after_first_halving = height - network.height_for_first_halving();
 
     let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
         / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
@@ -93,10 +77,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_index(height: Height, network: Network) -> usize {
-    let num_addresses = match network {
-        Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
-        Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
-    };
+    let num_addresses = network.num_funding_streams();
 
     let index = 1u32
         .checked_add(funding_stream_address_period(height, network))

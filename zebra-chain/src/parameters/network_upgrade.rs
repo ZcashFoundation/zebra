@@ -229,7 +229,7 @@ const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299
 /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
 
-impl NetworkUpgrade {
+impl Network {
     /// Returns a map between activation heights and network upgrades for `network`,
     /// in ascending height order.
     ///
@@ -241,7 +241,7 @@ impl NetworkUpgrade {
     /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
-    pub fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
+    pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
         let (mainnet_heights, testnet_heights) = {
             #[cfg(not(feature = "zebra-test"))]
             {
@@ -269,7 +269,7 @@ impl NetworkUpgrade {
                 (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
             }
         };
-        match network {
+        match self {
             Mainnet => mainnet_heights,
             Testnet => testnet_heights,
         }
@@ -277,10 +277,12 @@ impl NetworkUpgrade {
         .cloned()
         .collect()
     }
-
+}
+impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
     pub fn current(network: Network, height: block::Height) -> NetworkUpgrade {
-        NetworkUpgrade::activation_list(network)
+        network
+            .activation_list()
             .range(..=height)
             .map(|(_, nu)| *nu)
             .next_back()
@@ -292,7 +294,8 @@ impl NetworkUpgrade {
     /// Returns None if the next upgrade has not been implemented in Zebra
     /// yet.
     pub fn next(network: Network, height: block::Height) -> Option<NetworkUpgrade> {
-        NetworkUpgrade::activation_list(network)
+        network
+            .activation_list()
             .range((Excluded(height), Unbounded))
             .map(|(_, nu)| *nu)
             .next()
@@ -303,7 +306,8 @@ impl NetworkUpgrade {
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
     pub fn activation_height(&self, network: Network) -> Option<block::Height> {
-        NetworkUpgrade::activation_list(network)
+        network
+            .activation_list()
             .iter()
             .filter(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
@@ -316,7 +320,7 @@ impl NetworkUpgrade {
     /// Use [`NetworkUpgrade::activation_height`] to get the specific network
     /// upgrade.
     pub fn is_activation_height(network: Network, height: block::Height) -> bool {
-        NetworkUpgrade::activation_list(network).contains_key(&height)
+        network.activation_list().contains_key(&height)
     }
 
     /// Returns an unordered mapping between NetworkUpgrades and their ConsensusBranchIds.
@@ -445,20 +449,6 @@ impl NetworkUpgrade {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
 
-    /// Returns true if the maximum block time rule is active for `network` and `height`.
-    ///
-    /// Always returns true if `network` is the Mainnet.
-    /// If `network` is the Testnet, the `height` should be at least
-    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
-    /// Returns false otherwise.
-    ///
-    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-    pub fn is_max_block_time_enforced(network: Network, height: block::Height) -> bool {
-        match network {
-            Network::Mainnet => true,
-            Network::Testnet => height >= TESTNET_MAX_TIME_START_HEIGHT,
-        }
-    }
     /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
     pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
         CONSENSUS_BRANCH_IDS

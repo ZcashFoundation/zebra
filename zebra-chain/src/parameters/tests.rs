@@ -14,14 +14,14 @@ use NetworkUpgrade::*;
 fn activation_bijective() {
     let _init_guard = zebra_test::init();
 
-    let mainnet_activations = NetworkUpgrade::activation_list(Mainnet);
+    let mainnet_activations = Mainnet.activation_list();
     let mainnet_heights: HashSet<&block::Height> = mainnet_activations.keys().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_heights.len());
 
     let mainnet_nus: HashSet<&NetworkUpgrade> = mainnet_activations.values().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_nus.len());
 
-    let testnet_activations = NetworkUpgrade::activation_list(Testnet);
+    let testnet_activations = Testnet.activation_list();
     let testnet_heights: HashSet<&block::Height> = testnet_activations.keys().collect();
     assert_eq!(TESTNET_ACTIVATION_HEIGHTS.len(), testnet_heights.len());
 
@@ -46,7 +46,7 @@ fn activation_extremes_testnet() {
 fn activation_extremes(network: Network) {
     // The first three upgrades are Genesis, BeforeOverwinter, and Overwinter
     assert_eq!(
-        NetworkUpgrade::activation_list(network).get(&block::Height(0)),
+        network.activation_list().get(&block::Height(0)),
         Some(&Genesis)
     );
     assert_eq!(Genesis.activation_height(network), Some(block::Height(0)));
@@ -62,7 +62,7 @@ fn activation_extremes(network: Network) {
     );
 
     assert_eq!(
-        NetworkUpgrade::activation_list(network).get(&block::Height(1)),
+        network.activation_list().get(&block::Height(1)),
         Some(&BeforeOverwinter)
     );
     assert_eq!(
@@ -91,7 +91,7 @@ fn activation_extremes(network: Network) {
     // We assume that the last upgrade we know about continues forever
     // (even if we suspect that won't be true)
     assert_ne!(
-        NetworkUpgrade::activation_list(network).get(&block::Height::MAX),
+        network.activation_list().get(&block::Height::MAX),
         Some(&Genesis)
     );
     assert!(!NetworkUpgrade::is_activation_height(
@@ -121,7 +121,7 @@ fn activation_consistent_testnet() {
 /// Check that the `activation_height`, `is_activation_height`,
 /// `current`, and `next` functions are consistent for `network`.
 fn activation_consistent(network: Network) {
-    let activation_list = NetworkUpgrade::activation_list(network);
+    let activation_list = network.activation_list();
     let network_upgrades: HashSet<&NetworkUpgrade> = activation_list.values().collect();
 
     for &network_upgrade in network_upgrades {

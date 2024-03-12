@@ -1658,7 +1658,7 @@ async fn rpc_getdifficulty() {
         chain_sync_status::MockSyncStatus,
         chain_tip::mock::MockChainTip,
         serialization::DateTime32,
-        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
     };
 
     use zebra_network::address_book_peers::MockAddressBookPeers;
@@ -1742,7 +1742,7 @@ async fn rpc_getdifficulty() {
     assert_eq!(format!("{:.9}", get_difficulty.unwrap()), "0.000122072");
 
     // Fake the ChainInfo response: difficulty limit - smallest valid difficulty
-    let pow_limit = ExpandedDifficulty::target_difficulty_limit(Mainnet);
+    let pow_limit = Mainnet.target_difficulty_limit();
     let fake_difficulty = pow_limit.into();
     let mut read_state2 = read_state.clone();
     let mock_read_state_request_handler = async move {

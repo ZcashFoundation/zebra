@@ -17,7 +17,7 @@ use std::{
 };
 
 use zebra_chain::block;
-use zebra_chain::parameters::{genesis_hash, Network};
+use zebra_chain::parameters::Network;
 
 /// The hard-coded checkpoints for mainnet, generated using the
 /// `zebra-checkpoints` tool.
@@ -42,6 +42,47 @@ const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 /// See [`MAINNET_CHECKPOINTS`] for detailed `zebra-checkpoints` usage
 /// information.
 const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
+
+/// Network methods related to checkpoints
+pub trait ParameterCheckpoint {
+    /// Returns the hash for the genesis block in `network`.
+    fn genesis_hash(&self) -> zebra_chain::block::Hash;
+    /// Returns the hard-coded checkpoint list for `network`.
+    fn checkpoint_list(&self) -> CheckpointList;
+}
+
+impl ParameterCheckpoint for Network {
+    fn genesis_hash(&self) -> zebra_chain::block::Hash {
+        match self {
+            // zcash-cli getblockhash 0
+            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
+            // zcash-cli -testnet getblockhash 0
+            Network::Testnet => "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
+        }
+        .parse()
+        .expect("hard-coded hash parses")
+    }
+
+    fn checkpoint_list(&self) -> CheckpointList {
+        // parse calls CheckpointList::from_list
+        let checkpoint_list: CheckpointList = match self {
+            Network::Mainnet => MAINNET_CHECKPOINTS
+                .parse()
+                .expect("Hard-coded Mainnet checkpoint list parses and validates"),
+            Network::Testnet => TESTNET_CHECKPOINTS
+                .parse()
+                .expect("Hard-coded Testnet checkpoint list parses and validates"),
+        };
+
+        match checkpoint_list.hash(block::Height(0)) {
+            Some(hash) if hash == self.genesis_hash() => checkpoint_list,
+            Some(_) => {
+                panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
+            }
+            None => unreachable!("Parser should have checked for a missing genesis checkpoint"),
+        }
+    }
+}
 
 /// A list of block height and hash checkpoints.
 ///
@@ -81,27 +122,6 @@ impl FromStr for CheckpointList {
 }
 
 impl CheckpointList {
-    /// Returns the hard-coded checkpoint list for `network`.
-    pub fn new(network: Network) -> Self {
-        // parse calls CheckpointList::from_list
-        let checkpoint_list: CheckpointList = match network {
-            Network::Mainnet => MAINNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet => TESTNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Testnet checkpoint list parses and validates"),
-        };
-
-        match checkpoint_list.hash(block::Height(0)) {
-            Some(hash) if hash == genesis_hash(network) => checkpoint_list,
-            Some(_) => {
-                panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
-            }
-            None => unreachable!("Parser should have checked for a missing genesis checkpoint"),
-        }
-    }
-
     /// Create a new checkpoint list for `network` from `checkpoint_list`.
     ///
     /// Assumes that the provided genesis checkpoint is correct.
@@ -123,8 +143,8 @@ impl CheckpointList {
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
             Some((block::Height(0), hash))
-                if (hash == &genesis_hash(Network::Mainnet)
-                    || hash == &genesis_hash(Network::Testnet)) => {}
+                if (hash == &Network::Mainnet.genesis_hash()
+                    || hash == &Network::Testnet.genesis_hash()) => {}
             Some((block::Height(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }
