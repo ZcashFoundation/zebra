@@ -6,7 +6,7 @@ use super::{CoinbaseData, Input, OutPoint, Script, GENESIS_COINBASE_DATA};
 
 impl Input {
     /// Construct a strategy for creating valid-ish vecs of Inputs.
-    pub fn vec_strategy(ledger_state: LedgerState, max_size: usize) -> BoxedStrategy<Vec<Self>> {
+    pub fn vec_strategy(ledger_state: &LedgerState, max_size: usize) -> BoxedStrategy<Vec<Self>> {
         if ledger_state.has_coinbase {
             Self::arbitrary_with(Some(ledger_state.height))
                 .prop_map(|input| vec![input])
