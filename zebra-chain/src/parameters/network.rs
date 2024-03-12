@@ -92,10 +92,6 @@ impl Network {
     }
 }
 
-// impl NetworkSubsetExt for Network {
-//     type NetworkOffload = ZcashPrimitivesNetwork;
-// }
-
 impl From<Network> for &'static str {
     fn from(network: Network) -> &'static str {
         match network {
