@@ -859,7 +859,7 @@ impl Arbitrary for VerifiedUnminedTx {
 /// converting sapling shielded data from v4 to v5 if possible.
 pub fn transaction_to_fake_v5(
     trans: &Transaction,
-    network: Network,
+    network: &Network,
     height: block::Height,
 ) -> Transaction {
     use Transaction::*;
@@ -1005,7 +1005,7 @@ pub fn test_transactions(
 /// These transactions are converted from non-V5 transactions that exist in the provided network
 /// blocks.
 pub fn fake_v5_transactions_for_network<'b>(
-    network: Network,
+    network: &'b Network,
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
     transactions_from_blocks(blocks)

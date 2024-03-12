@@ -48,7 +48,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
     ];
 
     for (network, blocks) in networks {
-        for transaction in fake_v5_transactions_for_network(network, blocks) {
+        for transaction in fake_v5_transactions_for_network(&network, blocks) {
             match check::has_inputs_and_outputs(&transaction) {
                 Ok(()) => (),
                 Err(TransactionError::NoInputs) | Err(TransactionError::NoOutputs) => (),
@@ -67,7 +67,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
 fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     // Find a transaction with no inputs or outputs to use as base
     let mut transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -121,7 +121,7 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
 fn fake_v5_transaction_with_orchard_actions_has_flags() {
     // Find a transaction with no inputs or outputs to use as base
     let mut transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -164,7 +164,7 @@ fn fake_v5_transaction_with_orchard_actions_has_flags() {
 #[test]
 fn v5_transaction_with_no_inputs_fails_validation() {
     let transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -798,7 +798,7 @@ async fn state_error_converted_correctly() {
 #[test]
 fn v5_transaction_with_no_outputs_fails_validation() {
     let transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -821,7 +821,7 @@ fn v5_transaction_with_no_outputs_fails_validation() {
 #[test]
 fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
     let mut transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -836,7 +836,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
 #[test]
 fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
     let mut transaction = fake_v5_transactions_for_network(
-        Network::Mainnet,
+        &Network::Mainnet,
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
@@ -867,7 +867,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(network, state_service);
 
-        let transaction = fake_v5_transactions_for_network(network, blocks)
+        let transaction = fake_v5_transactions_for_network(&network, blocks)
             .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
 
@@ -914,7 +914,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(network, state_service);
 
-        let mut transaction = fake_v5_transactions_for_network(network, blocks)
+        let mut transaction = fake_v5_transactions_for_network(&network, blocks)
             .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
         if transaction
@@ -2300,7 +2300,7 @@ fn v5_with_sapling_spends() {
         let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
         let transaction =
-            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
                 .filter(|transaction| {
                     !transaction.is_coinbase()
@@ -2346,7 +2346,7 @@ fn v5_with_duplicate_sapling_spends() {
         let network = Network::Mainnet;
 
         let mut transaction =
-            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
                 .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
@@ -2393,7 +2393,7 @@ fn v5_with_duplicate_orchard_action() {
 
         // Find a transaction with no inputs or outputs to use as base
         let mut transaction =
-            fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
+            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
                 .find(|transaction| {
                     transaction.inputs().is_empty()
@@ -2849,7 +2849,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_ZERO_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
         let mut transaction =
-            fake_v5_transactions_for_network(network, zebra_test::vectors::TESTNET_BLOCKS.iter())
+            fake_v5_transactions_for_network(&network, zebra_test::vectors::TESTNET_BLOCKS.iter())
                 .rev()
                 .find(|transaction| {
                     transaction.inputs().is_empty()
@@ -2891,7 +2891,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
         let mut transaction =
-            fake_v5_transactions_for_network(network, zebra_test::vectors::TESTNET_BLOCKS.iter())
+            fake_v5_transactions_for_network(&network, zebra_test::vectors::TESTNET_BLOCKS.iter())
                 .rev()
                 .find(|transaction| {
                     transaction.inputs().is_empty()

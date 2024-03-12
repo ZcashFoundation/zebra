@@ -599,7 +599,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| transaction_to_fake_v5(t, network, Height(*height)))
+            .map(|t| transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
