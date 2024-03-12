@@ -70,28 +70,35 @@ where
             .into_iter()
             .map(|KeyWithHeight { key, height }| (key, height))
             .collect();
+
         let register_keys_response_fut = self
             .scan_service
             .clone()
-            .oneshot(ScanServiceRequest::RegisterKeys(keys.clone()));
+            .ready()
+            .await
+            .map_err(|_| Status::unknown("service poll_ready() method returned an error"))?
+            .call(ScanServiceRequest::RegisterKeys(keys.clone()));
 
         let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
 
-        // TODO: Make sure the service is ready and has been called with RegisterKeys request first.
-        //       `Oneshot` could call the service with these requests in either order, and
-        //       if it calls subscribe first, it will return an error.
-        let subscribe_results_response_fut =
-            self.scan_service
-                .clone()
-                .oneshot(ScanServiceRequest::SubscribeResults(
-                    keys.iter().cloned().collect(),
-                ));
+        let subscribe_results_response_fut = self
+            .scan_service
+            .clone()
+            .ready()
+            .await
+            .map_err(|_| Status::unknown("service poll_ready() method returned an error"))?
+            .call(ScanServiceRequest::SubscribeResults(
+                keys.iter().cloned().collect(),
+            ));
 
         let (register_keys_response, subscribe_results_response) =
             tokio::join!(register_keys_response_fut, subscribe_results_response_fut);
 
-        // TODO: Ignore errors here where no key was registered, unless the subscribe results request also returns an error that
-        //       the results sender was dropped because the keys didn't match any registered keys.
+        // TODO:
+        // - Ignore errors here where no key was registered, unless the subscribe results request also returns an error that
+        //   the results sender was dropped because the keys didn't match any registered keys.
+        // - If any requests that send a message the scan task respond with a timeout error in any gRPC methods, add:
+        //   "is Zebra synced past the Sapling activation height" to the error message
         let ScanServiceResponse::RegisteredKeys(_) = register_keys_response
             .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
