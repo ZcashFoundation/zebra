@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::{Service, ServiceBuilder, ServiceExt};
+use tower::{timeout::error::Elapsed, Service, ServiceBuilder, ServiceExt};
 
 use color_eyre::{eyre::eyre, Result};
 
@@ -387,19 +387,28 @@ async fn scan_service_timeout() -> Result<()> {
         ));
     }
 
-    while let Some(response) = response_futs.next().await {
-        let response =
-            response.expect("service should respond with timeout error before outer timeout");
-
-        let response_error = response
+    let expect_timeout_err = |response: Option<Result<Result<_, _>, _>>| {
+        response
+            .expect("response_futs should not be empty")
+            .expect("service should respond with timeout error before outer timeout")
             .expect_err("service response should be a timeout error")
-            .to_string();
+    };
 
-        assert!(
-            response_error.starts_with("request timed out"),
-            "error message should say the request timed out"
-        );
+    // RegisterKeys and SubscribeResults should return `Elapsed` errors from `Timeout` layer
+    for _ in 0..2 {
+        let response = response_futs.next().await;
+        expect_timeout_err(response)
+            .downcast::<Elapsed>()
+            .expect("service should return Elapsed error from Timeout layer");
     }
+
+    let response = response_futs.next().await;
+    let response_error_msg = expect_timeout_err(response).to_string();
+
+    assert!(
+        response_error_msg.starts_with("request timed out"),
+        "error message should say the request timed out"
+    );
 
     Ok(())
 }
