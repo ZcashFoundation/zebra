@@ -68,13 +68,13 @@ impl Network {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_pubkey_address_prefix()
+        <ZcashPrimitivesNetwork>::from(self).b58_pubkey_address_prefix()
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_script_address_prefix()
+        <ZcashPrimitivesNetwork>::from(self).b58_script_address_prefix()
     }
     /// Returns true if the maximum block time rule is active for `network` and `height`.
     ///
