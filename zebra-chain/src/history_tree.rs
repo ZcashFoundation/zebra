@@ -46,23 +46,23 @@ impl Eq for HistoryTreeError {}
 
 /// The inner [Tree] in one of its supported versions.
 #[derive(Debug)]
-enum InnerHistoryTree<'a> {
+enum InnerHistoryTree {
     /// A pre-Orchard tree.
-    PreOrchard(Tree<'a, PreOrchard>),
+    PreOrchard(Tree<PreOrchard>),
     /// An Orchard-onward tree.
-    OrchardOnward(Tree<'a, OrchardOnward>),
+    OrchardOnward(Tree<OrchardOnward>),
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
 /// the block history, as specified in [ZIP-221](https://zips.z.cash/zip-0221).
 #[derive(Debug)]
-pub struct NonEmptyHistoryTree<'a> {
-    network: &'a Network,
+pub struct NonEmptyHistoryTree {
+    network: Network,
     network_upgrade: NetworkUpgrade,
     /// Merkle mountain range tree from `zcash_history`.
     /// This is a "runtime" structure used to add / remove nodes, and it's not
     /// persistent.
-    inner: InnerHistoryTree<'a>,
+    inner: InnerHistoryTree,
     /// The number of nodes in the tree.
     size: u32,
     /// The peaks of the tree, indexed by their position in the array representation
@@ -72,7 +72,7 @@ pub struct NonEmptyHistoryTree<'a> {
     current_height: Height,
 }
 
-impl<'a> NonEmptyHistoryTree<'a> {
+impl<'a> NonEmptyHistoryTree {
     /// Recreate a [`HistoryTree`] from previously saved data.
     ///
     /// The parameters must come from the values of [`NonEmptyHistoryTree::size`],
@@ -114,7 +114,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
             }
         };
         Ok(Self {
-            network,
+            network: network.clone(),
             network_upgrade,
             inner,
             size,
@@ -169,7 +169,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
         let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry);
         Ok(NonEmptyHistoryTree {
-            network,
+            network: network.clone(),
             network_upgrade,
             inner: tree,
             size: 1,
@@ -212,7 +212,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
         if network_upgrade != self.network_upgrade {
             // This is the activation block of a network upgrade.
             // Create a new tree.
-            let new_tree = Self::from_block(self.network, block, sapling_root, orchard_root)?;
+            let new_tree = Self::from_block(&self.network, block, sapling_root, orchard_root)?;
             // Replaces self with the new tree
             *self = new_tree;
             assert_eq!(self.network_upgrade, network_upgrade);
@@ -328,7 +328,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
         self.inner = match self.inner {
             InnerHistoryTree::PreOrchard(_) => {
                 InnerHistoryTree::PreOrchard(Tree::<PreOrchard>::new_from_cache(
-                    self.network,
+                    &self.network,
                     self.network_upgrade,
                     self.size,
                     &self.peaks,
@@ -337,7 +337,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
             }
             InnerHistoryTree::OrchardOnward(_) => {
                 InnerHistoryTree::OrchardOnward(Tree::<OrchardOnward>::new_from_cache(
-                    self.network,
+                    &self.network,
                     self.network_upgrade,
                     self.size,
                     &self.peaks,
@@ -377,7 +377,7 @@ impl<'a> NonEmptyHistoryTree<'a> {
     }
 }
 
-impl<'a> Clone for NonEmptyHistoryTree<'a> {
+impl Clone for NonEmptyHistoryTree {
     fn clone(&self) -> Self {
         let tree = match self.inner {
             InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
@@ -402,7 +402,7 @@ impl<'a> Clone for NonEmptyHistoryTree<'a> {
             ),
         };
         NonEmptyHistoryTree {
-            network: &self.network.clone(),
+            network: self.network.clone(),
             network_upgrade: self.network_upgrade,
             inner: tree,
             size: self.size,
@@ -415,24 +415,24 @@ impl<'a> Clone for NonEmptyHistoryTree<'a> {
 /// A History Tree that keeps track of its own creation in the Heartwood
 /// activation block, being empty beforehand.
 #[derive(Debug, Default)]
-pub struct HistoryTree<'a>(Option<NonEmptyHistoryTree<'a>>);
+pub struct HistoryTree(Option<NonEmptyHistoryTree>);
 
-impl<'a> Clone for HistoryTree<'a> {
+impl Clone for HistoryTree {
     fn clone(&self) -> Self {
         HistoryTree(self.0.clone())
     }
 }
 
-impl<'a> HistoryTree<'a> {
+impl HistoryTree {
     /// Create a HistoryTree from a block.
     ///
     /// If the block is pre-Heartwood, it returns an empty history tree.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
-        network: &'a Network,
+        network: &Network,
         block: Arc<Block>,
-        sapling_root: &'a sapling::tree::Root,
-        orchard_root: &'a orchard::tree::Root,
+        sapling_root: &sapling::tree::Root,
+        orchard_root: &orchard::tree::Root,
     ) -> Result<Self, HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
             .activation_height(&network)
@@ -456,10 +456,10 @@ impl<'a> HistoryTree<'a> {
     #[allow(clippy::unwrap_in_result)]
     pub fn push(
         &mut self,
-        network: &'a Network,
+        network: &Network,
         block: Arc<Block>,
-        sapling_root: &'a sapling::tree::Root,
-        orchard_root: &'a orchard::tree::Root,
+        sapling_root: &sapling::tree::Root,
+        orchard_root: &orchard::tree::Root,
     ) -> Result<(), HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
             .activation_height(&network)
@@ -501,29 +501,29 @@ impl<'a> HistoryTree<'a> {
     }
 }
 
-impl<'a> From<NonEmptyHistoryTree<'a>> for HistoryTree<'a> {
-    fn from(tree: NonEmptyHistoryTree<'a>) -> Self {
+impl From<NonEmptyHistoryTree> for HistoryTree {
+    fn from(tree: NonEmptyHistoryTree) -> Self {
         HistoryTree(Some(tree))
     }
 }
 
-impl<'a> From<Option<NonEmptyHistoryTree<'a>>> for HistoryTree<'a> {
-    fn from(tree: Option<NonEmptyHistoryTree<'a>>) -> Self {
+impl From<Option<NonEmptyHistoryTree>> for HistoryTree {
+    fn from(tree: Option<NonEmptyHistoryTree>) -> Self {
         HistoryTree(tree)
     }
 }
 
-impl<'a> Deref for HistoryTree<'a> {
-    type Target = Option<NonEmptyHistoryTree<'a>>;
+impl Deref for HistoryTree {
+    type Target = Option<NonEmptyHistoryTree>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<'a> PartialEq for HistoryTree<'a> {
+impl PartialEq for HistoryTree {
     fn eq(&self, other: &Self) -> bool {
         self.as_ref().map(|tree| tree.hash()) == other.as_ref().map(|other_tree| other_tree.hash())
     }
 }
 
-impl<'a> Eq for HistoryTree<'a> {}
+impl Eq for HistoryTree {}

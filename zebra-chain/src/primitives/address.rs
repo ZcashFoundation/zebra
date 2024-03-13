@@ -158,7 +158,7 @@ impl Address {
     pub fn network(&self) -> Network {
         match &self {
             Self::Transparent(address) => address.network(),
-            Self::Sapling { network, .. } | Self::Unified { network, .. } => *network,
+            Self::Sapling { network, .. } | Self::Unified { network, .. } => network.clone(),
         }
     }
 

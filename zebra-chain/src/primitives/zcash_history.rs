@@ -33,8 +33,8 @@ pub trait Version: zcash_history::Version {
 ///
 /// Currently it should not be used as a long-term data structure because it
 /// may grow without limits.
-pub struct Tree<'a, V: zcash_history::Version> {
-    network: &'a Network,
+pub struct Tree<V: zcash_history::Version> {
+    network: Network,
     network_upgrade: NetworkUpgrade,
     inner: zcash_history::Tree<V>,
 }
@@ -91,7 +91,7 @@ impl Entry {
     }
 }
 
-impl<'a, V: Version> Tree<'a, V> {
+impl<V: Version> Tree<V> {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the
@@ -106,12 +106,12 @@ impl<'a, V: Version> Tree<'a, V> {
     /// Will panic if `peaks` is empty.
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_cache(
-        network: &'a Network,
+        network: &Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
         peaks: &BTreeMap<u32, Entry>,
         extra: &BTreeMap<u32, Entry>,
-    ) -> Result<Tree<'a, V>, io::Error> {
+    ) -> Result<Tree<V>, io::Error> {
         let branch_id = network_upgrade
             .branch_id()
             .expect("unexpected pre-Overwinter MMR history tree");
@@ -127,7 +127,7 @@ impl<'a, V: Version> Tree<'a, V> {
         }
         let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);
         Ok(Tree {
-            network,
+            network: network.clone(),
             network_upgrade,
             inner,
         })
@@ -140,7 +140,7 @@ impl<'a, V: Version> Tree<'a, V> {
     ///  (ignored for V1 trees).
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_block(
-        network: &'a Network,
+        network: &Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
@@ -217,7 +217,7 @@ impl<'a, V: Version> Tree<'a, V> {
     }
 }
 
-impl<'a, V: zcash_history::Version> std::fmt::Debug for Tree<'a, V> {
+impl<V: zcash_history::Version> std::fmt::Debug for Tree<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tree")
             .field("network", &self.network)
