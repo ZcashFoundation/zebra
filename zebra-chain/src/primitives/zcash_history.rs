@@ -140,7 +140,7 @@ impl<'a, V: Version> Tree<'a, V> {
     ///  (ignored for V1 trees).
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_block(
-        network: &Network,
+        network: &'a Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,

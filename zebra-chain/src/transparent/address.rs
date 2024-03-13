@@ -200,9 +200,9 @@ impl Address {
 
     /// Returns the network for this address.
     pub fn network(&self) -> Network {
-        match *self {
-            Address::PayToScriptHash { network, .. } => network,
-            Address::PayToPublicKeyHash { network, .. } => network,
+        match self {
+            Address::PayToScriptHash { network, .. } => network.clone(),
+            Address::PayToPublicKeyHash { network, .. } => network.clone(),
         }
     }
 
