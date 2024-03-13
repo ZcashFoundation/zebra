@@ -175,7 +175,7 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     let results_receiver = scan_task.subscribe(keys)?.await.map_err(|_| {
-                        "scan task dropped responder, check that keys are already registered"
+                        "scan task dropped responder, check that keys are registered"
                     })?;
 
                     Ok(Response::SubscribeResults(results_receiver))

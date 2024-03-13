@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, net::SocketAddr, pin::Pin};
 use futures_util::future::TryFutureExt;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::{transport::Server, Request, Response, Status};
-use tower::ServiceExt;
+use tower::{timeout::error::Elapsed, ServiceExt};
 
 use zebra_chain::{block::Height, transaction};
 use zebra_node_services::scan_service::{
@@ -94,22 +94,33 @@ where
         let (register_keys_response, subscribe_results_response) =
             tokio::join!(register_keys_response_fut, subscribe_results_response_fut);
 
-        // TODO:
-        // - Ignore errors here where no key was registered, unless the subscribe results request also returns an error that
-        //   the results sender was dropped because the keys didn't match any registered keys.
-        // - If any requests that send a message the scan task respond with a timeout error in any gRPC methods, add:
-        //   "is Zebra synced past the Sapling activation height" to the error message
-        let ScanServiceResponse::RegisteredKeys(_) = register_keys_response
-            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
+        // Ignores errors from the register keys request, we expect there to be a timeout if the keys
+        // are already registered, or an empty response if no new keys could be parsed as Sapling efvks.
+        //
+        // This method will still return an error if every key in the `scan` request is invalid, since
+        // the SubscribeResults request will return an error once the `rsp_tx` is dropped in `ScanTask::process_messages`
+        // when it finds that none of the keys in the request are registered.
+        let register_keys_err = match register_keys_response {
+            Ok(ScanServiceResponse::RegisteredKeys(_)) => None,
+            Ok(response) => {
+                return Err(Status::internal(format!(
+                    "unexpected response from scan service: {response:?}"
+                )))
+            }
+            Err(err) if err.downcast_ref::<Elapsed>().is_some() => {
+                return Err(Status::deadline_exceeded(
+                    "scan service requests timed out, is Zebra synced past Sapling activation height?")
+                )
+            }
+            Err(err) => Some(err),
         };
 
         let ScanServiceResponse::SubscribeResults(mut results_receiver) =
-            subscribe_results_response
-                .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+            subscribe_results_response.map_err(|err| {
+                register_keys_err
+                    .map(|err| Status::invalid_argument(err.to_string()))
+                    .unwrap_or(Status::internal(err.to_string()))
+            })?
         else {
             return Err(Status::unknown(
                 "scan service returned an unexpected response",
