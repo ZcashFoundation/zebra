@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
-use tower::Service;
+use tower::{BoxError, Service};
 
 use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Hash};
 
@@ -32,6 +32,9 @@ pub struct ScanService {
 }
 
 /// A timeout applied to `DeleteKeys` requests.
+///
+/// This should be shorter than [`SCAN_SERVICE_TIMEOUT`](crate::init::SCAN_SERVICE_TIMEOUT) so the
+/// request can try to delete entries from storage after the timeout before the future is dropped.
 const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
@@ -64,7 +67,7 @@ impl ScanService {
 
 impl Service<Request> for ScanService {
     type Response = Response;
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -123,7 +126,7 @@ impl Service<Request> for ScanService {
                         scan_task.remove_keys(keys.clone())?,
                     )
                     .await
-                    .map_err(|_| "timeout waiting for delete keys done notification");
+                    .map_err(|_| "request timed out removing keys from scan task".to_string());
 
                     // Delete the key from the database after either confirmation that it's been removed from the scan task, or
                     // waiting `DELETE_KEY_TIMEOUT`.
