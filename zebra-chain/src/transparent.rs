@@ -427,6 +427,6 @@ impl Output {
     ///
     /// Returns None if the address type is not valid or unrecognized.
     pub fn address(&self, network: Network) -> Option<Address> {
-        zcash_primitives::transparent_output_address(self, network)
+        zcash_primitives::transparent_output_address(self, &network)
     }
 }

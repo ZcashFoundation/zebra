@@ -319,7 +319,7 @@ pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
 /// Returns None if the address type is not valid or unrecognized.
 pub(crate) fn transparent_output_address(
     output: &transparent::Output,
-    network: Network,
+    network: &Network,
 ) -> Option<transparent::Address> {
     let tx_out = zp_tx::components::TxOut::try_from(output)
         .expect("zcash_primitives and Zebra transparent output formats must be compatible");
@@ -337,8 +337,8 @@ pub(crate) fn transparent_output_address(
     }
 }
 
-impl From<Network> for zcash_primitives::consensus::Network {
-    fn from(network: Network) -> Self {
+impl From<&Network> for zcash_primitives::consensus::Network {
+    fn from(network: &Network) -> Self {
         match network {
             Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
             Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
