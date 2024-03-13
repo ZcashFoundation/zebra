@@ -520,16 +520,16 @@ impl Block {
                     if let Some(history_tree) = history_tree.as_mut() {
                         history_tree
                             .push(
-                                current.network,
+                                &current.network,
                                 Arc::new(block.clone()),
-                                sapling_tree.root(),
-                                orchard_tree.root(),
+                                &sapling_tree.root(),
+                                &orchard_tree.root(),
                             )
                             .unwrap();
                     } else {
                         history_tree = Some(
                             HistoryTree::from_block(
-                                current.network,
+                                &current.network,
                                 Arc::new(block.clone()),
                                 &sapling_tree.root(),
                                 &orchard_tree.root(),
