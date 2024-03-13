@@ -103,7 +103,7 @@ impl Commitment {
     // TODO: rename as from_bytes_in_serialized_order()
     pub(super) fn from_bytes(
         bytes: [u8; 32],
-        network: Network,
+        network: &Network,
         height: block::Height,
     ) -> Result<Commitment, CommitmentError> {
         use Commitment::*;

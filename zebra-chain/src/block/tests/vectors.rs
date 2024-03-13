@@ -260,7 +260,7 @@ fn block_commitment(network: Network) {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
-        let commitment = block.commitment(network).unwrap_or_else(|_| {
+        let commitment = block.commitment(&network).unwrap_or_else(|_| {
             panic!("unexpected structurally invalid block commitment at {network} {height}")
         });
 

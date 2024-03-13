@@ -156,7 +156,7 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     });
 
     proptest!(|((network, block) in strategy)| {
-        block.check_transaction_network_upgrade_consistency(network)?;
+        block.check_transaction_network_upgrade_consistency(&network)?;
     });
 
     Ok(())

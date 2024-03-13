@@ -98,7 +98,7 @@ impl Block {
     ///
     /// Returns an error if this block does not have a block height,
     /// or if the commitment value is structurally invalid.
-    pub fn commitment(&self, network: Network) -> Result<Commitment, CommitmentError> {
+    pub fn commitment(&self, network: &Network) -> Result<Commitment, CommitmentError> {
         match self.coinbase_height() {
             None => Err(CommitmentError::MissingBlockHeight {
                 block_hash: self.hash(),
@@ -121,7 +121,7 @@ impl Block {
     #[allow(clippy::unwrap_in_result)]
     pub fn check_transaction_network_upgrade_consistency(
         &self,
-        network: Network,
+        network: &Network,
     ) -> Result<(), error::BlockError> {
         let block_nu =
             NetworkUpgrade::current(&network, self.coinbase_height().expect("a valid height"));

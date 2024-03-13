@@ -33,7 +33,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     );
 
     // Check its commitment
-    let commitment0 = block0.commitment(network)?;
+    let commitment0 = block0.commitment(&network)?;
     if network_upgrade == NetworkUpgrade::Heartwood {
         // Heartwood is the only upgrade that has a reserved value.
         // (For other upgrades we could compare with the expected commitment,
@@ -60,7 +60,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     );
 
     // Check its commitment
-    let commitment1 = block1.commitment(network)?;
+    let commitment1 = block1.commitment(&network)?;
     assert_eq!(commitment1, Commitment::ChainHistoryRoot(hash0));
 
     // Append Block to MMR tree

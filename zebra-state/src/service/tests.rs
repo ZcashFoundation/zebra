@@ -355,7 +355,7 @@ proptest! {
         prop_assume!(
             first_checked_block
                 .unwrap()
-                .check_transaction_network_upgrade_consistency(network)
+                .check_transaction_network_upgrade_consistency(&network)
                 .is_err()
         );
 

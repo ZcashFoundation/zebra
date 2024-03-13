@@ -47,7 +47,7 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let first_commitment = first_block.commitment(network)?;
+    let first_commitment = first_block.commitment(&network)?;
     if network_upgrade == NetworkUpgrade::Heartwood {
         // Heartwood is the only upgrade that has a reserved value.
         // (For other upgrades we could compare with the expected commitment,
@@ -82,7 +82,7 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let second_commitment = second_block.commitment(network)?;
+    let second_commitment = second_block.commitment(&network)?;
     assert_eq!(second_commitment, Commitment::ChainHistoryRoot(first_root));
 
     // Append second block to history tree

@@ -124,7 +124,7 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
     network: Network,
     history_tree: &HistoryTree,
 ) -> Result<(), ValidateContextError> {
-    match block.commitment(network)? {
+    match block.commitment(&network)? {
         block::Commitment::PreSaplingReserved(_)
         | block::Commitment::FinalSaplingRoot(_)
         | block::Commitment::ChainHistoryActivationReserved => {
@@ -346,7 +346,7 @@ where
         // using our activation heights, the Zebra instance that verified those blocks had different
         // network upgrade heights.
         block
-            .check_transaction_network_upgrade_consistency(network)
+            .check_transaction_network_upgrade_consistency(&network)
             .map_err(|error| {
                 format!("inconsistent network upgrade found in transaction: {error:?}")
             })?;

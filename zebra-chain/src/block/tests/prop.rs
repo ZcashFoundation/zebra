@@ -81,7 +81,7 @@ proptest! {
 
         // just skip the test if the bytes don't parse, because there's nothing
         // to compare with
-        if let Ok(commitment) = Commitment::from_bytes(bytes, network, block_height) {
+        if let Ok(commitment) = Commitment::from_bytes(bytes, &network, block_height) {
             let other_bytes = commitment.to_bytes();
 
             prop_assert_eq![bytes, other_bytes];
@@ -104,7 +104,7 @@ proptest! {
         let bytes = block.zcash_serialize_to_vec()?;
 
         // Check the block commitment
-        let commitment = block.commitment(network);
+        let commitment = block.commitment(&network);
         if let Ok(commitment) = commitment {
             let commitment_bytes = commitment.to_bytes();
             prop_assert_eq![block.header.commitment_bytes.0, commitment_bytes];

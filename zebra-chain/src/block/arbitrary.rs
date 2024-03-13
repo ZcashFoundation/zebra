@@ -706,7 +706,7 @@ impl Arbitrary for Commitment {
                 if block_height == Heartwood.activation_height(&network).unwrap() {
                     Commitment::ChainHistoryActivationReserved
                 } else {
-                    Commitment::from_bytes(commitment_bytes, network, block_height)
+                    Commitment::from_bytes(commitment_bytes, &network, block_height)
                         .expect("unexpected failure in from_bytes parsing")
                 }
             })

@@ -295,7 +295,7 @@ pub fn merkle_root_validity(
 ) -> Result<(), BlockError> {
     // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
     block
-        .check_transaction_network_upgrade_consistency(network)
+        .check_transaction_network_upgrade_consistency(&network)
         .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
 
     let merkle_root = transaction_hashes.iter().cloned().collect();
