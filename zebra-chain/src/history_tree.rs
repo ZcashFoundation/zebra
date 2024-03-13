@@ -72,13 +72,13 @@ pub struct NonEmptyHistoryTree {
     current_height: Height,
 }
 
-impl<'a> NonEmptyHistoryTree {
+impl NonEmptyHistoryTree {
     /// Recreate a [`HistoryTree`] from previously saved data.
     ///
     /// The parameters must come from the values of [`NonEmptyHistoryTree::size`],
     /// [`NonEmptyHistoryTree::peaks`] and [`NonEmptyHistoryTree::current_height`] of a HistoryTree.
     pub fn from_cache(
-        network: &'a Network,
+        network: &Network,
         size: u32,
         peaks: BTreeMap<u32, Entry>,
         current_height: Height,
@@ -130,7 +130,7 @@ impl<'a> NonEmptyHistoryTree {
     ///  (ignored for pre-Orchard blocks).
     #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
-        network: &'a Network,
+        network: &Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
@@ -444,7 +444,8 @@ impl HistoryTree {
         {
             std::cmp::Ordering::Less => Ok(HistoryTree(None)),
             _ => Ok(
-                NonEmptyHistoryTree::from_block(network, block, sapling_root, orchard_root)?.into(),
+                NonEmptyHistoryTree::from_block(&network, block, sapling_root, orchard_root)?
+                    .into(),
             ),
         }
     }
