@@ -337,7 +337,7 @@ pub fn coinbase_outputs_are_decryptable(
         return Ok(());
     }
 
-    if !zcash_note_encryption::decrypts_successfully(transaction, network, height) {
+    if !zcash_note_encryption::decrypts_successfully(transaction, &network, height) {
         return Err(TransactionError::CoinbaseOutputsNotDecryptable);
     }
 

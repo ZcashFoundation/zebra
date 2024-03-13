@@ -15,7 +15,7 @@ use crate::{
 ///
 /// If passed a network/height without matching consensus branch ID (pre-Overwinter),
 /// since `librustzcash` won't be able to parse it.
-pub fn decrypts_successfully(transaction: &Transaction, network: Network, height: Height) -> bool {
+pub fn decrypts_successfully(transaction: &Transaction, network: &Network, height: Height) -> bool {
     let network_upgrade = NetworkUpgrade::current(&network, height);
     let alt_tx = convert_tx_to_librustzcash(transaction, network_upgrade)
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
