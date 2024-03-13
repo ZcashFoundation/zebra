@@ -467,7 +467,7 @@ fn history_tree_is_updated_for_network_upgrade(
 
     // To fix the commitment in the next block we must recreate the history tree
     let tree = NonEmptyHistoryTree::from_block(
-        Network::Mainnet,
+        &Network::Mainnet,
         activation_block.clone(),
         &chain.sapling_note_commitment_tree_for_tip().root(),
         &chain.orchard_note_commitment_tree_for_tip().root(),
@@ -549,7 +549,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     // To fix the commitment in the next block we must recreate the history tree
     let chain = state.best_chain().unwrap();
     let tree = NonEmptyHistoryTree::from_block(
-        Network::Mainnet,
+        &Network::Mainnet,
         activation_block.clone(),
         &chain.sapling_note_commitment_tree_for_tip().root(),
         &chain.orchard_note_commitment_tree_for_tip().root(),

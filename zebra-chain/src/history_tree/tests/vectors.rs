@@ -59,7 +59,7 @@ fn push_and_prune_for_network_upgrade(
     let first_sapling_root =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
-        network,
+        &network,
         first_block,
         &first_sapling_root,
         &Default::default(),
@@ -134,7 +134,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     let sapling_root_prev =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
-        network,
+        &network,
         block_prev,
         &sapling_root_prev,
         &Default::default(),

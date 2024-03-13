@@ -1426,10 +1426,10 @@ impl Chain {
         let history_tree_mut = Arc::make_mut(&mut history_tree);
         history_tree_mut
             .push(
-                self.network,
+                &self.network,
                 contextually_valid.block.clone(),
-                sapling_root,
-                orchard_root,
+                &sapling_root,
+                &orchard_root,
             )
             .map_err(Arc::new)?;
 

@@ -17,7 +17,7 @@ pub fn fake_history_tree(network: Network) -> Arc<HistoryTree> {
     let first_sapling_root = Root::try_from(sapling_root).unwrap();
 
     let history_tree = NonEmptyHistoryTree::from_block(
-        Network::Mainnet,
+        &Network::Mainnet,
         block,
         &first_sapling_root,
         &Default::default(),

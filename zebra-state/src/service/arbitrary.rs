@@ -158,7 +158,7 @@ impl Strategy for PreparedChain {
                 .current();
             // Generate a history tree from the first block
             let history_tree = HistoryTree::from_block(
-                network,
+                &network,
                 blocks[0].block.clone(),
                 // Dummy roots since this is only used for tests
                 &Default::default(),
