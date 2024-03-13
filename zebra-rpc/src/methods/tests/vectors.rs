@@ -1224,8 +1224,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     mock_sync_status.set_is_close_to_tip(true);
 
     let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
-        true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
+        false => Some(transparent::Address::from_script_hash(&Mainnet, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(
+            &Mainnet, [0x7e; 20],
+        )),
     };
 
     #[allow(clippy::unnecessary_struct_initialization)]

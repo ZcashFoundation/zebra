@@ -94,7 +94,7 @@ pub async fn test_responses<State, ReadState>(
 
     #[allow(clippy::unnecessary_struct_initialization)]
     let mining_config = crate::config::mining::Config {
-        miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
+        miner_address: Some(transparent::Address::from_script_hash(&network, [0xad; 20])),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
         // TODO: Use default field values when optional features are enabled in tests #8183

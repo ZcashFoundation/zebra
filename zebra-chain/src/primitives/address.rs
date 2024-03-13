@@ -71,7 +71,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_pub_key_hash(
-            network.try_into()?,
+            &network.try_into()?,
             data,
         )))
     }
@@ -81,7 +81,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_script_hash(
-            network.try_into()?,
+            &network.try_into()?,
             data,
         )))
     }
@@ -100,7 +100,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = network.try_into()?;
+        let network = &network.try_into()?;
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
@@ -132,10 +132,10 @@ impl zcash_address::TryFromAddress for Address {
                     }
                 }
                 unified::Receiver::P2pkh(data) => {
-                    transparent = Some(transparent::Address::from_pub_key_hash(network, data));
+                    transparent = Some(transparent::Address::from_pub_key_hash(&network, data));
                 }
                 unified::Receiver::P2sh(data) => {
-                    transparent = Some(transparent::Address::from_script_hash(network, data));
+                    transparent = Some(transparent::Address::from_script_hash(&network, data));
                 }
                 unified::Receiver::Unknown { .. } => {
                     return Err(BoxError::from("Unsupported receiver in a Unified Address.").into());
@@ -144,7 +144,7 @@ impl zcash_address::TryFromAddress for Address {
         }
 
         Ok(Self::Unified {
-            network,
+            network: network.clone(),
             unified_address,
             orchard,
             sapling,
