@@ -240,20 +240,30 @@ where
             return Err(Status::invalid_argument(msg));
         }
 
-        let ScanServiceResponse::RegisteredKeys(keys) = self
+        match self
             .scan_service
             .clone()
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys)))
             .await
-            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
-        };
+        {
+            Ok(ScanServiceResponse::RegisteredKeys(keys)) => {
+                Ok(Response::new(RegisterKeysResponse { keys }))
+            }
 
-        Ok(Response::new(RegisterKeysResponse { keys }))
+            Ok(response) => {
+                return Err(Status::internal(format!(
+                    "unexpected response from scan service: {response:?}"
+                )))
+            }
+
+            Err(err) if err.downcast_ref::<Elapsed>().is_some() => Err(Status::deadline_exceeded(
+                "RegisterKeys scan service request timed out, \
+                    is Zebra synced past Sapling activation height?",
+            )),
+
+            Err(err) => Err(Status::unknown(err.to_string())),
+        }
     }
 
     async fn clear_results(
