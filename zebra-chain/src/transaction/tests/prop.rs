@@ -150,7 +150,7 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     // Update with new transaction versions as needed
     let strategy = LedgerState::coinbase_strategy(None, 5, true).prop_flat_map(|ledger_state| {
         (
-            Just(ledger_state.network),
+            Just(ledger_state.network.clone()),
             Block::arbitrary_with(ledger_state),
         )
     });

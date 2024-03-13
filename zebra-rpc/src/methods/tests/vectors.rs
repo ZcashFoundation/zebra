@@ -669,7 +669,7 @@ async fn rpc_getaddresstxids_response() {
 
         // Get the address.
         let address = first_block_first_transaction.outputs()[1]
-            .address(network)
+            .address(&network)
             .unwrap();
 
         // Create a populated state service
@@ -808,7 +808,7 @@ async fn rpc_getaddressutxos_response() {
     let first_block_first_transaction = &blocks[1].transactions[0];
     // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
     let address = &first_block_first_transaction.outputs()[1]
-        .address(Mainnet)
+        .address(&Mainnet)
         .unwrap();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();

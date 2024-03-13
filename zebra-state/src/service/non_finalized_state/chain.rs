@@ -1754,7 +1754,7 @@ impl
             );
 
             // Update the address index with this UTXO
-            if let Some(receiving_address) = created_utxo.utxo.output.address(self.network) {
+            if let Some(receiving_address) = created_utxo.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .entry(receiving_address)
@@ -1793,7 +1793,7 @@ impl
             );
 
             // Revert the address index for this UTXO
-            if let Some(receiving_address) = created_utxo.utxo.output.address(self.network) {
+            if let Some(receiving_address) = created_utxo.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .get_mut(&receiving_address)
@@ -1857,7 +1857,7 @@ impl
             };
 
             // Index the spent output for the address
-            if let Some(spending_address) = spent_output.utxo.output.address(self.network) {
+            if let Some(spending_address) = spent_output.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .entry(spending_address)
@@ -1909,7 +1909,7 @@ impl
             };
 
             // Revert the spent output for the address
-            if let Some(receiving_address) = spent_output.utxo.output.address(self.network) {
+            if let Some(receiving_address) = spent_output.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .get_mut(&receiving_address)

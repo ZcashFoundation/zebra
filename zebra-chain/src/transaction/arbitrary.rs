@@ -46,7 +46,7 @@ impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
@@ -61,7 +61,7 @@ impl Transaction {
     /// Generate a proptest strategy for V2 Transactions
     pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             option::of(any::<JoinSplitData<Bctv14Proof>>()),
@@ -80,7 +80,7 @@ impl Transaction {
     /// Generate a proptest strategy for V3 Transactions
     pub fn v3_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -101,7 +101,7 @@ impl Transaction {
     /// Generate a proptest strategy for V4 Transactions
     pub fn v4_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
@@ -146,7 +146,7 @@ impl Transaction {
             NetworkUpgrade::branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
-            transparent::Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
             option::of(any::<orchard::ShieldedData>()),
@@ -196,7 +196,7 @@ impl Transaction {
         len: usize,
     ) -> BoxedStrategy<Vec<Arc<Self>>> {
         // TODO: fixup coinbase miner subsidy
-        let coinbase = Transaction::arbitrary_with(ledger_state).prop_map(Arc::new);
+        let coinbase = Transaction::arbitrary_with(ledger_state.clone()).prop_map(Arc::new);
         ledger_state.has_coinbase = false;
         let remainder = vec(
             Transaction::arbitrary_with(ledger_state).prop_map(Arc::new),
@@ -787,7 +787,7 @@ impl Arbitrary for Transaction {
                 Self::v4_strategy(ledger_state)
             }
             NetworkUpgrade::Nu5 => prop_oneof![
-                Self::v4_strategy(ledger_state),
+                Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
             ]
             .boxed(),

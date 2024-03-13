@@ -77,7 +77,7 @@ impl AddressUtxos {
         self.utxos.iter().map(|(out_loc, output)| {
             (
                 output
-                    .address(self.network)
+                    .address(&self.network)
                     .expect("address indexes only contain outputs with addresses"),
                 self.tx_ids
                     .get(&out_loc.transaction_location())

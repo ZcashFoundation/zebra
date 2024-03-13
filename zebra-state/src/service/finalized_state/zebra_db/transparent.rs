@@ -413,7 +413,7 @@ impl DiskWriteBatch {
         // Index all new transparent outputs
         for (new_output_location, utxo) in new_outputs_by_out_loc {
             let unspent_output = &utxo.output;
-            let receiving_address = unspent_output.address(network);
+            let receiving_address = unspent_output.address(&network);
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
@@ -490,7 +490,7 @@ impl DiskWriteBatch {
         // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
         for (spent_output_location, utxo) in spent_utxos_by_out_loc {
             let spent_output = &utxo.output;
-            let sending_address = spent_output.address(network);
+            let sending_address = spent_output.address(&network);
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
@@ -548,7 +548,7 @@ impl DiskWriteBatch {
             let spent_utxo = spent_utxos_by_outpoint
                 .get(&spent_outpoint)
                 .expect("unexpected missing spent output");
-            let sending_address = spent_utxo.output.address(network);
+            let sending_address = spent_utxo.output.address(&network);
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {

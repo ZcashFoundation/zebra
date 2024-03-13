@@ -368,7 +368,7 @@ impl ZebraDb {
                     .values()
                     .map(|ordered_utxo| &ordered_utxo.utxo),
             )
-            .filter_map(|utxo| utxo.output.address(network))
+            .filter_map(|utxo| utxo.output.address(&network))
             .unique()
             .collect();
 

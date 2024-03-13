@@ -100,7 +100,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     // build addresses
     let address = &first_block_first_transaction.outputs()[1]
-        .address(network)
+        .address(&network)
         .unwrap();
     let addresses = vec![address.to_string()];
 
