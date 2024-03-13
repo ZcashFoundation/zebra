@@ -97,10 +97,6 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
 
-            Request::CheckKeyHashes(_key_hashes) => {
-                // TODO: check that these entries exist in db
-            }
-
             Request::RegisterKeys(keys) => {
                 let mut scan_task = self.scan_task.clone();
 
@@ -199,7 +195,5 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
         }
-
-        async move { Ok(Response::Results(BTreeMap::new())) }.boxed()
     }
 }

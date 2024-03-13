@@ -13,9 +13,6 @@ pub enum Request {
     /// Requests general info about the scanner
     Info,
 
-    /// TODO: Accept `KeyHash`es and return key hashes that are registered
-    CheckKeyHashes(Vec<()>),
-
     /// Submits viewing keys with their optional birth-heights for scanning.
     RegisterKeys(Vec<(String, Option<u32>)>),
 
