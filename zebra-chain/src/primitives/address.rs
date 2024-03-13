@@ -53,8 +53,8 @@ impl TryFrom<zcash_address::Network> for Network {
     }
 }
 
-impl From<Network> for zcash_address::Network {
-    fn from(network: Network) -> Self {
+impl From<&Network> for zcash_address::Network {
+    fn from(network: &Network) -> Self {
         match network {
             Network::Mainnet => zcash_address::Network::Main,
             Network::Testnet => zcash_address::Network::Test,
@@ -185,7 +185,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling((*network).into(), data);
+                let address = ZcashAddress::from_sapling((network).into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,
