@@ -243,7 +243,7 @@ This utility generates an `openapi.yaml` specification by extracting information
 To use the generator tool, build and run it with the following command:
 
 ```console
-cargo run --bin openapi-generator --features="openapi-generator
+cargo run --bin openapi-generator --features="openapi-generator"
 ```
 
 This command will create or update an `openapi.yaml` file at the root of the Zebra project repository.
