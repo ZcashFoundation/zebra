@@ -118,10 +118,12 @@ impl Service<Request> for ScanService {
 
                 return async move {
                     // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
-                    let remove_keys_result =
-                        tokio::time::timeout(DELETE_KEY_TIMEOUT, scan_task.remove_keys(&keys)?)
-                            .await
-                            .map_err(|_| "timeout waiting for delete keys done notification");
+                    let remove_keys_result = tokio::time::timeout(
+                        DELETE_KEY_TIMEOUT,
+                        scan_task.remove_keys(keys.clone())?,
+                    )
+                    .await
+                    .map_err(|_| "timeout waiting for delete keys done notification");
 
                     // Delete the key from the database after either confirmation that it's been removed from the scan task, or
                     // waiting `DELETE_KEY_TIMEOUT`.
