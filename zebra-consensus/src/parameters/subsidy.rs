@@ -201,12 +201,12 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRE
 /// Functionality specific to block subsidy-related consensus rules
 pub trait ParameterSubsidy {
     /// Number of addresses for each funding stream in the Network.
-    /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     fn num_funding_streams(&self) -> usize;
     /// Returns the minimum height after the first halving
     /// as described in [protocol specification §7.10][7.10]
     ///
-    /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     fn height_for_first_halving(&self) -> Height;
 }
 
@@ -221,7 +221,7 @@ impl ParameterSubsidy for Network {
     fn height_for_first_halving(&self) -> Height {
         // First halving on Mainnet is at Canopy
         // while in Testnet is at block constant height of `1_116_000`
-        // https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+        // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
         match self {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(*self)
