@@ -36,7 +36,7 @@ use crate::{
     block::{Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
-    transaction, BoxError, Config,
+    transaction, BoxError, Config, ParameterCheckpoint as _,
 };
 
 #[cfg(test)]
@@ -263,7 +263,7 @@ where
             // > activation block hashes given in § 3.12 ‘Mainnet and Testnet’ on p. 20.
             //
             // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
-            let full_checkpoints = CheckpointList::new(network);
+            let full_checkpoints = network.checkpoint_list();
             let mut already_warned = false;
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
@@ -363,7 +363,7 @@ where
 pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList, Height) {
     // TODO: Zebra parses the checkpoint list three times at startup.
     //       Instead, cache the checkpoint list for each `network`.
-    let list = CheckpointList::new(network);
+    let list = network.checkpoint_list();
 
     let max_checkpoint_height = if config.checkpoint_sync {
         list.max_height()

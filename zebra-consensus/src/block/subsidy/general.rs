@@ -131,11 +131,7 @@ mod test {
 
     fn halving_for_network(network: Network) -> Result<(), Report> {
         let blossom_height = Blossom.activation_height(network).unwrap();
-        let first_halving_height = match network {
-            Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
-            Network::Testnet => Height(1_116_000),
-        };
+        let first_halving_height = network.height_for_first_halving();
 
         assert_eq!(
             1,
@@ -261,11 +257,7 @@ mod test {
 
     fn block_subsidy_for_network(network: Network) -> Result<(), Report> {
         let blossom_height = Blossom.activation_height(network).unwrap();
-        let first_halving_height = match network {
-            Network::Mainnet => Canopy.activation_height(network).unwrap(),
-            // Based on "7.8 Calculation of Block Subsidy and Founders' Reward"
-            Network::Testnet => Height(1_116_000),
-        };
+        let first_halving_height = network.height_for_first_halving();
 
         // After slow-start mining and before Blossom the block subsidy is 12.5 ZEC
         // https://z.cash/support/faq/#what-is-slow-start-mining
