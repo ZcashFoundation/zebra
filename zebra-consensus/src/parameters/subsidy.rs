@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 use zebra_chain::{
     amount::COIN,
     block::{Height, HeightDiff},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
 };
 
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
@@ -198,6 +198,38 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRE
     "t3XHAGxRP2FNfhAjxGjxbrQPYtQQjc3RCQD",
 ];
 
+/// Functionality specific to block subsidy-related consensus rules
+pub trait ParameterSubsidy {
+    /// Number of addresses for each funding stream in the Network.
+    /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+    fn num_funding_streams(&self) -> usize;
+    /// Returns the minimum height after the first halving
+    /// as described in [protocol specification §7.10][7.10]
+    ///
+    /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+    fn height_for_first_halving(&self) -> Height;
+}
+
+/// Network methods related to Block Subsidy and Funding Streams
+impl ParameterSubsidy for Network {
+    fn num_funding_streams(&self) -> usize {
+        match self {
+            Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
+            Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
+        }
+    }
+    fn height_for_first_halving(&self) -> Height {
+        // First halving on Mainnet is at Canopy
+        // while in Testnet is at block constant height of `1_116_000`
+        // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+        match self {
+            Network::Mainnet => NetworkUpgrade::Canopy
+                .activation_height(*self)
+                .expect("canopy activation height should be available"),
+            Network::Testnet => FIRST_HALVING_TESTNET,
+        }
+    }
+}
 /// List of addresses for the Zcash Foundation funding stream in the Mainnet.
 pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];

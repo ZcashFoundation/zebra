@@ -20,10 +20,10 @@ use zebra_chain::{
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
-    work::difficulty::{ExpandedDifficulty, U256},
+    work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
+    funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
     RouterError,
 };
 use zebra_network::AddressBookPeers;
@@ -1098,7 +1098,7 @@ where
                 best_chain_tip_height(&latest_chain_tip)?
             };
 
-            if height < height_for_first_halving(network) {
+            if height < network.height_for_first_halving() {
                 return Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Zebra does not support founders' reward subsidies, \
@@ -1197,7 +1197,7 @@ where
             // using this calculation.)
 
             // Get expanded difficulties (256 bits), these are the inverse of the work
-            let pow_limit: U256 = ExpandedDifficulty::target_difficulty_limit(network).into();
+            let pow_limit: U256 = network.target_difficulty_limit().into();
             let difficulty: U256 = chain_info
                 .expected_difficulty
                 .to_expanded()

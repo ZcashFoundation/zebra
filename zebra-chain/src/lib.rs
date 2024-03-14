@@ -43,6 +43,9 @@ pub mod work;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod tests;
+
 /// Error type alias to make working with generic errors easier.
 ///
 /// Note: the 'static lifetime bound means that the *type* cannot have any

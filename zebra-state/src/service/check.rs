@@ -277,9 +277,7 @@ fn difficulty_threshold_and_time_are_valid(
     // of that block plus 90*60 seconds.
     //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    if NetworkUpgrade::is_max_block_time_enforced(network, candidate_height)
-        && candidate_time > block_time_max
-    {
+    if network.is_max_block_time_enforced(candidate_height) && candidate_time > block_time_max {
         Err(ValidateContextError::TimeTooLate {
             candidate_time,
             block_time_max,

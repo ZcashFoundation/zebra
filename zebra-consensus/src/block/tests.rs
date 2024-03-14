@@ -19,7 +19,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
-    work::difficulty::{ExpandedDifficulty, INVALID_COMPACT_DIFFICULTY},
+    work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
@@ -189,10 +189,7 @@ fn difficulty_is_valid_for_historical_blocks() -> Result<(), Report> {
 }
 
 fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {
         let block = block
@@ -244,7 +241,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
         hash,
         difficulty_threshold,
         Network::Mainnet,
-        ExpandedDifficulty::target_difficulty_limit(Network::Mainnet),
+        Network::Mainnet.target_difficulty_limit(),
     );
     assert_eq!(expected, result);
 
@@ -296,10 +293,7 @@ fn subsidy_is_valid_for_historical_blocks() -> Result<(), Report> {
 }
 
 fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {
         let block = block
@@ -401,10 +395,7 @@ fn funding_stream_validation() -> Result<(), Report> {
 }
 
 fn funding_stream_validation_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(network)
@@ -479,10 +470,7 @@ fn miner_fees_validation_success() -> Result<(), Report> {
 }
 
 fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {
         if Height(height) > SLOW_START_SHIFT {
@@ -568,10 +556,7 @@ fn merkle_root_is_valid() -> Result<(), Report> {
 }
 
 fn merkle_root_is_valid_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (_height, block) in block_iter {
         let block = block
@@ -592,10 +577,7 @@ fn merkle_root_is_valid_for_network(network: Network) -> Result<(), Report> {
 }
 
 fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (height, block) in block_iter {
         let mut block = block
@@ -707,10 +689,7 @@ fn transaction_expiration_height_validation() -> Result<(), Report> {
 }
 
 fn transaction_expiration_height_for_network(network: Network) -> Result<(), Report> {
-    let block_iter = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+    let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {
         let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
