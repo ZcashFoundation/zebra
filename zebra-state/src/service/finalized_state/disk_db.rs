@@ -525,8 +525,7 @@ impl DiskDb {
         let mut column_families_log_string = String::from("");
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
     
-        let mut i: usize = 0;
-        for cf_descriptor in column_families {
+        for (i, cf_descriptor) in column_families.iter().enumerate() {
             
             let cf_name = &cf_descriptor.name();
             let cf_handle = db.cf_handle(cf_name).expect("Column family handle must exist");
@@ -559,7 +558,6 @@ impl DiskDb {
                 )
                 .unwrap();
             }
-            i+=1;
         }
 
         debug!("{}", column_families_log_string);
