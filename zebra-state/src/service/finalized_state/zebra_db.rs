@@ -322,6 +322,15 @@ impl ZebraDb {
 
         Ok(())
     }
+
+    /// Logs metrics related to the underlying RocksDB instance.
+    ///
+    /// This function prints various metrics and statistics about the RocksDB database,
+    /// such as disk usage, memory usage, and other performance-related metrics.
+    pub fn print_db_metrics(&self) {
+        self.db.print_db_metrics();
+    }
+
 }
 
 impl Drop for ZebraDb {

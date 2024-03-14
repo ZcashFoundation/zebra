@@ -13,6 +13,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    fmt::Write,
     ops::RangeBounds,
     path::Path,
     sync::Arc,
@@ -515,14 +516,18 @@ impl DiskDb {
     /// Prints rocksdb metrics for each column family along with total database disk size, live data disk size and database memory size.
     pub fn print_db_metrics(&self) {
         let mut total_size_on_disk = 0;
-        let mut total_size_in_mem = 0;
         let mut total_live_size_on_disk = 0;
+        let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options(); 
 
         let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
+        let mut column_families_log_string = String::from("");
+        write!(column_families_log_string, "Column families and sizes: ").unwrap();
     
+        let mut i: usize = 0;
         for cf_descriptor in column_families {
+            
             let cf_name = &cf_descriptor.name();
             let cf_handle = db.cf_handle(cf_name).expect("Column family handle must exist");
     
@@ -535,10 +540,29 @@ impl DiskDb {
     
             let mem_table_size = db.property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables").unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
-    
-            info!("Column Family: {}, Disk Size: {} bytes, Memory Size: {} bytes", cf_name, cf_disk_size, mem_table_size.unwrap_or(0));
+
+            // TODO: Consider displaying the disk and memory sizes in a human-readable format (e.g., MiB, GiB)
+            // This might require adding a dependency like the `human_bytes` crate (https://crates.io/crates/human_bytes)
+            // See https://github.com/ZcashFoundation/zebra/pull/8336#discussion_r1520535787
+            if i == 0 {
+                write!(
+                    column_families_log_string,
+                    "{} (Disk: {} bytes, Memory: {} bytes)",
+                    cf_name, cf_disk_size, mem_table_size.unwrap_or(0)
+                )
+                .unwrap();
+            } else {
+                write!(
+                    column_families_log_string,
+                    ", {} (Disk: {} bytes, Memory: {} bytes)",
+                    cf_name, cf_disk_size, mem_table_size.unwrap_or(0)
+                )
+                .unwrap();
+            }
+            i+=1;
         }
-    
+
+        debug!("{}", column_families_log_string);
         info!("Total Database Disk Size: {} bytes", total_size_on_disk);
         info!("Total Live Data Disk Size: {} bytes", total_live_size_on_disk);
         info!("Total Database Memory Size: {} bytes", total_size_in_mem);
