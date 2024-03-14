@@ -119,7 +119,7 @@ pub(crate) async fn run() -> Result<()> {
     )?;
 
     let mut result_receiver = scan_task
-        .subscribe(keys.into_iter().collect())
+        .subscribe(keys.iter().cloned().collect())
         .expect("should send subscribe message successfully")
         .await
         .expect("should receive response successfully");
