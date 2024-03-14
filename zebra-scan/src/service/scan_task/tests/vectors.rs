@@ -147,7 +147,12 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let subscribe_keys: HashSet<String> = sapling_keys[..5].iter().cloned().collect();
     let result_receiver_fut = {
         let mut mock_scan_task = mock_scan_task.clone();
-        tokio::spawn(async move { mock_scan_task.subscribe(subscribe_keys.clone()).await })
+        tokio::spawn(async move {
+            mock_scan_task
+                .subscribe(subscribe_keys.clone())
+                .expect("should send subscribe msg successfully")
+                .await
+        })
     };
 
     // Wait for spawned task to send subscribe message
