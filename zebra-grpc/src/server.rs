@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, net::SocketAddr, pin::Pin};
 use futures_util::future::TryFutureExt;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tonic::{transport::Server, Request, Response, Status};
-use tower::ServiceExt;
+use tower::{timeout::error::Elapsed, ServiceExt};
 
 use zebra_chain::{block::Height, transaction};
 use zebra_node_services::scan_service::{
@@ -70,34 +70,57 @@ where
             .into_iter()
             .map(|KeyWithHeight { key, height }| (key, height))
             .collect();
+
         let register_keys_response_fut = self
             .scan_service
             .clone()
-            .oneshot(ScanServiceRequest::RegisterKeys(keys.clone()));
+            .ready()
+            .await
+            .map_err(|_| Status::unknown("service poll_ready() method returned an error"))?
+            .call(ScanServiceRequest::RegisterKeys(keys.clone()));
 
         let keys: Vec<_> = keys.into_iter().map(|(key, _start_at)| key).collect();
 
-        let subscribe_results_response_fut =
-            self.scan_service
-                .clone()
-                .oneshot(ScanServiceRequest::SubscribeResults(
-                    keys.iter().cloned().collect(),
-                ));
+        let subscribe_results_response_fut = self
+            .scan_service
+            .clone()
+            .ready()
+            .await
+            .map_err(|_| Status::unknown("service poll_ready() method returned an error"))?
+            .call(ScanServiceRequest::SubscribeResults(
+                keys.iter().cloned().collect(),
+            ));
 
         let (register_keys_response, subscribe_results_response) =
             tokio::join!(register_keys_response_fut, subscribe_results_response_fut);
 
-        let ScanServiceResponse::RegisteredKeys(_) = register_keys_response
-            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
+        // Ignores errors from the register keys request, we expect there to be a timeout if the keys
+        // are already registered, or an empty response if no new keys could be parsed as Sapling efvks.
+        //
+        // This method will still return an error if every key in the `scan` request is invalid, since
+        // the SubscribeResults request will return an error once the `rsp_tx` is dropped in `ScanTask::process_messages`
+        // when it finds that none of the keys in the request are registered.
+        let register_keys_err = match register_keys_response {
+            Ok(ScanServiceResponse::RegisteredKeys(_)) => None,
+            Ok(response) => {
+                return Err(Status::internal(format!(
+                    "unexpected response from scan service: {response:?}"
+                )))
+            }
+            Err(err) if err.downcast_ref::<Elapsed>().is_some() => {
+                return Err(Status::deadline_exceeded(
+                    "scan service requests timed out, is Zebra synced past Sapling activation height?")
+                )
+            }
+            Err(err) => Some(err),
         };
 
         let ScanServiceResponse::SubscribeResults(mut results_receiver) =
-            subscribe_results_response
-                .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
+            subscribe_results_response.map_err(|err| {
+                register_keys_err
+                    .map(|err| Status::invalid_argument(err.to_string()))
+                    .unwrap_or(Status::internal(err.to_string()))
+            })?
         else {
             return Err(Status::unknown(
                 "scan service returned an unexpected response",
@@ -179,7 +202,7 @@ where
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::Info))
             .await
-            .map_err(|_| Status::unknown("scan service was unavailable"))?
+            .map_err(|err| Status::unknown(format!("scan service returned error: {err}")))?
         else {
             return Err(Status::unknown(
                 "scan service returned an unexpected response",
@@ -217,20 +240,30 @@ where
             return Err(Status::invalid_argument(msg));
         }
 
-        let ScanServiceResponse::RegisteredKeys(keys) = self
+        match self
             .scan_service
             .clone()
             .ready()
             .and_then(|service| service.call(ScanServiceRequest::RegisterKeys(keys)))
             .await
-            .map_err(|_| Status::unknown("scan service was unavailable"))?
-        else {
-            return Err(Status::unknown(
-                "scan service returned an unexpected response",
-            ));
-        };
+        {
+            Ok(ScanServiceResponse::RegisteredKeys(keys)) => {
+                Ok(Response::new(RegisterKeysResponse { keys }))
+            }
 
-        Ok(Response::new(RegisterKeysResponse { keys }))
+            Ok(response) => {
+                return Err(Status::internal(format!(
+                    "unexpected response from scan service: {response:?}"
+                )))
+            }
+
+            Err(err) if err.downcast_ref::<Elapsed>().is_some() => Err(Status::deadline_exceeded(
+                "RegisterKeys scan service request timed out, \
+                    is Zebra synced past Sapling activation height?",
+            )),
+
+            Err(err) => Err(Status::unknown(err.to_string())),
+        }
     }
 
     async fn clear_results(

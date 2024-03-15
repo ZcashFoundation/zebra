@@ -41,6 +41,11 @@ name = "scanning-results-reader"
 path = "src/bin/scanning-results-reader/main.rs"
 required-features = ["shielded-scan"]
 
+[[bin]]
+name = "openapi-generator"
+path = "src/bin/openapi-generator/main.rs"
+required-features = ["openapi-generator"]
+
 [features]
 default = []
 
@@ -72,6 +77,14 @@ shielded-scan = [
     "zcash_primitives",
     "zcash_client_backend",
     "zebra-scan"
+]
+
+openapi-generator = [
+    "zebra-rpc",
+    "syn",
+    "quote",
+    "serde_yaml",
+    "serde"
 ]
 
 [dependencies]
@@ -109,3 +122,9 @@ jsonrpc = { version = "0.17.0", optional = true }
 
 zcash_primitives = { version = "0.13.0-rc.1", optional = true }
 zcash_client_backend = {version = "0.10.0-rc.1", optional = true}
+
+# For the openapi generator
+syn = { version = "2.0.52", features = ["full"], optional = true }
+quote = { version = "1.0.35", optional = true }
+serde_yaml = { version = "0.9.32", optional = true }
+serde = { version = "1.0.196", features = ["serde_derive"], optional = true }
