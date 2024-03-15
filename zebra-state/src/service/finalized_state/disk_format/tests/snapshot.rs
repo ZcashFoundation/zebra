@@ -64,7 +64,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
 
     let mut state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );

@@ -384,8 +384,12 @@ async fn db_init_outside_future_executor() -> Result<()> {
     let start = Instant::now();
 
     // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
-    let db_init_handle =
-        zebra_state::spawn_init(config.state.clone(), config.network.network, Height::MAX, 0);
+    let db_init_handle = zebra_state::spawn_init(
+        config.state.clone(),
+        &config.network.network,
+        Height::MAX,
+        0,
+    );
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started
@@ -2530,7 +2534,7 @@ async fn generate_checkpoints_testnet() -> Result<()> {
 #[tokio::test]
 async fn new_state_format() -> Result<()> {
     for network in [Mainnet, Testnet] {
-        state_format_test("new_state_format_test", network, 2, None).await?;
+        state_format_test("new_state_format_test", &network, 2, None).await?;
     }
 
     Ok(())
@@ -2548,7 +2552,7 @@ async fn update_state_format() -> Result<()> {
     fake_version.patch = 0;
 
     for network in [Mainnet, Testnet] {
-        state_format_test("update_state_format_test", network, 3, Some(&fake_version)).await?;
+        state_format_test("update_state_format_test", &network, 3, Some(&fake_version)).await?;
     }
 
     Ok(())
@@ -2567,7 +2571,7 @@ async fn downgrade_state_format() -> Result<()> {
     for network in [Mainnet, Testnet] {
         state_format_test(
             "downgrade_state_format_test",
-            network,
+            &network,
             3,
             Some(&fake_version),
         )
@@ -2580,7 +2584,7 @@ async fn downgrade_state_format() -> Result<()> {
 /// Test state format changes, see calling tests for details.
 async fn state_format_test(
     base_test_name: &str,
-    network: Network,
+    network: &Network,
     reopen_count: usize,
     fake_version: Option<&Version>,
 ) -> Result<()> {

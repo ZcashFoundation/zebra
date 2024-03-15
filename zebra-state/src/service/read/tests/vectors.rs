@@ -372,7 +372,7 @@ fn new_ephemeral_db() -> ZebraDb {
         &Config::ephemeral(),
         STATE_DATABASE_KIND,
         &state_database_format_version_in_code(),
-        Mainnet,
+        &Mainnet,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()

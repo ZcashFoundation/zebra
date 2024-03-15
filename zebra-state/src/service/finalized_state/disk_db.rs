@@ -727,7 +727,7 @@ impl DiskDb {
         config: &Config,
         db_kind: impl AsRef<str>,
         format_version_in_code: &Version,
-        network: Network,
+        network: &Network,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> DiskDb {
@@ -765,7 +765,7 @@ impl DiskDb {
                 let db = DiskDb {
                     db_kind: db_kind.to_string(),
                     format_version_in_code: format_version_in_code.clone(),
-                    network,
+                    network: network.clone(),
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
                 };

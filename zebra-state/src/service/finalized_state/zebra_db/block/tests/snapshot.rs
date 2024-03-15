@@ -167,7 +167,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
 
     let mut state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );

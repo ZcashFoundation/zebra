@@ -263,7 +263,7 @@ impl Application for ZebradApp {
 
         // reads state disk version file, doesn't open RocksDB database
         let disk_db_version =
-            match state_database_format_version_on_disk(&config.state, config.network.network) {
+            match state_database_format_version_on_disk(&config.state, &config.network.network) {
                 Ok(Some(version)) => version.to_string(),
                 // This "version" is specially formatted to match a relaxed version regex in CI
                 Ok(None) => "creating.new.database".to_string(),

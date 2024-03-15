@@ -156,7 +156,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let key_to_be_stored = encode_extended_full_viewing_key("zxviews", &efvk);
 
     // Create a database
-    let mut storage = new_test_storage(network);
+    let mut storage = new_test_storage(&network);
 
     // Insert the generated key to the database
     storage.add_sapling_key(&key_to_be_stored, None);

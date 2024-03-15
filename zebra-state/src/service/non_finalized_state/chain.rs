@@ -373,7 +373,7 @@ impl Chain {
 
     /// Returns the [`Network`] for this chain.
     pub fn network(&self) -> Network {
-        self.network
+        self.network.clone()
     }
 
     /// Returns the [`ContextuallyVerifiedBlock`] with [`block::Hash`] or
@@ -1270,7 +1270,6 @@ impl Chain {
     ) -> impl Iterator<Item = &TransparentTransfers> {
         addresses
             .iter()
-            .copied()
             .flat_map(|address| self.partial_transparent_transfers.get(&address))
     }
 

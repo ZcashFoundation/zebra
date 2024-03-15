@@ -124,7 +124,7 @@ impl StartCmd {
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::spawn_init(
                 config.state.clone(),
-                config.network.network,
+                &config.network.network,
                 max_checkpoint_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
@@ -261,7 +261,7 @@ impl StartCmd {
         info!("spawning delete old databases task");
         let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
             &config.state,
-            config.network.network,
+            &config.network.network,
         );
 
         info!("spawning progress logging task");
@@ -306,7 +306,7 @@ impl StartCmd {
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
                 config.shielded_scan.clone(),
-                config.network.network,
+                &config.network.network,
                 state,
                 chain_tip_change,
             )

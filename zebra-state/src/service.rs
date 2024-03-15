@@ -310,7 +310,7 @@ impl StateService {
     /// and read-only watch channels for its best chain tip.
     pub fn new(
         config: Config,
-        network: Network,
+        network: &Network,
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
@@ -1882,7 +1882,7 @@ impl Service<ReadRequest> for ReadStateService {
 /// probably not what you want.
 pub fn init(
     config: Config,
-    network: Network,
+    network: &Network,
     max_checkpoint_height: block::Height,
     checkpoint_verify_concurrency_limit: usize,
 ) -> (
@@ -1912,7 +1912,7 @@ pub fn init(
 /// a read state service, and receivers for state chain tip updates.
 pub fn spawn_init(
     config: Config,
-    network: Network,
+    network: &Network,
     max_checkpoint_height: block::Height,
     checkpoint_verify_concurrency_limit: usize,
 ) -> tokio::task::JoinHandle<(

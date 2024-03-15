@@ -77,7 +77,10 @@ pub(crate) fn partial_nu5_chain_strategy(
                     false,
                 )
             })
-            .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
+            .prop_map(move |partial_chain| {
+                let network_clone = network.clone();
+                (network_clone, nu_activation, partial_chain)
+            })
         })
 }
 
@@ -94,7 +97,7 @@ pub(crate) fn new_state_with_mainnet_genesis(
 
     let mut finalized_state = FinalizedState::new_with_debug(
         &config,
-        network,
+        &network,
         // The tests that use this setup function also commit invalid blocks to the state.
         true,
         #[cfg(feature = "elasticsearch")]

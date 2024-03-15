@@ -23,7 +23,7 @@ mod snapshot;
 mod vectors;
 
 /// Returns an empty `Storage` suitable for testing.
-pub fn new_test_storage(network: Network) -> Storage {
+pub fn new_test_storage(network: &Network) -> Storage {
     Storage::new(&Config::ephemeral(), network, false)
 }
 

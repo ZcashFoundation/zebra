@@ -50,7 +50,7 @@ impl Storage {
     /// New keys in `config` are not inserted into the database.
     pub(crate) fn new_db(config: &Config, network: Network, read_only: bool) -> Self {
         Self::new_with_debug(
-            config, network,
+            config, &network,
             // TODO: make format upgrades work with any database, then change debug_skip_format_upgrades to `false`
             true, read_only,
         )
@@ -64,7 +64,7 @@ impl Storage {
     /// This method is intended for use in tests.
     pub(crate) fn new_with_debug(
         config: &Config,
-        network: Network,
+        network: &Network,
         debug_skip_format_upgrades: bool,
         read_only: bool,
     ) -> Self {

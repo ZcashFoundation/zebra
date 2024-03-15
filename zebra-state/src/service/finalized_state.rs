@@ -141,7 +141,7 @@ impl FinalizedState {
     /// If there is no existing database, creates a new database on disk.
     pub fn new(
         config: &Config,
-        network: Network,
+        network: &Network,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
         Self::new_with_debug(
@@ -160,7 +160,7 @@ impl FinalizedState {
     /// This method is intended for use in tests.
     pub(crate) fn new_with_debug(
         config: &Config,
-        network: Network,
+        network: &Network,
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
         read_only: bool,
