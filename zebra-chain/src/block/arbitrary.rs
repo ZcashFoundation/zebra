@@ -69,7 +69,7 @@ impl Arbitrary for Height {
     type Strategy = BoxedStrategy<Self>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 /// The configuration data for proptest when generating arbitrary chains
 pub struct LedgerState {

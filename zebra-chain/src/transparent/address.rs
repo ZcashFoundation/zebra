@@ -27,7 +27,7 @@ use proptest::prelude::*;
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
+    Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
