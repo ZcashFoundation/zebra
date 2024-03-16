@@ -330,7 +330,6 @@ impl ZebraDb {
     pub fn print_db_metrics(&self) {
         self.db.print_db_metrics();
     }
-
 }
 
 impl Drop for ZebraDb {

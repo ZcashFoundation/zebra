@@ -22,7 +22,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ReadOptions, ColumnFamilyDescriptor, Options};
+use rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -519,25 +519,27 @@ impl DiskDb {
         let mut total_live_size_on_disk = 0;
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options(); 
-
+        let db_options = DiskDb::options();
         let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
         let mut column_families_log_string = String::from("");
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
-    
         for (i, cf_descriptor) in column_families.iter().enumerate() {
-            
             let cf_name = &cf_descriptor.name();
-            let cf_handle = db.cf_handle(cf_name).expect("Column family handle must exist");
-    
-            let live_data_size = db.property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size").unwrap_or(Some(0));
-            let total_sst_files_size = db.property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size").unwrap_or(Some(0));
-    
+            let cf_handle = db
+                .cf_handle(cf_name)
+                .expect("Column family handle must exist");
+            let live_data_size = db
+                .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                .unwrap_or(Some(0));
+            let total_sst_files_size = db
+                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                .unwrap_or(Some(0));
             let cf_disk_size = live_data_size.unwrap_or(0) + total_sst_files_size.unwrap_or(0);
             total_size_on_disk += cf_disk_size;
             total_live_size_on_disk += live_data_size.unwrap_or(0);
-    
-            let mem_table_size = db.property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables").unwrap_or(Some(0));
+            let mem_table_size = db
+                .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                .unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
 
             // TODO: Consider displaying the disk and memory sizes in a human-readable format (e.g., MiB, GiB)
@@ -547,14 +549,18 @@ impl DiskDb {
                 write!(
                     column_families_log_string,
                     "{} (Disk: {} bytes, Memory: {} bytes)",
-                    cf_name, cf_disk_size, mem_table_size.unwrap_or(0)
+                    cf_name,
+                    cf_disk_size,
+                    mem_table_size.unwrap_or(0)
                 )
                 .unwrap();
             } else {
                 write!(
                     column_families_log_string,
-                    ", {} (Disk: {} bytes, Memory: {} bytes)",
-                    cf_name, cf_disk_size, mem_table_size.unwrap_or(0)
+                    "{} (Disk: {} bytes, Memory: {} bytes)",
+                    cf_name,
+                    cf_disk_size,
+                    mem_table_size.unwrap_or(0)
                 )
                 .unwrap();
             }
@@ -562,7 +568,10 @@ impl DiskDb {
 
         debug!("{}", column_families_log_string);
         info!("Total Database Disk Size: {} bytes", total_size_on_disk);
-        info!("Total Live Data Disk Size: {} bytes", total_live_size_on_disk);
+        info!(
+            "Total Live Data Disk Size: {} bytes",
+            total_live_size_on_disk
+        );
         info!("Total Database Memory Size: {} bytes", total_size_in_mem);
     }
 
@@ -775,7 +784,6 @@ impl DiskDb {
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// Build a vector of current column families on the disk and optionally any new column families.
-    /// 
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
         db_options: &Options,
@@ -790,13 +798,13 @@ impl DiskDb {
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference
         let column_families_on_disk = DB::list_cf(db_options, path).unwrap_or_default();
-    
-        let column_families = column_families_on_disk.into_iter()
+        let column_families = column_families_on_disk
+            .into_iter()
             .chain(column_families_in_code.iter().cloned())
-            .unique() 
+            .unique()
             .collect::<Vec<_>>();
-    
-        column_families.into_iter()
+        column_families
+            .into_iter()
             .map(|cf_name| ColumnFamilyDescriptor::new(cf_name, db_options.clone()))
             .collect()
     }
