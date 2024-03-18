@@ -83,7 +83,7 @@ impl NonEmptyHistoryTree {
         peaks: BTreeMap<u32, Entry>,
         current_height: Height,
     ) -> Result<Self, HistoryTreeError> {
-        let network_upgrade = NetworkUpgrade::current(&network, current_height);
+        let network_upgrade = NetworkUpgrade::current(network, current_height);
         let inner = match network_upgrade {
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
@@ -138,7 +138,7 @@ impl NonEmptyHistoryTree {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(&network, height);
+        let network_upgrade = NetworkUpgrade::current(network, height);
         let (tree, entry) = match network_upgrade {
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
@@ -239,8 +239,8 @@ impl NonEmptyHistoryTree {
 
     /// Extend the history tree with the given blocks.
     pub fn try_extend<
-        'b,
-        T: IntoIterator<Item = (Arc<Block>, &'b sapling::tree::Root, &'b orchard::tree::Root)>,
+        'a,
+        T: IntoIterator<Item = (Arc<Block>, &'a sapling::tree::Root, &'a orchard::tree::Root)>,
     >(
         &mut self,
         iter: T,
@@ -392,7 +392,7 @@ impl Clone for NonEmptyHistoryTree {
             ),
             InnerHistoryTree::OrchardOnward(_) => InnerHistoryTree::OrchardOnward(
                 Tree::<OrchardOnward>::new_from_cache(
-                    &self.network.clone(),
+                    &self.network,
                     self.network_upgrade,
                     self.size,
                     &self.peaks,
@@ -414,14 +414,8 @@ impl Clone for NonEmptyHistoryTree {
 
 /// A History Tree that keeps track of its own creation in the Heartwood
 /// activation block, being empty beforehand.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct HistoryTree(Option<NonEmptyHistoryTree>);
-
-impl Clone for HistoryTree {
-    fn clone(&self) -> Self {
-        HistoryTree(self.0.clone())
-    }
-}
 
 impl HistoryTree {
     /// Create a HistoryTree from a block.
@@ -435,7 +429,7 @@ impl HistoryTree {
         orchard_root: &orchard::tree::Root,
     ) -> Result<Self, HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
-            .activation_height(&network)
+            .activation_height(network)
             .expect("Heartwood height is known");
         match block
             .coinbase_height()
@@ -444,8 +438,7 @@ impl HistoryTree {
         {
             std::cmp::Ordering::Less => Ok(HistoryTree(None)),
             _ => Ok(
-                NonEmptyHistoryTree::from_block(&network, block, sapling_root, orchard_root)?
-                    .into(),
+                NonEmptyHistoryTree::from_block(network, block, sapling_root, orchard_root)?.into(),
             ),
         }
     }
@@ -463,7 +456,7 @@ impl HistoryTree {
         orchard_root: &orchard::tree::Root,
     ) -> Result<(), HistoryTreeError> {
         let heartwood_height = NetworkUpgrade::Heartwood
-            .activation_height(&network)
+            .activation_height(network)
             .expect("Heartwood height is known");
         match block
             .coinbase_height()

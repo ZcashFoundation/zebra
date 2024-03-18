@@ -348,13 +348,14 @@ impl Arbitrary for Block {
     type Parameters = LedgerState;
 
     fn arbitrary_with(ledger_state: Self::Parameters) -> Self::Strategy {
-        let ledger_state_clone = ledger_state.clone();
-        let transactions_strategy =
+        let transactions_strategy = {
+            let ledger_state = ledger_state.clone();
             // Generate a random number transactions. A coinbase tx is always generated, so if
             // `transaction_count` is zero, the block will contain only the coinbase tx.
             (0..MAX_ARBITRARY_ITEMS).prop_flat_map(move |transaction_count| {
-                Transaction::vec_strategy(ledger_state_clone.clone(), transaction_count)
-            });
+                Transaction::vec_strategy(ledger_state.clone(), transaction_count)
+            })
+        };
 
         // TODO: if needed, fixup:
         // - history and authorizing data commitments
