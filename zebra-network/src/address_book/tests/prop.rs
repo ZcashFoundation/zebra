@@ -32,7 +32,7 @@ proptest! {
 
         let address_book = AddressBook::new_with_addrs(
             local_listener,
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
@@ -71,7 +71,7 @@ proptest! {
 
         let address_book = AddressBook::new_with_addrs(
             local_listener,
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
@@ -110,7 +110,7 @@ proptest! {
 
         let mut address_book = AddressBook::new_with_addrs(
             local_listener,
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             addr_limit,
             Span::none(),
@@ -133,7 +133,7 @@ proptest! {
 
         let mut address_book = AddressBook::new_with_addrs(
             local_listener,
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             addr_limit,
             Span::none(),

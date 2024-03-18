@@ -42,9 +42,9 @@ proptest! {
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
         let _init_guard = zebra_test::init();
 
-        if let Some(sanitized) = addr.sanitize(Mainnet) {
+        if let Some(sanitized) = addr.sanitize(&Mainnet) {
             // check that all sanitized addresses are valid for outbound
-            prop_assert!(addr.last_known_info_is_valid_for_outbound(Mainnet));
+            prop_assert!(addr.last_known_info_is_valid_for_outbound(&Mainnet));
             // also check the address, port, and services individually
             prop_assert!(!addr.addr.ip().is_unspecified());
             prop_assert_ne!(addr.addr.port(), 0);
@@ -117,7 +117,7 @@ proptest! {
         let mut attempt_count: usize = 0;
 
         for change in changes {
-            while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
+            while addr.is_ready_for_connection_attempt(instant_now, chrono_now, &Mainnet) {
                 // Simulate an attempt
                 addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
                     .apply_to_meta_addr(addr, instant_now, chrono_now) {
@@ -158,7 +158,7 @@ proptest! {
 
         let address_book = AddressBook::new_with_addrs(
             local_listener,
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
@@ -176,7 +176,7 @@ proptest! {
         // regardless of where they have come from
         prop_assert_eq!(
             book_sanitized_local_listener.cloned(),
-            expected_local_listener.sanitize(Mainnet),
+            expected_local_listener.sanitize(&Mainnet),
             "address book: {:?}, sanitized_addrs: {:?}, canonical_local_listener: {:?}",
             address_book,
             sanitized_addrs,
@@ -217,7 +217,7 @@ proptest! {
             // Check address book update - return value
             let mut address_book = AddressBook::new_with_addrs(
                 local_listener,
-                Mainnet,
+                &Mainnet,
                 DEFAULT_MAX_CONNS_PER_IP,
                 1,
                 Span::none(),
@@ -229,8 +229,8 @@ proptest! {
             let book_contents: Vec<MetaAddr> = address_book.peers().collect();
 
             // Ignore the same addresses that the address book ignores
-            let expected_result = if !expected_result.address_is_valid_for_outbound(Mainnet)
-                || ( !expected_result.last_known_info_is_valid_for_outbound(Mainnet)
+            let expected_result = if !expected_result.address_is_valid_for_outbound(&Mainnet)
+                || ( !expected_result.last_known_info_is_valid_for_outbound(&Mainnet)
                       && expected_result.last_connection_state.is_never_attempted())
             {
                None
@@ -323,7 +323,7 @@ proptest! {
 
         // Only put valid addresses in the address book.
         // This means some tests will start with an empty address book.
-        let addrs = if addr.last_known_info_is_valid_for_outbound(Mainnet) {
+        let addrs = if addr.last_known_info_is_valid_for_outbound(&Mainnet) {
             Some(addr)
         } else {
             None
@@ -331,7 +331,7 @@ proptest! {
 
         let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
@@ -371,7 +371,7 @@ proptest! {
                         LIVE_PEER_INTERVALS,
                         overall_test_time,
                         peer_change_interval,
-                        addr.last_known_info_is_valid_for_outbound(Mainnet),
+                        addr.last_known_info_is_valid_for_outbound(&Mainnet),
                     );
                 }
 
@@ -438,7 +438,7 @@ proptest! {
                     let addr = addrs.entry(addr.addr).or_insert(*addr);
                     let change = changes.get(change_index);
 
-                    while addr.is_ready_for_connection_attempt(instant_now, chrono_now, Mainnet) {
+                    while addr.is_ready_for_connection_attempt(instant_now, chrono_now, &Mainnet) {
                         // Simulate an attempt
                         *addr = if let Some(addr) = MetaAddr::new_reconnect(addr.addr)
                             .apply_to_meta_addr(*addr, instant_now, chrono_now) {

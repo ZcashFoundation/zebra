@@ -48,10 +48,10 @@ fn sanitize_extremes() {
         last_connection_state: Default::default(),
     };
 
-    if let Some(min_sanitized) = min_time_entry.sanitize(Mainnet) {
+    if let Some(min_sanitized) = min_time_entry.sanitize(&Mainnet) {
         check::sanitize_avoids_leaks(&min_time_entry, &min_sanitized);
     }
-    if let Some(max_sanitized) = max_time_entry.sanitize(Mainnet) {
+    if let Some(max_sanitized) = max_time_entry.sanitize(&Mainnet) {
         check::sanitize_avoids_leaks(&max_time_entry, &max_sanitized);
     }
 }

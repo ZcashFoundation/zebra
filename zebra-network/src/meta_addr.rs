@@ -559,7 +559,7 @@ impl MetaAddr {
         &self,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
-        network: Network,
+        network: &Network,
     ) -> bool {
         self.last_known_info_is_valid_for_outbound(network)
             && !self.was_recently_updated(instant_now, chrono_now)
@@ -571,8 +571,8 @@ impl MetaAddr {
     ///
     /// Since the addresses in the address book are unique, this check can be
     /// used to permanently reject entire [`MetaAddr`]s.
-    pub fn address_is_valid_for_outbound(&self, network: Network) -> bool {
-        address_is_valid_for_outbound_connections(self.addr, network).is_ok()
+    pub fn address_is_valid_for_outbound(&self, network: &Network) -> bool {
+        address_is_valid_for_outbound_connections(self.addr, network.clone()).is_ok()
     }
 
     /// Is the last known information for this peer valid for outbound
@@ -582,7 +582,7 @@ impl MetaAddr {
     /// only be used to:
     /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
     /// - temporarily stop outbound connections to a [`MetaAddr`].
-    pub fn last_known_info_is_valid_for_outbound(&self, network: Network) -> bool {
+    pub fn last_known_info_is_valid_for_outbound(&self, network: &Network) -> bool {
         let is_node = match self.services {
             Some(services) => services.contains(PeerServices::NODE_NETWORK),
             None => true,
@@ -627,7 +627,7 @@ impl MetaAddr {
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sanitize(&self, network: Network) -> Option<MetaAddr> {
+    pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
             return None;
         }

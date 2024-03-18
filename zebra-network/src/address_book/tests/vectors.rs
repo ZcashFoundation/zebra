@@ -22,7 +22,7 @@ use crate::{
 fn address_book_empty() {
     let address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
     );
@@ -54,7 +54,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
@@ -71,7 +71,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr2, meta_addr1];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
@@ -91,7 +91,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
@@ -108,7 +108,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr2, meta_addr1];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
@@ -163,7 +163,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),

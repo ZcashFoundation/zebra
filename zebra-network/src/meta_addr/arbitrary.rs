@@ -106,7 +106,7 @@ impl MetaAddrChange {
                 |(addr, services, local_now)| {
                     let addr = MetaAddr::new_gossiped_meta_addr(addr, services, local_now);
 
-                    if addr.last_known_info_is_valid_for_outbound(Mainnet) {
+                    if addr.last_known_info_is_valid_for_outbound(&Mainnet) {
                         Some(addr.addr.port())
                     } else {
                         None

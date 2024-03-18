@@ -381,7 +381,7 @@ impl Config {
 
     /// Returns the addresses in the peer list cache file, if available.
     pub async fn load_peer_cache(&self) -> io::Result<HashSet<PeerSocketAddr>> {
-        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(self.network) else {
+        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(&self.network) else {
             return Ok(HashSet::new());
         };
 
@@ -457,7 +457,7 @@ impl Config {
     /// Atomic writes avoid corrupting the cache if Zebra panics or crashes, or if multiple Zebra
     /// instances try to read and write the same cache file.
     pub async fn update_peer_cache(&self, peer_list: HashSet<PeerSocketAddr>) -> io::Result<()> {
-        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(self.network) else {
+        let Some(peer_cache_file) = self.cache_dir.peer_cache_file_path(&self.network) else {
             return Ok(());
         };
 

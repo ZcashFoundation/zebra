@@ -96,7 +96,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize(Mainnet);
+        let addr = addr.sanitize(&Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV1 = addr.unwrap().into();
@@ -115,7 +115,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize(Mainnet);
+        let addr = addr.sanitize(&Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV1 = addr.unwrap().into();
@@ -153,7 +153,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize(Mainnet);
+        let addr = addr.sanitize(&Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV2 = addr.unwrap().into();
@@ -172,7 +172,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize(Mainnet);
+        let addr = addr.sanitize(&Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV2 = addr.unwrap().into();

@@ -325,7 +325,7 @@ async fn written_peer_cache_can_be_read_manually() {
         assert!(
             !cached_peers.is_empty(),
             "unexpected empty peer cache from manual load: {:?}",
-            config.cache_dir.peer_cache_file_path(config.network)
+            config.cache_dir.peer_cache_file_path(&config.network)
         );
     }
 }
@@ -371,7 +371,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         assert!(
             approximate_cached_peer_count > 0,
             "unexpected empty address book using cache from previous instance: {:?}",
-            config.cache_dir.peer_cache_file_path(config.network)
+            config.cache_dir.peer_cache_file_path(&config.network)
         );
     }
 }

@@ -84,8 +84,8 @@ impl Builder {
     }
 
     /// Configure the codec for the given [`Network`].
-    pub fn for_network(mut self, network: Network) -> Self {
-        self.network = network;
+    pub fn for_network(mut self, network: &Network) -> Self {
+        self.network = network.clone();
         self
     }
 
