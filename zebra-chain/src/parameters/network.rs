@@ -92,18 +92,12 @@ impl Network {
     }
 }
 
-impl From<Network> for &'static str {
-    fn from(network: Network) -> &'static str {
+impl From<&Network> for &'static str {
+    fn from(network: &Network) -> &'static str {
         match network {
             Network::Mainnet => "Mainnet",
             Network::Testnet => "Testnet",
         }
-    }
-}
-
-impl From<&Network> for &'static str {
-    fn from(network: &Network) -> &'static str {
-        (network).into()
     }
 }
 
