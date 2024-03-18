@@ -212,7 +212,7 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
 pub fn disabled_add_to_sprout_pool(
     tx: &Transaction,
     height: Height,
-    network: Network,
+    network: &Network,
 ) -> Result<(), TransactionError> {
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(&network)
@@ -325,7 +325,7 @@ where
 /// <https://github.com/ZcashFoundation/zebra/issues/3027>
 pub fn coinbase_outputs_are_decryptable(
     transaction: &Transaction,
-    network: Network,
+    network: &Network,
     height: Height,
 ) -> Result<(), TransactionError> {
     // The consensus rule only applies to Heartwood onward.
@@ -352,7 +352,7 @@ pub fn coinbase_outputs_are_decryptable(
 pub fn coinbase_expiry_height(
     block_height: &Height,
     coinbase: &Transaction,
-    network: Network,
+    network: &Network,
 ) -> Result<(), TransactionError> {
     let expiry_height = coinbase.expiry_height();
 

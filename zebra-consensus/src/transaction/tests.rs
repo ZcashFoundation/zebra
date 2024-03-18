@@ -186,7 +186,7 @@ fn v5_transaction_with_no_inputs_fails_validation() {
 #[tokio::test]
 async fn mempool_request_with_missing_input_is_rejected() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let (height, tx) = transactions_from_blocks(zebra_test::vectors::MAINNET_BLOCKS.iter())
         .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
@@ -235,7 +235,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
 #[tokio::test]
 async fn mempool_request_with_present_input_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -302,7 +302,7 @@ async fn mempool_request_with_present_input_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_invalid_lock_time_is_rejected() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -381,7 +381,7 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
 #[tokio::test]
 async fn mempool_request_with_unlocked_lock_time_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -448,7 +448,7 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -518,7 +518,7 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_past_lock_time_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -597,7 +597,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
     let _init_guard = zebra_test::init();
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -700,7 +700,7 @@ async fn state_error_converted_correctly() {
     use zebra_state::DuplicateNullifierError;
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -865,7 +865,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 
     for (network, blocks) in networks {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         let transaction = fake_v5_transactions_for_network(&network, blocks)
             .next_back()
@@ -912,7 +912,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
         let blocks = network.block_iter();
 
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         let mut transaction = fake_v5_transactions_for_network(&network, blocks)
             .next_back()
@@ -984,7 +984,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1007,7 +1007,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 async fn v4_transaction_with_last_valid_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1054,7 +1054,7 @@ async fn v4_transaction_with_last_valid_expiry_height() {
 async fn v4_coinbase_transaction_with_low_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1095,7 +1095,7 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
 async fn v4_transaction_with_too_low_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1147,7 +1147,7 @@ async fn v4_transaction_with_too_low_expiry_height() {
 async fn v4_transaction_with_exceeding_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     let block_height = block::Height::MAX;
 
@@ -1198,7 +1198,7 @@ async fn v4_transaction_with_exceeding_expiry_height() {
 async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     // Use an arbitrary pre-NU5 block height.
     // It can't be NU5-onward because the expiry height limit is not enforced
@@ -1274,7 +1274,7 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1329,7 +1329,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1384,7 +1384,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1450,7 +1450,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -1521,7 +1521,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         let result = verifier
             .oneshot(Request::Block {
@@ -1580,7 +1580,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1603,7 +1603,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 async fn v5_transaction_with_last_valid_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Testnet, state_service);
+    let verifier = Verifier::new(&Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&Network::Testnet)
@@ -1648,7 +1648,7 @@ async fn v5_transaction_with_last_valid_expiry_height() {
 async fn v5_coinbase_transaction_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Testnet, state_service);
+    let verifier = Verifier::new(&Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&Network::Testnet)
@@ -1763,7 +1763,7 @@ async fn v5_coinbase_transaction_expiry_height() {
 async fn v5_transaction_with_too_low_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Testnet, state_service);
+    let verifier = Verifier::new(&Network::Testnet, state_service);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&Network::Testnet)
@@ -1815,7 +1815,7 @@ async fn v5_transaction_with_too_low_expiry_height() {
 async fn v5_transaction_with_exceeding_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
+    let verifier = Verifier::new(&Network::Mainnet, state_service);
 
     let block_height = block::Height::MAX;
 
@@ -1893,7 +1893,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -1950,7 +1950,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -2007,7 +2007,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let result = verifier
         .oneshot(Request::Block {
@@ -2037,7 +2037,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
-        let (height, transaction) = test_transactions(network)
+        let (height, transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
                 !transaction.is_coinbase() && transaction.inputs().is_empty()
@@ -2050,7 +2050,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2109,7 +2109,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 ) {
     let network = Network::Mainnet;
 
-    let (height, mut transaction) = test_transactions(network)
+    let (height, mut transaction) = test_transactions(&network)
         .rev()
         .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
         .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
@@ -2130,7 +2130,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     // Initialize the verifier
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called.") });
-    let verifier = Verifier::new(network, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     // Test the transaction verifier.
     //
@@ -2168,7 +2168,7 @@ fn v4_with_sapling_spends() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
-        let (height, transaction) = test_transactions(network)
+        let (height, transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
                 !transaction.is_coinbase() && transaction.inputs().is_empty()
@@ -2181,7 +2181,7 @@ fn v4_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2208,7 +2208,7 @@ fn v4_with_duplicate_sapling_spends() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
-        let (height, mut transaction) = test_transactions(network)
+        let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
                 !transaction.is_coinbase() && transaction.inputs().is_empty()
@@ -2224,7 +2224,7 @@ fn v4_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2253,7 +2253,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
-        let (height, transaction) = test_transactions(network)
+        let (height, transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
                 !transaction.is_coinbase() && transaction.inputs().is_empty()
@@ -2269,7 +2269,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2318,7 +2318,7 @@ fn v5_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2362,7 +2362,7 @@ fn v5_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2425,7 +2425,7 @@ fn v5_with_duplicate_orchard_action() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+        let verifier = Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
@@ -2717,14 +2717,14 @@ fn add_to_sprout_pool_after_nu() {
 
     // the coinbase transaction should pass the check.
     assert_eq!(
-        check::disabled_add_to_sprout_pool(&block.transactions[0], block_height, network),
+        check::disabled_add_to_sprout_pool(&block.transactions[0], block_height, &network),
         Ok(())
     );
 
     // the 2nd transaction has no joinsplits, should pass the check.
     assert_eq!(block.transactions[1].joinsplit_count(), 0);
     assert_eq!(
-        check::disabled_add_to_sprout_pool(&block.transactions[1], block_height, network),
+        check::disabled_add_to_sprout_pool(&block.transactions[1], block_height, &network),
         Ok(())
     );
 
@@ -2737,7 +2737,7 @@ fn add_to_sprout_pool_after_nu() {
     assert!(vpub_old > zero);
 
     assert_eq!(
-        check::disabled_add_to_sprout_pool(&block.transactions[3], block_height, network),
+        check::disabled_add_to_sprout_pool(&block.transactions[3], block_height, &network),
         Err(TransactionError::DisabledAddToSproutPool)
     );
 
@@ -2750,7 +2750,7 @@ fn add_to_sprout_pool_after_nu() {
     assert_eq!(vpub_old, zero);
 
     assert_eq!(
-        check::disabled_add_to_sprout_pool(&block.transactions[7], block_height, network),
+        check::disabled_add_to_sprout_pool(&block.transactions[7], block_height, &network),
         Ok(())
     );
 }
@@ -2796,7 +2796,7 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
             // and there are relevant outputs.
             tested_coinbase_txs += 1;
         }
-        check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)
+        check::coinbase_outputs_are_decryptable(coinbase_tx, &network, height)
             .expect("coinbase outputs must be decryptable with an all-zero key");
 
         // For remaining transactions, check if existing outputs are NOT decryptable
@@ -2805,11 +2805,11 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
             let has_outputs = tx.sapling_outputs().count() > 0 || tx.orchard_actions().count() > 0;
             if has_outputs && heartwood_onward {
                 tested_non_coinbase_txs += 1;
-                check::coinbase_outputs_are_decryptable(tx, network, height).expect_err(
+                check::coinbase_outputs_are_decryptable(tx, &network, height).expect_err(
                     "decrypting a non-coinbase output with an all-zero key should fail",
                 );
             } else {
-                check::coinbase_outputs_are_decryptable(tx, network, height)
+                check::coinbase_outputs_are_decryptable(tx, &network, height)
                     .expect("a transaction without outputs, or pre-Heartwood, must be considered 'decryptable'");
             }
         }
@@ -2874,7 +2874,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
         assert_eq!(
             check::coinbase_outputs_are_decryptable(
                 &transaction,
-                network,
+                &network,
                 NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
             ),
             Ok(())
@@ -2916,7 +2916,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
         assert_eq!(
             check::coinbase_outputs_are_decryptable(
                 &transaction,
-                network,
+                &network,
                 NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
             ),
             Err(TransactionError::CoinbaseOutputsNotDecryptable)
@@ -2927,7 +2927,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
 #[tokio::test]
 async fn mempool_zip317_error() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
         .activation_height(&Network::Mainnet)
@@ -2999,7 +2999,7 @@ async fn mempool_zip317_error() {
 #[tokio::test]
 async fn mempool_zip317_ok() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new(Network::Mainnet, state.clone());
+    let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
         .activation_height(&Network::Mainnet)

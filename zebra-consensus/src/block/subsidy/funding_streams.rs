@@ -23,7 +23,7 @@ mod tests;
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn funding_stream_values(
     height: Height,
-    network: Network,
+    network: &Network,
 ) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, Error> {
     let canopy_height = Canopy.activation_height(&network).unwrap();
     let mut results = HashMap::new();
@@ -52,7 +52,7 @@ pub fn funding_stream_values(
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn funding_stream_address_period(height: Height, network: Network) -> u32 {
+fn funding_stream_address_period(height: Height, network: &Network) -> u32 {
     // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
     // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     //
@@ -76,7 +76,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn funding_stream_address_index(height: Height, network: Network) -> usize {
+fn funding_stream_address_index(height: Height, network: &Network) -> usize {
     let num_addresses = network.num_funding_streams();
 
     let index = 1u32
@@ -100,7 +100,7 @@ fn funding_stream_address_index(height: Height, network: Network) -> usize {
 /// only use transparent addresses,
 pub fn funding_stream_address(
     height: Height,
-    network: Network,
+    network: &Network,
     receiver: FundingStreamReceiver,
 ) -> transparent::Address {
     let index = funding_stream_address_index(height, network);
@@ -127,7 +127,7 @@ pub fn funding_stream_recipient_info(
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn check_script_form(lock_script: &Script, address: transparent::Address) -> bool {
+pub fn check_script_form(lock_script: &Script, address: &transparent::Address) -> bool {
     assert!(
         address.is_script_hash(),
         "incorrect funding stream address constant: {address} \
@@ -141,7 +141,7 @@ pub fn check_script_form(lock_script: &Script, address: transparent::Address) ->
 }
 
 /// Returns a new funding stream coinbase output lock script, which pays to the P2SH `address`.
-pub fn new_coinbase_script(address: transparent::Address) -> Script {
+pub fn new_coinbase_script(address: &transparent::Address) -> Script {
     assert!(
         address.is_script_hash(),
         "incorrect coinbase script address: {address} \
@@ -158,7 +158,7 @@ pub fn new_coinbase_script(address: transparent::Address) -> Script {
 /// Returns a list of outputs in `transaction`, which have a script address equal to `address`.
 pub fn filter_outputs_by_address(
     transaction: &Transaction,
-    address: transparent::Address,
+    address: &transparent::Address,
 ) -> Vec<transparent::Output> {
     transaction
         .outputs()

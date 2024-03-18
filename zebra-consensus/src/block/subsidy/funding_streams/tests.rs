@@ -12,7 +12,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
 
     // funding streams not active
     let canopy_height_minus1 = Canopy.activation_height(&network).unwrap() - 1;
-    assert!(funding_stream_values(canopy_height_minus1.unwrap(), network)?.is_empty());
+    assert!(funding_stream_values(canopy_height_minus1.unwrap(), &network)?.is_empty());
 
     // funding stream is active
     let canopy_height = Canopy.activation_height(&network);
@@ -31,15 +31,15 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     assert_eq!(
-        funding_stream_values(canopy_height.unwrap(), network).unwrap(),
+        funding_stream_values(canopy_height.unwrap(), &network).unwrap(),
         hash_map
     );
     assert_eq!(
-        funding_stream_values(canopy_height_plus1.unwrap(), network).unwrap(),
+        funding_stream_values(canopy_height_plus1.unwrap(), &network).unwrap(),
         hash_map
     );
     assert_eq!(
-        funding_stream_values(canopy_height_plus2.unwrap(), network).unwrap(),
+        funding_stream_values(canopy_height_plus2.unwrap(), &network).unwrap(),
         hash_map
     );
 
@@ -49,10 +49,10 @@ fn test_funding_stream_values() -> Result<(), Report> {
     let last = end - 1;
 
     assert_eq!(
-        funding_stream_values(last.unwrap(), network).unwrap(),
+        funding_stream_values(last.unwrap(), &network).unwrap(),
         hash_map
     );
-    assert!(funding_stream_values(end, network)?.is_empty());
+    assert!(funding_stream_values(end, &network)?.is_empty());
 
     Ok(())
 }
@@ -74,7 +74,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 );
 
                 // Asserts if address is not a P2SH address.
-                let _script = new_coinbase_script(address);
+                let _script = new_coinbase_script(&address);
             }
         }
     }

@@ -116,7 +116,7 @@ impl StartCmd {
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
-            config.network.network,
+            &config.network.network,
         );
 
         info!("opening database, this may take a few minutes");
@@ -168,7 +168,7 @@ impl StartCmd {
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
-                config.network.network,
+                &config.network.network,
                 state.clone(),
             )
             .await;

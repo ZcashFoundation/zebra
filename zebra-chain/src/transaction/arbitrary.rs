@@ -993,7 +993,7 @@ fn sapling_spend_v4_to_fake_v5(
 
 /// Iterate over V4 transactions in the block test vectors for the specified `network`.
 pub fn test_transactions(
-    network: Network,
+    network: &Network,
 ) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
     let blocks = network.block_iter();
 

@@ -67,7 +67,7 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
 /// If the header difficulty threshold is invalid, returns an error containing `height` and `hash`.
 pub fn difficulty_threshold_is_valid(
     header: &Header,
-    network: Network,
+    network: &Network,
     height: &Height,
     hash: &Hash,
 ) -> Result<ExpandedDifficulty, BlockError> {
@@ -86,7 +86,7 @@ pub fn difficulty_threshold_is_valid(
             *height,
             *hash,
             difficulty_threshold,
-            network,
+            network.clone(),
             network.target_difficulty_limit(),
         ))?;
     }
@@ -102,7 +102,7 @@ pub fn difficulty_threshold_is_valid(
 /// If the block is invalid, returns an error containing `height` and `hash`.
 pub fn difficulty_is_valid(
     header: &Header,
-    network: Network,
+    network: &Network,
     height: &Height,
     hash: &Hash,
 ) -> Result<(), BlockError> {
@@ -123,7 +123,7 @@ pub fn difficulty_is_valid(
             *height,
             *hash,
             difficulty_threshold,
-            network,
+            network.clone(),
         ))?;
     }
 
@@ -143,7 +143,7 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
-pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockError> {
+pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
@@ -189,7 +189,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
 
             let has_expected_output =
-                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
+                subsidy::funding_streams::filter_outputs_by_address(coinbase, &address)
                     .iter()
                     .map(zebra_chain::transparent::Output::value)
                     .any(|value| value == expected_amount);
@@ -210,7 +210,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
 /// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub fn miner_fees_are_valid(
     block: &Block,
-    network: Network,
+    network: &Network,
     block_miner_fees: Amount<NonNegative>,
 ) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
@@ -289,7 +289,7 @@ pub fn time_is_valid_at(
 /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
 /// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
 pub fn merkle_root_validity(
-    network: Network,
+    network: &Network,
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {

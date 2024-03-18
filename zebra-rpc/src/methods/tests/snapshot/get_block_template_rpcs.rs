@@ -86,7 +86,7 @@ pub async fn test_responses<State, ReadState>(
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
         .await;
 
     let mut mock_sync_status = MockSyncStatus::default();
