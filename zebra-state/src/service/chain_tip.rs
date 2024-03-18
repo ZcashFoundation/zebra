@@ -147,7 +147,7 @@ impl ChainTipSender {
     #[instrument(skip(initial_tip), fields(new_height, new_hash))]
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
-        network: Network,
+        network: &Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
         let initial_tip = initial_tip.into();
         Self::record_new_tip(&initial_tip);
@@ -584,11 +584,11 @@ impl ChainTipChange {
     }
 
     /// Create a new [`ChainTipChange`] from a [`LatestChainTip`] receiver and [`Network`].
-    fn new(latest_chain_tip: LatestChainTip, network: Network) -> Self {
+    fn new(latest_chain_tip: LatestChainTip, network: &Network) -> Self {
         Self {
             latest_chain_tip,
             last_change_hash: None,
-            network,
+            network: network.clone(),
         }
     }
 

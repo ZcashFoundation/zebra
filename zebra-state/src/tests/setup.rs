@@ -104,7 +104,7 @@ pub(crate) fn new_state_with_mainnet_genesis(
         None,
         false,
     );
-    let non_finalized_state = NonFinalizedState::new(network);
+    let non_finalized_state = NonFinalizedState::new(&network);
 
     assert_eq!(
         None,

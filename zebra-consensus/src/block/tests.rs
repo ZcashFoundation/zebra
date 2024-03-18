@@ -139,7 +139,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = zebra_state::init_test(network);
+    let state_service = zebra_state::init_test(&network);
 
     let transaction = transaction::Verifier::new(network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);

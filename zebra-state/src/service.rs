@@ -353,7 +353,7 @@ impl StateService {
         let non_finalized_state = NonFinalizedState::new(network);
 
         let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(finalized_state.network()));
+            watch::channel(NonFinalizedState::new(&finalized_state.network()));
 
         // Security: The number of blocks in these channels is limited by
         //           the syncer and inbound lookahead limits.
@@ -399,7 +399,7 @@ impl StateService {
         let finalized_block_write_last_sent_hash = finalized_state.db.finalized_tip_hash();
 
         let state = Self {
-            network,
+            network: network.clone(),
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
@@ -1935,7 +1935,7 @@ pub fn spawn_init(
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, _, _, _) =
@@ -1950,7 +1950,7 @@ pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxEr
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test_services(
-    network: Network,
+    network: &Network,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     ReadStateService,

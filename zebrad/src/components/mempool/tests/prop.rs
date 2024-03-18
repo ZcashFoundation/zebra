@@ -65,7 +65,7 @@ proptest! {
                 _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -115,7 +115,7 @@ proptest! {
                 _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -196,7 +196,7 @@ proptest! {
                 mut tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -254,7 +254,7 @@ fn block1_chain_tip() -> Option<ChainTipBlock> {
 
 /// Create a new [`Mempool`] instance using mocked services.
 fn setup(
-    network: Network,
+    network: &Network,
 ) -> (
     Mempool,
     MockPeerSet,

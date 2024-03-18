@@ -237,7 +237,7 @@ fn setup_crawler() -> (
 
     // the network should be irrelevant here
     let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(None, Network::Mainnet);
+        ChainTipSender::new(None, &Network::Mainnet);
 
     Crawler::spawn(
         &Config::default(),

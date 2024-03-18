@@ -253,7 +253,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     let transcript = Transcript::from(iter);
 
     let network = Network::Mainnet;
-    let state = init_test(network);
+    let state = init_test(&network);
 
     transcript.check(state).await?;
 
@@ -401,7 +401,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), &network, Height::MAX, 0);
 
         prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
@@ -493,7 +493,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), &network, Height::MAX, 0);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);

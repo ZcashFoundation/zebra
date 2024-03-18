@@ -151,10 +151,10 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
 
     let expected_hash = block2.hash();
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -187,10 +187,10 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let block2 = block1.make_fake_child().set_work(10);
     let child = block1.make_fake_child().set_work(1);
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -237,10 +237,10 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let child1 = block1.make_fake_child().set_work(1);
     let child2 = block2.make_fake_child().set_work(1);
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -282,10 +282,10 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -327,10 +327,10 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -370,10 +370,10 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let more_work_child = block1.make_fake_child().set_work(3);
     let expected_hash = more_work_child.hash();
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -417,10 +417,10 @@ fn history_tree_is_updated_for_network_upgrade(
             .expect("block is structurally valid"),
     );
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );
@@ -515,10 +515,10 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
             .expect("block is structurally valid"),
     );
 
-    let mut state = NonFinalizedState::new(network);
+    let mut state = NonFinalizedState::new(&network);
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
-        network,
+        &network,
         #[cfg(feature = "elasticsearch")]
         None,
     );

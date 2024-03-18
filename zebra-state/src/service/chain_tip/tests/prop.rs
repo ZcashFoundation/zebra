@@ -38,7 +38,7 @@ proptest! {
         tip_updates in any::<SummaryDebug<Vec<(BlockUpdate, BlockConnection, TipChangeCheck)>>>(),
         network in any::<Network>(),
     ) {
-        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, network);
+        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, &network);
 
         let mut latest_finalized_tip = None;
         let mut latest_non_finalized_tip = None;

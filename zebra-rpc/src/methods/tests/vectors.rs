@@ -909,7 +909,7 @@ async fn rpc_getblockcount_empty_state() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(Mainnet);
+        zebra_state::init_test_services(&Mainnet);
 
     let (
         block_verifier_router,
@@ -956,7 +956,7 @@ async fn rpc_getpeerinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(Mainnet);
+        zebra_state::init_test_services(&Mainnet);
 
     let (
         block_verifier_router,
