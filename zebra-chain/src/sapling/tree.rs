@@ -11,6 +11,7 @@
 //! A root of a note commitment tree is associated with each treestate.
 
 use std::{
+    default::Default,
     fmt,
     hash::{Hash, Hasher},
     io,
@@ -692,7 +693,7 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 /// It is likely that the dense format will be used in future RPCs, in which
 /// case the current implementation will have to change and use the format
 /// compatible with [`Frontier`] instead.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct SerializedTree(Vec<u8>);
 
 impl From<&NoteCommitmentTree> for SerializedTree {

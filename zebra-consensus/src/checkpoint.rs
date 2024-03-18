@@ -42,7 +42,7 @@ use crate::{
         TargetHeight::{self, *},
     },
     error::BlockError,
-    BoxError,
+    BoxError, ParameterCheckpoint as _,
 };
 
 pub(crate) mod list;
@@ -207,7 +207,7 @@ where
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
     ) -> Self {
-        let checkpoint_list = CheckpointList::new(network);
+        let checkpoint_list = network.checkpoint_list();
         let max_height = checkpoint_list.max_height();
         tracing::info!(
             ?max_height,

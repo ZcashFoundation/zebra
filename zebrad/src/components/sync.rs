@@ -21,8 +21,8 @@ use tower::{
 use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
-    parameters::genesis_hash,
 };
+use zebra_consensus::ParameterCheckpoint as _;
 use zebra_network as zn;
 use zebra_state as zs;
 
@@ -500,7 +500,7 @@ where
         ));
 
         let new_syncer = Self {
-            genesis_hash: genesis_hash(config.network.network),
+            genesis_hash: config.network.network.genesis_hash(),
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
