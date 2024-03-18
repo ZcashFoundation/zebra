@@ -42,7 +42,7 @@ proptest-impl = [
 ]
 
 [dependencies]
-chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.35", default-features = false, features = ["clock", "std"] }
 futures = "0.3.30"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
@@ -54,7 +54,7 @@ jsonrpc-http-server = "18.0.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
 serde_json = { version = "1.0.113", features = ["preserve_order"] }
-indexmap = { version = "2.2.3", features = ["serde"] }
+indexmap = { version = "2.2.5", features = ["serde"] }
 
 tokio = { version = "1.36.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
@@ -67,7 +67,7 @@ serde = { version = "1.0.196", features = ["serde_derive"] }
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }
 # ECC deps used by getblocktemplate-rpcs feature
-zcash_address = { version = "0.3.1", optional = true }
+zcash_address = { version = "0.3.2", optional = true }
 
 # Test-only feature proptest-impl
 proptest = { version = "1.4.0", optional = true }
@@ -80,11 +80,11 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.35" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.35" }
 
 [dev-dependencies]
-insta = { version = "1.33.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.36.1", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
-thiserror = "1.0.57"
+thiserror = "1.0.58"
 tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35", features = ["proptest-impl"] }
