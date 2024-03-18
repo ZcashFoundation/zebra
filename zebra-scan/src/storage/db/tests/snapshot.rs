@@ -89,8 +89,8 @@ fn test_database_format_with_network(network: Network) {
     //
     // We limit the number of blocks, because we create 2 snapshots per block, one for each network.
     for height in 0..=2 {
-        super::add_fake_results(&mut storage, network, Height(height), true);
-        super::add_fake_results(&mut storage, network, Height(height), false);
+        super::add_fake_results(&mut storage, &network, Height(height), true);
+        super::add_fake_results(&mut storage, &network, Height(height), false);
 
         let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_suffix(format!("{net_suffix}_{height}"));

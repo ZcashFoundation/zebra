@@ -41,7 +41,7 @@ pub fn add_fake_keys(storage: &mut Storage) {
 /// If it is `false`, adds the transaction hashes from `height`.
 pub fn add_fake_results(
     storage: &mut Storage,
-    network: Network,
+    network: &Network,
     height: Height,
     add_progress_marker: bool,
 ) {

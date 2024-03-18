@@ -111,7 +111,7 @@ pub async fn start(
     > = key_heights
         .keys()
         .map(|key| {
-            let parsed_keys = sapling_key_to_scan_block_keys(key, network)?;
+            let parsed_keys = sapling_key_to_scan_block_keys(key, &network)?;
             Ok::<_, Report>((key.clone(), parsed_keys))
         })
         .try_collect()?;
@@ -143,7 +143,7 @@ pub async fn start(
         let was_parsed_keys_empty = parsed_keys.is_empty();
 
         let (new_keys, new_result_senders, new_result_receivers) =
-            ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
+            ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
 
         subscribed_keys.extend(new_result_senders);
         // Drop any results senders that are closed from subscribed_keys
@@ -311,6 +311,7 @@ pub async fn scan_height_and_store_results(
         let sapling_key = sapling_key.clone();
         let block = block.clone();
         let mut storage = storage.clone();
+        let network = network.clone();
 
         // We use a dummy size of the Sapling note commitment tree.
         //
@@ -326,9 +327,9 @@ pub async fn scan_height_and_store_results(
 
         tokio::task::spawn_blocking(move || {
             let dfvk_res =
-                scan_block(network, &block, sapling_tree_size, &dfvks).map_err(|e| eyre!(e))?;
+                scan_block(&network, &block, sapling_tree_size, &dfvks).map_err(|e| eyre!(e))?;
             let ivk_res =
-                scan_block(network, &block, sapling_tree_size, &ivks).map_err(|e| eyre!(e))?;
+                scan_block(&network, &block, sapling_tree_size, &ivks).map_err(|e| eyre!(e))?;
 
             let dfvk_res = scanned_block_to_db_result(dfvk_res);
             let ivk_res = scanned_block_to_db_result(ivk_res);
@@ -375,7 +376,7 @@ pub async fn scan_height_and_store_results(
 /// - Pass the real `sapling_tree_size` parameter from the state.
 /// - Add other prior block metadata.
 pub fn scan_block<K: ScanningKey>(
-    network: Network,
+    network: &Network,
     block: &Block,
     sapling_tree_size: u32,
     scanning_keys: &[K],
@@ -419,7 +420,7 @@ pub fn scan_block<K: ScanningKey>(
 // TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_scan_block_keys(
     key: &SaplingScanningKey,
-    network: Network,
+    network: &Network,
 ) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
     let efvk =
         decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;

@@ -306,7 +306,7 @@ impl StartCmd {
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
                 config.shielded_scan.clone(),
-                &config.network.network,
+                config.network.network,
                 state,
                 chain_tip_change,
             )

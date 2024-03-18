@@ -42,7 +42,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     assert_eq!(block.transactions.len(), 4);
 
-    let res = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let res = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
@@ -118,7 +118,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
         let compact_block = block_to_compact(&block, chain_metadata);
 
-        let res = scan_block(network, &block, sapling_commitment_tree_size, &ivks)
+        let res = scan_block(&network, &block, sapling_commitment_tree_size, &ivks)
             .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
@@ -177,7 +177,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    let result = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let result = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(result.transactions().len(), 1);
