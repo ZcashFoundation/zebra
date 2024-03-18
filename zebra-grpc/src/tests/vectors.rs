@@ -37,11 +37,11 @@ async fn test_grpc_methods_mocked() {
     test_delete_keys_errors(client.clone()).await;
 
     for network in Network::iter() {
-        test_mocked_getinfo_for_network(&client, &mock_scan_service, network).await;
-        test_mocked_getresults_for_network(&client, &mock_scan_service, network).await;
-        test_mocked_register_keys_for_network(&client, &mock_scan_service, network).await;
-        test_mocked_clear_results_for_network(&client, &mock_scan_service, network).await;
-        test_mocked_delete_keys_for_network(&client, &mock_scan_service, network).await;
+        test_mocked_getinfo_for_network(&client, &mock_scan_service, &network).await;
+        test_mocked_getresults_for_network(&client, &mock_scan_service, &network).await;
+        test_mocked_register_keys_for_network(&client, &mock_scan_service, &network).await;
+        test_mocked_clear_results_for_network(&client, &mock_scan_service, &network).await;
+        test_mocked_delete_keys_for_network(&client, &mock_scan_service, &network).await;
     }
 }
 
@@ -49,7 +49,7 @@ async fn test_grpc_methods_mocked() {
 async fn test_mocked_getinfo_for_network(
     client: &ScannerClient<Channel>,
     mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     // create request, fake results and get response
     let get_info_response = call_get_info(client.clone(), mock_scan_service.clone(), network).await;
@@ -66,7 +66,7 @@ async fn test_mocked_getinfo_for_network(
 async fn test_mocked_getresults_for_network(
     client: &ScannerClient<Channel>,
     mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     // create request, fake populated results and get response
     let get_results_response =
@@ -114,7 +114,7 @@ async fn test_mocked_getresults_for_network(
 async fn test_mocked_register_keys_for_network(
     client: &ScannerClient<Channel>,
     mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     // create request, fake return value and get response
     let register_keys_response =
@@ -132,7 +132,7 @@ async fn test_mocked_register_keys_for_network(
 async fn test_mocked_clear_results_for_network(
     client: &ScannerClient<Channel>,
     mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     // create request, fake results and get response
     let get_results_response =
@@ -181,7 +181,7 @@ async fn test_mocked_clear_results_for_network(
 async fn test_mocked_delete_keys_for_network(
     client: &ScannerClient<Channel>,
     mock_scan_service: &MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     // create request, fake results and get response
     let register_keys_response =
@@ -267,9 +267,10 @@ async fn start_server_and_get_client(
 /// Add fake populated results to the mock scan service
 async fn add_fake_populated_results(
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) {
     let mut mock_scan_service = mock_scan_service.clone();
+    let network = network.clone();
     tokio::spawn(async move {
         let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
         let mut fake_results = BTreeMap::new();
@@ -298,7 +299,7 @@ async fn add_fake_populated_results(
 /// Add fake empty results to the mock scan service
 async fn add_fake_empty_results(
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    _network: Network,
+    _network: &Network,
 ) {
     let mut mock_scan_service = mock_scan_service.clone();
     tokio::spawn(async move {
@@ -318,7 +319,7 @@ async fn add_fake_empty_results(
 async fn call_get_results(
     client: ScannerClient<Channel>,
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
     empty_results: bool,
 ) -> tonic::Response<GetResultsResponse> {
     let get_results_response_fut = {
@@ -380,7 +381,7 @@ async fn test_get_results_errors(mut client: ScannerClient<Channel>) {
 async fn call_get_info(
     client: ScannerClient<Channel>,
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    network: Network,
+    network: &Network,
 ) -> tonic::Response<InfoReply> {
     let get_info_response_fut = {
         let mut client = client.clone();
@@ -389,6 +390,7 @@ async fn call_get_info(
     };
 
     let mut mock_scan_service = mock_scan_service.clone();
+    let network = network.clone();
     tokio::spawn(async move {
         mock_scan_service
             .expect_request_that(|req| matches!(req, ScanRequest::Info))
@@ -408,7 +410,7 @@ async fn call_get_info(
 async fn call_register_keys(
     client: ScannerClient<Channel>,
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    _network: Network,
+    _network: &Network,
 ) -> tonic::Response<RegisterKeysResponse> {
     let key_with_height = KeyWithHeight {
         key: ZECPAGES_SAPLING_VIEWING_KEY.to_string(),
@@ -472,7 +474,7 @@ async fn test_register_keys_errors(client: ScannerClient<Channel>) {
 async fn call_clear_results(
     client: ScannerClient<Channel>,
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    _network: Network,
+    _network: &Network,
 ) -> tonic::Response<Empty> {
     let clear_results_response_fut = {
         let mut client = client.clone();
@@ -525,7 +527,7 @@ async fn test_clear_results_errors(client: ScannerClient<Channel>) {
 async fn call_delete_keys(
     client: ScannerClient<Channel>,
     mock_scan_service: MockService<ScanRequest, ScanResponse, PanicAssertion>,
-    _network: Network,
+    _network: &Network,
 ) -> tonic::Response<Empty> {
     let delete_keys_response_fut = {
         let mut client = client.clone();
