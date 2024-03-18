@@ -111,7 +111,7 @@ impl ChainTip for MockChainTip {
 
     fn estimate_distance_to_network_chain_tip(
         &self,
-        _network: Network,
+        _network: &Network,
     ) -> Option<(block::HeightDiff, block::Height)> {
         self.estimated_distance_to_network_chain_tip
             .borrow()

@@ -56,7 +56,7 @@ proptest! {
         let mock_local_time = current_block_time + estimated_time_difference + time_displacement;
 
         assert_eq!(
-            chain_tip.estimate_network_chain_tip_height(network, mock_local_time),
+            chain_tip.estimate_network_chain_tip_height(&network, mock_local_time),
             Some(network_height)
         );
     }

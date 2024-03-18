@@ -683,7 +683,7 @@ async fn rpc_getaddresstxids_response() {
             for start in 1..=10 {
                 for end in start..=10 {
                     rpc_getaddresstxids_response_with(
-                        network,
+                        &network,
                         start..=end,
                         &address,
                         &read_state,
@@ -695,7 +695,7 @@ async fn rpc_getaddresstxids_response() {
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
-                network,
+                &network,
                 1..=10,
                 &address,
                 &read_state,
@@ -707,7 +707,7 @@ async fn rpc_getaddresstxids_response() {
 }
 
 async fn rpc_getaddresstxids_response_with(
-    network: Network,
+    network: &Network,
     range: RangeInclusive<u32>,
     address: &transparent::Address,
     read_state: &ReadStateService,
@@ -718,7 +718,7 @@ async fn rpc_getaddresstxids_response_with(
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         "RPC test",
-        network,
+        network.clone(),
         false,
         true,
         Buffer::new(mempool.clone(), 1),
@@ -876,7 +876,7 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -921,7 +921,7 @@ async fn rpc_getblockcount_empty_state() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -982,7 +982,7 @@ async fn rpc_getpeerinfo() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        network,
+        &network,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1038,7 +1038,7 @@ async fn rpc_getblockhash() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1094,7 +1094,7 @@ async fn rpc_getmininginfo() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         read_state,
@@ -1130,7 +1130,7 @@ async fn rpc_getnetworksolps() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         read_state,
@@ -1259,7 +1259,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
@@ -1284,7 +1284,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(Mainnet),
+                    history_tree: fake_history_tree(&Mainnet),
                 }));
         }
     };
@@ -1523,7 +1523,7 @@ async fn rpc_submitblock_errors() {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1575,7 +1575,7 @@ async fn rpc_validateaddress() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
@@ -1620,7 +1620,7 @@ async fn rpc_z_validateaddress() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
@@ -1707,7 +1707,7 @@ async fn rpc_getdifficulty() {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
@@ -1732,7 +1732,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1758,7 +1758,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1781,7 +1781,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1804,7 +1804,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1828,7 +1828,7 @@ async fn rpc_z_listunifiedreceivers() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),

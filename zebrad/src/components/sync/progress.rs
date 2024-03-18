@@ -135,7 +135,7 @@ pub async fn show_block_chain_progress(
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
         if let Some(estimated_height) =
-            latest_chain_tip.estimate_network_chain_tip_height(network, now)
+            latest_chain_tip.estimate_network_chain_tip_height(&network, now)
         {
             // The estimate/actual race doesn't matter here,
             // because we're only using it for metrics and logging.

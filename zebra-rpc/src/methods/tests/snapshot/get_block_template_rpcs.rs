@@ -51,7 +51,7 @@ use crate::methods::{
 };
 
 pub async fn test_responses<State, ReadState>(
-    network: Network,
+    network: &Network,
     mempool: MockService<
         mempool::Request,
         mempool::Response,

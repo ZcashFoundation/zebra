@@ -596,7 +596,7 @@ proptest! {
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
             "RPC test",
-            network,
+            network.clone(),
             false,
             true,
             mempool.clone(),
