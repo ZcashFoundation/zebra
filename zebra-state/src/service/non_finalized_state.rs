@@ -281,7 +281,7 @@ impl NonFinalizedState {
         let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
 
         let chain = Chain::new(
-            self.network,
+            &self.network,
             finalized_tip_height,
             finalized_state.sprout_tree_for_tip(),
             finalized_state.sapling_tree_for_tip(),
@@ -381,7 +381,7 @@ impl NonFinalizedState {
             scope.spawn_fifo(|_scope| {
                 block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
                     block,
-                    network,
+                    &network,
                     &history_tree,
                 ));
             });

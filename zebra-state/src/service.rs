@@ -430,7 +430,7 @@ impl StateService {
                     &state.read_service.db,
                     tip.1,
                 ),
-                state.network,
+                &state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
                 let legacy_db_path = state.read_service.db.path().to_path_buf();
@@ -1643,7 +1643,7 @@ impl Service<ReadRequest> for ReadStateService {
                         let utxos = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
                                 read::address_utxos(
-                                    state.network,
+                                    &state.network,
                                     non_finalized_state.best_chain(),
                                     &state.db,
                                     addresses,
@@ -1749,7 +1749,7 @@ impl Service<ReadRequest> for ReadStateService {
                             read::difficulty::get_block_template_chain_info(
                                 &latest_non_finalized_state,
                                 &state.db,
-                                state.network,
+                                &state.network,
                             );
 
                         // The work is done in the future.
@@ -1921,10 +1921,11 @@ pub fn spawn_init(
     LatestChainTip,
     ChainTipChange,
 )> {
+    let network = network.clone();
     tokio::task::spawn_blocking(move || {
         init(
             config,
-            network,
+            &network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
         )

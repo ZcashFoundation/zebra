@@ -51,7 +51,7 @@ impl ValueTree for PreparedChainTree {
         (
             self.chain.clone(),
             self.count.current(),
-            self.network,
+            self.network.clone(),
             self.history_tree.clone(),
         )
     }
@@ -137,7 +137,7 @@ impl Strategy for PreparedChain {
             let (network, blocks) = ledger_strategy
                 .prop_flat_map(|ledger| {
                     (
-                        Just(ledger.network),
+                        Just(ledger.network.clone()),
                         Block::partial_chain_strategy(
                             ledger,
                             MAX_PARTIAL_CHAIN_BLOCKS,
@@ -193,7 +193,7 @@ impl Strategy for PreparedChain {
 /// - a [`ChainTipChange`] tracker
 pub async fn populated_state(
     blocks: impl IntoIterator<Item = Arc<Block>>,
-    network: Network,
+    network: &Network,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     ReadStateService,

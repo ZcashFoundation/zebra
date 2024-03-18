@@ -91,7 +91,7 @@ impl AdjustedDifficulty {
     /// If the `context` contains fewer than 28 items.
     pub fn new_from_block<C>(
         candidate_block: &Block,
-        network: Network,
+        network: &Network,
         context: C,
     ) -> AdjustedDifficulty
     where
@@ -125,7 +125,7 @@ impl AdjustedDifficulty {
     pub fn new_from_header_time<C>(
         candidate_header_time: DateTime<Utc>,
         previous_block_height: block::Height,
-        network: Network,
+        network: &Network,
         context: C,
     ) -> AdjustedDifficulty
     where
@@ -148,7 +148,7 @@ impl AdjustedDifficulty {
         AdjustedDifficulty {
             candidate_time: candidate_header_time,
             candidate_height,
-            network,
+            network: network.clone(),
             relevant_difficulty_thresholds,
             relevant_times,
         }
@@ -166,7 +166,7 @@ impl AdjustedDifficulty {
 
     /// Returns the configured network.
     pub fn network(&self) -> Network {
-        self.network
+        self.network.clone()
     }
 
     /// Calculate the expected `difficulty_threshold` for a candidate block, based

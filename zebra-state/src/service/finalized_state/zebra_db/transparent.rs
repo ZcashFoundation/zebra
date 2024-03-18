@@ -343,7 +343,7 @@ impl DiskWriteBatch {
     pub fn prepare_transparent_transaction_batch(
         &mut self,
         db: &DiskDb,
-        network: Network,
+        network: &Network,
         finalized: &FinalizedBlock,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -400,7 +400,7 @@ impl DiskWriteBatch {
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
-        network: Network,
+        network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
@@ -477,7 +477,7 @@ impl DiskWriteBatch {
     pub fn prepare_spent_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
-        network: Network,
+        network: &Network,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
@@ -532,7 +532,7 @@ impl DiskWriteBatch {
     pub fn prepare_spending_transparent_tx_ids_batch(
         &mut self,
         db: &DiskDb,
-        network: Network,
+        network: &Network,
         spending_tx_location: TransactionLocation,
         transaction: &Transaction,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,

@@ -340,7 +340,7 @@ impl FinalizedState {
                 // thread, if it shows up in profiles
                 check::block_commitment_is_valid_for_chain_history(
                     block.clone(),
-                    self.network(),
+                    &self.network(),
                     &history_tree,
                 )?;
 
@@ -414,7 +414,7 @@ impl FinalizedState {
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
-            self.network(),
+            &self.network(),
             source,
         );
 

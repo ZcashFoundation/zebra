@@ -294,7 +294,7 @@ impl ZebraDb {
         &mut self,
         finalized: FinalizedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-        network: Network,
+        network: &Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
@@ -376,7 +376,9 @@ impl ZebraDb {
         let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
             changed_addresses
                 .into_iter()
-                .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+                .filter_map(|address| {
+                    Some((address.clone(), self.address_balance_location(&address)?))
+                })
                 .collect();
 
         let mut batch = DiskWriteBatch::new();
@@ -440,7 +442,7 @@ impl DiskWriteBatch {
     pub fn prepare_block_batch(
         &mut self,
         zebra_db: &ZebraDb,
-        network: Network,
+        network: &Network,
         finalized: &FinalizedBlock,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,

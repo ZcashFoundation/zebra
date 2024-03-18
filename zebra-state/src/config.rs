@@ -234,10 +234,11 @@ pub fn check_and_delete_old_databases(
     let current_span = Span::current();
     let config = config.clone();
     let db_kind = db_kind.as_ref().to_string();
+    let network = network.clone();
 
     spawn_blocking(move || {
         current_span.in_scope(|| {
-            delete_old_databases(config, db_kind, major_version, network);
+            delete_old_databases(config, db_kind, major_version, &network);
             info!("finished old database version cleanup task");
         })
     })

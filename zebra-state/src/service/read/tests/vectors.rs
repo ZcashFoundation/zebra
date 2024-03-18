@@ -56,7 +56,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
         .collect();
 
     let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
-        populated_state(blocks.clone(), Mainnet).await;
+        populated_state(blocks.clone(), &Mainnet).await;
 
     let tip_height = Height(blocks.len() as u32 - 1);
 

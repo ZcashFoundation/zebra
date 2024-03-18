@@ -803,7 +803,7 @@ impl DiskDb {
 
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
-        self.network
+        self.network.clone()
     }
 
     /// Returns the `Path` where the files used by this database are located.

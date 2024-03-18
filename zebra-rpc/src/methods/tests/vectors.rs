@@ -70,7 +70,7 @@ async fn rpc_getblock() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -343,7 +343,7 @@ async fn rpc_getbestblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -386,7 +386,7 @@ async fn rpc_getrawtransaction() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
     latest_chain_tip_sender.send_best_tip_height(Height(10));
@@ -557,7 +557,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -674,7 +674,7 @@ async fn rpc_getaddresstxids_response() {
 
         // Create a populated state service
         let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-            zebra_state::populated_state(blocks.to_owned(), network).await;
+            zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
             // Exhaustively test possible block ranges for mainnet.
@@ -814,7 +814,7 @@ async fn rpc_getaddressutxos_response() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let rpc = RpcImpl::new(
         "RPC test",
@@ -864,7 +864,7 @@ async fn rpc_getblockcount() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (
         block_verifier_router,
@@ -1026,7 +1026,7 @@ async fn rpc_getblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (
         block_verifier_router,
@@ -1090,7 +1090,7 @@ async fn rpc_getmininginfo() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1126,7 +1126,7 @@ async fn rpc_getnetworksolps() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1510,7 +1510,7 @@ async fn rpc_submitblock_errors() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks, Mainnet).await;
+        zebra_state::populated_state(blocks, &Mainnet).await;
 
     // Init RPCs
     let (

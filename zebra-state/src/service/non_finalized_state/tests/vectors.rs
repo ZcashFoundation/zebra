@@ -26,7 +26,7 @@ use crate::{
 fn construct_empty() {
     let _init_guard = zebra_test::init();
     let _chain = Chain::new(
-        Network::Mainnet,
+        &Network::Mainnet,
         Height(0),
         Default::default(),
         Default::default(),
@@ -43,7 +43,7 @@ fn construct_single() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
     let mut chain = Chain::new(
-        Network::Mainnet,
+        &Network::Mainnet,
         Height(0),
         Default::default(),
         Default::default(),
@@ -77,7 +77,7 @@ fn construct_many() -> Result<()> {
     }
 
     let mut chain = Chain::new(
-        Network::Mainnet,
+        &Network::Mainnet,
         (initial_height - 1).expect("Initial height should be at least 1."),
         Default::default(),
         Default::default(),
@@ -104,7 +104,7 @@ fn ord_matches_work() -> Result<()> {
     let more_block = less_block.clone().set_work(10);
 
     let mut lesser_chain = Chain::new(
-        Network::Mainnet,
+        &Network::Mainnet,
         Height(0),
         Default::default(),
         Default::default(),
@@ -115,7 +115,7 @@ fn ord_matches_work() -> Result<()> {
     lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_spent_utxos())?;
 
     let mut bigger_chain = Chain::new(
-        Network::Mainnet,
+        &Network::Mainnet,
         Height(0),
         Default::default(),
         Default::default(),

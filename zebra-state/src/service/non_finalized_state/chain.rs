@@ -211,7 +211,7 @@ pub struct ChainInner {
 impl Chain {
     /// Create a new Chain with the given finalized tip trees and network.
     pub(crate) fn new(
-        network: Network,
+        network: &Network,
         finalized_tip_height: Height,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
@@ -247,7 +247,7 @@ impl Chain {
         };
 
         let mut chain = Self {
-            network,
+            network: network.clone(),
             inner,
             last_fork_height: None,
         };

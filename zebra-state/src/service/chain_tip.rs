@@ -643,7 +643,7 @@ impl Clone for ChainTipChange {
             // clear the previous change hash, so the first action is a reset
             last_change_hash: None,
 
-            network: self.network,
+            network: self.network.clone(),
         }
     }
 }

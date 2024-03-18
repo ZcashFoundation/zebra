@@ -56,7 +56,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Create a populated state service
     #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), network).await;
+        zebra_state::populated_state(blocks.clone(), &network).await;
 
     // Start snapshots of RPC responses.
     let mut settings = insta::Settings::clone_current();
