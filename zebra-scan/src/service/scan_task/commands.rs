@@ -8,7 +8,6 @@ use tokio::sync::{
     oneshot,
 };
 
-use tower::BoxError;
 use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_node_services::scan_service::response::ScanResult;
@@ -207,14 +206,14 @@ impl ScanTask {
     /// Sends a message to the scan task to start sending the results for the provided viewing keys to a channel.
     ///
     /// Returns the channel receiver.
-    pub async fn subscribe(
+    pub fn subscribe(
         &mut self,
         keys: HashSet<SaplingScanningKey>,
-    ) -> Result<Receiver<ScanResult>, BoxError> {
+    ) -> Result<oneshot::Receiver<Receiver<ScanResult>>, TrySendError<ScanTaskCommand>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         self.send(ScanTaskCommand::SubscribeResults { keys, rsp_tx })?;
 
-        Ok(rsp_rx.await?)
+        Ok(rsp_rx)
     }
 }

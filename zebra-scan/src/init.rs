@@ -1,6 +1,6 @@
 //! Initializing the scanner and gRPC server.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use color_eyre::Report;
 use tokio::task::JoinHandle;
@@ -11,6 +11,9 @@ use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network};
 use zebra_state::ChainTipChange;
 
 use crate::{scan, service::ScanService, storage::Storage, Config};
+
+/// The timeout applied to scan service calls
+pub const SCAN_SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Initialize [`ScanService`] based on its config.
 ///
@@ -25,6 +28,7 @@ pub async fn init_with_server(
     info!(?config, "starting scan service");
     let scan_service = ServiceBuilder::new()
         .buffer(10)
+        .timeout(SCAN_SERVICE_TIMEOUT)
         .service(ScanService::new(&config, network, state, chain_tip_change).await);
 
     // TODO: move this to zebra-grpc init() function and include addr

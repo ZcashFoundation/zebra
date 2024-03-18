@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, task::Poll, time::Duration};
 
 use futures::future::FutureExt;
-use tower::Service;
+use tower::{BoxError, Service};
 
 use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network, transaction::Hash};
 
@@ -32,6 +32,9 @@ pub struct ScanService {
 }
 
 /// A timeout applied to `DeleteKeys` requests.
+///
+/// This should be shorter than [`SCAN_SERVICE_TIMEOUT`](crate::init::SCAN_SERVICE_TIMEOUT) so the
+/// request can try to delete entries from storage after the timeout before the future is dropped.
 const DELETE_KEY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl ScanService {
@@ -64,7 +67,7 @@ impl ScanService {
 
 impl Service<Request> for ScanService {
     type Response = Response;
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = BoxError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
@@ -97,17 +100,17 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
 
-            Request::CheckKeyHashes(_key_hashes) => {
-                // TODO: check that these entries exist in db
-            }
-
             Request::RegisterKeys(keys) => {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    Ok(Response::RegisteredKeys(
-                        scan_task.register_keys(keys)?.await?,
-                    ))
+                    let newly_registered_keys = scan_task.register_keys(keys)?.await?;
+                    if !newly_registered_keys.is_empty() {
+                        Ok(Response::RegisteredKeys(newly_registered_keys))
+                    } else {
+                        Err("no keys were registered, check that keys are not already registered and \
+                        are valid Sapling extended full viewing keys".into())
+                    }
                 }
                 .boxed();
             }
@@ -123,7 +126,7 @@ impl Service<Request> for ScanService {
                         scan_task.remove_keys(keys.clone())?,
                     )
                     .await
-                    .map_err(|_| "timeout waiting for delete keys done notification");
+                    .map_err(|_| "request timed out removing keys from scan task".to_string());
 
                     // Delete the key from the database after either confirmation that it's been removed from the scan task, or
                     // waiting `DELETE_KEY_TIMEOUT`.
@@ -171,7 +174,9 @@ impl Service<Request> for ScanService {
                 let mut scan_task = self.scan_task.clone();
 
                 return async move {
-                    let results_receiver = scan_task.subscribe(keys).await?;
+                    let results_receiver = scan_task.subscribe(keys)?.await.map_err(|_| {
+                        "scan task dropped responder, check that keys are registered"
+                    })?;
 
                     Ok(Response::SubscribeResults(results_receiver))
                 }
@@ -193,7 +198,5 @@ impl Service<Request> for ScanService {
                 .boxed();
             }
         }
-
-        async move { Ok(Response::Results(BTreeMap::new())) }.boxed()
     }
 }
