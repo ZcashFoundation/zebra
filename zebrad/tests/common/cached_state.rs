@@ -120,7 +120,7 @@ pub fn wait_for_state_version_upgrade<T>(
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
 #[tracing::instrument(skip(cache_dir))]
 pub async fn start_state_service_with_cache_dir(
-    network: Network,
+    network: &Network,
     cache_dir: impl Into<PathBuf>,
 ) -> Result<(
     BoxStateService,
@@ -144,7 +144,7 @@ pub async fn start_state_service_with_cache_dir(
 /// Loads the chain tip height from the state stored in a specified directory.
 #[tracing::instrument]
 pub async fn load_tip_height_from_state_directory(
-    network: Network,
+    network: &Network,
     state_path: &Path,
 ) -> Result<block::Height> {
     let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
@@ -168,7 +168,7 @@ pub async fn load_tip_height_from_state_directory(
 ///
 /// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
 pub async fn get_future_blocks(
-    network: Network,
+    network: &Network,
     test_type: TestType,
     test_name: &str,
     max_num_blocks: u32,
@@ -199,7 +199,7 @@ pub async fn get_future_blocks(
 ///
 /// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
 pub async fn get_raw_future_blocks(
-    network: Network,
+    network: &Network,
     test_type: TestType,
     test_name: &str,
     max_num_blocks: u32,
@@ -216,7 +216,7 @@ pub async fn get_raw_future_blocks(
 
     let should_sync = true;
     let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
             .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 

@@ -80,7 +80,11 @@ impl Tracing {
     //
     // This method should only print to stderr, because stdout is for tracing logs.
     #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
-    pub fn new(network: Network, config: Config, uses_intro: bool) -> Result<Self, FrameworkError> {
+    pub fn new(
+        network: &Network,
+        config: Config,
+        uses_intro: bool,
+    ) -> Result<Self, FrameworkError> {
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
         let use_color = config.use_color_stdout();

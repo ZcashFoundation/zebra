@@ -51,7 +51,7 @@ pub async fn start(
     loop {
         if network == Network::Mainnet {
             if let Some(tip_height) = latest_chain_tip.best_tip_height() {
-                check(tip_height, network);
+                check(tip_height, &network);
             }
         } else {
             info!("Release always valid in Testnet");
@@ -61,7 +61,7 @@ pub async fn start(
 }
 
 /// Check if the current release is too old and panic if so.
-pub fn check(tip_height: Height, network: Network) {
+pub fn check(tip_height: Height, network: &Network) {
     info!("Checking if Zebra release is inside support range ...");
 
     // Get the current block spacing

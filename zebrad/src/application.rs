@@ -441,7 +441,7 @@ impl Application for ZebradApp {
             tracing_config.flamegraph = None;
         }
         components.push(Box::new(Tracing::new(
-            config.network.network,
+            &config.network.network,
             tracing_config,
             command.cmd().uses_intro(),
         )?));

@@ -29,11 +29,11 @@ use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
-pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
+pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
     let network = zebra_network::Config {
-        network: net,
+        network: net.clone(),
         // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse()?,
         crawl_new_peer_interval: TEST_DURATION,
@@ -113,7 +113,7 @@ pub fn default_test_config(net: Network) -> Result<ZebradConfig> {
     })
 }
 
-pub fn persistent_test_config(network: Network) -> Result<ZebradConfig> {
+pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = default_test_config(network)?;
     config.state.ephemeral = false;
     Ok(config)
@@ -142,7 +142,7 @@ pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
 pub fn random_known_rpc_port_config(
     parallel_cpu_threads: bool,
-    network: Network,
+    network: &Network,
 ) -> Result<ZebradConfig> {
     // [Note on port conflict](#Note on port conflict)
     let listen_port = random_known_port();

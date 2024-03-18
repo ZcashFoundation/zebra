@@ -235,7 +235,7 @@ impl StartCmd {
             sync_status.clone(),
             address_book.clone(),
             latest_chain_tip.clone(),
-            config.network.network,
+            config.network.network.clone(),
         );
 
         // Start concurrent tasks which don't add load to other tasks
@@ -267,7 +267,7 @@ impl StartCmd {
         info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
-                config.network.network,
+                config.network.network.clone(),
                 latest_chain_tip.clone(),
                 sync_status.clone(),
             )
@@ -277,7 +277,7 @@ impl StartCmd {
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
-            sync::end_of_support::start(config.network.network, latest_chain_tip.clone())
+            sync::end_of_support::start(config.network.network.clone(), latest_chain_tip.clone())
                 .in_current_span(),
         );
 

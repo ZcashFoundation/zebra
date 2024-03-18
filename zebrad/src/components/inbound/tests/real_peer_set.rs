@@ -646,7 +646,7 @@ async fn setup(
 
     // Network
     let network_config = NetworkConfig {
-        network,
+        network: network.clone(),
         listen_addr: config_listen_addr,
 
         // Stop Zebra making outbound connections
