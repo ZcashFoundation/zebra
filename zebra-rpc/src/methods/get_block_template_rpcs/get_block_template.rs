@@ -361,7 +361,7 @@ pub fn standard_coinbase_outputs(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let funding_streams = funding_stream_values(height, &network)
+    let funding_streams = funding_stream_values(height, network)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
     // Optional TODO: move this into a zebra_consensus function?
@@ -373,12 +373,12 @@ pub fn standard_coinbase_outputs(
         .map(|(receiver, amount)| {
             (
                 receiver,
-                (amount, funding_stream_address(height, &network, receiver)),
+                (amount, funding_stream_address(height, network, receiver)),
             )
         })
         .collect();
 
-    let miner_reward = miner_subsidy(height, &network)
+    let miner_reward = miner_subsidy(height, network)
         .expect("reward calculations are valid for reasonable chain heights")
         + miner_fee;
     let miner_reward =

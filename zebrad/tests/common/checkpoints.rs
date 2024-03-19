@@ -71,7 +71,7 @@ pub async fn run(network: Network) -> Result<()> {
 
     // Sync zebrad to the network chain tip
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, true)?
+        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, true)?
     {
         zebrad_and_address
     } else {
@@ -155,8 +155,12 @@ pub async fn run(network: Network) -> Result<()> {
         "zebrad synced to the tip, launching zebra-checkpoints...",
     );
 
-    let zebra_checkpoints =
-        spawn_zebra_checkpoints_direct(network, test_type, zebra_rpc_address, last_checkpoint)?;
+    let zebra_checkpoints = spawn_zebra_checkpoints_direct(
+        network.clone(),
+        test_type,
+        zebra_rpc_address,
+        last_checkpoint,
+    )?;
 
     let show_zebrad_logs = env::var(LOG_ZEBRAD_CHECKPOINTS).is_ok();
     if !show_zebrad_logs {

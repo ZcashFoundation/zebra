@@ -28,7 +28,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     mock_scan_task.register_keys(sapling_keys_with_birth_heights.clone())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it updated parsed_keys correctly and returned the right new keys when starting with an empty state
 
@@ -49,7 +49,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     // Check that no key should be added if they are all already known and the heights are the same
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -75,7 +75,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[10..15].to_vec())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         parsed_keys.len(),
@@ -95,7 +95,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let done_rx = mock_scan_task.remove_keys(sapling_keys.clone())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     // Check that it sends the done notification successfully before returning and dropping `done_tx`
     done_rx.await?;
@@ -114,7 +114,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     mock_scan_task.remove_keys(sapling_keys.clone())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert!(
         new_keys.is_empty(),
@@ -130,7 +130,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     mock_scan_task.register_keys(sapling_keys_with_birth_heights[..2].to_vec())?;
 
     let (new_keys, _new_results_senders, _new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     assert_eq!(
         new_keys.len(),
@@ -159,7 +159,7 @@ async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let (_new_keys, new_results_senders, new_results_receivers) =
-        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, &network)?;
+        ScanTask::process_messages(&mut cmd_receiver, &mut parsed_keys, network)?;
 
     let (result_receiver, rsp_tx) = new_results_receivers
         .into_iter()

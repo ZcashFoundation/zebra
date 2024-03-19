@@ -473,8 +473,8 @@ impl HistoryTree {
                 let tree = Some(NonEmptyHistoryTree::from_block(
                     network,
                     block,
-                    &sapling_root,
-                    &orchard_root,
+                    sapling_root,
+                    orchard_root,
                 )?);
                 // Replace the current object with the new tree
                 *self = HistoryTree(tree);
@@ -483,7 +483,7 @@ impl HistoryTree {
                 self.0
                     .as_mut()
                     .expect("history tree must exist Heartwood-onward")
-                    .push(block.clone(), &sapling_root, &orchard_root)?;
+                    .push(block.clone(), sapling_root, orchard_root)?;
             }
         };
         Ok(())

@@ -306,7 +306,7 @@ impl StartCmd {
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
                 config.shielded_scan.clone(),
-                config.network.network,
+                config.network.network.clone(),
                 state,
                 chain_tip_change,
             )
@@ -324,7 +324,7 @@ impl StartCmd {
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
             let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-                config.network.network,
+                &config.network.network,
                 config.mining.clone(),
                 mempool,
                 read_only_state_service,

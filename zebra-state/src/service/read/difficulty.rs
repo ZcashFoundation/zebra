@@ -247,7 +247,7 @@ fn difficulty_time_and_history_tree(
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
         cur_time.into(),
         tip_height,
-        &network,
+        network,
         relevant_data.iter().cloned(),
     );
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
@@ -308,7 +308,7 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("valid blocks have in-range times");
 
     let minimum_difficulty_spacing =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
             .expect("just checked testnet, and the RPC returns an error for low heights");
     let minimum_difficulty_spacing: Duration32 = minimum_difficulty_spacing
         .try_into()
@@ -360,7 +360,7 @@ fn adjust_difficulty_and_time_for_testnet(
         result.expected_difficulty = AdjustedDifficulty::new_from_header_time(
             result.cur_time.into(),
             previous_block_height,
-            &network,
+            network,
             relevant_data.iter().cloned(),
         )
         .expected_difficulty_threshold();

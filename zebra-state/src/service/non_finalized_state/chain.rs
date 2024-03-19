@@ -1270,7 +1270,7 @@ impl Chain {
     ) -> impl Iterator<Item = &TransparentTransfers> {
         addresses
             .iter()
-            .flat_map(|address| self.partial_transparent_transfers.get(&address))
+            .flat_map(|address| self.partial_transparent_transfers.get(address))
     }
 
     /// Returns the transparent balance change for `addresses` in this non-finalized chain.

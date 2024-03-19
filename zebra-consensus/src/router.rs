@@ -324,11 +324,11 @@ where
 
     // transaction verification
 
-    let transaction = transaction::Verifier::new(&network, state_service.clone());
+    let transaction = transaction::Verifier::new(network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
-    let (list, max_checkpoint_height) = init_checkpoint_list(config, &network);
+    let (list, max_checkpoint_height) = init_checkpoint_list(config, network);
 
     let tip = match state_service
         .ready()
@@ -347,8 +347,8 @@ where
         "initializing block verifier router"
     );
 
-    let block = SemanticBlockVerifier::new(&network, state_service.clone(), transaction.clone());
-    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, &network, tip, state_service);
+    let block = SemanticBlockVerifier::new(network, state_service.clone(), transaction.clone());
+    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,
         max_checkpoint_height,

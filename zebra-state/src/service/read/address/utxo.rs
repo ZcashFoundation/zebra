@@ -150,7 +150,7 @@ where
                     "full address UTXO response",
                 );
 
-                return Ok(AddressUtxos::new(&network, utxos, tx_ids));
+                return Ok(AddressUtxos::new(network, utxos, tx_ids));
             }
 
             Err(chain_utxo_error) => {

@@ -568,12 +568,12 @@ where
             (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
         let consensus = TipConsensusBranch {
             chain_tip: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, tip_height)
+                NetworkUpgrade::current(network, tip_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
             next_block: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, next_block_height)
+                NetworkUpgrade::current(network, next_block_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),

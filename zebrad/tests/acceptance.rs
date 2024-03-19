@@ -1338,7 +1338,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1395,7 +1395,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -2115,7 +2115,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -2144,7 +2144,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -2646,7 +2646,7 @@ async fn state_format_test(
         tracing::info!(?network, "running {test_name} using zebra-state");
 
         let config = UseAnyState
-            .zebrad_config(test_name, false, Some(dir.path()), &network)
+            .zebrad_config(test_name, false, Some(dir.path()), network)
             .expect("already checked config")?;
 
         zebra_state::write_state_database_format_version_to_disk(
@@ -2841,7 +2841,7 @@ fn scan_task_starts() -> Result<()> {
     let test_type = TestType::LaunchWithEmptyState {
         launches_lightwalletd: false,
     };
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     let mut keys = IndexMap::new();
     keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
     config.shielded_scan.sapling_keys_to_scan = keys;
@@ -2886,7 +2886,7 @@ async fn scan_rpc_server_starts() -> Result<()> {
 
     let port = random_known_port();
     let listen_addr = format!("127.0.0.1:{port}");
-    let mut config = default_test_config(Mainnet)?;
+    let mut config = default_test_config(&Mainnet)?;
     config.shielded_scan.listen_addr = Some(listen_addr.parse()?);
 
     // Start zebra with the config.
@@ -2944,7 +2944,7 @@ fn scan_start_where_left() -> Result<()> {
     let test_type = TestType::UpdateZebraCachedStateNoRpc;
     if let Some(cache_dir) = test_type.zebrad_state_path("scan test") {
         // Add a key to the config
-        let mut config = default_test_config(Mainnet)?;
+        let mut config = default_test_config(&Mainnet)?;
         let mut keys = IndexMap::new();
         keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
         config.shielded_scan.sapling_keys_to_scan = keys;

@@ -64,7 +64,7 @@ impl Version {
         assert!(
             constants::CURRENT_NETWORK_PROTOCOL_VERSION >= min_spec,
             "Zebra does not implement the minimum specified {:?} protocol version for {:?} at {:?}",
-            NetworkUpgrade::current(&network, height),
+            NetworkUpgrade::current(network, height),
             network,
             height,
         );
@@ -80,7 +80,7 @@ impl Version {
     /// - after Zebra's local network is slow or shut down.
     fn initial_min_for_network(network: &Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-            .get(&network)
+            .get(network)
             .expect("We always have a value for testnet or mainnet")
     }
 
@@ -89,7 +89,7 @@ impl Version {
     ///
     /// This is the minimum peer version when Zebra is close to the current tip.
     fn min_specified_for_height(network: &Network, height: block::Height) -> Version {
-        let network_upgrade = NetworkUpgrade::current(&network, height);
+        let network_upgrade = NetworkUpgrade::current(network, height);
         Version::min_specified_for_upgrade(network, network_upgrade)
     }
 
@@ -237,7 +237,7 @@ mod test {
     fn version_consistent(network: &Network) {
         let _init_guard = zebra_test::init();
 
-        let highest_network_upgrade = NetworkUpgrade::current(&network, block::Height::MAX);
+        let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
         assert!(highest_network_upgrade == Nu5 || highest_network_upgrade == Canopy,
                 "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
 
@@ -250,7 +250,7 @@ mod test {
             Canopy,
             Nu5,
         ] {
-            let height = network_upgrade.activation_height(&network);
+            let height = network_upgrade.activation_height(network);
             if let Some(height) = height {
                 assert_eq!(
                     Version::min_specified_for_upgrade(network, network_upgrade),

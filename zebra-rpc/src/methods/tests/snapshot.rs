@@ -56,7 +56,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // Create a populated state service
     #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), &network).await;
+        zebra_state::populated_state(blocks.clone(), network).await;
 
     // Start snapshots of RPC responses.
     let mut settings = insta::Settings::clone_current();
@@ -65,7 +65,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // Test getblocktemplate-rpcs snapshots
     #[cfg(feature = "getblocktemplate-rpcs")]
     get_block_template_rpcs::test_responses(
-        &network,
+        network,
         mempool.clone(),
         state,
         read_state.clone(),
@@ -100,7 +100,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // build addresses
     let address = &first_block_first_transaction.outputs()[1]
-        .address(&network)
+        .address(network)
         .unwrap();
     let addresses = vec![address.to_string()];
 

@@ -132,10 +132,10 @@ impl zcash_address::TryFromAddress for Address {
                     }
                 }
                 unified::Receiver::P2pkh(data) => {
-                    transparent = Some(transparent::Address::from_pub_key_hash(&network, data));
+                    transparent = Some(transparent::Address::from_pub_key_hash(network, data));
                 }
                 unified::Receiver::P2sh(data) => {
-                    transparent = Some(transparent::Address::from_script_hash(&network, data));
+                    transparent = Some(transparent::Address::from_script_hash(network, data));
                 }
                 unified::Receiver::Unknown { .. } => {
                     return Err(BoxError::from("Unsupported receiver in a Unified Address.").into());

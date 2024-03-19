@@ -22,7 +22,7 @@ use crate::{funding_stream_values, parameters::subsidy::*};
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
     let blossom_height = Blossom
-        .activation_height(&network)
+        .activation_height(network)
         .expect("blossom activation height should be available");
 
     if height < SLOW_START_SHIFT {
