@@ -43,7 +43,7 @@ impl NetworkChainTipHeightEstimator {
     pub fn new(
         current_block_time: DateTime<Utc>,
         current_height: block::Height,
-        network: Network,
+        network: &Network,
     ) -> Self {
         let mut target_spacings = NetworkUpgrade::target_spacings(network);
         let (_genesis_height, initial_target_spacing) =

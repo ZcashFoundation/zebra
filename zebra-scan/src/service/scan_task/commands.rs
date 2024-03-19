@@ -61,7 +61,7 @@ impl ScanTask {
             SaplingScanningKey,
             (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
         >,
-        network: Network,
+        network: &Network,
     ) -> Result<
         (
             HashMap<

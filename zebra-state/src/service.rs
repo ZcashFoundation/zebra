@@ -310,7 +310,7 @@ impl StateService {
     /// and read-only watch channels for its best chain tip.
     pub fn new(
         config: Config,
-        network: Network,
+        network: &Network,
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
@@ -353,7 +353,7 @@ impl StateService {
         let non_finalized_state = NonFinalizedState::new(network);
 
         let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(finalized_state.network()));
+            watch::channel(NonFinalizedState::new(&finalized_state.network()));
 
         // Security: The number of blocks in these channels is limited by
         //           the syncer and inbound lookahead limits.
@@ -399,7 +399,7 @@ impl StateService {
         let finalized_block_write_last_sent_hash = finalized_state.db.finalized_tip_hash();
 
         let state = Self {
-            network,
+            network: network.clone(),
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
@@ -430,7 +430,7 @@ impl StateService {
                     &state.read_service.db,
                     tip.1,
                 ),
-                state.network,
+                &state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
                 let legacy_db_path = state.read_service.db.path().to_path_buf();
@@ -1643,7 +1643,7 @@ impl Service<ReadRequest> for ReadStateService {
                         let utxos = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
                                 read::address_utxos(
-                                    state.network,
+                                    &state.network,
                                     non_finalized_state.best_chain(),
                                     &state.db,
                                     addresses,
@@ -1749,7 +1749,7 @@ impl Service<ReadRequest> for ReadStateService {
                             read::difficulty::get_block_template_chain_info(
                                 &latest_non_finalized_state,
                                 &state.db,
-                                state.network,
+                                &state.network,
                             );
 
                         // The work is done in the future.
@@ -1882,7 +1882,7 @@ impl Service<ReadRequest> for ReadStateService {
 /// probably not what you want.
 pub fn init(
     config: Config,
-    network: Network,
+    network: &Network,
     max_checkpoint_height: block::Height,
     checkpoint_verify_concurrency_limit: usize,
 ) -> (
@@ -1912,7 +1912,7 @@ pub fn init(
 /// a read state service, and receivers for state chain tip updates.
 pub fn spawn_init(
     config: Config,
-    network: Network,
+    network: &Network,
     max_checkpoint_height: block::Height,
     checkpoint_verify_concurrency_limit: usize,
 ) -> tokio::task::JoinHandle<(
@@ -1921,10 +1921,11 @@ pub fn spawn_init(
     LatestChainTip,
     ChainTipChange,
 )> {
+    let network = network.clone();
     tokio::task::spawn_blocking(move || {
         init(
             config,
-            network,
+            &network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
         )
@@ -1935,7 +1936,7 @@ pub fn spawn_init(
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, _, _, _) =
@@ -1950,7 +1951,7 @@ pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxEr
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test_services(
-    network: Network,
+    network: &Network,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     ReadStateService,

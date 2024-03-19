@@ -47,7 +47,7 @@ mod tests;
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
 pub fn connect_isolated<PeerTransport>(
-    network: Network,
+    network: &Network,
     data_stream: PeerTransport,
     user_agent: String,
 ) -> impl Future<Output = Result<Client, BoxError>>
@@ -74,7 +74,7 @@ where
 /// This function can make the isolated connection send different responses to peers,
 /// which makes it stand out from other isolated connections from other peers.
 pub fn connect_isolated_with_inbound<PeerTransport, InboundService>(
-    network: Network,
+    network: &Network,
     data_stream: PeerTransport,
     user_agent: String,
     inbound_service: InboundService,
@@ -86,7 +86,7 @@ where
     InboundService::Future: Send,
 {
     let config = Config {
-        network,
+        network: network.clone(),
         ..Config::default()
     };
 
@@ -125,7 +125,7 @@ where
 ///
 /// Prefer `connect_isolated_tor` if available.
 pub fn connect_isolated_tcp_direct(
-    network: Network,
+    network: &Network,
     addr: impl Into<PeerSocketAddr>,
     user_agent: String,
 ) -> impl Future<Output = Result<Client, BoxError>> {
@@ -145,7 +145,7 @@ pub fn connect_isolated_tcp_direct(
 /// This function can make the isolated connection send different responses to peers,
 /// which makes it stand out from other isolated connections from other peers.
 pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
-    network: Network,
+    network: &Network,
     addr: impl Into<PeerSocketAddr>,
     user_agent: String,
     inbound_service: InboundService,
@@ -156,10 +156,11 @@ where
     InboundService::Future: Send,
 {
     let addr = addr.into();
+    let network = network.clone();
 
     tokio::net::TcpStream::connect(*addr)
         .err_into()
         .and_then(move |tcp_stream| {
-            connect_isolated_with_inbound(network, tcp_stream, user_agent, inbound_service)
+            connect_isolated_with_inbound(&network, tcp_stream, user_agent, inbound_service)
         })
 }

@@ -280,7 +280,7 @@ impl Network {
 }
 impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
-    pub fn current(network: Network, height: block::Height) -> NetworkUpgrade {
+    pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
         network
             .activation_list()
             .range(..=height)
@@ -293,7 +293,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if the next upgrade has not been implemented in Zebra
     /// yet.
-    pub fn next(network: Network, height: block::Height) -> Option<NetworkUpgrade> {
+    pub fn next(network: &Network, height: block::Height) -> Option<NetworkUpgrade> {
         network
             .activation_list()
             .range((Excluded(height), Unbounded))
@@ -305,7 +305,7 @@ impl NetworkUpgrade {
     ///
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
-    pub fn activation_height(&self, network: Network) -> Option<block::Height> {
+    pub fn activation_height(&self, network: &Network) -> Option<block::Height> {
         network
             .activation_list()
             .iter()
@@ -319,7 +319,7 @@ impl NetworkUpgrade {
     ///
     /// Use [`NetworkUpgrade::activation_height`] to get the specific network
     /// upgrade.
-    pub fn is_activation_height(network: Network, height: block::Height) -> bool {
+    pub fn is_activation_height(network: &Network, height: block::Height) -> bool {
         network.activation_list().contains_key(&height)
     }
 
@@ -358,12 +358,14 @@ impl NetworkUpgrade {
     /// Returns the target block spacing for `network` and `height`.
     ///
     /// See [`NetworkUpgrade::target_spacing`] for details.
-    pub fn target_spacing_for_height(network: Network, height: block::Height) -> Duration {
+    pub fn target_spacing_for_height(network: &Network, height: block::Height) -> Duration {
         NetworkUpgrade::current(network, height).target_spacing()
     }
 
     /// Returns all the target block spacings for `network` and the heights where they start.
-    pub fn target_spacings(network: Network) -> impl Iterator<Item = (block::Height, Duration)> {
+    pub fn target_spacings(
+        network: &Network,
+    ) -> impl Iterator<Item = (block::Height, Duration)> + '_ {
         [
             (NetworkUpgrade::Genesis, PRE_BLOSSOM_POW_TARGET_SPACING),
             (
@@ -388,7 +390,7 @@ impl NetworkUpgrade {
     ///
     /// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
     pub fn minimum_difficulty_spacing_for_height(
-        network: Network,
+        network: &Network,
         height: block::Height,
     ) -> Option<Duration> {
         match (network, height) {
@@ -417,7 +419,7 @@ impl NetworkUpgrade {
     /// check for the time gap. This function implements the correct "greater than"
     /// check.
     pub fn is_testnet_min_difficulty_block(
-        network: Network,
+        network: &Network,
         block_height: block::Height,
         block_time: DateTime<Utc>,
         previous_block_time: DateTime<Utc>,
@@ -443,7 +445,7 @@ impl NetworkUpgrade {
     ///
     /// See [`NetworkUpgrade::averaging_window_timespan`] for details.
     pub fn averaging_window_timespan_for_height(
-        network: Network,
+        network: &Network,
         height: block::Height,
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
@@ -472,7 +474,7 @@ impl ConsensusBranchId {
     /// Returns the current consensus branch id for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.
-    pub fn current(network: Network, height: block::Height) -> Option<ConsensusBranchId> {
+    pub fn current(network: &Network, height: block::Height) -> Option<ConsensusBranchId> {
         NetworkUpgrade::current(network, height).branch_id()
     }
 }

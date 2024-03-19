@@ -20,7 +20,7 @@ use crate::{funding_stream_values, parameters::subsidy::*};
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 ///
 /// Returns `None` if the divisor would overflow a `u64`.
-pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
+pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
@@ -64,7 +64,7 @@ pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
+pub fn block_subsidy(height: Height, network: &Network) -> Result<Amount<NonNegative>, Error> {
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
@@ -97,7 +97,7 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn miner_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
+pub fn miner_subsidy(height: Height, network: &Network) -> Result<Amount<NonNegative>, Error> {
     let total_funding_stream_amount: Result<Amount<NonNegative>, _> =
         funding_stream_values(height, network)?.values().sum();
 
@@ -123,13 +123,13 @@ mod test {
     fn halving_test() -> Result<(), Report> {
         let _init_guard = zebra_test::init();
 
-        halving_for_network(Network::Mainnet)?;
-        halving_for_network(Network::Testnet)?;
+        halving_for_network(&Network::Mainnet)?;
+        halving_for_network(&Network::Testnet)?;
 
         Ok(())
     }
 
-    fn halving_for_network(network: Network) -> Result<(), Report> {
+    fn halving_for_network(network: &Network) -> Result<(), Report> {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = network.height_for_first_halving();
 
@@ -249,13 +249,13 @@ mod test {
     fn block_subsidy_test() -> Result<(), Report> {
         let _init_guard = zebra_test::init();
 
-        block_subsidy_for_network(Network::Mainnet)?;
-        block_subsidy_for_network(Network::Testnet)?;
+        block_subsidy_for_network(&Network::Mainnet)?;
+        block_subsidy_for_network(&Network::Testnet)?;
 
         Ok(())
     }
 
-    fn block_subsidy_for_network(network: Network) -> Result<(), Report> {
+    fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         let blossom_height = Blossom.activation_height(network).unwrap();
         let first_halving_height = network.height_for_first_halving();
 

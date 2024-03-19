@@ -10,7 +10,7 @@ impl OrchardViewingKey {
     /// Accepts an encoded Orchard viewing key to decode
     ///
     /// Returns a [`OrchardViewingKey`] if successful, or None otherwise
-    pub fn parse(_key: &str, _network: Network) -> Option<Self> {
+    pub fn parse(_key: &str, _network: &Network) -> Option<Self> {
         // TODO: parse Orchard viewing keys
         None
     }

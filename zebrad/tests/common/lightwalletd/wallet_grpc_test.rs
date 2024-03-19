@@ -85,9 +85,12 @@ pub async fn run() -> Result<()> {
 
     // Launch zebra with peers and using a predefined zebrad state path.
     // As this tests are just queries we can have a live chain where blocks are coming.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
-    {
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+        network.clone(),
+        test_name,
+        test_type,
+        use_internet_connection,
+    )? {
         tracing::info!(
             ?network,
             ?test_type,
@@ -134,7 +137,7 @@ pub async fn run() -> Result<()> {
 
     // Launch lightwalletd
     let (lightwalletd, lightwalletd_rpc_port) =
-        spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
+        spawn_lightwalletd_for_rpc(network.clone(), test_name, test_type, zebra_rpc_address)?
             .expect("already checked cached state and network requirements");
 
     tracing::info!(
@@ -182,10 +185,10 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     // Get `Sapling` activation height.
-    let sapling_activation_height = Sapling.activation_height(network).unwrap().0 as u64;
+    let sapling_activation_height = Sapling.activation_height(&network).unwrap().0 as u64;
 
     // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Nu5 network upgrade
-    assert!(block_tip.height > Nu5.activation_height(network).unwrap().0 as u64);
+    assert!(block_tip.height > Nu5.activation_height(&network).unwrap().0 as u64);
 
     // The first block in the mainnet that has sapling and orchard information.
     let block_with_trees = 1687107;

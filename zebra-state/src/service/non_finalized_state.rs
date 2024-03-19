@@ -91,7 +91,7 @@ impl Clone for NonFinalizedState {
     fn clone(&self) -> Self {
         Self {
             chain_set: self.chain_set.clone(),
-            network: self.network,
+            network: self.network.clone(),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: self.should_count_metrics,
@@ -108,10 +108,10 @@ impl Clone for NonFinalizedState {
 
 impl NonFinalizedState {
     /// Returns a new non-finalized state for `network`.
-    pub fn new(network: Network) -> NonFinalizedState {
+    pub fn new(network: &Network) -> NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
-            network,
+            network: network.clone(),
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
@@ -281,7 +281,7 @@ impl NonFinalizedState {
         let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
 
         let chain = Chain::new(
-            self.network,
+            &self.network,
             finalized_tip_height,
             finalized_state.sprout_tree_for_tip(),
             finalized_state.sapling_tree_for_tip(),
@@ -381,7 +381,7 @@ impl NonFinalizedState {
             scope.spawn_fifo(|_scope| {
                 block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
                     block,
-                    network,
+                    &network,
                     &history_tree,
                 ));
             });

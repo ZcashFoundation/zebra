@@ -437,7 +437,7 @@ where
         let rpc_impl = RpcImpl {
             build_version,
             user_agent,
-            network,
+            network: network.clone(),
             debug_force_finished_sync,
             debug_like_zcashd,
             mempool: mempool.clone(),
@@ -491,7 +491,7 @@ where
     // TODO: use a generic error constructor (#5548)
     #[allow(clippy::unwrap_in_result)]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
-        let network = self.network;
+        let network = &self.network;
 
         // `chain` field
         let chain = self.network.bip70_network_name();
@@ -1113,7 +1113,6 @@ where
                 })?;
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
-
             // TODO: If this RPC is called a lot, just get the block header,
             // rather than the whole block.
             let block_request = zebra_state::ReadRequest::Block(hash_or_height);

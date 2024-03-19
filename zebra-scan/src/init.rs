@@ -29,7 +29,7 @@ pub async fn init_with_server(
     let scan_service = ServiceBuilder::new()
         .buffer(10)
         .timeout(SCAN_SERVICE_TIMEOUT)
-        .service(ScanService::new(&config, network, state, chain_tip_change).await);
+        .service(ScanService::new(&config, &network, state, chain_tip_change).await);
 
     // TODO: move this to zebra-grpc init() function and include addr
     info!(?listen_addr, "starting scan gRPC server");
@@ -58,7 +58,7 @@ pub fn spawn_init(
         tokio::spawn(
             async move {
                 let storage =
-                    tokio::task::spawn_blocking(move || Storage::new(&config, network, false))
+                    tokio::task::spawn_blocking(move || Storage::new(&config, &network, false))
                         .wait_for_panics()
                         .await;
                 let (_cmd_sender, cmd_receiver) = tokio::sync::mpsc::channel(1);

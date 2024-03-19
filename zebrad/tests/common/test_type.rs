@@ -177,7 +177,7 @@ impl TestType {
         test_name: Str,
         use_internet_connection: bool,
         replace_cache_dir: Option<&Path>,
-        network: Network,
+        network: &Network,
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.

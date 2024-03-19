@@ -31,7 +31,7 @@ proptest! {
         let (runtime, _init_guard) = zebra_test::init_async();
 
         let (mut minimum_peer_version, best_tip_height) =
-            MinimumPeerVersion::with_mock_chain_tip(network);
+            MinimumPeerVersion::with_mock_chain_tip(&network);
 
         best_tip_height.send_best_tip_height(block_height);
 
@@ -64,7 +64,7 @@ proptest! {
         let (runtime, _init_guard) = zebra_test::init_async();
 
         let (mut minimum_peer_version, best_tip_height) =
-            MinimumPeerVersion::with_mock_chain_tip(block_heights.network);
+            MinimumPeerVersion::with_mock_chain_tip(&block_heights.network);
 
         best_tip_height.send_best_tip_height(block_heights.before_upgrade);
 
@@ -117,7 +117,7 @@ proptest! {
         // Get peers and handles
         let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
         let (minimum_peer_version, _best_tip_height) =
-            MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+            MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
         // Build a peerset
         runtime.block_on(async move {
@@ -193,7 +193,7 @@ proptest! {
         // Get peers and handles
         let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
         let (minimum_peer_version, _best_tip_height) =
-            MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+            MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
         runtime.block_on(async move {
             // Build a peerset
@@ -264,7 +264,7 @@ proptest! {
         // Get peers and handles
         let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
         let (minimum_peer_version, _best_tip_height) =
-            MinimumPeerVersion::with_mock_chain_tip(Network::Mainnet);
+            MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
         runtime.block_on(async move {
             // Build a peerset

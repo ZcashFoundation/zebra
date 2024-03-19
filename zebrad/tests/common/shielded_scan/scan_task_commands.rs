@@ -80,14 +80,14 @@ pub(crate) async fn run() -> Result<()> {
     fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
 
     let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
-        start_state_service_with_cache_dir(network, zebrad_state_path.clone()).await?;
+        start_state_service_with_cache_dir(&network, zebrad_state_path.clone()).await?;
 
     let chain_tip_height = latest_chain_tip
         .best_tip_height()
         .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
 
     let sapling_activation_height = NetworkUpgrade::Sapling
-        .activation_height(network)
+        .activation_height(&network)
         .expect("there should be an activation height for Mainnet");
 
     assert!(
@@ -105,7 +105,7 @@ pub(crate) async fn run() -> Result<()> {
     let state = ServiceBuilder::new().buffer(10).service(state_service);
 
     // Create an ephemeral `Storage` instance
-    let storage = Storage::new(&scan_config, network, false);
+    let storage = Storage::new(&scan_config, &network, false);
     let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
 
     tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);

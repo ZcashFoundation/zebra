@@ -24,7 +24,7 @@ proptest! {
     ) {
         let (chain_tip, mock_chain_tip_sender) = MockChainTip::new();
         let blossom_activation_height = NetworkUpgrade::Blossom
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Blossom activation height is missing");
 
         block_heights.sort();
@@ -50,13 +50,13 @@ proptest! {
 
         let time_displacement = calculate_time_displacement(
             time_displacement_factor,
-            NetworkUpgrade::current(network, network_height),
+            NetworkUpgrade::current(&network, network_height),
         );
 
         let mock_local_time = current_block_time + estimated_time_difference + time_displacement;
 
         assert_eq!(
-            chain_tip.estimate_network_chain_tip_height(network, mock_local_time),
+            chain_tip.estimate_network_chain_tip_height(&network, mock_local_time),
             Some(network_height)
         );
     }

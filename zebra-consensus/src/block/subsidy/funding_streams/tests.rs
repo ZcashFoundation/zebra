@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn test_funding_stream_values() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-    let network = Network::Mainnet;
+    let network = &Network::Mainnet;
 
     // funding streams not active
     let canopy_height_minus1 = Canopy.activation_height(network).unwrap() - 1;
@@ -44,7 +44,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network).unwrap();
+    let range = FUNDING_STREAM_HEIGHT_RANGES.get(network).unwrap();
     let end = range.end;
     let last = end - 1;
 
@@ -74,7 +74,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 );
 
                 // Asserts if address is not a P2SH address.
-                let _script = new_coinbase_script(address);
+                let _script = new_coinbase_script(&address);
             }
         }
     }

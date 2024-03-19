@@ -45,7 +45,7 @@ impl CacheDir {
     }
 
     /// Returns the peer cache file path for `network`, if enabled.
-    pub fn peer_cache_file_path(&self, network: Network) -> Option<PathBuf> {
+    pub fn peer_cache_file_path(&self, network: &Network) -> Option<PathBuf> {
         Some(
             self.cache_dir()?
                 .join("network")

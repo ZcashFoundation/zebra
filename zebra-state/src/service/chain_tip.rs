@@ -147,7 +147,7 @@ impl ChainTipSender {
     #[instrument(skip(initial_tip), fields(new_height, new_hash))]
     pub fn new(
         initial_tip: impl Into<Option<ChainTipBlock>>,
-        network: Network,
+        network: &Network,
     ) -> (Self, LatestChainTip, ChainTipChange) {
         let initial_tip = initial_tip.into();
         Self::record_new_tip(&initial_tip);
@@ -575,7 +575,7 @@ impl ChainTipChange {
         // Fork changes can activate or deactivate a network upgrade.
         // So we must perform the same actions for network upgrades and skipped blocks.
         if Some(block.previous_block_hash) != self.last_change_hash
-            || NetworkUpgrade::is_activation_height(self.network, block.height)
+            || NetworkUpgrade::is_activation_height(&self.network, block.height)
         {
             TipAction::reset_with(block)
         } else {
@@ -584,11 +584,11 @@ impl ChainTipChange {
     }
 
     /// Create a new [`ChainTipChange`] from a [`LatestChainTip`] receiver and [`Network`].
-    fn new(latest_chain_tip: LatestChainTip, network: Network) -> Self {
+    fn new(latest_chain_tip: LatestChainTip, network: &Network) -> Self {
         Self {
             latest_chain_tip,
             last_change_hash: None,
-            network,
+            network: network.clone(),
         }
     }
 
@@ -643,7 +643,7 @@ impl Clone for ChainTipChange {
             // clear the previous change hash, so the first action is a reset
             last_change_hash: None,
 
-            network: self.network,
+            network: self.network.clone(),
         }
     }
 }

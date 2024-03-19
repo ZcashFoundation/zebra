@@ -222,7 +222,7 @@ fn block_test_vectors_height(network: Network) {
 
         if height
             >= Sapling
-                .activation_height(network)
+                .activation_height(&network)
                 .expect("sapling activation height is set")
                 .0
         {
@@ -260,7 +260,7 @@ fn block_commitment(network: Network) {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
-        let commitment = block.commitment(network).unwrap_or_else(|_| {
+        let commitment = block.commitment(&network).unwrap_or_else(|_| {
             panic!("unexpected structurally invalid block commitment at {network} {height}")
         });
 

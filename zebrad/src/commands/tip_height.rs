@@ -63,7 +63,7 @@ impl TipHeightCmd {
 
         // UTXO verification isn't used here: we're not updating the state.
         let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
-            zebra_state::init(config, self.network, Height::MAX, 0);
+            zebra_state::init(config, &self.network, Height::MAX, 0);
 
         latest_chain_tip
     }

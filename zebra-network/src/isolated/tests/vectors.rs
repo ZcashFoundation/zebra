@@ -40,15 +40,17 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
     // Connection errors are detected using the JoinHandle.
     // (They might also make the test hang.)
     let mut outbound_join_handle = tokio::spawn(connect_isolated_tcp_direct(
-        network,
+        &network,
         listen_addr,
         "".to_string(),
     ));
 
     let (inbound_conn, _) = listener.accept().await.unwrap();
 
-    let mut inbound_stream =
-        Framed::new(inbound_conn, Codec::builder().for_network(network).finish());
+    let mut inbound_stream = Framed::new(
+        inbound_conn,
+        Codec::builder().for_network(&network).finish(),
+    );
 
     check_version_message(network, &mut inbound_stream).await;
 
@@ -90,11 +92,11 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
     let (inbound_stream, outbound_stream) = tokio::io::duplex(1024);
 
     let mut outbound_join_handle =
-        tokio::spawn(connect_isolated(network, outbound_stream, "".to_string()));
+        tokio::spawn(connect_isolated(&network, outbound_stream, "".to_string()));
 
     let mut inbound_stream = Framed::new(
         inbound_stream,
-        Codec::builder().for_network(network).finish(),
+        Codec::builder().for_network(&network).finish(),
     );
 
     check_version_message(network, &mut inbound_stream).await;
