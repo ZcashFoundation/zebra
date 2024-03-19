@@ -345,7 +345,7 @@ fn fake_v5_round_trip() {
     let _init_guard = zebra_test::init();
 
     fake_v5_round_trip_for_network(Network::Mainnet);
-    fake_v5_round_trip_for_network(Network::Testnet);
+    fake_v5_round_trip_for_network(Network::new_default_testnet());
 }
 
 fn fake_v5_round_trip_for_network(network: Network) {
@@ -493,7 +493,7 @@ fn fake_v5_librustzcash_round_trip() {
     let _init_guard = zebra_test::init();
 
     fake_v5_librustzcash_round_trip_for_network(Network::Mainnet);
-    fake_v5_librustzcash_round_trip_for_network(Network::Testnet);
+    fake_v5_librustzcash_round_trip_for_network(Network::new_default_testnet());
 }
 
 fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
@@ -933,7 +933,7 @@ fn binding_signatures() {
     let _init_guard = zebra_test::init();
 
     binding_signatures_for_network(Network::Mainnet);
-    binding_signatures_for_network(Network::Testnet);
+    binding_signatures_for_network(Network::new_default_testnet());
 }
 
 fn binding_signatures_for_network(network: Network) {

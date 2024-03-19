@@ -46,7 +46,7 @@ fn test_database_format() {
     let _init_guard = zebra_test::init();
 
     test_database_format_with_network(Mainnet);
-    test_database_format_with_network(Testnet);
+    test_database_format_with_network(Network::new_default_testnet());
 }
 
 /// Snapshot raw and typed database formats for `network`.

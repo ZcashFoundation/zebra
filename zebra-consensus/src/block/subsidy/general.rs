@@ -124,7 +124,7 @@ mod test {
         let _init_guard = zebra_test::init();
 
         halving_for_network(Network::Mainnet)?;
-        halving_for_network(Network::Testnet)?;
+        halving_for_network(Network::new_default_testnet())?;
 
         Ok(())
     }
@@ -250,7 +250,7 @@ mod test {
         let _init_guard = zebra_test::init();
 
         block_subsidy_for_network(Network::Mainnet)?;
-        block_subsidy_for_network(Network::Testnet)?;
+        block_subsidy_for_network(Network::new_default_testnet())?;
 
         Ok(())
     }

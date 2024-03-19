@@ -80,7 +80,7 @@ fn incremental_roots() {
 #[test]
 fn incremental_roots_with_blocks() -> Result<()> {
     incremental_roots_with_blocks_for_network(Network::Mainnet)?;
-    incremental_roots_with_blocks_for_network(Network::Testnet)?;
+    incremental_roots_with_blocks_for_network(Network::new_default_testnet())?;
 
     Ok(())
 }

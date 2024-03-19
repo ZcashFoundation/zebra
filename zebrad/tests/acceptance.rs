@@ -1047,7 +1047,7 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
         TINY_CHECKPOINT_TEST_HEIGHT,
-        Testnet,
+        Network::new_default_testnet(),
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
         None,
@@ -1267,7 +1267,7 @@ fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
 fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let network = Testnet;
+    let network = Network::new_default_testnet();
     create_cached_database(network)
 }
 
@@ -1293,7 +1293,7 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let network = Testnet;
+    let network = Network::new_default_testnet();
     sync_past_mandatory_checkpoint(network)
 }
 
@@ -1318,7 +1318,10 @@ fn full_sync_mainnet() -> Result<()> {
 #[ignore]
 fn full_sync_testnet() -> Result<()> {
     // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES")
+    full_sync_test(
+        Network::new_default_testnet(),
+        "FULL_SYNC_TESTNET_TIMEOUT_MINUTES",
+    )
 }
 
 #[cfg(feature = "prometheus")]
@@ -2522,14 +2525,14 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 #[ignore]
 #[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
-    common::checkpoints::run(Testnet).await
+    common::checkpoints::run(Network::new_default_testnet()).await
 }
 
 /// Check that new states are created with the current state format version,
 /// and that restarting `zebrad` doesn't change the format version.
 #[tokio::test]
 async fn new_state_format() -> Result<()> {
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         state_format_test("new_state_format_test", network, 2, None).await?;
     }
 
@@ -2547,7 +2550,7 @@ async fn update_state_format() -> Result<()> {
     fake_version.minor = 0;
     fake_version.patch = 0;
 
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         state_format_test("update_state_format_test", network, 3, Some(&fake_version)).await?;
     }
 
@@ -2564,7 +2567,7 @@ async fn downgrade_state_format() -> Result<()> {
     fake_version.minor = u16::MAX.into();
     fake_version.patch = 0;
 
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         state_format_test(
             "downgrade_state_format_test",
             network,

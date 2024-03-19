@@ -12,9 +12,9 @@ use eyre::Result;
 #[test]
 fn tree() -> Result<()> {
     tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+    tree_for_network_upgrade(Network::new_default_testnet(), NetworkUpgrade::Heartwood)?;
     tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
+    tree_for_network_upgrade(Network::new_default_testnet(), NetworkUpgrade::Canopy)?;
     Ok(())
 }
 

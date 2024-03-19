@@ -155,7 +155,7 @@ fn test_block_and_transaction_data() {
     let _init_guard = zebra_test::init();
 
     test_block_and_transaction_data_with_network(Mainnet);
-    test_block_and_transaction_data_with_network(Testnet);
+    test_block_and_transaction_data_with_network(Network::new_default_testnet());
 }
 
 /// Snapshot finalized block and transaction data for `network`.

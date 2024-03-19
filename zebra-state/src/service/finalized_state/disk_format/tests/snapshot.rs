@@ -52,7 +52,7 @@ fn test_raw_rocksdb_column_families() {
     let _init_guard = zebra_test::init();
 
     test_raw_rocksdb_column_families_with_network(Mainnet);
-    test_raw_rocksdb_column_families_with_network(Testnet);
+    test_raw_rocksdb_column_families_with_network(Network::new_default_testnet());
 }
 
 /// Snapshot raw column families for `network`.

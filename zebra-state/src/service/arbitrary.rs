@@ -93,7 +93,7 @@ impl PreparedChain {
             .activation_height(Network::Mainnet)
             .expect("must have height");
         let test_height = NetworkUpgrade::Heartwood
-            .activation_height(Network::Testnet)
+            .activation_height(Network::new_default_testnet())
             .expect("must have height");
         let height = std::cmp::max(main_height, test_height);
 

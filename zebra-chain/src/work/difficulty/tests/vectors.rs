@@ -264,7 +264,7 @@ fn compact_bitcoin_test_vectors() {
 #[test]
 fn block_difficulty() -> Result<(), Report> {
     block_difficulty_for_network(Network::Mainnet)?;
-    block_difficulty_for_network(Network::Testnet)?;
+    block_difficulty_for_network(Network::new_default_testnet())?;
 
     Ok(())
 }
@@ -350,7 +350,7 @@ fn block_difficulty_for_network(network: Network) -> Result<(), Report> {
 #[test]
 fn genesis_block_difficulty() -> Result<(), Report> {
     genesis_block_difficulty_for_network(Network::Mainnet)?;
-    genesis_block_difficulty_for_network(Network::Testnet)?;
+    genesis_block_difficulty_for_network(Network::new_default_testnet())?;
 
     Ok(())
 }
@@ -420,6 +420,7 @@ fn testnet_minimum_difficulty() -> Result<(), Report> {
 /// block.
 #[spandoc::spandoc]
 fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), Report> {
+    let network = Network::new_default_testnet();
     let block = zebra_test::vectors::TESTNET_BLOCKS
         .get(&height.0)
         .expect("test vectors contain the specified minimum difficulty block height");
@@ -454,7 +455,7 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
         // threshold, as documented in ZIP-205 and ZIP-208:
         // https://zips.z.cash/zip-0205#change-to-difficulty-adjustment-on-testnet
         // https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-testnet
-        match NetworkUpgrade::minimum_difficulty_spacing_for_height(Network::Testnet, height) {
+        match NetworkUpgrade::minimum_difficulty_spacing_for_height(network, height) {
             None => Err(eyre!("the minimum difficulty rule is not active"))?,
             Some(spacing) if (time_gap <= spacing) => Err(eyre!(
                 "minimum difficulty block times must be more than 6 target spacing intervals apart"
@@ -477,12 +478,12 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
 
     /// SPANDOC: Check that the testnet minimum difficulty is the PoWLimit {?height, ?threshold, ?hash}
     {
-        assert_eq!(threshold, Network::Testnet.target_difficulty_limit(),
+        assert_eq!(threshold, network.target_difficulty_limit(),
                    "testnet minimum difficulty thresholds should be equal to the PoWLimit. Hint: Blocks with large gaps are allowed to have the minimum difficulty, but it's not required.");
         // all blocks pass the minimum difficulty threshold, even if they aren't minimum
         // difficulty blocks, because it's the lowest permitted difficulty
         assert!(
-            hash <= Network::Testnet.target_difficulty_limit(),
+            hash <= network.target_difficulty_limit(),
             "testnet minimum difficulty hashes must be less than the PoWLimit"
         );
     }
