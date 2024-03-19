@@ -107,7 +107,7 @@ lazy_static! {
     pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<Network, std::ops::Range<Height>> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(Network::Mainnet, Height(1_046_400)..Height(2_726_400));
-        hash_map.insert(Network::Testnet, Height(1_028_500)..Height(2_796_000));
+        hash_map.insert(Network::new_default_testnet(), Height(1_028_500)..Height(2_796_000));
         hash_map
     };
 
@@ -127,7 +127,7 @@ lazy_static! {
         testnet_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
         testnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
         testnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        addresses_by_network.insert(Network::Testnet, testnet_addresses);
+        addresses_by_network.insert(Network::new_default_testnet(), testnet_addresses);
 
         addresses_by_network
     };
@@ -215,7 +215,10 @@ impl ParameterSubsidy for Network {
     fn num_funding_streams(&self) -> usize {
         match self {
             Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
-            Network::Testnet => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
+            Network::Testnet(_params) if self.is_default_testnet() => {
+                FUNDING_STREAMS_NUM_ADDRESSES_TESTNET
+            }
+            Network::Testnet(_params) => unimplemented!("custom test network funding streams"),
         }
     }
     fn height_for_first_halving(&self) -> Height {
@@ -226,7 +229,10 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(*self)
                 .expect("canopy activation height should be available"),
-            Network::Testnet => FIRST_HALVING_TESTNET,
+            Network::Testnet(_params) if self.is_default_testnet() => FIRST_HALVING_TESTNET,
+            Network::Testnet(_params) => {
+                unimplemented!("custom test network height for first halving")
+            }
         }
     }
 }

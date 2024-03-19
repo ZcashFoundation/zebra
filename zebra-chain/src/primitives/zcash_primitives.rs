@@ -13,6 +13,8 @@ use crate::{
     transparent::{self, Script},
 };
 
+use super::address::UnsupportedNetwork;
+
 // TODO: move copied and modified code to a separate module.
 //
 // Used by boilerplate code below.
@@ -337,11 +339,16 @@ pub(crate) fn transparent_output_address(
     }
 }
 
-impl From<Network> for zcash_primitives::consensus::Network {
-    fn from(network: Network) -> Self {
+impl TryFrom<Network> for zcash_primitives::consensus::Network {
+    type Error = UnsupportedNetwork;
+
+    fn try_from(network: Network) -> Result<Self, Self::Error> {
         match network {
-            Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-            Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
+            Network::Mainnet => Ok(zcash_primitives::consensus::Network::MainNetwork),
+            Network::Testnet(_params) if network.is_default_testnet() => {
+                Ok(zcash_primitives::consensus::Network::TestNetwork)
+            }
+            Network::Testnet(_params) => Err(UnsupportedNetwork),
         }
     }
 }
@@ -350,7 +357,7 @@ impl From<zcash_primitives::consensus::Network> for Network {
     fn from(network: zcash_primitives::consensus::Network) -> Self {
         match network {
             zcash_primitives::consensus::Network::MainNetwork => Network::Mainnet,
-            zcash_primitives::consensus::Network::TestNetwork => Network::Testnet,
+            zcash_primitives::consensus::Network::TestNetwork => Network::new_default_testnet(),
         }
     }
 }

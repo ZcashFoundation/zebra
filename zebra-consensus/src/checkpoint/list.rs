@@ -57,7 +57,11 @@ impl ParameterCheckpoint for Network {
             // zcash-cli getblockhash 0
             Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
             // zcash-cli -testnet getblockhash 0
-            Network::Testnet => "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
+            Network::Testnet(_params) if self.is_default_testnet() => {
+                "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38"
+            }
+
+            Network::Testnet(_params) => unimplemented!("custom test network genesis hash"),
         }
         .parse()
         .expect("hard-coded hash parses")
@@ -69,9 +73,10 @@ impl ParameterCheckpoint for Network {
             Network::Mainnet => MAINNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet => TESTNET_CHECKPOINTS
+            Network::Testnet(_params) if self.is_default_testnet() => TESTNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Testnet checkpoint list parses and validates"),
+            Network::Testnet(_params) => unimplemented!("custom test network checkpoints"),
         };
 
         match checkpoint_list.hash(block::Height(0)) {
@@ -144,7 +149,8 @@ impl CheckpointList {
         match checkpoints.iter().next() {
             Some((block::Height(0), hash))
                 if (hash == &Network::Mainnet.genesis_hash()
-                    || hash == &Network::Testnet.genesis_hash()) => {}
+                    // TODO: Accept `network` argument and check that the network's first item is the genesis hash.
+                    || hash == &Network::new_default_testnet().genesis_hash()) => {}
             Some((block::Height(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }

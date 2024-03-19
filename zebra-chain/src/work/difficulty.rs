@@ -699,7 +699,11 @@ impl ParameterDifficulty for Network {
             /* 2^243 - 1 */
             Network::Mainnet => (U256::one() << 243) - 1,
             /* 2^251 - 1 */
-            Network::Testnet => (U256::one() << 251) - 1,
+            Network::Testnet(_) if self.is_default_testnet() => (U256::one() << 251) - 1,
+            // Custom value
+            Network::Testnet(_params) => {
+                unimplemented!("custom testnet target difficulty limit")
+            }
         };
 
         // `zcashd` converts the PoWLimit into a compact representation before

@@ -225,7 +225,12 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> &IndexSet<String> {
         match self.network {
             Network::Mainnet => &self.initial_mainnet_peers,
-            Network::Testnet => &self.initial_testnet_peers,
+            Network::Testnet(_) if self.network.is_default_testnet() => &self.initial_testnet_peers,
+            // TODO: Add an `initial_custom_testnet` config field?
+            //       Regtest should always be isolated but it may be nice to have a separate field for custom public testnets.
+            Network::Testnet(_params) => {
+                unimplemented!("custom test network initial peer hostnames")
+            }
         }
     }
 

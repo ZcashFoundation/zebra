@@ -31,7 +31,10 @@ impl ParameterMagic for Network {
     fn magic_value(&self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
-            Network::Testnet => magics::TESTNET,
+            Network::Testnet(_) if self.is_default_testnet() => magics::TESTNET,
+            Network::Testnet(_params) => {
+                unimplemented!("custom testnet network magic")
+            }
         }
     }
 }
@@ -78,6 +81,7 @@ impl Version {
     /// - during the initial block download,
     /// - after Zebra restarts, and
     /// - after Zebra's local network is slow or shut down.
+    // TODO: Move constant to a network method
     fn initial_min_for_network(network: Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
             .get(&network)
@@ -103,17 +107,18 @@ impl Version {
         //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
-            (Testnet, Overwinter) => 170_003,
+            (Testnet(_), Overwinter) if network.is_default_testnet() => 170_003,
             (Mainnet, Overwinter) => 170_005,
             (_, Sapling) => 170_007,
-            (Testnet, Blossom) => 170_008,
+            (Testnet(_), Blossom) if network.is_default_testnet() => 170_008,
             (Mainnet, Blossom) => 170_009,
-            (Testnet, Heartwood) => 170_010,
+            (Testnet(_), Heartwood) if network.is_default_testnet() => 170_010,
             (Mainnet, Heartwood) => 170_011,
-            (Testnet, Canopy) => 170_012,
+            (Testnet(_), Canopy) if network.is_default_testnet() => 170_012,
             (Mainnet, Canopy) => 170_013,
-            (Testnet, Nu5) => 170_050,
+            (Testnet(_), Nu5) if network.is_default_testnet() => 170_050,
             (Mainnet, Nu5) => 170_100,
+            _ => unimplemented!("custom network activation heights"),
         })
     }
 }
@@ -201,7 +206,7 @@ mod test {
 
     #[test]
     fn version_extremes_testnet() {
-        version_extremes(Testnet)
+        version_extremes(Network::new_default_testnet())
     }
 
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
@@ -229,7 +234,7 @@ mod test {
 
     #[test]
     fn version_consistent_testnet() {
-        version_consistent(Testnet)
+        version_consistent(Network::new_default_testnet())
     }
 
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions

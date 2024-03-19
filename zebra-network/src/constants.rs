@@ -396,7 +396,7 @@ lazy_static! {
         let mut hash_map = HashMap::new();
 
         hash_map.insert(Mainnet, Version::min_specified_for_upgrade(Mainnet, Nu5));
-        hash_map.insert(Testnet, Version::min_specified_for_upgrade(Testnet, Nu5));
+        hash_map.insert(Network::new_default_testnet(), Version::min_specified_for_upgrade(Network::new_default_testnet(), Nu5));
 
         hash_map
     };

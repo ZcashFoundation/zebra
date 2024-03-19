@@ -47,17 +47,25 @@ impl TryFrom<zcash_address::Network> for Network {
     fn try_from(network: zcash_address::Network) -> Result<Self, Self::Error> {
         match network {
             zcash_address::Network::Main => Ok(Network::Mainnet),
-            zcash_address::Network::Test => Ok(Network::Testnet),
+            zcash_address::Network::Test => Ok(Network::new_default_testnet()),
             zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
         }
     }
 }
 
-impl From<Network> for zcash_address::Network {
-    fn from(network: Network) -> Self {
+/// An error indicating that network cannot be converted to a [`zcash_address::Network`].
+#[derive(Debug)]
+pub struct UnsupportedNetwork;
+
+impl TryFrom<Network> for zcash_address::Network {
+    type Error = UnsupportedNetwork;
+    fn try_from(network: Network) -> Result<Self, Self::Error> {
         match network {
-            Network::Mainnet => zcash_address::Network::Main,
-            Network::Testnet => zcash_address::Network::Test,
+            Network::Mainnet => Ok(zcash_address::Network::Main),
+            Network::Testnet(_params) if network.is_default_testnet() => {
+                Ok(zcash_address::Network::Test)
+            }
+            Network::Testnet(_params) => Err(UnsupportedNetwork),
         }
     }
 }
@@ -185,7 +193,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling((*network).into(), data);
+                let address = ZcashAddress::from_sapling((*network).try_into().ok()?, data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,

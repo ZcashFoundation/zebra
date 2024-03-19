@@ -51,6 +51,11 @@ mod tests;
 /// after the grace period.
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
+/// Network consensus parameters for test networks such as Regtest and the default Testnet.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct NetworkParameters {}
+
 /// An enum describing the possible network choices.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
@@ -60,7 +65,7 @@ pub enum Network {
     Mainnet,
 
     /// The oldest public test network.
-    Testnet,
+    Testnet(NetworkParameters),
 }
 
 use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
@@ -68,13 +73,17 @@ impl Network {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_pubkey_address_prefix()
+        <ZcashPrimitivesNetwork>::try_from(*self)
+            .expect("must match zcash_primitives network")
+            .b58_pubkey_address_prefix()
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_script_address_prefix()
+        <ZcashPrimitivesNetwork>::try_from(*self)
+            .expect("must match zcash_primitives network")
+            .b58_script_address_prefix()
     }
     /// Returns true if the maximum block time rule is active for `network` and `height`.
     ///
@@ -87,7 +96,7 @@ impl Network {
     pub fn is_max_block_time_enforced(self, height: block::Height) -> bool {
         match self {
             Network::Mainnet => true,
-            Network::Testnet => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+            Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
         }
     }
 }
@@ -96,7 +105,7 @@ impl From<Network> for &'static str {
     fn from(network: Network) -> &'static str {
         match network {
             Network::Mainnet => "Mainnet",
-            Network::Testnet => "Testnet",
+            Network::Testnet(_params) => "Testnet",
         }
     }
 }
@@ -114,17 +123,27 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Creates a new [`Network::Testnet`] with the default Testnet network parameters.
+    pub fn new_default_testnet() -> Self {
+        Self::Testnet(NetworkParameters::default())
+    }
+
+    /// Returns true if the network is the default Testnet, or false otherwise.
+    pub fn is_default_testnet(&self) -> bool {
+        self == &Self::new_default_testnet()
+    }
+
     /// Returns an iterator over [`Network`] variants.
     pub fn iter() -> impl Iterator<Item = Self> {
         // TODO: Use default values of `Testnet` variant when adding fields for #7845.
-        [Self::Mainnet, Self::Testnet].into_iter()
+        [Self::Mainnet, Self::new_default_testnet()].into_iter()
     }
 
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
             Network::Mainnet => 8233,
-            Network::Testnet => 18233,
+            Network::Testnet(_params) => 18233,
         }
     }
 
@@ -151,7 +170,7 @@ impl Network {
     pub fn bip70_network_name(&self) -> String {
         match self {
             Network::Mainnet => "main".to_string(),
-            Network::Testnet => "test".to_string(),
+            Network::Testnet(_params) => "test".to_string(),
         }
     }
 
@@ -179,7 +198,7 @@ impl FromStr for Network {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         match string.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
-            "testnet" => Ok(Network::Testnet),
+            "testnet" => Ok(Network::new_default_testnet()),
             _ => Err(InvalidNetworkError(string.to_owned())),
         }
     }
