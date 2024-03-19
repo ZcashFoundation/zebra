@@ -81,7 +81,6 @@ impl Version {
     /// - during the initial block download,
     /// - after Zebra restarts, and
     /// - after Zebra's local network is slow or shut down.
-    // TODO: Move constant to a network method
     fn initial_min_for_network(network: Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
             .get(&network)

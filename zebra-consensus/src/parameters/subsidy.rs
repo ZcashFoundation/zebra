@@ -104,6 +104,7 @@ lazy_static! {
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    // TODO: Move these to a `Network` method.
     pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<Network, std::ops::Range<Height>> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(Network::Mainnet, Height(1_046_400)..Height(2_726_400));
@@ -112,6 +113,7 @@ lazy_static! {
     };
 
     /// Convenient storage for all addresses, for all receivers and networks
+    // TODO: Move these to a `Network` method.
     pub static ref FUNDING_STREAM_ADDRESSES: HashMap<Network, HashMap<FundingStreamReceiver, Vec<String>>> = {
         let mut addresses_by_network = HashMap::with_capacity(2);
 
