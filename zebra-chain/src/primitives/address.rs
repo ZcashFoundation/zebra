@@ -185,7 +185,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling((network).into(), data);
+                let address = ZcashAddress::from_sapling(network.into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,

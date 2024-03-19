@@ -382,7 +382,7 @@ impl Clone for NonEmptyHistoryTree {
         let tree = match self.inner {
             InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
                 Tree::<PreOrchard>::new_from_cache(
-                    &self.network.clone(),
+                    &self.network,
                     self.network_upgrade,
                     self.size,
                     &self.peaks,

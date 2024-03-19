@@ -21,7 +21,7 @@ fn tree() -> Result<()> {
 fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
-    let height = network_upgrade.activation_height(&network).unwrap().0;
+    let height = network_upgrade.activation_height(network).unwrap().0;
 
     // Load Block 0 (activation block of the given network upgrade)
     let block0 = Arc::new(
@@ -33,7 +33,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     );
 
     // Check its commitment
-    let commitment0 = block0.commitment(&network)?;
+    let commitment0 = block0.commitment(network)?;
     if network_upgrade == NetworkUpgrade::Heartwood {
         // Heartwood is the only upgrade that has a reserved value.
         // (For other upgrades we could compare with the expected commitment,
@@ -45,7 +45,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     let sapling_root0 =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let (mut tree, _) =
-        Tree::<V1>::new_from_block(&network, block0, &sapling_root0, &Default::default())?;
+        Tree::<V1>::new_from_block(network, block0, &sapling_root0, &Default::default())?;
 
     // Compute root hash of the MMR tree, which will be included in the next block
     let hash0 = tree.hash();
@@ -60,7 +60,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     );
 
     // Check its commitment
-    let commitment1 = block1.commitment(&network)?;
+    let commitment1 = block1.commitment(network)?;
     assert_eq!(commitment1, Commitment::ChainHistoryRoot(hash0));
 
     // Append Block to MMR tree

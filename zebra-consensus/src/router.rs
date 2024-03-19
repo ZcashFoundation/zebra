@@ -240,9 +240,14 @@ where
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
-    let checkpoint_state_service = state_service.clone();
-    let checkpoint_sync = config.checkpoint_sync;
-    let network_clone = network.clone();
+    let (checkpoint_state_service, checkpoint_sync, network_clone) = {
+        let checkpoint_state_service = state_service.clone();
+        let checkpoint_sync = config.checkpoint_sync;
+        let network_clone = network.clone();
+
+        (checkpoint_state_service, checkpoint_sync, network_clone)
+    };
+
     let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
         async move {

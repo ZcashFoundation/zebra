@@ -154,7 +154,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
     };
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(&network)
+        .activation_height(network)
         .expect("Canopy activation height is known");
 
     if height < SLOW_START_INTERVAL {
@@ -295,7 +295,7 @@ pub fn merkle_root_validity(
 ) -> Result<(), BlockError> {
     // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
     block
-        .check_transaction_network_upgrade_consistency(&network)
+        .check_transaction_network_upgrade_consistency(network)
         .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
 
     let merkle_root = transaction_hashes.iter().cloned().collect();
