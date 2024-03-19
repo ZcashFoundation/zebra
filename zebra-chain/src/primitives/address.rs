@@ -65,6 +65,7 @@ impl TryFrom<Network> for zcash_address::Network {
             Network::Testnet(_params) if network.is_default_testnet() => {
                 Ok(zcash_address::Network::Test)
             }
+            // TODO: Check for Regtest parameters and return [`zcash_address::Network::Regtest`]
             Network::Testnet(_params) => Err(UnsupportedNetwork),
         }
     }

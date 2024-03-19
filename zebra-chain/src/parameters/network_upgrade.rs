@@ -271,8 +271,8 @@ impl Network {
         };
         match self {
             Mainnet => mainnet_heights,
-            Testnet(_params) if self.is_default_testnet() => testnet_heights,
-            Testnet(_) => unimplemented!("custom testnet activation heights"),
+            // TODO: Add `activation_heights` field and use the above Testnet constants as the default value
+            Testnet(_params) => testnet_heights,
         }
         .iter()
         .cloned()
@@ -393,18 +393,17 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> Option<Duration> {
         match (network, height) {
+            // TODO: Add a field on `NetworkParameters` for minimum difficulty spacing and min difficulty start height
             (Network::Testnet(_params), height)
-                if network.is_default_testnet()
-                    && height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT =>
+                if height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT =>
             {
                 None
             }
             (Network::Mainnet, _) => None,
-            (Network::Testnet(_params), _) if network.is_default_testnet() => {
+            (Network::Testnet(_params), _) => {
                 let network_upgrade = NetworkUpgrade::current(network, height);
                 Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
             }
-            _ => unimplemented!("custom testnet minimum difficulty spacing"),
         }
     }
 
