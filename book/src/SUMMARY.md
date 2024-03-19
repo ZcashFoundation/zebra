@@ -20,7 +20,7 @@
     - [Shielded Scanning gRPC Server](user/shielded-scan-grpc-server.md)
   - [Kibana blockchain explorer](user/elasticsearch.md)
   - [Forking the Zcash Testnet with Zebra](user/fork-zebra-testnet.md)
-    [OpenAPI specification](user/openapi.md)
+  - [OpenAPI specification](user/openapi.md)
   - [Troubleshooting](user/troubleshooting.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
