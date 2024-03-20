@@ -205,18 +205,30 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
-    continuous_blockchain(None, Mainnet).await?;
-    continuous_blockchain(None, Testnet).await?;
+    for network in Network::iter() {
+        continuous_blockchain(None, network).await?;
+    }
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
-    for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
-        continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
-    }
-    for height in 0..zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.len() {
-        continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Testnet).await?;
+    for network in Network::iter() {
+        for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
+            continuous_blockchain(
+                Some(block::Height(height.try_into().unwrap())),
+                network.clone(),
+            )
+            .await?;
+        }
+
+        for height in 0..zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.len() {
+            continuous_blockchain(
+                Some(block::Height(height.try_into().unwrap())),
+                network.clone(),
+            )
+            .await?;
+        }
     }
     Ok(())
 }

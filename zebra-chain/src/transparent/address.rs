@@ -300,7 +300,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = pub_key.to_address(Network::Testnet);
+        let t_addr = pub_key.to_address(Network::new_default_testnet());
 
         assert_eq!(format!("{t_addr}"), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
     }
@@ -322,7 +322,7 @@ mod tests {
 
         let script = Script::new(&[0; 20]);
 
-        let t_addr = script.to_address(Network::Testnet);
+        let t_addr = script.to_address(Network::new_default_testnet());
 
         assert_eq!(format!("{t_addr}"), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }

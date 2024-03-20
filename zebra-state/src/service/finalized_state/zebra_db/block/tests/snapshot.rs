@@ -37,7 +37,7 @@ use serde::Serialize;
 use zebra_chain::{
     block::{self, Block, Height, SerializedBlock},
     orchard,
-    parameters::Network::{self, *},
+    parameters::Network,
     sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction},
@@ -153,9 +153,9 @@ impl TransactionData {
 #[test]
 fn test_block_and_transaction_data() {
     let _init_guard = zebra_test::init();
-
-    test_block_and_transaction_data_with_network(Mainnet);
-    test_block_and_transaction_data_with_network(Testnet);
+    for network in Network::iter() {
+        test_block_and_transaction_data_with_network(network);
+    }
 }
 
 /// Snapshot finalized block and transaction data for `network`.

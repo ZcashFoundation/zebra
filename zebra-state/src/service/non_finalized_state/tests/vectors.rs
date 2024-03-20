@@ -134,8 +134,9 @@ fn ord_matches_work() -> Result<()> {
 fn best_chain_wins() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    best_chain_wins_for_network(Network::Mainnet)?;
-    best_chain_wins_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        best_chain_wins_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -172,8 +173,9 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
 fn finalize_pops_from_best_chain() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    finalize_pops_from_best_chain_for_network(Network::Mainnet)?;
-    finalize_pops_from_best_chain_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        finalize_pops_from_best_chain_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -219,8 +221,9 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
 fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Mainnet)?;
-    commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -264,10 +267,9 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
 #[test]
 fn shorter_chain_can_be_best_chain() -> Result<()> {
     let _init_guard = zebra_test::init();
-
-    shorter_chain_can_be_best_chain_for_network(Network::Mainnet)?;
-    shorter_chain_can_be_best_chain_for_network(Network::Testnet)?;
-
+    for network in Network::iter() {
+        shorter_chain_can_be_best_chain_for_network(network)?;
+    }
     Ok(())
 }
 
@@ -307,9 +309,9 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 #[test]
 fn longer_chain_with_more_work_wins() -> Result<()> {
     let _init_guard = zebra_test::init();
-
-    longer_chain_with_more_work_wins_for_network(Network::Mainnet)?;
-    longer_chain_with_more_work_wins_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        longer_chain_with_more_work_wins_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -355,8 +357,9 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
 fn equal_length_goes_to_more_work() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    equal_length_goes_to_more_work_for_network(Network::Mainnet)?;
-    equal_length_goes_to_more_work_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        equal_length_goes_to_more_work_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -394,8 +397,9 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
 
 #[test]
 fn history_tree_is_updated() -> Result<()> {
-    history_tree_is_updated_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    history_tree_is_updated_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
+    for network in Network::iter() {
+        history_tree_is_updated_for_network_upgrade(network, NetworkUpgrade::Heartwood)?;
+    }
     // TODO: we can't test other upgrades until we have a method for creating a FinalizedState
     // with a HistoryTree.
     Ok(())
@@ -497,8 +501,9 @@ fn history_tree_is_updated_for_network_upgrade(
 
 #[test]
 fn commitment_is_validated() {
-    commitment_is_validated_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood);
-    commitment_is_validated_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood);
+    for network in Network::iter() {
+        commitment_is_validated_for_network_upgrade(network, NetworkUpgrade::Heartwood);
+    }
     // TODO: we can't test other upgrades until we have a method for creating a FinalizedState
     // with a HistoryTree.
 }
