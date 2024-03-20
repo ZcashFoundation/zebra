@@ -545,25 +545,14 @@ impl DiskDb {
             // TODO: Consider displaying the disk and memory sizes in a human-readable format (e.g., MiB, GiB)
             // This might require adding a dependency like the `human_bytes` crate (https://crates.io/crates/human_bytes)
             // See https://github.com/ZcashFoundation/zebra/pull/8336#discussion_r1520535787
-            if i == 0 {
-                write!(
-                    column_families_log_string,
-                    "{} (Disk: {} bytes, Memory: {} bytes)",
-                    cf_name,
-                    cf_disk_size,
-                    mem_table_size.unwrap_or(0)
-                )
-                .unwrap();
-            } else {
-                write!(
-                    column_families_log_string,
-                    "{} (Disk: {} bytes, Memory: {} bytes)",
-                    cf_name,
-                    cf_disk_size,
-                    mem_table_size.unwrap_or(0)
-                )
-                .unwrap();
-            }
+            write!(
+                column_families_log_string,
+                "{} (Disk: {} bytes, Memory: {} bytes)",
+                cf_name,
+                cf_disk_size,
+                mem_table_size.unwrap_or(0)
+            )
+            .unwrap();
         }
 
         debug!("{}", column_families_log_string);
