@@ -5,7 +5,7 @@ use std::{fmt, str::FromStr};
 use thiserror::Error;
 
 use crate::{
-    block::{Height, HeightDiff},
+    block::{self, Height, HeightDiff},
     parameters::NetworkUpgrade::Canopy,
 };
 
@@ -61,6 +61,35 @@ pub enum Network {
 
     /// The oldest public test network.
     Testnet,
+}
+
+use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
+impl Network {
+    /// Returns the human-readable prefix for Base58Check-encoded transparent
+    /// pay-to-public-key-hash payment addresses for the network.
+    pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+        <ZcashPrimitivesNetwork>::from(*self).b58_pubkey_address_prefix()
+    }
+
+    /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
+    /// payment addresses for the network.
+    pub fn b58_script_address_prefix(&self) -> [u8; 2] {
+        <ZcashPrimitivesNetwork>::from(*self).b58_script_address_prefix()
+    }
+    /// Returns true if the maximum block time rule is active for `network` and `height`.
+    ///
+    /// Always returns true if `network` is the Mainnet.
+    /// If `network` is the Testnet, the `height` should be at least
+    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
+    /// Returns false otherwise.
+    ///
+    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    pub fn is_max_block_time_enforced(self, height: block::Height) -> bool {
+        match self {
+            Network::Mainnet => true,
+            Network::Testnet => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+        }
+    }
 }
 
 impl From<Network> for &'static str {

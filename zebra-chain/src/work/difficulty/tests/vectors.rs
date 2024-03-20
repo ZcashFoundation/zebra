@@ -309,9 +309,9 @@ fn block_difficulty_for_network(network: Network) -> Result<(), Report> {
         /// SPANDOC: Check the PoWLimit for block {?height, ?network, ?threshold, ?hash}
         {
             // the consensus rule
-            assert!(threshold <= ExpandedDifficulty::target_difficulty_limit(network));
+            assert!(threshold <= network.target_difficulty_limit());
             // check that ordering is transitive, we checked `hash <= threshold` above
-            assert!(hash <= ExpandedDifficulty::target_difficulty_limit(network));
+            assert!(hash <= network.target_difficulty_limit());
         }
 
         /// SPANDOC: Check compact round-trip for block {?height, ?network}
@@ -376,7 +376,7 @@ fn genesis_block_difficulty_for_network(network: Network) -> Result<(), Report> 
     {
         assert_eq!(
             threshold,
-            ExpandedDifficulty::target_difficulty_limit(network),
+            network.target_difficulty_limit(),
             "genesis block difficulty thresholds must be equal to the PoWLimit"
         );
     }
@@ -477,12 +477,12 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
 
     /// SPANDOC: Check that the testnet minimum difficulty is the PoWLimit {?height, ?threshold, ?hash}
     {
-        assert_eq!(threshold, ExpandedDifficulty::target_difficulty_limit(Network::Testnet),
+        assert_eq!(threshold, Network::Testnet.target_difficulty_limit(),
                    "testnet minimum difficulty thresholds should be equal to the PoWLimit. Hint: Blocks with large gaps are allowed to have the minimum difficulty, but it's not required.");
         // all blocks pass the minimum difficulty threshold, even if they aren't minimum
         // difficulty blocks, because it's the lowest permitted difficulty
         assert!(
-            hash <= ExpandedDifficulty::target_difficulty_limit(Network::Testnet),
+            hash <= Network::Testnet.target_difficulty_limit(),
             "testnet minimum difficulty hashes must be less than the PoWLimit"
         );
     }

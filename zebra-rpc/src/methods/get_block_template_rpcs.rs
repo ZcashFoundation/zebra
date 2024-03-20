@@ -20,10 +20,10 @@ use zebra_chain::{
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
-    work::difficulty::{ExpandedDifficulty, U256},
+    work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
+    funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
     RouterError,
 };
 use zebra_network::AddressBookPeers;
@@ -69,6 +69,8 @@ pub trait GetBlockTemplateRpc {
     /// the number of blocks in this chain excluding the genesis block).
     ///
     /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
+    /// method: post
+    /// tags: blockchain
     ///
     /// # Notes
     ///
@@ -80,10 +82,12 @@ pub trait GetBlockTemplateRpc {
     /// to a block in the best chain.
     ///
     /// zcashd reference: [`getblockhash`](https://zcash-rpc.github.io/getblockhash.html)
+    /// method: post
+    /// tags: blockchain
     ///
     /// # Parameters
     ///
-    /// - `index`: (numeric, required) The block index.
+    /// - `index`: (numeric, required, example=1) The block index.
     ///
     /// # Notes
     ///
@@ -100,6 +104,8 @@ pub trait GetBlockTemplateRpc {
     /// - `jsonrequestobject`: (string, optional) A JSON object containing arguments.
     ///
     /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
+    /// method: post
+    /// tags: mining
     ///
     /// # Notes
     ///
@@ -124,11 +130,17 @@ pub trait GetBlockTemplateRpc {
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
     ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
+    /// method: post
+    /// tags: mining
     ///
     /// # Parameters
-    /// - `hexdata` (string, required)
-    /// - `jsonparametersobject` (string, optional) - currently ignored
-    ///  - holds a single field, workid, that must be included in submissions if provided by the server.
+    ///
+    /// - `hexdata`: (string, required)
+    /// - `jsonparametersobject`: (string, optional) - currently ignored
+    ///
+    /// # Notes
+    ///
+    ///  - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.
     #[rpc(name = "submitblock")]
     fn submit_block(
         &self,
@@ -139,6 +151,8 @@ pub trait GetBlockTemplateRpc {
     /// Returns mining-related information.
     ///
     /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
+    /// method: post
+    /// tags: mining
     #[rpc(name = "getmininginfo")]
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>>;
 
@@ -150,6 +164,8 @@ pub trait GetBlockTemplateRpc {
     /// If `height` is not supplied or is -1, uses the tip height.
     ///
     /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
+    /// method: post
+    /// tags: mining
     #[rpc(name = "getnetworksolps")]
     fn get_network_sol_ps(
         &self,
@@ -164,6 +180,8 @@ pub trait GetBlockTemplateRpc {
     /// See that method for details.
     ///
     /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
+    /// method: post
+    /// tags: mining
     #[rpc(name = "getnetworkhashps")]
     fn get_network_hash_ps(
         &self,
@@ -176,6 +194,8 @@ pub trait GetBlockTemplateRpc {
     /// Returns data about each connected network node.
     ///
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
+    /// method: post
+    /// tags: network
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
 
@@ -183,6 +203,16 @@ pub trait GetBlockTemplateRpc {
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
+    /// method: post
+    /// tags: util
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The zcash address to validate.
+    ///
+    /// # Notes
+    ///
+    /// - No notes
     #[rpc(name = "validateaddress")]
     fn validate_address(&self, address: String) -> BoxFuture<Result<validate_address::Response>>;
 
@@ -190,6 +220,16 @@ pub trait GetBlockTemplateRpc {
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)
+    /// method: post
+    /// tags: util
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The zcash address to validate.
+    ///
+    /// # Notes
+    ///
+    /// - No notes
     #[rpc(name = "z_validateaddress")]
     fn z_validate_address(
         &self,
@@ -199,22 +239,41 @@ pub trait GetBlockTemplateRpc {
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
     ///
-    /// `height` can be any valid current or future height.
-    /// If `height` is not supplied, uses the tip height.
-    ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
+    /// method: post
+    /// tags: mining
+    ///
+    /// # Parameters
+    ///
+    /// - `height`: (numeric, optional, example=1) Can be any valid current or future height.
+    ///
+    /// # Notes
+    ///
+    /// If `height` is not supplied, uses the tip height.
     #[rpc(name = "getblocksubsidy")]
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>>;
 
     /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
     ///
     /// zcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)
+    /// method: post
+    /// tags: blockchain
     #[rpc(name = "getdifficulty")]
     fn get_difficulty(&self) -> BoxFuture<Result<f64>>;
 
     /// Returns the list of individual payment addresses given a unified address.
     ///
     /// zcashd reference: [`z_listunifiedreceivers`](https://zcash.github.io/rpc/z_listunifiedreceivers.html)
+    /// method: post
+    /// tags: wallet
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The zcash unified address to get the list from.
+    ///
+    /// # Notes
+    ///
+    /// - No notes
     #[rpc(name = "z_listunifiedreceivers")]
     fn z_list_unified_receivers(
         &self,
@@ -1098,7 +1157,7 @@ where
                 best_chain_tip_height(&latest_chain_tip)?
             };
 
-            if height < height_for_first_halving(network) {
+            if height < network.height_for_first_halving() {
                 return Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Zebra does not support founders' reward subsidies, \
@@ -1197,7 +1256,7 @@ where
             // using this calculation.)
 
             // Get expanded difficulties (256 bits), these are the inverse of the work
-            let pow_limit: U256 = ExpandedDifficulty::target_difficulty_limit(network).into();
+            let pow_limit: U256 = network.target_difficulty_limit().into();
             let difficulty: U256 = chain_info
                 .expected_difficulty
                 .to_expanded()
