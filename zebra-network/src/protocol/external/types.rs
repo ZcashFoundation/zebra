@@ -207,7 +207,7 @@ mod test {
 
     #[test]
     fn version_extremes_testnet() {
-        version_extremes(&Testnet)
+        version_extremes(&Network::new_default_testnet())
     }
 
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
@@ -235,7 +235,7 @@ mod test {
 
     #[test]
     fn version_consistent_testnet() {
-        version_consistent(&Testnet)
+        version_consistent(&Network::new_default_testnet())
     }
 
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions

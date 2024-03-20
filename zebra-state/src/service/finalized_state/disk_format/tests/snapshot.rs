@@ -29,11 +29,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use zebra_chain::{
-    block::Block,
-    parameters::Network::{self, *},
-    serialization::ZcashDeserializeInto,
-};
+use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
 
 use crate::{
     service::finalized_state::{
@@ -50,9 +46,9 @@ use crate::{
 #[test]
 fn test_raw_rocksdb_column_families() {
     let _init_guard = zebra_test::init();
-
-    test_raw_rocksdb_column_families_with_network(Mainnet);
-    test_raw_rocksdb_column_families_with_network(Testnet);
+    for network in Network::iter() {
+        test_raw_rocksdb_column_families_with_network(network);
+    }
 }
 
 /// Snapshot raw column families for `network`.

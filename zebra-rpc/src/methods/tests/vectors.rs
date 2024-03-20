@@ -654,7 +654,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 async fn rpc_getaddresstxids_response() {
     let _init_guard = zebra_test::init();
 
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         let blocks: Vec<Arc<Block>> = network
             .blockchain_map()
             .iter()
