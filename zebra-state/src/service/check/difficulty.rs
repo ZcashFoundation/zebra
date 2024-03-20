@@ -183,10 +183,9 @@ impl AdjustedDifficulty {
             self.candidate_time,
             self.relevant_times[0],
         ) {
-            assert_eq!(
-                self.network,
-                Network::Testnet,
-                "invalid network: the minimum difficulty rule only applies on testnet"
+            assert!(
+                self.network.is_a_test_network(),
+                "invalid network: the minimum difficulty rule only applies on test networks"
             );
             self.network.target_difficulty_limit().to_compact()
         } else {

@@ -5,7 +5,10 @@
 use zcash_address::unified::{self, Container};
 use zcash_primitives::sapling;
 
-use crate::{parameters::Network, transparent, BoxError};
+use crate::{
+    parameters::{Network, UnsupportedNetwork},
+    transparent, BoxError,
+};
 
 /// Zcash address variants
 pub enum Address {
@@ -47,17 +50,25 @@ impl TryFrom<zcash_address::Network> for Network {
     fn try_from(network: zcash_address::Network) -> Result<Self, Self::Error> {
         match network {
             zcash_address::Network::Main => Ok(Network::Mainnet),
-            zcash_address::Network::Test => Ok(Network::Testnet),
+            zcash_address::Network::Test => Ok(Network::new_default_testnet()),
             zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
         }
     }
 }
 
-impl From<&Network> for zcash_address::Network {
-    fn from(network: &Network) -> Self {
+impl TryFrom<&Network> for zcash_address::Network {
+    type Error = UnsupportedNetwork;
+
+    fn try_from(network: &Network) -> Result<Self, Self::Error> {
         match network {
-            Network::Mainnet => zcash_address::Network::Main,
-            Network::Testnet => zcash_address::Network::Test,
+            Network::Mainnet => Ok(zcash_address::Network::Main),
+            Network::Testnet(_params) if network.is_default_testnet() => {
+                Ok(zcash_address::Network::Test)
+            }
+            // TODO: If the network parameters match `Regtest` parameters, convert to
+            //       `zcash_address::Network::Regtest instead of returning `UnsupportedAddress` error.
+            //       (#7119, #7839)
+            Network::Testnet(_params) => Err(UnsupportedNetwork),
         }
     }
 }
@@ -185,7 +196,14 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling(network.into(), data);
+                let network = network
+                    .try_into()
+                    .map_err(|err| {
+                        warn!(?err, "could not convert address network to zcash network")
+                    })
+                    .ok()?;
+
+                let address = ZcashAddress::from_sapling(network, data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,
