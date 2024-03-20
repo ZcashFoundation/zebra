@@ -44,7 +44,9 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    let range = FUNDING_STREAM_HEIGHT_RANGES.get(network).unwrap();
+    let range = FUNDING_STREAM_HEIGHT_RANGES
+        .get(&network.bip70_network_name())
+        .unwrap();
     let end = range.end;
     let last = end - 1;
 

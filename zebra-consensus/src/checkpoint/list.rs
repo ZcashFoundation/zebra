@@ -57,7 +57,10 @@ impl ParameterCheckpoint for Network {
             // zcash-cli getblockhash 0
             Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
             // zcash-cli -testnet getblockhash 0
-            Network::Testnet => "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
+            // TODO: Add a `genesis_hash` field to `NetworkParameters` and return it here (#8366)
+            Network::Testnet(_params) => {
+                "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38"
+            }
         }
         .parse()
         .expect("hard-coded hash parses")
@@ -65,11 +68,15 @@ impl ParameterCheckpoint for Network {
 
     fn checkpoint_list(&self) -> CheckpointList {
         // parse calls CheckpointList::from_list
+        // TODO:
+        // - Add a `genesis_hash` field to `NetworkParameters` and return it here (#8366)
+        // - Consider adding a `CUSTOM_TESTNET_CHECKPOINTS` constant to enable building with another checkpoints list
+        //   when using a configured testnet?
         let checkpoint_list: CheckpointList = match self {
             Network::Mainnet => MAINNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet => TESTNET_CHECKPOINTS
+            Network::Testnet(_params) => TESTNET_CHECKPOINTS
                 .parse()
                 .expect("Hard-coded Testnet checkpoint list parses and validates"),
         };
@@ -142,9 +149,11 @@ impl CheckpointList {
 
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
+            // TODO: Move this check to `<Network as ParameterCheckpoint>::checkpoint_list(&network)` method above (#8366),
+            //       See <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385865347>
             Some((block::Height(0), hash))
                 if (hash == &Network::Mainnet.genesis_hash()
-                    || hash == &Network::Testnet.genesis_hash()) => {}
+                    || hash == &Network::new_default_testnet().genesis_hash()) => {}
             Some((block::Height(0), _)) => {
                 Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
             }

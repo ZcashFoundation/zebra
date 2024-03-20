@@ -26,7 +26,9 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
             let recovery = zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
-                &<zcash_primitives::consensus::Network>::from(network),
+                // TODO: Implement `Parameters` trait for `Network` and pass network here without conversion (#8365)
+                &<zcash_primitives::consensus::Network>::try_from(network)
+                    .expect("network must match zcash_primitives network"),
                 alt_height,
                 &null_sapling_ovk,
                 output,

@@ -15,6 +15,8 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
+use lazy_static::lazy_static;
+
 use zebra_chain::parameters::Network;
 
 use crate::{
@@ -176,6 +178,10 @@ pub struct Config {
     pub max_connections_per_ip: usize,
 }
 
+lazy_static! {
+    static ref EMPTY_INITIAL_REGTEST_PEERS: IndexSet<String> = IndexSet::new();
+}
+
 impl Config {
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
@@ -223,9 +229,13 @@ impl Config {
 
     /// Returns the initial seed peer hostnames for the configured network.
     pub fn initial_peer_hostnames(&self) -> &IndexSet<String> {
-        match self.network {
+        match &self.network {
             Network::Mainnet => &self.initial_mainnet_peers,
-            Network::Testnet => &self.initial_testnet_peers,
+            Network::Testnet(params) if params.is_default_testnet() => &self.initial_testnet_peers,
+            // TODO: Check if the network is an incompatible custom testnet (_not_ Regtest), then panic if `initial_testnet_peers`
+            //       contains any of the default testnet peers, or return `initial_testnet_peers` otherwise. See:
+            //       <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385881828>
+            Network::Testnet(_params) => &EMPTY_INITIAL_REGTEST_PEERS,
         }
     }
 

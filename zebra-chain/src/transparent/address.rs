@@ -137,7 +137,8 @@ impl ZcashDeserialize for Address {
             }
             zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
-                    network: Network::Testnet,
+                    // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
+                    network: Network::new_default_testnet(),
                     script_hash: hash_bytes,
                 })
             }
@@ -149,7 +150,8 @@ impl ZcashDeserialize for Address {
             }
             zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
-                    network: Network::Testnet,
+                    // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
+                    network: Network::new_default_testnet(),
                     pub_key_hash: hash_bytes,
                 })
             }
