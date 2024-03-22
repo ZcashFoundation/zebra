@@ -274,7 +274,7 @@ impl Application for ZebradApp {
                 }
             };
 
-        let app_metadata = vec![
+        let app_metadata = [
             // build-time constant: cargo or git tag + short commit
             ("version", build_version().to_string()),
             // config
