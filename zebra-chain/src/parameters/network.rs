@@ -2,7 +2,6 @@
 
 use std::{fmt, str::FromStr, sync::Arc};
 
-use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 
 use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
@@ -66,20 +65,28 @@ impl NetworkParameters {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 pub enum NetworkKind {
     /// The production mainnet.
+    #[default]
     Mainnet,
 
     /// A test network.
     Testnet,
 }
 
+impl From<Network> for NetworkKind {
+    fn from(network: Network) -> Self {
+        network.kind()
+    }
+}
+
 /// An enum describing the possible network choices.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
     #[default]
@@ -87,34 +94,6 @@ pub enum Network {
 
     /// The oldest public test network.
     Testnet(Arc<NetworkParameters>),
-}
-
-impl<'de> Deserialize<'de> for Network {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
-        #[serde(deny_unknown_fields)]
-        enum DNetwork {
-            #[default]
-            Mainnet,
-            #[serde(alias = "Testnet")]
-            DefaultTestnet,
-            Regtest,
-            #[serde(untagged)]
-            ConfiguredTestnet(NetworkParameters),
-        }
-
-        let network = match DNetwork::deserialize(deserializer)? {
-            DNetwork::Mainnet => Network::Mainnet,
-            DNetwork::DefaultTestnet => Network::new_default_testnet(),
-            DNetwork::Regtest => unimplemented!("Regtest is not yet implemented"),
-            DNetwork::ConfiguredTestnet(params) => Network::Testnet(Arc::new(params)),
-        };
-
-        Ok(network)
-    }
 }
 
 impl NetworkKind {
@@ -184,9 +163,14 @@ impl fmt::Display for Network {
 }
 
 impl Network {
-    /// Creates a new [`Network::Testnet`] with the default Testnet network parameters.
+    /// Creates a new [`Network::Testnet`] with the default Testnet [`NetworkParameters`].
     pub fn new_default_testnet() -> Self {
         Self::Testnet(Arc::new(NetworkParameters::default()))
+    }
+
+    /// Creates a new configured [`Network::Testnet`] with the provided Testnet [`NetworkParameters`].
+    pub fn new_configured_testnet(params: NetworkParameters) -> Self {
+        Self::Testnet(Arc::new(params))
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.
@@ -203,6 +187,14 @@ impl Network {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
             Network::Testnet(_) => NetworkKind::Testnet,
+        }
+    }
+
+    /// Returns the default [`Network`] for a [`NetworkKind`].
+    pub fn from_kind(kind: NetworkKind) -> Self {
+        match kind {
+            NetworkKind::Mainnet => Self::Mainnet,
+            NetworkKind::Testnet => Self::new_default_testnet(),
         }
     }
 

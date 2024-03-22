@@ -23,7 +23,7 @@ pub mod arbitrary;
 
 pub use error::*;
 pub use genesis::*;
-pub use network::{Network, NetworkKind};
+pub use network::{Network, NetworkKind, NetworkParameters};
 pub use network_upgrade::*;
 pub use transaction::*;
 
