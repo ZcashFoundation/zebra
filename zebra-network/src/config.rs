@@ -17,7 +17,7 @@ use tracing::Span;
 
 use lazy_static::lazy_static;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::parameters::{Network, NetworkKind, NetworkParameters};
 
 use crate::{
     constants::{
@@ -633,7 +633,8 @@ impl<'de> Deserialize<'de> for Config {
         #[serde(deny_unknown_fields, default)]
         struct DConfig {
             listen_addr: String,
-            network: Network,
+            network: NetworkKind,
+            testnet_parameters: Option<NetworkParameters>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -648,7 +649,8 @@ impl<'de> Deserialize<'de> for Config {
                 let config = Config::default();
                 Self {
                     listen_addr: "0.0.0.0".to_string(),
-                    network: config.network,
+                    network: Default::default(),
+                    testnet_parameters: None,
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -661,7 +663,8 @@ impl<'de> Deserialize<'de> for Config {
 
         let DConfig {
             listen_addr,
-            network,
+            network: network_kind,
+            testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -669,6 +672,18 @@ impl<'de> Deserialize<'de> for Config {
             crawl_new_peer_interval,
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
+
+        let network = if let Some(network_params) = testnet_parameters {
+            assert_eq!(
+                network_kind,
+                NetworkKind::Testnet,
+                "set network to 'Testnet' to use testnet parameters"
+            );
+
+            Network::new_configured_testnet(network_params)
+        } else {
+            Network::from_kind(network_kind)
+        };
 
         let listen_addr = match listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),
