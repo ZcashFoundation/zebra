@@ -7,7 +7,7 @@ use secp256k1::PublicKey;
 use sha2::Sha256;
 
 use crate::{
-    parameters::Network,
+    parameters::NetworkKind,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     transparent::{opcodes::OpCode, Script},
 };
@@ -37,7 +37,7 @@ pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {
         /// Production, test, or other network
-        network: Network,
+        network: NetworkKind,
         /// 20 bytes specifying a script hash.
         script_hash: [u8; 20],
     },
@@ -45,7 +45,7 @@ pub enum Address {
     /// P2PKH (Pay to Public Key Hash) addresses
     PayToPublicKeyHash {
         /// Production, test, or other network
-        network: Network,
+        network: NetworkKind,
         /// 20 bytes specifying a public key hash, which is a RIPEMD-160
         /// hash of a SHA-256 hash of a compressed ECDSA key encoding.
         pub_key_hash: [u8; 20],
@@ -131,27 +131,25 @@ impl ZcashDeserialize for Address {
         match version_bytes {
             zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
-                    network: Network::Mainnet,
+                    network: NetworkKind::Mainnet,
                     script_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
-                    // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
-                    network: Network::new_default_testnet(),
+                    network: NetworkKind::Testnet,
                     script_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
-                    network: Network::Mainnet,
+                    network: NetworkKind::Mainnet,
                     pub_key_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
-                    // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
-                    network: Network::new_default_testnet(),
+                    network: NetworkKind::Testnet,
                     pub_key_hash: hash_bytes,
                 })
             }
@@ -162,11 +160,11 @@ impl ZcashDeserialize for Address {
 
 trait ToAddressWithNetwork {
     /// Convert `self` to an `Address`, given the current `network`.
-    fn to_address(&self, network: Network) -> Address;
+    fn to_address(&self, network: NetworkKind) -> Address;
 }
 
 impl ToAddressWithNetwork for Script {
-    fn to_address(&self, network: Network) -> Address {
+    fn to_address(&self, network: NetworkKind) -> Address {
         Address::PayToScriptHash {
             network,
             script_hash: Address::hash_payload(self.as_raw_bytes()),
@@ -175,7 +173,7 @@ impl ToAddressWithNetwork for Script {
 }
 
 impl ToAddressWithNetwork for PublicKey {
-    fn to_address(&self, network: Network) -> Address {
+    fn to_address(&self, network: NetworkKind) -> Address {
         Address::PayToPublicKeyHash {
             network,
             pub_key_hash: Address::hash_payload(&self.serialize()[..]),
@@ -185,26 +183,26 @@ impl ToAddressWithNetwork for PublicKey {
 
 impl Address {
     /// Create an address for the given public key hash and network.
-    pub fn from_pub_key_hash(network: &Network, pub_key_hash: [u8; 20]) -> Self {
+    pub fn from_pub_key_hash(network: NetworkKind, pub_key_hash: [u8; 20]) -> Self {
         Self::PayToPublicKeyHash {
-            network: network.clone(),
+            network,
             pub_key_hash,
         }
     }
 
     /// Create an address for the given script hash and network.
-    pub fn from_script_hash(network: &Network, script_hash: [u8; 20]) -> Self {
+    pub fn from_script_hash(network: NetworkKind, script_hash: [u8; 20]) -> Self {
         Self::PayToScriptHash {
-            network: network.clone(),
+            network,
             script_hash,
         }
     }
 
-    /// Returns the network for this address.
-    pub fn network(&self) -> Network {
+    /// Returns the network kind for this address.
+    pub fn network(&self) -> NetworkKind {
         match self {
-            Address::PayToScriptHash { network, .. } => network.clone(),
-            Address::PayToPublicKeyHash { network, .. } => network.clone(),
+            Address::PayToScriptHash { network, .. } => *network,
+            Address::PayToPublicKeyHash { network, .. } => *network,
         }
     }
 
@@ -285,7 +283,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = pub_key.to_address(Network::Mainnet);
+        let t_addr = pub_key.to_address(NetworkKind::Mainnet);
 
         assert_eq!(format!("{t_addr}"), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
@@ -300,7 +298,7 @@ mod tests {
         ])
         .expect("A PublicKey from slice");
 
-        let t_addr = pub_key.to_address(Network::new_default_testnet());
+        let t_addr = pub_key.to_address(NetworkKind::Testnet);
 
         assert_eq!(format!("{t_addr}"), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
     }
@@ -311,7 +309,7 @@ mod tests {
 
         let script = Script::new(&[0u8; 20]);
 
-        let t_addr = script.to_address(Network::Mainnet);
+        let t_addr = script.to_address(NetworkKind::Mainnet);
 
         assert_eq!(format!("{t_addr}"), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
     }
@@ -322,7 +320,7 @@ mod tests {
 
         let script = Script::new(&[0; 20]);
 
-        let t_addr = script.to_address(Network::new_default_testnet());
+        let t_addr = script.to_address(NetworkKind::Testnet);
 
         assert_eq!(format!("{t_addr}"), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }

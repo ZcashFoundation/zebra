@@ -451,7 +451,7 @@ where
         if let Some(miner_address) = mining_config.miner_address.clone() {
             assert_eq!(
                 miner_address.network(),
-                network.clone(),
+                network.kind(),
                 "incorrect miner address config: {miner_address} \
                          network.network {network} and miner address network {} must match",
                 miner_address.network(),
@@ -1084,7 +1084,7 @@ where
                 return Ok(validate_address::Response::invalid());
             }
 
-            if address.network() == network {
+            if address.network() == network.kind() {
                 Ok(validate_address::Response {
                     address: Some(raw_address),
                     is_valid: true,
@@ -1124,7 +1124,7 @@ where
                     }
                 };
 
-            if address.network() == network {
+            if address.network() == network.kind() {
                 Ok(z_validate_address::Response {
                     is_valid: true,
                     address: Some(raw_address),
