@@ -18,17 +18,17 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative,
-    block::Height,
-    history_tree::{HistoryTree, NonEmptyHistoryTree},
-    transparent,
+    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
     value_balance::ValueBalance,
 };
 
 use crate::{
     request::FinalizedBlock,
     service::finalized_state::{
-        disk_db::DiskWriteBatch, disk_format::RawBytes, zebra_db::ZebraDb, TypedColumnFamily,
+        disk_db::DiskWriteBatch,
+        disk_format::{chain::HistoryTreeParts, RawBytes},
+        zebra_db::ZebraDb,
+        TypedColumnFamily,
     },
     BoxError,
 };
@@ -42,15 +42,15 @@ pub const HISTORY_TREE: &str = "history_tree";
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
-pub type HistoryTreeCf<'cf> = TypedColumnFamily<'cf, (), NonEmptyHistoryTree>;
+pub type HistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, (), HistoryTreeParts>;
 
 /// The legacy (1.3.0 and earlier) type for reading history trees from the database.
 /// This type should not be used in new code.
-pub type LegacyHistoryTreeCf<'cf> = TypedColumnFamily<'cf, Height, NonEmptyHistoryTree>;
+pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryTreeParts>;
 
 /// A generic raw key type for reading history trees from the database, regardless of the database version.
 /// This type should not be used in new code.
-pub type RawHistoryTreeCf<'cf> = TypedColumnFamily<'cf, RawBytes, NonEmptyHistoryTree>;
+pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
 
 /// The name of the chain value pools column family.
 ///
@@ -67,22 +67,22 @@ impl ZebraDb {
     // Column family convenience methods
 
     /// Returns a typed handle to the `history_tree` column family.
-    pub(crate) fn history_tree_cf(&self) -> HistoryTreeCf {
-        HistoryTreeCf::new(&self.db, HISTORY_TREE)
+    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf {
+        HistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a legacy typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreeCf {
-        LegacyHistoryTreeCf::new(&self.db, HISTORY_TREE)
+    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf {
+        LegacyHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a generic raw key typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreeCf {
-        RawHistoryTreeCf::new(&self.db, HISTORY_TREE)
+    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf {
+        RawHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
@@ -115,19 +115,24 @@ impl ZebraDb {
         //
         // So we use the empty key `()`. Since the key has a constant value, we will always read
         // the latest tree.
-        let mut history_tree = history_tree_cf.zs_get(&());
+        let mut history_tree_parts = history_tree_cf.zs_get(&());
 
-        if history_tree.is_none() {
+        if history_tree_parts.is_none() {
             let legacy_history_tree_cf = self.legacy_history_tree_cf();
 
             // In Zebra 1.4.0 and later, we only update the history tip tree when it has changed (for every block after heartwood).
             // But we write with a `()` key, not a height key.
             // So we need to look for the most recent update height if the `()` key has never been written.
-            history_tree = legacy_history_tree_cf
+            history_tree_parts = legacy_history_tree_cf
                 .zs_last_key_value()
                 .map(|(_height_key, tree_value)| tree_value);
         }
 
+        let history_tree = history_tree_parts.map(|parts| {
+            parts.with_network(&self.db.network()).expect(
+                "deserialization format should match the serialization format used by IntoDisk",
+            )
+        });
         Arc::new(HistoryTree::from(history_tree))
     }
 
@@ -139,7 +144,12 @@ impl ZebraDb {
 
         raw_history_tree_cf
             .zs_forward_range_iter(..)
-            .map(|(raw_key, history_tree)| (raw_key, Arc::new(HistoryTree::from(history_tree))))
+            .map(|(raw_key, history_tree_parts)| {
+                let history_tree = history_tree_parts.with_network(&self.db.network()).expect(
+                    "deserialization format should match the serialization format used by IntoDisk",
+                );
+                (raw_key, Arc::new(HistoryTree::from(history_tree)))
+            })
             .collect()
     }
 
@@ -164,9 +174,9 @@ impl DiskWriteBatch {
     pub fn update_history_tree(&mut self, db: &ZebraDb, tree: &HistoryTree) {
         let history_tree_cf = db.history_tree_cf().with_batch_for_writing(self);
 
-        if let Some(tree) = tree.as_ref().as_ref() {
+        if let Some(tree) = tree.as_ref() {
             // The batch is modified by this method and written by the caller.
-            let _ = history_tree_cf.zs_insert(&(), tree);
+            let _ = history_tree_cf.zs_insert(&(), &HistoryTreeParts::from(tree));
         }
     }
 

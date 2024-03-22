@@ -66,6 +66,17 @@ impl NetworkParameters {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+/// An enum describing the kind of network, whether it's the production mainnet or a testnet.
+pub enum NetworkKind {
+    /// The production mainnet.
+    Mainnet,
+
+    /// A test network.
+    Testnet,
+}
+
 /// An enum describing the possible network choices.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
@@ -106,40 +117,49 @@ impl<'de> Deserialize<'de> for Network {
     }
 }
 
-impl Network {
+impl NetworkKind {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
-    pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::try_from(self)
-            // This prefix is the same for Testnet and Regtest in zcashd.
-            // TODO: Use the constants directly when implementing `Parameters` for `Network` (#8365)
-            .unwrap_or(ZcashPrimitivesNetwork::TestNetwork)
-            .b58_pubkey_address_prefix()
+    pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
+        <ZcashPrimitivesNetwork>::from(self).b58_pubkey_address_prefix()
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
-    pub fn b58_script_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::try_from(self)
-            // This prefix is the same for Testnet and Regtest in zcashd.
-            // TODO: Use the constants directly when implementing `Parameters` for `Network` (#8365)
-            .unwrap_or(ZcashPrimitivesNetwork::TestNetwork)
-            .b58_script_address_prefix()
+    pub fn b58_script_address_prefix(self) -> [u8; 2] {
+        <ZcashPrimitivesNetwork>::from(self).b58_script_address_prefix()
     }
-    /// Returns true if the maximum block time rule is active for `network` and `height`.
-    ///
-    /// Always returns true if `network` is the Mainnet.
-    /// If `network` is the Testnet, the `height` should be at least
-    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
-    /// Returns false otherwise.
-    ///
-    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
+
+    /// Return the network name as defined in
+    /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
+    pub fn bip70_network_name(&self) -> String {
         match self {
-            Network::Mainnet => true,
-            // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on NetworkParameters (#8364)
-            Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+            Self::Mainnet => "main".to_string(),
+            Self::Testnet => "test".to_string(),
         }
+    }
+
+    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
+    pub fn from_zcash_address(network: zcash_address::Network) -> Self {
+        match network {
+            zcash_address::Network::Main => NetworkKind::Mainnet,
+            zcash_address::Network::Test | zcash_address::Network::Regtest => NetworkKind::Testnet,
+        }
+    }
+}
+
+impl From<NetworkKind> for &'static str {
+    fn from(network: NetworkKind) -> &'static str {
+        match network {
+            NetworkKind::Mainnet => "MainnetKind",
+            NetworkKind::Testnet => "TestnetKind",
+        }
+    }
+}
+
+impl fmt::Display for NetworkKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str((*self).into())
     }
 }
 
@@ -178,17 +198,41 @@ impl Network {
         }
     }
 
+    /// Returns the [`NetworkKind`] for this network.
+    pub fn kind(&self) -> NetworkKind {
+        match self {
+            Network::Mainnet => NetworkKind::Mainnet,
+            Network::Testnet(_) => NetworkKind::Testnet,
+        }
+    }
+
     /// Returns an iterator over [`Network`] variants.
     pub fn iter() -> impl Iterator<Item = Self> {
         // TODO: Use default values of `Testnet` variant when adding fields for #7845.
         [Self::Mainnet, Self::new_default_testnet()].into_iter()
     }
 
+    /// Returns true if the maximum block time rule is active for `network` and `height`.
+    ///
+    /// Always returns true if `network` is the Mainnet.
+    /// If `network` is the Testnet, the `height` should be at least
+    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
+    /// Returns false otherwise.
+    ///
+    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
+        match self {
+            Network::Mainnet => true,
+            // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on NetworkParameters (#8364)
+            Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+        }
+    }
+
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
             Network::Mainnet => 8233,
-            // TODO: Add a `default_port` field to `NetworkParameters` to return here.
+            // TODO: Add a `default_port` field to `NetworkParameters` to return here. (zcashd uses 18344 for Regtest)
             Network::Testnet(_params) => 18233,
         }
     }
@@ -214,10 +258,7 @@ impl Network {
     /// Return the network name as defined in
     /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
     pub fn bip70_network_name(&self) -> String {
-        match self {
-            Network::Mainnet => "main".to_string(),
-            Network::Testnet(_params) => "test".to_string(),
-        }
+        self.kind().bip70_network_name()
     }
 
     /// Return the lowercase network name.
