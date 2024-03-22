@@ -149,6 +149,9 @@ jobs:
       rust_backtrace: full
       rust_lib_backtrace: full
       rust_log: info
+    # This step needs access to Docker Hub secrets to run successfully
+    secrets: inherit
+
 
   # zebrad cached checkpoint state tests
 
