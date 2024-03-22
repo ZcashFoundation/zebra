@@ -54,6 +54,11 @@ futures = "0.3.30"
 zcash_client_backend = "0.10.0-rc.1"
 zcash_primitives = "0.13.0-rc.1"
 
+# Wallet integration
+zcash_client_backend2 = { package = "zcash_client_backend", path = "/home/alfredo/librustzcash/pr1293/librustzcash/zcash_client_backend", features = ["test-dependencies"] }
+zcash_primitives2 = { package = "zcash_primitives", path = "/home/alfredo/librustzcash/pr1293/librustzcash/zcash_primitives" }
+secrecy = "0.8.0"
+
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35", features = ["shielded-scan"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.35", features = ["shielded-scan"] }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.35", features = ["shielded-scan"] }

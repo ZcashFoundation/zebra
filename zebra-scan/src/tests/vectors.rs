@@ -200,3 +200,51 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn wallet_fake_generated_blocks() -> Result<()> {
+    use zcash_client_backend2::data_api::{ScannedBlock, ScannedBundles};
+    use zcash_primitives2::{block::BlockHash, consensus::BlockHeight};
+
+    use crate::service::scan_task::wallet::{
+        create_account, get_wallet_chain_tip, init, insert_block,
+    };
+
+    let extsk = ExtendedSpendingKey::master(&[]);
+    let dfvk: DiversifiableFullViewingKey = extsk.to_diversifiable_full_viewing_key();
+    let nf = Nullifier([7; 32]);
+
+    let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
+
+    assert_eq!(block.transactions.len(), 4);
+
+    let scanned_block = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+
+    // TODO: this conversion should not be needed once we have only 1 verison of `zcash_client_backend` dependency.
+    let scanned_block_converted = ScannedBlock::from_parts(
+        BlockHeight::from_u32(scanned_block.height().into()),
+        BlockHash(scanned_block.block_hash().0),
+        scanned_block.block_time(),
+        vec![],
+        ScannedBundles::new(1, vec![], vec![]),
+    );
+
+    // Initialize the memory wallet database
+    let mut database = init();
+
+    // Insert a block
+    let _ = insert_block(&mut database, scanned_block_converted);
+
+    // Check inserted block
+    let chain_tip = get_wallet_chain_tip(&database).unwrap();
+    assert_eq!(chain_tip, block.coinbase_height());
+
+    // Create an account
+    let seed = [0u8; 32];
+    let sapling_viewing_key = create_account(&mut database, seed).unwrap();
+
+    // Check created account viewing key
+    assert_eq!(sapling_viewing_key, "zxviews1qwm3496eqqqqpqx8h5s6jukzxgqghr9zv3jzxwhzqch7sgkkpwkcu2pd5wlv7vvzn6wfqdwumklpg83s0cmdjludg9lydkfwaqvkwjajq4gak778aty5ejhpy3k355l8fweqflerk632tuq93rp43qjlzgg03yufzp77wnn34vjnltz6da093xxnxhecuyxr3cequrfqtvz49dne3pkhmfta003rv0pz8eh6wk87w8xzldtpztwzuvaq8cgv0racerghex40rhvrpjgrzzdml".to_string());
+
+    Ok(())
+}

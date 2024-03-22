@@ -12,6 +12,7 @@ use crate::storage::Storage;
 mod commands;
 mod executor;
 pub mod scan;
+pub mod wallet;
 
 pub use commands::ScanTaskCommand;
 
