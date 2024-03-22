@@ -24,8 +24,8 @@ categories = ["algorithms", "asynchronous"]
 [dependencies]
 futures = "0.3.30"
 futures-core = "0.3.28"
-pin-project = "1.1.4"
-rayon = "1.8.1"
+pin-project = "1.1.5"
+rayon = "1.9.0"
 tokio = { version = "1.36.0", features = ["time", "sync", "tracing", "macros"] }
 tokio-util = "0.7.10"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
@@ -33,7 +33,7 @@ tracing = "0.1.39"
 tracing-futures = "0.2.5"
 
 [dev-dependencies]
-color-eyre = "0.6.2"
+color-eyre = "0.6.3"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
@@ -42,7 +42,7 @@ ed25519-zebra = "4.0.3"
 rand = "0.8.5"
 
 tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
-tokio-test = "0.4.3"
+tokio-test = "0.4.4"
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.11" }
 tower-test = "0.4.0"
 
