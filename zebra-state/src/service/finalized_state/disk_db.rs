@@ -523,7 +523,7 @@ impl DiskDb {
         let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
         let mut column_families_log_string = String::from("");
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
-        for (i, cf_descriptor) in column_families.iter().enumerate() {
+        for cf_descriptor in column_families.iter() {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
