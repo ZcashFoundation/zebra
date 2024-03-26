@@ -139,12 +139,12 @@ async fn check_transcripts() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = zebra_state::init_test(network);
+    let state_service = zebra_state::init_test(&network);
 
-    let transaction = transaction::Verifier::new(network, state_service.clone());
+    let transaction = transaction::Verifier::new(&network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);
     let block_verifier = Buffer::new(
-        SemanticBlockVerifier::new(network, state_service.clone(), transaction),
+        SemanticBlockVerifier::new(&network, state_service.clone(), transaction),
         1,
     );
 
@@ -196,7 +196,7 @@ fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
-        check::difficulty_is_valid(&block.header, network, &Height(height), &block.hash())
+        check::difficulty_is_valid(&block.header, &network, &Height(height), &block.hash())
             .expect("the difficulty from a historical block should be valid");
     }
 
@@ -220,7 +220,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
 
     // Validate the block
     let result =
-        check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &hash).unwrap_err();
+        check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
     let expected = BlockError::InvalidDifficulty(height, hash);
     assert_eq!(expected, result);
 
@@ -235,7 +235,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
 
     // Validate the block as if it is a mainnet block
     let result =
-        check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &hash).unwrap_err();
+        check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
     let expected = BlockError::TargetDifficultyLimit(
         height,
         hash,
@@ -255,7 +255,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     let difficulty_threshold = block.header.difficulty_threshold.to_expanded().unwrap();
 
     // Validate the block
-    let result = check::difficulty_is_valid(&block.header, Network::Mainnet, &height, &bad_hash)
+    let result = check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &bad_hash)
         .unwrap_err();
     let expected =
         BlockError::DifficultyFilter(height, bad_hash, difficulty_threshold, Network::Mainnet);
@@ -301,12 +301,13 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
             .expect("block is structurally valid");
 
         let canopy_activation_height = NetworkUpgrade::Canopy
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Canopy activation height is known");
 
         // TODO: first halving, second halving, third halving, and very large halvings
         if block::Height(height) >= canopy_activation_height {
-            check::subsidy_is_valid(&block, network).expect("subsidies should pass for this block");
+            check::subsidy_is_valid(&block, &network)
+                .expect("subsidies should pass for this block");
         }
     }
 
@@ -334,7 +335,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     assert_eq!(expected, result);
 
     // Validate the block using subsidy_is_valid
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    let result = check::subsidy_is_valid(&block, &network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
 
@@ -353,7 +354,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     assert_eq!(expected, result);
 
     // Validate the block using subsidy_is_valid
-    let result = check::subsidy_is_valid(&block, network).unwrap_err();
+    let result = check::subsidy_is_valid(&block, &network).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
 
@@ -378,7 +379,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     assert_eq!(expected, result);
 
     // Validate the block using subsidy_is_valid, which does not detect this error
-    check::subsidy_is_valid(&block, network)
+    check::subsidy_is_valid(&block, &network)
         .expect("subsidy does not check for extra coinbase transactions");
 
     Ok(())
@@ -398,7 +399,7 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
     let block_iter = network.block_iter();
 
     let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
+        .activation_height(&network)
         .expect("Canopy activation height is known");
 
     for (&height, block) in block_iter {
@@ -406,7 +407,7 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
 
             // Validate
-            let result = check::subsidy_is_valid(&block, network);
+            let result = check::subsidy_is_valid(&block, &network);
             assert!(result.is_ok());
         }
     }
@@ -450,7 +451,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let result = check::subsidy_is_valid(&block, network);
+    let result = check::subsidy_is_valid(&block, &network);
     let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::FundingStreamNotFound,
     )));
@@ -480,7 +481,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             let miner_fees = Amount::try_from(MAX_MONEY / 2).unwrap();
 
             // Validate
-            let result = check::miner_fees_are_valid(&block, network, miner_fees);
+            let result = check::miner_fees_are_valid(&block, &network, miner_fees);
             assert!(result.is_ok());
         }
     }
@@ -501,7 +502,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let miner_fees = Amount::zero();
 
     // Validate
-    let result = check::miner_fees_are_valid(&block, network, miner_fees);
+    let result = check::miner_fees_are_valid(&block, &network, miner_fees);
 
     let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
         SubsidyError::InvalidMinerFees,
@@ -569,7 +570,7 @@ fn merkle_root_is_valid_for_network(network: Network) -> Result<(), Report> {
             .map(|tx| tx.hash())
             .collect::<Vec<_>>();
 
-        check::merkle_root_validity(network, &block, &transaction_hashes)
+        check::merkle_root_validity(&network, &block, &transaction_hashes)
             .expect("merkle root should be valid for this block");
     }
 
@@ -587,7 +588,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
         // skip blocks that are before overwinter as they will not have a valid consensus branch id
         if *height
             < NetworkUpgrade::Overwinter
-                .activation_height(network)
+                .activation_height(&network)
                 .expect("a valid overwinter activation height")
                 .0
         {
@@ -599,7 +600,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| transaction_to_fake_v5(t, network, Height(*height)))
+            .map(|t| transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
@@ -616,7 +617,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
         // but we also need to test against zcashd test vectors.
         Arc::make_mut(&mut block.header).merkle_root = transaction_hashes.iter().cloned().collect();
 
-        check::merkle_root_validity(network, &block, &transaction_hashes)
+        check::merkle_root_validity(&network, &block, &transaction_hashes)
             .expect("merkle root should be valid for this block");
     }
 
@@ -682,13 +683,13 @@ fn legacy_sigops_count_for_historic_blocks() {
 fn transaction_expiration_height_validation() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    transaction_expiration_height_for_network(Network::Mainnet)?;
-    transaction_expiration_height_for_network(Network::Testnet)?;
+    transaction_expiration_height_for_network(&Network::Mainnet)?;
+    transaction_expiration_height_for_network(&Network::Testnet)?;
 
     Ok(())
 }
 
-fn transaction_expiration_height_for_network(network: Network) -> Result<(), Report> {
+fn transaction_expiration_height_for_network(network: &Network) -> Result<(), Report> {
     let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {

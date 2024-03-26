@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (config, network) = Default::default();
 
     let (scan_service, _cmd_receiver) =
-        ScanService::new_with_mock_scanner(Storage::new(&config, network, false));
+        ScanService::new_with_mock_scanner(Storage::new(&config, &network, false));
     let scan_service = ServiceBuilder::new().buffer(10).service(scan_service);
 
     // Start the gRPC server.

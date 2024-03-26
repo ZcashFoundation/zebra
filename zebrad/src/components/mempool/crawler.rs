@@ -30,7 +30,7 @@
 //! # let peer_set_service = MockService::build().for_unit_tests();
 //! # let mempool_service = MockService::build().for_unit_tests();
 //! # let (sync_status, _) = SyncStatus::new();
-//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, Network::Mainnet);
+//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, &Network::Mainnet);
 //!
 //! let crawler_task = mempool::Crawler::spawn(
 //!     &mempool::Config::default(),

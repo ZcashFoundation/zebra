@@ -515,8 +515,8 @@ where
         let user_agent = self.user_agent.unwrap_or_default();
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
-        let network = config.network;
-        let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, network);
+        let network = config.network.clone();
+        let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
 
         Ok(Handshake {
             config,
@@ -898,7 +898,7 @@ where
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
-                    .for_network(config.network)
+                    .for_network(&config.network)
                     .with_metrics_addr_label(connected_addr.get_transient_addr_label())
                     .finish(),
             );

@@ -395,8 +395,8 @@ lazy_static! {
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, Version> = {
         let mut hash_map = HashMap::new();
 
-        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(Mainnet, Nu5));
-        hash_map.insert(Testnet, Version::min_specified_for_upgrade(Testnet, Nu5));
+        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu5));
+        hash_map.insert(Testnet, Version::min_specified_for_upgrade(&Testnet, Nu5));
 
         hash_map
     };

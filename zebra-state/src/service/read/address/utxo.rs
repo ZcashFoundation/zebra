@@ -48,14 +48,14 @@ pub struct AddressUtxos {
 impl AddressUtxos {
     /// Creates a new set of address UTXOs.
     pub fn new(
-        network: Network,
+        network: &Network,
         utxos: BTreeMap<OutputLocation, transparent::Output>,
         tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
     ) -> Self {
         Self {
             utxos,
             tx_ids,
-            network,
+            network: network.clone(),
         }
     }
 
@@ -77,7 +77,7 @@ impl AddressUtxos {
         self.utxos.iter().map(|(out_loc, output)| {
             (
                 output
-                    .address(self.network)
+                    .address(&self.network)
                     .expect("address indexes only contain outputs with addresses"),
                 self.tx_ids
                     .get(&out_loc.transaction_location())
@@ -95,7 +95,7 @@ impl AddressUtxos {
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
 /// returns an empty list.
 pub fn address_utxos<C>(
-    network: Network,
+    network: &Network,
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,

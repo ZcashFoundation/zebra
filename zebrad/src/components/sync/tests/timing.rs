@@ -149,7 +149,7 @@ fn request_genesis_is_rate_limited() {
     });
 
     // create an empty latest chain tip
-    let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, Network::Mainnet);
+    let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, &Network::Mainnet);
 
     // create a verifier service that will always panic as it will never be called
     let verifier_service =

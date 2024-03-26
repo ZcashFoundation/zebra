@@ -91,7 +91,7 @@ impl AdjustedDifficulty {
     /// If the `context` contains fewer than 28 items.
     pub fn new_from_block<C>(
         candidate_block: &Block,
-        network: Network,
+        network: &Network,
         context: C,
     ) -> AdjustedDifficulty
     where
@@ -125,7 +125,7 @@ impl AdjustedDifficulty {
     pub fn new_from_header_time<C>(
         candidate_header_time: DateTime<Utc>,
         previous_block_height: block::Height,
-        network: Network,
+        network: &Network,
         context: C,
     ) -> AdjustedDifficulty
     where
@@ -148,7 +148,7 @@ impl AdjustedDifficulty {
         AdjustedDifficulty {
             candidate_time: candidate_header_time,
             candidate_height,
-            network,
+            network: network.clone(),
             relevant_difficulty_thresholds,
             relevant_times,
         }
@@ -166,7 +166,7 @@ impl AdjustedDifficulty {
 
     /// Returns the configured network.
     pub fn network(&self) -> Network {
-        self.network
+        self.network.clone()
     }
 
     /// Calculate the expected `difficulty_threshold` for a candidate block, based
@@ -178,7 +178,7 @@ impl AdjustedDifficulty {
     /// minimum difficulty adjustment from ZIPs 205 and 208.
     pub fn expected_difficulty_threshold(&self) -> CompactDifficulty {
         if NetworkUpgrade::is_testnet_min_difficulty_block(
-            self.network,
+            &self.network,
             self.candidate_height,
             self.candidate_time,
             self.relevant_times[0],
@@ -204,7 +204,7 @@ impl AdjustedDifficulty {
     /// Testnet minimum difficulty adjustment.)
     fn threshold_bits(&self) -> CompactDifficulty {
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
-            self.network,
+            &self.network,
             self.candidate_height,
         );
 
@@ -263,7 +263,7 @@ impl AdjustedDifficulty {
     /// start and end of the timespan times. timespan times `[11..=16]` are ignored.
     fn median_timespan_bounded(&self) -> Duration {
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
-            self.network,
+            &self.network,
             self.candidate_height,
         );
         // This value is exact, but we need to truncate its nanoseconds component

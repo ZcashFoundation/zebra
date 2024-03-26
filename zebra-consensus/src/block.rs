@@ -108,9 +108,9 @@ where
     V::Future: Send + 'static,
 {
     /// Creates a new SemanticBlockVerifier
-    pub fn new(network: Network, state_service: S, transaction_verifier: V) -> Self {
+    pub fn new(network: &Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
-            network,
+            network: network.clone(),
             state_service,
             transaction_verifier,
         }
@@ -139,7 +139,7 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
-        let network = self.network;
+        let network = self.network.clone();
 
         let block = request.block();
 
@@ -180,11 +180,11 @@ where
             // > acceptance rules (excluding the check for a valid proof-of-work).
             // <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
             if request.is_proposal() {
-                check::difficulty_threshold_is_valid(&block.header, network, &height, &hash)?;
+                check::difficulty_threshold_is_valid(&block.header, &network, &height, &hash)?;
             } else {
                 // Do the difficulty checks first, to raise the threshold for
                 // attacks that use any other fields.
-                check::difficulty_is_valid(&block.header, network, &height, &hash)?;
+                check::difficulty_is_valid(&block.header, &network, &height, &hash)?;
                 check::equihash_solution_is_valid(&block.header)?;
             }
 
@@ -195,7 +195,7 @@ where
             let transaction_hashes: Arc<[_]> =
                 block.transactions.iter().map(|t| t.hash()).collect();
 
-            check::merkle_root_validity(network, &block, &transaction_hashes)?;
+            check::merkle_root_validity(&network, &block, &transaction_hashes)?;
 
             // Since errors cause an early exit, try to do the
             // quick checks first.
@@ -205,12 +205,12 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
-            check::subsidy_is_valid(&block, network)?;
+            check::subsidy_is_valid(&block, &network)?;
 
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
-            tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, network, height)?;
+            tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
@@ -277,7 +277,7 @@ where
                     hash,
                     source: amount_error,
                 })?;
-            check::miner_fees_are_valid(&block, network, block_miner_fees)?;
+            check::miner_fees_are_valid(&block, &network, block_miner_fees)?;
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)

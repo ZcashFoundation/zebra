@@ -17,7 +17,7 @@ use crate::{service::ScanTask, tests::mock_sapling_scanning_keys};
 async fn scan_task_processes_messages_correctly() -> Result<(), Report> {
     let (mut mock_scan_task, mut cmd_receiver) = ScanTask::mock();
     let mut parsed_keys = HashMap::new();
-    let network = Default::default();
+    let network = &Default::default();
 
     // Send some keys to be registered
     let num_keys = 10;

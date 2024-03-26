@@ -37,7 +37,7 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
     let transcript = Transcript::from(empty_state_test_cases());
 
     let network = Mainnet;
-    let (_state, read_state, _latest_chain_tip, _chain_tip_change) = init_test_services(network);
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) = init_test_services(&network);
 
     transcript.check(read_state).await?;
 
@@ -56,7 +56,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
         .collect();
 
     let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
-        populated_state(blocks.clone(), Mainnet).await;
+        populated_state(blocks.clone(), &Mainnet).await;
 
     let tip_height = Height(blocks.len() as u32 - 1);
 
@@ -372,7 +372,7 @@ fn new_ephemeral_db() -> ZebraDb {
         &Config::ephemeral(),
         STATE_DATABASE_KIND,
         &state_database_format_version_in_code(),
-        Mainnet,
+        &Mainnet,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()

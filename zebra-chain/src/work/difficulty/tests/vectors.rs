@@ -454,7 +454,7 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
         // threshold, as documented in ZIP-205 and ZIP-208:
         // https://zips.z.cash/zip-0205#change-to-difficulty-adjustment-on-testnet
         // https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-testnet
-        match NetworkUpgrade::minimum_difficulty_spacing_for_height(Network::Testnet, height) {
+        match NetworkUpgrade::minimum_difficulty_spacing_for_height(&Network::Testnet, height) {
             None => Err(eyre!("the minimum difficulty rule is not active"))?,
             Some(spacing) if (time_gap <= spacing) => Err(eyre!(
                 "minimum difficulty block times must be more than 6 target spacing intervals apart"

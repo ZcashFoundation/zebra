@@ -236,7 +236,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 
     // Get the zebrad config
     let config = test_type
-        .zebrad_config(test_name, use_internet_connection, None, network)
+        .zebrad_config(test_name, use_internet_connection, None, &network)
         .expect("already checked config")?;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
@@ -314,7 +314,7 @@ where
             test_name,
             use_internet_connection,
             replace_cache_dir,
-            network,
+            &network,
         )
         .expect("already checked config")?;
 
@@ -353,7 +353,7 @@ pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
     // Check if we have any necessary cached states for the zebrad config.
     // The cache_dir and network values don't matter here.
     test_type
-        .zebrad_config(test_name, true, None, Mainnet)
+        .zebrad_config(test_name, true, None, &Mainnet)
         .is_some()
 }
 

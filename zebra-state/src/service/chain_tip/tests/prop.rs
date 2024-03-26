@@ -38,7 +38,7 @@ proptest! {
         tip_updates in any::<SummaryDebug<Vec<(BlockUpdate, BlockConnection, TipChangeCheck)>>>(),
         network in any::<Network>(),
     ) {
-        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, network);
+        let (mut chain_tip_sender, latest_chain_tip, mut chain_tip_change) = ChainTipSender::new(None, &network);
 
         let mut latest_finalized_tip = None;
         let mut latest_non_finalized_tip = None;
@@ -132,7 +132,7 @@ proptest! {
                     // some updates don't do anything, so there's no new action
                     None
                 } else if Some(chain_tip.previous_block_hash) != old_last_change_hash
-                    || NetworkUpgrade::is_activation_height(network, chain_tip.height)
+                    || NetworkUpgrade::is_activation_height(&network, chain_tip.height)
                 {
                     Some(TipAction::reset_with(block.0.into()))
                 } else {

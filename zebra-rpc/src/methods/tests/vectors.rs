@@ -70,7 +70,7 @@ async fn rpc_getblock() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -343,7 +343,7 @@ async fn rpc_getbestblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -386,7 +386,7 @@ async fn rpc_getrawtransaction() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
     latest_chain_tip_sender.send_best_tip_height(Height(10));
@@ -557,7 +557,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -669,12 +669,12 @@ async fn rpc_getaddresstxids_response() {
 
         // Get the address.
         let address = first_block_first_transaction.outputs()[1]
-            .address(network)
+            .address(&network)
             .unwrap();
 
         // Create a populated state service
         let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-            zebra_state::populated_state(blocks.to_owned(), network).await;
+            zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
             // Exhaustively test possible block ranges for mainnet.
@@ -683,7 +683,7 @@ async fn rpc_getaddresstxids_response() {
             for start in 1..=10 {
                 for end in start..=10 {
                     rpc_getaddresstxids_response_with(
-                        network,
+                        &network,
                         start..=end,
                         &address,
                         &read_state,
@@ -695,7 +695,7 @@ async fn rpc_getaddresstxids_response() {
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
-                network,
+                &network,
                 1..=10,
                 &address,
                 &read_state,
@@ -707,7 +707,7 @@ async fn rpc_getaddresstxids_response() {
 }
 
 async fn rpc_getaddresstxids_response_with(
-    network: Network,
+    network: &Network,
     range: RangeInclusive<u32>,
     address: &transparent::Address,
     read_state: &ReadStateService,
@@ -718,7 +718,7 @@ async fn rpc_getaddresstxids_response_with(
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         "RPC test",
-        network,
+        network.clone(),
         false,
         true,
         Buffer::new(mempool.clone(), 1),
@@ -808,13 +808,13 @@ async fn rpc_getaddressutxos_response() {
     let first_block_first_transaction = &blocks[1].transactions[0];
     // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
     let address = &first_block_first_transaction.outputs()[1]
-        .address(Mainnet)
+        .address(&Mainnet)
         .unwrap();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let rpc = RpcImpl::new(
         "RPC test",
@@ -864,19 +864,19 @@ async fn rpc_getblockcount() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
         .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -909,19 +909,19 @@ async fn rpc_getblockcount_empty_state() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(Mainnet);
+        zebra_state::init_test_services(&Mainnet);
 
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
         .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -956,14 +956,14 @@ async fn rpc_getpeerinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(Mainnet);
+        zebra_state::init_test_services(&Mainnet);
 
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
         .await;
 
     let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
@@ -982,7 +982,7 @@ async fn rpc_getpeerinfo() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        network,
+        &network,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1026,19 +1026,19 @@ async fn rpc_getblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
         .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1090,11 +1090,11 @@ async fn rpc_getmininginfo() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         read_state,
@@ -1126,11 +1126,11 @@ async fn rpc_getnetworksolps() {
 
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         read_state,
@@ -1224,8 +1224,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     mock_sync_status.set_is_close_to_tip(true);
 
     let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
-        true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
+        false => Some(transparent::Address::from_script_hash(&Mainnet, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(
+            &Mainnet, [0x7e; 20],
+        )),
     };
 
     #[allow(clippy::unnecessary_struct_initialization)]
@@ -1238,7 +1240,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1257,7 +1259,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
@@ -1282,7 +1284,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(Mainnet),
+                    history_tree: fake_history_tree(&Mainnet),
                 }));
         }
     };
@@ -1508,7 +1510,7 @@ async fn rpc_submitblock_errors() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks, Mainnet).await;
+        zebra_state::populated_state(blocks, &Mainnet).await;
 
     // Init RPCs
     let (
@@ -1516,12 +1518,12 @@ async fn rpc_submitblock_errors() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), Mainnet, state.clone())
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
         .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -1573,7 +1575,7 @@ async fn rpc_validateaddress() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
@@ -1618,7 +1620,7 @@ async fn rpc_z_validateaddress() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
@@ -1687,7 +1689,7 @@ async fn rpc_getdifficulty() {
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1705,7 +1707,7 @@ async fn rpc_getdifficulty() {
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
@@ -1730,7 +1732,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1756,7 +1758,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1779,7 +1781,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1802,7 +1804,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(Mainnet),
+                history_tree: fake_history_tree(&Mainnet),
             }));
     };
 
@@ -1826,7 +1828,7 @@ async fn rpc_z_listunifiedreceivers() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-        Mainnet,
+        &Mainnet,
         Default::default(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),

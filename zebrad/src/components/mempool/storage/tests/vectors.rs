@@ -36,7 +36,7 @@ fn mempool_storage_crud_exact_mainnet() {
     });
 
     // Get one (1) unmined transaction
-    let unmined_tx = unmined_transactions_in_blocks(.., network)
+    let unmined_tx = unmined_transactions_in_blocks(.., &network)
         .next()
         .expect("at least one unmined transaction");
 
@@ -69,7 +69,7 @@ fn mempool_storage_basic() -> Result<()> {
 
 fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, network).collect();
+    let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, &network).collect();
 
     assert!(
         MEMPOOL_TX_COUNT < unmined_transactions.len(),
@@ -162,7 +162,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     });
 
     // Get one (1) unmined transaction
-    let unmined_tx_1 = unmined_transactions_in_blocks(.., network)
+    let unmined_tx_1 = unmined_transactions_in_blocks(.., &network)
         .next()
         .expect("at least one unmined transaction");
 
@@ -193,7 +193,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     );
 
     // Get a different unmined transaction
-    let unmined_tx_2 = unmined_transactions_in_blocks(1.., network)
+    let unmined_tx_2 = unmined_transactions_in_blocks(1.., &network)
         .find(|tx| {
             tx.transaction
                 .transaction

@@ -111,7 +111,7 @@ proptest! {
 
         // We require sanitization before serialization,
         // but we also need the original address for this test
-        let sanitized_addr = addr.sanitize(Mainnet);
+        let sanitized_addr = addr.sanitize(&Mainnet);
         prop_assume!(sanitized_addr.is_some());
         let sanitized_addr = sanitized_addr.unwrap();
 
@@ -184,7 +184,7 @@ proptest! {
 
         // We require sanitization before serialization,
         // but we also need the original address for this test
-        let sanitized_addr = addr.sanitize(Mainnet);
+        let sanitized_addr = addr.sanitize(&Mainnet);
         prop_assume!(sanitized_addr.is_some());
         let sanitized_addr = sanitized_addr.unwrap();
 

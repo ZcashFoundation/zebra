@@ -263,7 +263,7 @@ impl Application for ZebradApp {
 
         // reads state disk version file, doesn't open RocksDB database
         let disk_db_version =
-            match state_database_format_version_on_disk(&config.state, config.network.network) {
+            match state_database_format_version_on_disk(&config.state, &config.network.network) {
                 Ok(Some(version)) => version.to_string(),
                 // This "version" is specially formatted to match a relaxed version regex in CI
                 Ok(None) => "creating.new.database".to_string(),
@@ -274,7 +274,7 @@ impl Application for ZebradApp {
                 }
             };
 
-        let app_metadata = vec![
+        let app_metadata = [
             // build-time constant: cargo or git tag + short commit
             ("version", build_version().to_string()),
             // config
@@ -441,7 +441,7 @@ impl Application for ZebradApp {
             tracing_config.flamegraph = None;
         }
         components.push(Box::new(Tracing::new(
-            config.network.network,
+            &config.network.network,
             tracing_config,
             command.cmd().uses_intro(),
         )?));

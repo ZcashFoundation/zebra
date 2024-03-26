@@ -70,7 +70,7 @@ impl FromDisk for NonEmptyHistoryTree {
                 "deserialization format should match the serialization format used by IntoDisk",
             );
         NonEmptyHistoryTree::from_cache(
-            parts.network,
+            &parts.network,
             parts.size,
             parts.peaks,
             parts.current_height,

@@ -18,7 +18,7 @@ fn end_of_support_panic() {
     // We are in panic
     let panic = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY) + 1;
 
-    end_of_support::check(Height(panic), Network::Mainnet);
+    end_of_support::check(Height(panic), &Network::Mainnet);
 }
 
 /// Test that the `end_of_support` function is working as expected.
@@ -29,7 +29,7 @@ fn end_of_support_function() {
     let no_warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY)
         - (30 * ESTIMATED_BLOCKS_PER_DAY);
 
-    end_of_support::check(Height(no_warn), Network::Mainnet);
+    end_of_support::check(Height(no_warn), &Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));
@@ -38,7 +38,7 @@ fn end_of_support_function() {
     // We are in warn range
     let warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152) - (3 * ESTIMATED_BLOCKS_PER_DAY);
 
-    end_of_support::check(Height(warn), Network::Mainnet);
+    end_of_support::check(Height(warn), &Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));
@@ -59,7 +59,7 @@ fn end_of_support_date() {
     // Get the last one we have and use it as tip.
     let higher_checkpoint = list.max_height();
 
-    end_of_support::check(higher_checkpoint, Network::Mainnet);
+    end_of_support::check(higher_checkpoint, &Network::Mainnet);
     assert!(logs_contain(
         "Checking if Zebra release is inside support range ..."
     ));

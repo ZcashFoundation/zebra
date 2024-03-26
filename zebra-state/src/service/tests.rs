@@ -194,7 +194,7 @@ async fn test_populated_state_responds_correctly(
 
 #[tokio::main]
 async fn populate_and_check(blocks: Vec<Arc<Block>>) -> Result<()> {
-    let (state, _, _, _) = populated_state(blocks, Network::Mainnet).await;
+    let (state, _, _, _) = populated_state(blocks, &Network::Mainnet).await;
     test_populated_state_responds_correctly(state).await?;
     Ok(())
 }
@@ -253,7 +253,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     let transcript = Transcript::from(iter);
 
     let network = Network::Mainnet;
-    let state = init_test(network);
+    let state = init_test(&network);
 
     transcript.check(state).await?;
 
@@ -306,7 +306,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -323,7 +323,7 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -355,14 +355,14 @@ proptest! {
         prop_assume!(
             first_checked_block
                 .unwrap()
-                .check_transaction_network_upgrade_consistency(network)
+                .check_transaction_network_upgrade_consistency(&network)
                 .is_err()
         );
 
         let response = crate::service::check::legacy_chain(
             nu_activation_height,
             chain.clone().into_iter().rev(),
-            network,
+            &network,
             TEST_LEGACY_CHAIN_LIMIT,
         ).map_err(|error| error.to_string());
 
@@ -380,7 +380,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -401,7 +401,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), &network, Height::MAX, 0);
 
         prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
@@ -493,7 +493,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), &network, Height::MAX, 0);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);

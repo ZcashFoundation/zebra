@@ -11,7 +11,7 @@ use crate::{
 /// Tests that keys are deleted correctly
 #[test]
 pub fn deletes_keys_and_results_correctly() {
-    let mut db = new_test_storage(Network::Mainnet);
+    let mut db = new_test_storage(&Network::Mainnet);
 
     let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
 
@@ -69,7 +69,7 @@ pub fn deletes_keys_and_results_correctly() {
 /// Tests that keys are deleted correctly
 #[test]
 pub fn clears_results_correctly() {
-    let mut db = new_test_storage(Network::Mainnet);
+    let mut db = new_test_storage(&Network::Mainnet);
 
     let zec_pages_sapling_efvk = ZECPAGES_SAPLING_VIEWING_KEY.to_string();
 

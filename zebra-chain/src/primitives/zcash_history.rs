@@ -23,7 +23,7 @@ pub trait Version: zcash_history::Version {
     /// Convert a Block into the NodeData for this version.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData;
@@ -75,7 +75,7 @@ impl Entry {
     ///  (ignored for V1 trees).
     fn new_leaf<V: Version>(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self {
@@ -106,7 +106,7 @@ impl<V: Version> Tree<V> {
     /// Will panic if `peaks` is empty.
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_cache(
-        network: Network,
+        network: &Network,
         network_upgrade: NetworkUpgrade,
         length: u32,
         peaks: &BTreeMap<u32, Entry>,
@@ -127,7 +127,7 @@ impl<V: Version> Tree<V> {
         }
         let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);
         Ok(Tree {
-            network,
+            network: network.clone(),
             network_upgrade,
             inner,
         })
@@ -140,7 +140,7 @@ impl<V: Version> Tree<V> {
     ///  (ignored for V1 trees).
     #[allow(clippy::unwrap_in_result)]
     pub fn new_from_block(
-        network: Network,
+        network: &Network,
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
@@ -182,7 +182,7 @@ impl<V: Version> Tree<V> {
         let height = block
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
-        let network_upgrade = NetworkUpgrade::current(self.network, height);
+        let network_upgrade = NetworkUpgrade::current(&self.network, height);
 
         assert!(
             network_upgrade == self.network_upgrade,
@@ -191,7 +191,7 @@ impl<V: Version> Tree<V> {
             self.network_upgrade
         );
 
-        let node_data = V::block_to_history_node(block, self.network, sapling_root, orchard_root);
+        let node_data = V::block_to_history_node(block, &self.network, sapling_root, orchard_root);
         let appended = self.inner.append_leaf(node_data)?;
 
         let mut new_nodes = Vec::new();
@@ -233,7 +233,7 @@ impl Version for zcash_history::V1 {
     /// `orchard_root` is ignored.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         _orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {
@@ -300,7 +300,7 @@ impl Version for V2 {
     /// `orchard_root` is the root of the Orchard note commitment tree of the block.
     fn block_to_history_node(
         block: Arc<Block>,
-        network: Network,
+        network: &Network,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData {

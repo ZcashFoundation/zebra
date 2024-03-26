@@ -223,8 +223,8 @@ impl GetBlockTemplate {
     /// in the `getblocktemplate` RPC.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        network: Network,
-        miner_address: transparent::Address,
+        network: &Network,
+        miner_address: &transparent::Address,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         mempool_txs: Vec<VerifiedUnminedTx>,

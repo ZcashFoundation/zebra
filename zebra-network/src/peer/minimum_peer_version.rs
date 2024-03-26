@@ -35,9 +35,9 @@ where
 {
     /// Create a new [`MinimumPeerVersion`] to track the minimum supported peer protocol version
     /// for the current `chain_tip` on the `network`.
-    pub fn new(chain_tip: C, network: Network) -> Self {
+    pub fn new(chain_tip: C, network: &Network) -> Self {
         MinimumPeerVersion {
-            network,
+            network: network.clone(),
             chain_tip,
             current_minimum: Version::min_remote_for_height(network, None),
             has_changed: true,
@@ -72,7 +72,7 @@ where
     /// has changed.
     fn update(&mut self) {
         let height = self.chain_tip.best_tip_height();
-        let new_minimum = Version::min_remote_for_height(self.network, height);
+        let new_minimum = Version::min_remote_for_height(&self.network, height);
 
         if self.current_minimum != new_minimum {
             self.current_minimum = new_minimum;
@@ -99,7 +99,7 @@ where
 {
     fn clone(&self) -> Self {
         MinimumPeerVersion {
-            network: self.network,
+            network: self.network.clone(),
             chain_tip: self.chain_tip.clone(),
             current_minimum: self.current_minimum,
             has_changed: true,

@@ -220,7 +220,7 @@ where
 #[instrument(skip(state_service))]
 pub async fn init<S>(
     config: Config,
-    network: Network,
+    network: &Network,
     mut state_service: S,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
@@ -240,8 +240,14 @@ where
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
-    let checkpoint_state_service = state_service.clone();
-    let checkpoint_sync = config.checkpoint_sync;
+    let (checkpoint_state_service, checkpoint_sync, network_clone) = {
+        let checkpoint_state_service = state_service.clone();
+        let checkpoint_sync = config.checkpoint_sync;
+        let network_clone = network.clone();
+
+        (checkpoint_state_service, checkpoint_sync, network_clone)
+    };
+
     let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
         async move {
@@ -263,7 +269,7 @@ where
             // > activation block hashes given in § 3.12 ‘Mainnet and Testnet’ on p. 20.
             //
             // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
-            let full_checkpoints = network.checkpoint_list();
+            let full_checkpoints = network_clone.checkpoint_list();
             let mut already_warned = false;
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
@@ -360,7 +366,7 @@ where
 
 /// Parses the checkpoint list for `network` and `config`.
 /// Returns the checkpoint list and maximum checkpoint height.
-pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList, Height) {
+pub fn init_checkpoint_list(config: Config, network: &Network) -> (CheckpointList, Height) {
     // TODO: Zebra parses the checkpoint list three times at startup.
     //       Instead, cache the checkpoint list for each `network`.
     let list = network.checkpoint_list();

@@ -73,9 +73,9 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: Network, state: ZS) -> Self {
+    pub fn new(network: &Network, state: ZS) -> Self {
         Self {
-            network,
+            network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
             script_verifier: script::Verifier,
         }
@@ -218,7 +218,7 @@ impl Request {
     /// The network upgrade to consider for the verification.
     ///
     /// This is based on the block height from the request, and the supplied `network`.
-    pub fn upgrade(&self, network: Network) -> NetworkUpgrade {
+    pub fn upgrade(&self, network: &Network) -> NetworkUpgrade {
         NetworkUpgrade::current(network, self.height())
     }
 
@@ -294,7 +294,7 @@ where
     // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
         let script_verifier = self.script_verifier;
-        let network = self.network;
+        let network = self.network.clone();
         let state = self.state.clone();
 
         let tx = req.transaction();
@@ -321,7 +321,7 @@ where
 
             // Validate `nExpiryHeight` consensus rules
             if tx.is_coinbase() {
-                check::coinbase_expiry_height(&req.height(), &tx, network)?;
+                check::coinbase_expiry_height(&req.height(), &tx, &network)?;
             } else {
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
@@ -335,7 +335,7 @@ where
 
             // [Canopy onward]: `vpub_old` MUST be zero.
             // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
+            check::disabled_add_to_sprout_pool(&tx, req.height(), &network)?;
 
             check::spend_conflicts(&tx)?;
 
@@ -396,7 +396,7 @@ where
                     ..
                 } => Self::verify_v4_transaction(
                     &req,
-                    network,
+                    &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     joinsplit_data,
@@ -408,7 +408,7 @@ where
                     ..
                 } => Self::verify_v5_transaction(
                     &req,
-                    network,
+                    &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     sapling_shielded_data,
@@ -616,7 +616,7 @@ where
     /// - the `sapling_shielded_data` in the transaction
     fn verify_v4_transaction(
         request: &Request,
-        network: Network,
+        network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
@@ -708,7 +708,7 @@ where
     /// - the orchard shielded data of the transaction, if any
     fn verify_v5_transaction(
         request: &Request,
-        network: Network,
+        network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
@@ -782,7 +782,7 @@ where
     /// Returns script verification responses via the `utxo_sender`.
     fn verify_transparent_inputs_and_outputs(
         request: &Request,
-        network: Network,
+        network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {

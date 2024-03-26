@@ -352,7 +352,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
-        .activation_height(network)
+        .activation_height(&network)
         .expect("a valid height")
         .0;
 
@@ -380,7 +380,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| arbitrary::transaction_to_fake_v5(t, network, Height(*height)))
+            .map(|t| arbitrary::transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
@@ -500,12 +500,12 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
-        .activation_height(network)
+        .activation_height(&network)
         .expect("a valid height")
         .0;
 
     let nu5_activation_height = NetworkUpgrade::Nu5
-        .activation_height(network)
+        .activation_height(&network)
         .unwrap_or(Height::MAX_EXPIRY_HEIGHT)
         .0;
 
@@ -525,7 +525,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| arbitrary::transaction_to_fake_v5(t, network, Height(*height)))
+            .map(|t| arbitrary::transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
@@ -940,7 +940,7 @@ fn binding_signatures_for_network(network: Network) {
     let block_iter = network.block_iter();
 
     for (height, bytes) in block_iter {
-        let upgrade = NetworkUpgrade::current(network, Height(*height));
+        let upgrade = NetworkUpgrade::current(&network, Height(*height));
 
         let block = bytes
             .zcash_deserialize_into::<Block>()

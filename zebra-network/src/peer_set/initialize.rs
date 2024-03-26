@@ -174,7 +174,7 @@ where
         handle_rx,
         inv_receiver,
         address_metrics,
-        MinimumPeerVersion::new(latest_chain_tip, config.network),
+        MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
@@ -436,7 +436,7 @@ async fn limit_initial_peers(
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer_addr in all_peers {
-        let preference = PeerPreference::new(peer_addr, config.network);
+        let preference = PeerPreference::new(peer_addr, config.network.clone());
 
         match preference {
             Ok(preference) => preferred_peers
@@ -499,7 +499,7 @@ async fn limit_initial_peers(
 pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) {
     // Warn if we're configured using the wrong network port.
     if let Err(wrong_addr) =
-        address_is_valid_for_inbound_listeners(config.listen_addr, config.network)
+        address_is_valid_for_inbound_listeners(config.listen_addr, config.network.clone())
     {
         warn!(
             "We are configured with address {} on {:?}, but it could cause network issues. \

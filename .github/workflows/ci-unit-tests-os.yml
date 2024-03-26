@@ -95,7 +95,7 @@ jobs:
             rust: beta
 
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.1.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -184,7 +184,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.1.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -206,7 +206,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.1.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -249,7 +249,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.1.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -270,7 +270,7 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v4.1.1
+        uses: actions/checkout@v4.1.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.4.0
@@ -281,7 +281,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v3.0.0
+        uses: baptiste0928/cargo-install@v3.0.1
         with:
           crate: cargo-machete
 

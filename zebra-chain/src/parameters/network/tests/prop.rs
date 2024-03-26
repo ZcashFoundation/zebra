@@ -18,7 +18,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         let canopy_activation = NetworkUpgrade::Canopy
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Canopy activation height is set");
 
         let grace_period_end_height = (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)

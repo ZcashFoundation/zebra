@@ -53,8 +53,8 @@ impl TryFrom<zcash_address::Network> for Network {
     }
 }
 
-impl From<Network> for zcash_address::Network {
-    fn from(network: Network) -> Self {
+impl From<&Network> for zcash_address::Network {
+    fn from(network: &Network) -> Self {
         match network {
             Network::Mainnet => zcash_address::Network::Main,
             Network::Testnet => zcash_address::Network::Test,
@@ -71,7 +71,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_pub_key_hash(
-            network.try_into()?,
+            &network.try_into()?,
             data,
         )))
     }
@@ -81,7 +81,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_script_hash(
-            network.try_into()?,
+            &network.try_into()?,
             data,
         )))
     }
@@ -100,7 +100,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = network.try_into()?;
+        let network = &network.try_into()?;
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
@@ -144,7 +144,7 @@ impl zcash_address::TryFromAddress for Address {
         }
 
         Ok(Self::Unified {
-            network,
+            network: network.clone(),
             unified_address,
             orchard,
             sapling,
@@ -158,7 +158,7 @@ impl Address {
     pub fn network(&self) -> Network {
         match &self {
             Self::Transparent(address) => address.network(),
-            Self::Sapling { network, .. } | Self::Unified { network, .. } => *network,
+            Self::Sapling { network, .. } | Self::Unified { network, .. } => network.clone(),
         }
     }
 
@@ -185,7 +185,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling((*network).into(), data);
+                let address = ZcashAddress::from_sapling(network.into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,

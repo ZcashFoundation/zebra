@@ -42,7 +42,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     assert_eq!(block.transactions.len(), 4);
 
-    let res = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let res = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
@@ -93,7 +93,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
     // Create a populated state service.
     let (_state_service, read_only_state_service, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), network).await;
+        zebra_state::populated_state(blocks.clone(), &network).await;
 
     let db = read_only_state_service.db();
 
@@ -118,7 +118,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
         let compact_block = block_to_compact(&block, chain_metadata);
 
-        let res = scan_block(network, &block, sapling_commitment_tree_size, &ivks)
+        let res = scan_block(&network, &block, sapling_commitment_tree_size, &ivks)
             .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
@@ -156,7 +156,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     let key_to_be_stored = encode_extended_full_viewing_key("zxviews", &efvk);
 
     // Create a database
-    let mut storage = new_test_storage(network);
+    let mut storage = new_test_storage(&network);
 
     // Insert the generated key to the database
     storage.add_sapling_key(&key_to_be_stored, None);
@@ -177,7 +177,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    let result = scan_block(Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let result = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(result.transactions().len(), 1);

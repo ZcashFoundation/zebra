@@ -54,7 +54,7 @@ pub(crate) fn partial_nu5_chain_strategy(
         .prop_flat_map(move |(network, random_nu)| {
             // TODO: update this to Nu5 after we have a height #1841
             let mut nu = network_upgrade;
-            let nu_activation = nu.activation_height(network).unwrap();
+            let nu_activation = nu.activation_height(&network).unwrap();
             let height = Height(nu_activation.0 + blocks_after_nu_activation);
 
             // The `network_upgrade_override` will not be enough as when it is `None`,
@@ -77,7 +77,10 @@ pub(crate) fn partial_nu5_chain_strategy(
                     false,
                 )
             })
-            .prop_map(move |partial_chain| (network, nu_activation, partial_chain))
+            .prop_map(move |partial_chain| {
+                let network_clone = network.clone();
+                (network_clone, nu_activation, partial_chain)
+            })
         })
 }
 
@@ -94,14 +97,14 @@ pub(crate) fn new_state_with_mainnet_genesis(
 
     let mut finalized_state = FinalizedState::new_with_debug(
         &config,
-        network,
+        &network,
         // The tests that use this setup function also commit invalid blocks to the state.
         true,
         #[cfg(feature = "elasticsearch")]
         None,
         false,
     );
-    let non_finalized_state = NonFinalizedState::new(network);
+    let non_finalized_state = NonFinalizedState::new(&network);
 
     assert_eq!(
         None,

@@ -10,6 +10,6 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 fn parses_sapling_efvk_correctly() {
     let _init_guard = zebra_test::init();
 
-    ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, Network::Mainnet)
+    ViewingKey::parse(ZECPAGES_SAPLING_VIEWING_KEY, &Network::Mainnet)
         .expect("should parse hard-coded viewing key successfully");
 }

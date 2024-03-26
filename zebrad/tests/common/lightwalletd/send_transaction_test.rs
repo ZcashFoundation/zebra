@@ -85,7 +85,8 @@ pub async fn run() -> Result<()> {
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
-    let transactions = load_transactions_from_future_blocks(network, test_type, test_name).await?;
+    let transactions =
+        load_transactions_from_future_blocks(network.clone(), test_type, test_name).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -98,9 +99,12 @@ pub async fn run() -> Result<()> {
 
     // Start zebrad with no peers, we want to send transactions without blocks coming in. If `wallet_grpc_test`
     // runs before this test (as it does in `lightwalletd_test_suite`), then we are the most up to date with tip we can.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
-    {
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+        network.clone(),
+        test_name,
+        test_type,
+        use_internet_connection,
+    )? {
         zebrad_and_address
     } else {
         // Skip the test, we don't have the required cached state
@@ -283,7 +287,7 @@ async fn load_transactions_from_future_blocks(
     test_type: TestType,
     test_name: &str,
 ) -> Result<Vec<Arc<Transaction>>> {
-    let transactions = get_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
+    let transactions = get_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
         .await?
         .into_iter()
         .flat_map(|block| block.transactions)

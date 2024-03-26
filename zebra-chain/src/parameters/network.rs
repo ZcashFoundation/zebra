@@ -52,7 +52,7 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Network {
     /// The production mainnet.
@@ -68,13 +68,13 @@ impl Network {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_pubkey_address_prefix()
+        <ZcashPrimitivesNetwork>::from(self).b58_pubkey_address_prefix()
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(&self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(*self).b58_script_address_prefix()
+        <ZcashPrimitivesNetwork>::from(self).b58_script_address_prefix()
     }
     /// Returns true if the maximum block time rule is active for `network` and `height`.
     ///
@@ -84,7 +84,7 @@ impl Network {
     /// Returns false otherwise.
     ///
     /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-    pub fn is_max_block_time_enforced(self, height: block::Height) -> bool {
+    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
         match self {
             Network::Mainnet => true,
             Network::Testnet => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
@@ -92,18 +92,12 @@ impl Network {
     }
 }
 
-impl From<Network> for &'static str {
-    fn from(network: Network) -> &'static str {
+impl From<&Network> for &'static str {
+    fn from(network: &Network) -> &'static str {
         match network {
             Network::Mainnet => "Mainnet",
             Network::Testnet => "Testnet",
         }
-    }
-}
-
-impl From<&Network> for &'static str {
-    fn from(network: &Network) -> &'static str {
-        (*network).into()
     }
 }
 
@@ -139,7 +133,7 @@ impl Network {
         // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
         let canopy_activation = Canopy
-            .activation_height(*self)
+            .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
         (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
@@ -166,7 +160,7 @@ impl Network {
     }
 
     /// Returns the Sapling activation height for this network.
-    pub fn sapling_activation_height(self) -> Height {
+    pub fn sapling_activation_height(&self) -> Height {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")

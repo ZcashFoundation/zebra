@@ -131,7 +131,7 @@ impl Config {
         &self,
         db_kind: impl AsRef<str>,
         major_version: u64,
-        network: Network,
+        network: &Network,
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
         let major_version = format!("v{}", major_version);
@@ -153,7 +153,7 @@ impl Config {
         &self,
         db_kind: impl AsRef<str>,
         major_version: u64,
-        network: Network,
+        network: &Network,
     ) -> PathBuf {
         let mut version_path = self.db_path(db_kind, major_version, network);
 
@@ -200,7 +200,7 @@ impl Default for Config {
 /// and deletes them from the filesystem.
 ///
 /// See `check_and_delete_old_databases()` for details.
-pub fn check_and_delete_old_state_databases(config: &Config, network: Network) -> JoinHandle<()> {
+pub fn check_and_delete_old_state_databases(config: &Config, network: &Network) -> JoinHandle<()> {
     check_and_delete_old_databases(
         config,
         STATE_DATABASE_KIND,
@@ -229,15 +229,16 @@ pub fn check_and_delete_old_databases(
     config: &Config,
     db_kind: impl AsRef<str>,
     major_version: u64,
-    network: Network,
+    network: &Network,
 ) -> JoinHandle<()> {
     let current_span = Span::current();
     let config = config.clone();
     let db_kind = db_kind.as_ref().to_string();
+    let network = network.clone();
 
     spawn_blocking(move || {
         current_span.in_scope(|| {
-            delete_old_databases(config, db_kind, major_version, network);
+            delete_old_databases(config, db_kind, major_version, &network);
             info!("finished old database version cleanup task");
         })
     })
@@ -246,7 +247,7 @@ pub fn check_and_delete_old_databases(
 /// Check if there are old database folders and delete them from the filesystem.
 ///
 /// See [`check_and_delete_old_databases`] for details.
-fn delete_old_databases(config: Config, db_kind: String, major_version: u64, network: Network) {
+fn delete_old_databases(config: Config, db_kind: String, major_version: u64, network: &Network) {
     if config.ephemeral || !config.delete_old_database {
         return;
     }
@@ -371,7 +372,7 @@ fn parse_major_version(dir_name: &str) -> Option<u64> {
 /// Returns the full semantic version of the on-disk state database, based on its config and network.
 pub fn state_database_format_version_on_disk(
     config: &Config,
-    network: Network,
+    network: &Network,
 ) -> Result<Option<Version>, BoxError> {
     database_format_version_on_disk(
         config,
@@ -398,7 +399,7 @@ pub fn database_format_version_on_disk(
     config: &Config,
     db_kind: impl AsRef<str>,
     major_version: u64,
-    network: Network,
+    network: &Network,
 ) -> Result<Option<Version>, BoxError> {
     let version_path = config.version_file_path(&db_kind, major_version, network);
     let db_path = config.db_path(db_kind, major_version, network);
@@ -470,7 +471,7 @@ pub(crate) mod hidden {
     pub fn write_state_database_format_version_to_disk(
         config: &Config,
         changed_version: &Version,
-        network: Network,
+        network: &Network,
     ) -> Result<(), BoxError> {
         write_database_format_version_to_disk(config, STATE_DATABASE_KIND, changed_version, network)
     }
@@ -496,7 +497,7 @@ pub(crate) mod hidden {
         config: &Config,
         db_kind: impl AsRef<str>,
         changed_version: &Version,
-        network: Network,
+        network: &Network,
     ) -> Result<(), BoxError> {
         let version_path = config.version_file_path(db_kind, changed_version.major, network);
 

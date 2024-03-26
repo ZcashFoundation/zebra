@@ -35,7 +35,7 @@ fn push_and_prune_for_network_upgrade(
 ) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     // Load first block (activation block of the given network upgrade)
     let first_block = Arc::new(
@@ -47,7 +47,7 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let first_commitment = first_block.commitment(network)?;
+    let first_commitment = first_block.commitment(&network)?;
     if network_upgrade == NetworkUpgrade::Heartwood {
         // Heartwood is the only upgrade that has a reserved value.
         // (For other upgrades we could compare with the expected commitment,
@@ -59,7 +59,7 @@ fn push_and_prune_for_network_upgrade(
     let first_sapling_root =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
-        network,
+        &network,
         first_block,
         &first_sapling_root,
         &Default::default(),
@@ -82,7 +82,7 @@ fn push_and_prune_for_network_upgrade(
     );
 
     // Check its commitment
-    let second_commitment = second_block.commitment(network)?;
+    let second_commitment = second_block.commitment(&network)?;
     assert_eq!(second_commitment, Commitment::ChainHistoryRoot(first_root));
 
     // Append second block to history tree
@@ -117,7 +117,7 @@ fn upgrade() -> Result<()> {
 fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
-    let height = network_upgrade.activation_height(network).unwrap().0;
+    let height = network_upgrade.activation_height(&network).unwrap().0;
 
     // Load previous block (the block before the activation block of the given network upgrade)
     let block_prev = Arc::new(
@@ -134,7 +134,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     let sapling_root_prev =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
-        network,
+        &network,
         block_prev,
         &sapling_root_prev,
         &Default::default(),
