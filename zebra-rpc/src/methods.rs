@@ -9,7 +9,7 @@
 use std::{collections::HashSet, default::Default, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
-use futures::{FutureExt, TryFutureExt};
+use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -776,8 +776,6 @@ where
                     }
                 };
 
-                // TODO: do the txids and confirmations state queries in parallel?
-
                 // Get transaction IDs from the transaction index by block hash
                 //
                 // # Concurrency
@@ -789,26 +787,7 @@ where
                 // valid. Clients that query block heights must be able to handle chain forks,
                 // including getting transaction IDs from any chain fork.
                 let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash.into());
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-                let tx = match response {
-                    zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
-                        tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect()
-                    }
-                    zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
-                        message: "Block not found".to_string(),
-                        data: None,
-                    })?,
-                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
+                let tx_ids_response_fut = state.clone().oneshot(request);
 
                 // Get block confirmations from the block height index
                 //
@@ -826,17 +805,91 @@ where
                 const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
                 let request = zebra_state::ReadRequest::Depth(hash);
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
+                let depth_response_fut = state.clone().oneshot(request);
+
+                // Sapling trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
+                let sapling_tree_response_fut = state.clone().oneshot(request);
+
+                // Orchard trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
+                let orchard_tree_response_fut = state.clone().oneshot(request);
+
+                let mut futs = FuturesOrdered::new();
+                futs.push_back(tx_ids_response_fut);
+                futs.push_back(sapling_tree_response_fut);
+                futs.push_back(orchard_tree_response_fut);
+                futs.push_back(depth_response_fut);
+
+                let tx_ids_response = futs
+                    .next()
                     .await
+                    .expect("should have 4 items in futs")
                     .map_err(|error| Error {
                         code: ErrorCode::ServerError(0),
                         message: error.to_string(),
                         data: None,
                     })?;
 
-                let confirmations = match response {
+                let sapling_tree_response = futs
+                    .next()
+                    .await
+                    .expect("should have 3 items in futs")
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let orchard_tree_response = futs
+                    .next()
+                    .await
+                    .expect("should have 2 items in futs")
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let depth_response = futs
+                    .next()
+                    .await
+                    .expect("should have an item in futs")
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let tx = match tx_ids_response {
+                    zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
+                        tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect()
+                    }
+                    zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
+                        data: None,
+                    })?,
+                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                };
+
+                let sapling_note_commitment_tree_count = match sapling_tree_response {
+                    zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
+                    zebra_state::ReadResponse::SaplingTree(None) => 0,
+                    _ => unreachable!("unmatched response to a SaplingTree request"),
+                };
+
+                let confirmations = match depth_response {
                     // Confirmations are one more than the depth.
                     // Depth is limited by height, so it will never overflow an i64.
                     zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
@@ -848,47 +901,7 @@ where
                 //        this needs a new state request for the height -> hash index
                 let height = hash_or_height.height();
 
-                // Sapling trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let sapling_note_commitment_tree_count = match response {
-                    zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                    zebra_state::ReadResponse::SaplingTree(None) => 0,
-                    _ => unreachable!("unmatched response to a SaplingTree request"),
-                };
-
-                // Orchard trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let orchard_note_commitment_tree_count = match response {
+                let orchard_note_commitment_tree_count = match orchard_tree_response {
                     zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
                     zebra_state::ReadResponse::OrchardTree(None) => 0,
                     _ => unreachable!("unmatched response to a OrchardTree request"),
