@@ -11,11 +11,8 @@ use insta::dynamic_redaction;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::Block,
-    chain_tip::mock::MockChainTip,
-    parameters::Network::{Mainnet, Testnet},
-    serialization::ZcashDeserializeInto,
-    subtree::NoteCommitmentSubtreeData,
+    block::Block, chain_tip::mock::MockChainTip, parameters::Network::Mainnet,
+    serialization::ZcashDeserializeInto, subtree::NoteCommitmentSubtreeData,
 };
 use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::mock_service::MockService;
@@ -33,12 +30,13 @@ pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
+    let default_testnet = Network::new_default_testnet();
 
     tokio::join!(
         test_rpc_response_data_for_network(&Mainnet),
-        test_rpc_response_data_for_network(&Testnet),
+        test_rpc_response_data_for_network(&default_testnet),
         test_mocked_rpc_response_data_for_network(&Mainnet),
-        test_mocked_rpc_response_data_for_network(&Testnet),
+        test_mocked_rpc_response_data_for_network(&default_testnet),
     );
 }
 

@@ -10,8 +10,12 @@ use std::collections::BTreeMap;
 use bincode::Options;
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::NonEmptyHistoryTree, parameters::Network,
-    primitives::zcash_history, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::Height,
+    history_tree::{HistoryTreeError, NonEmptyHistoryTree},
+    parameters::{Network, NetworkKind},
+    primitives::zcash_history,
+    value_balance::ValueBalance,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -39,42 +43,54 @@ impl FromDisk for ValueBalance<NonNegative> {
 // https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct HistoryTreeParts {
-    network: Network,
+pub struct HistoryTreeParts {
+    network: NetworkKind,
     size: u32,
     peaks: BTreeMap<u32, zcash_history::Entry>,
     current_height: Height,
 }
 
-impl IntoDisk for NonEmptyHistoryTree {
+impl HistoryTreeParts {
+    /// Converts [`HistoryTreeParts`] to a [`NonEmptyHistoryTree`].
+    pub(crate) fn with_network(
+        self,
+        network: &Network,
+    ) -> Result<NonEmptyHistoryTree, HistoryTreeError> {
+        assert_eq!(
+            self.network,
+            network.kind(),
+            "history tree network kind should match current network"
+        );
+
+        NonEmptyHistoryTree::from_cache(network, self.size, self.peaks, self.current_height)
+    }
+}
+
+impl From<&NonEmptyHistoryTree> for HistoryTreeParts {
+    fn from(history_tree: &NonEmptyHistoryTree) -> Self {
+        HistoryTreeParts {
+            network: history_tree.network().kind(),
+            size: history_tree.size(),
+            peaks: history_tree.peaks().clone(),
+            current_height: history_tree.current_height(),
+        }
+    }
+}
+
+impl IntoDisk for HistoryTreeParts {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let data = HistoryTreeParts {
-            network: self.network(),
-            size: self.size(),
-            peaks: self.peaks().clone(),
-            current_height: self.current_height(),
-        };
         bincode::DefaultOptions::new()
-            .serialize(&data)
+            .serialize(self)
             .expect("serialization to vec doesn't fail")
     }
 }
 
-impl FromDisk for NonEmptyHistoryTree {
+impl FromDisk for HistoryTreeParts {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
+        bincode::DefaultOptions::new()
             .deserialize(bytes.as_ref())
-            .expect(
-                "deserialization format should match the serialization format used by IntoDisk",
-            );
-        NonEmptyHistoryTree::from_cache(
-            &parts.network,
-            parts.size,
-            parts.peaks,
-            parts.current_height,
-        )
-        .expect("deserialization format should match the serialization format used by IntoDisk")
+            .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }

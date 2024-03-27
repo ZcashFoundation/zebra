@@ -5,7 +5,10 @@
 use zcash_address::unified::{self, Container};
 use zcash_primitives::sapling;
 
-use crate::{parameters::Network, transparent, BoxError};
+use crate::{
+    parameters::{Network, NetworkKind, UnsupportedNetwork},
+    transparent, BoxError,
+};
 
 /// Zcash address variants
 pub enum Address {
@@ -14,8 +17,8 @@ pub enum Address {
 
     /// Sapling address
     Sapling {
-        /// Address' network
-        network: Network,
+        /// Address' network kind
+        network: NetworkKind,
 
         /// Sapling address
         address: sapling::PaymentAddress,
@@ -23,8 +26,8 @@ pub enum Address {
 
     /// Unified address
     Unified {
-        /// Address' network
-        network: Network,
+        /// Address' network kind
+        network: NetworkKind,
 
         /// Unified address
         unified_address: zcash_address::unified::Address,
@@ -47,17 +50,34 @@ impl TryFrom<zcash_address::Network> for Network {
     fn try_from(network: zcash_address::Network) -> Result<Self, Self::Error> {
         match network {
             zcash_address::Network::Main => Ok(Network::Mainnet),
-            zcash_address::Network::Test => Ok(Network::Testnet),
+            zcash_address::Network::Test => Ok(Network::new_default_testnet()),
             zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
         }
     }
 }
 
-impl From<&Network> for zcash_address::Network {
-    fn from(network: &Network) -> Self {
+impl TryFrom<&Network> for zcash_address::Network {
+    type Error = UnsupportedNetwork;
+
+    fn try_from(network: &Network) -> Result<Self, Self::Error> {
         match network {
-            Network::Mainnet => zcash_address::Network::Main,
-            Network::Testnet => zcash_address::Network::Test,
+            Network::Mainnet => Ok(zcash_address::Network::Main),
+            Network::Testnet(_params) if network.is_default_testnet() => {
+                Ok(zcash_address::Network::Test)
+            }
+            // TODO: If the network parameters match `Regtest` parameters, convert to
+            //       `zcash_address::Network::Regtest instead of returning `UnsupportedAddress` error.
+            //       (#7119, #7839)
+            Network::Testnet(_params) => Err(UnsupportedNetwork),
+        }
+    }
+}
+
+impl From<NetworkKind> for zcash_address::Network {
+    fn from(network: NetworkKind) -> Self {
+        match network {
+            NetworkKind::Mainnet => zcash_address::Network::Main,
+            NetworkKind::Testnet => zcash_address::Network::Test,
         }
     }
 }
@@ -71,7 +91,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_pub_key_hash(
-            &network.try_into()?,
+            NetworkKind::from_zcash_address(network),
             data,
         )))
     }
@@ -81,7 +101,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_script_hash(
-            &network.try_into()?,
+            NetworkKind::from_zcash_address(network),
             data,
         )))
     }
@@ -90,7 +110,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         data: [u8; 43],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = network.try_into()?;
+        let network = NetworkKind::from_zcash_address(network);
         sapling::PaymentAddress::from_bytes(&data)
             .map(|address| Self::Sapling { address, network })
             .ok_or_else(|| BoxError::from("not a valid sapling address").into())
@@ -100,7 +120,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = &network.try_into()?;
+        let network = NetworkKind::from_zcash_address(network);
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
@@ -144,7 +164,7 @@ impl zcash_address::TryFromAddress for Address {
         }
 
         Ok(Self::Unified {
-            network: network.clone(),
+            network,
             unified_address,
             orchard,
             sapling,
@@ -155,10 +175,10 @@ impl zcash_address::TryFromAddress for Address {
 
 impl Address {
     /// Returns the network for the address.
-    pub fn network(&self) -> Network {
+    pub fn network(&self) -> NetworkKind {
         match &self {
             Self::Transparent(address) => address.network(),
-            Self::Sapling { network, .. } | Self::Unified { network, .. } => network.clone(),
+            Self::Sapling { network, .. } | Self::Unified { network, .. } => *network,
         }
     }
 
@@ -185,7 +205,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling(network.into(), data);
+                let address = ZcashAddress::from_sapling((*network).into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,

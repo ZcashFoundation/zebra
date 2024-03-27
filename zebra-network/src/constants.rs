@@ -392,11 +392,12 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
-    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, Version> = {
+    // TODO: Move the value here to a field on `NetworkParameters` (#8367)
+    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<String, Version> = {
         let mut hash_map = HashMap::new();
 
-        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu5));
-        hash_map.insert(Testnet, Version::min_specified_for_upgrade(&Testnet, Nu5));
+        hash_map.insert(Mainnet.bip70_network_name(), Version::min_specified_for_upgrade(&Mainnet, Nu5));
+        hash_map.insert(Network::new_default_testnet().bip70_network_name(), Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu5));
 
         hash_map
     };

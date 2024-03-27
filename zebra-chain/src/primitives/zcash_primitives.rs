@@ -7,7 +7,7 @@ use zcash_primitives::transaction as zp_tx;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkUpgrade},
+    parameters::{Network, NetworkKind, NetworkUpgrade, UnsupportedNetwork},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -328,20 +328,39 @@ pub(crate) fn transparent_output_address(
 
     match alt_addr {
         Some(zcash_primitives::legacy::TransparentAddress::PublicKey(pub_key_hash)) => Some(
-            transparent::Address::from_pub_key_hash(network, pub_key_hash),
+            transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash),
         ),
-        Some(zcash_primitives::legacy::TransparentAddress::Script(script_hash)) => {
-            Some(transparent::Address::from_script_hash(network, script_hash))
-        }
+        Some(zcash_primitives::legacy::TransparentAddress::Script(script_hash)) => Some(
+            transparent::Address::from_script_hash(network.kind(), script_hash),
+        ),
         None => None,
     }
 }
 
-impl From<&Network> for zcash_primitives::consensus::Network {
-    fn from(network: &Network) -> Self {
+impl TryFrom<&Network> for zcash_primitives::consensus::Network {
+    type Error = UnsupportedNetwork;
+
+    fn try_from(network: &Network) -> Result<Self, Self::Error> {
         match network {
-            Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-            Network::Testnet => zcash_primitives::consensus::Network::TestNetwork,
+            Network::Mainnet => Ok(zcash_primitives::consensus::Network::MainNetwork),
+            // Note: There are differences between the `TestNetwork` parameters and those returned by
+            //       `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
+            //       Zebra is using the default public Testnet.
+            // TODO: Try to remove this conversion, if possible, by implementing `zcash_primitives::consensus::Parameters`
+            //       on `Network` (#8365).
+            Network::Testnet(_params) if network.is_default_testnet() => {
+                Ok(zcash_primitives::consensus::Network::TestNetwork)
+            }
+            Network::Testnet(_params) => Err(UnsupportedNetwork),
+        }
+    }
+}
+
+impl From<NetworkKind> for zcash_primitives::consensus::Network {
+    fn from(network: NetworkKind) -> Self {
+        match network {
+            NetworkKind::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
+            NetworkKind::Testnet => zcash_primitives::consensus::Network::TestNetwork,
         }
     }
 }
@@ -350,7 +369,7 @@ impl From<zcash_primitives::consensus::Network> for Network {
     fn from(network: zcash_primitives::consensus::Network) -> Self {
         match network {
             zcash_primitives::consensus::Network::MainNetwork => Network::Mainnet,
-            zcash_primitives::consensus::Network::TestNetwork => Network::Testnet,
+            zcash_primitives::consensus::Network::TestNetwork => Network::new_default_testnet(),
         }
     }
 }

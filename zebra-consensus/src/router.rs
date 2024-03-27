@@ -240,13 +240,9 @@ where
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
-    let (checkpoint_state_service, checkpoint_sync, network_clone) = {
-        let checkpoint_state_service = state_service.clone();
-        let checkpoint_sync = config.checkpoint_sync;
-        let network_clone = network.clone();
-
-        (checkpoint_state_service, checkpoint_sync, network_clone)
-    };
+    let checkpoint_state_service = state_service.clone();
+    let checkpoint_sync = config.checkpoint_sync;
+    let checkpoint_network = network.clone();
 
     let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
@@ -269,7 +265,7 @@ where
             // > activation block hashes given in § 3.12 ‘Mainnet and Testnet’ on p. 20.
             //
             // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
-            let full_checkpoints = network_clone.checkpoint_list();
+            let full_checkpoints = checkpoint_network.checkpoint_list();
             let mut already_warned = false;
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {

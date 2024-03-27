@@ -89,13 +89,14 @@ impl PreparedChain {
         // The history tree only works with Heartwood onward.
         // Since the network will be chosen later, we pick the larger
         // between the mainnet and testnet Heartwood activation heights.
-        let main_height = NetworkUpgrade::Heartwood
-            .activation_height(&Network::Mainnet)
-            .expect("must have height");
-        let test_height = NetworkUpgrade::Heartwood
-            .activation_height(&Network::Testnet)
-            .expect("must have height");
-        let height = std::cmp::max(main_height, test_height);
+        let height = Network::iter()
+            .map(|network| {
+                NetworkUpgrade::Heartwood
+                    .activation_height(&network)
+                    .expect("must have height")
+            })
+            .max()
+            .expect("Network::iter() must return non-empty iterator");
 
         PreparedChain {
             ledger_strategy: Some(LedgerState::height_strategy(

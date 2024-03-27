@@ -215,7 +215,7 @@ impl ZebraDb {
 
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
-        self.db.network().clone()
+        self.db.network()
     }
 
     /// Returns the `Path` where the files used by this database are located.

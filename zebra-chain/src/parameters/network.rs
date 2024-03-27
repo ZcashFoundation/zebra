@@ -1,8 +1,10 @@
 //! Consensus parameters for each Zcash network.
 
-use std::{fmt, str::FromStr};
+use std::{fmt, str::FromStr, sync::Arc};
 
 use thiserror::Error;
+
+use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
 
 use crate::{
     block::{self, Height, HeightDiff},
@@ -51,44 +53,92 @@ mod tests;
 /// after the grace period.
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
-/// An enum describing the possible network choices.
+/// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct NetworkParameters {}
+
+impl NetworkParameters {
+    /// Returns true if the instance of [`NetworkParameters`] represents the default public Testnet.
+    pub fn is_default_testnet(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+/// An enum describing the kind of network, whether it's the production mainnet or a testnet.
+pub enum NetworkKind {
+    /// The production mainnet.
+    #[default]
+    Mainnet,
+
+    /// A test network.
+    Testnet,
+}
+
+impl From<Network> for NetworkKind {
+    fn from(network: Network) -> Self {
+        network.kind()
+    }
+}
+
+/// An enum describing the possible network choices.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
     #[default]
     Mainnet,
 
     /// The oldest public test network.
-    Testnet,
+    Testnet(Arc<NetworkParameters>),
 }
 
-use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
-impl Network {
+impl NetworkKind {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
-    pub fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+    pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         <ZcashPrimitivesNetwork>::from(self).b58_pubkey_address_prefix()
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
-    pub fn b58_script_address_prefix(&self) -> [u8; 2] {
+    pub fn b58_script_address_prefix(self) -> [u8; 2] {
         <ZcashPrimitivesNetwork>::from(self).b58_script_address_prefix()
     }
-    /// Returns true if the maximum block time rule is active for `network` and `height`.
-    ///
-    /// Always returns true if `network` is the Mainnet.
-    /// If `network` is the Testnet, the `height` should be at least
-    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
-    /// Returns false otherwise.
-    ///
-    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
+
+    /// Return the network name as defined in
+    /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
+    pub fn bip70_network_name(&self) -> String {
         match self {
-            Network::Mainnet => true,
-            Network::Testnet => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+            Self::Mainnet => "main".to_string(),
+            Self::Testnet => "test".to_string(),
         }
+    }
+
+    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
+    pub fn from_zcash_address(network: zcash_address::Network) -> Self {
+        match network {
+            zcash_address::Network::Main => NetworkKind::Mainnet,
+            zcash_address::Network::Test | zcash_address::Network::Regtest => NetworkKind::Testnet,
+        }
+    }
+}
+
+impl From<NetworkKind> for &'static str {
+    fn from(network: NetworkKind) -> &'static str {
+        match network {
+            NetworkKind::Mainnet => "MainnetKind",
+            NetworkKind::Testnet => "TestnetKind",
+        }
+    }
+}
+
+impl fmt::Display for NetworkKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str((*self).into())
     }
 }
 
@@ -96,7 +146,12 @@ impl From<&Network> for &'static str {
     fn from(network: &Network) -> &'static str {
         match network {
             Network::Mainnet => "Mainnet",
-            Network::Testnet => "Testnet",
+            // TODO:
+            // - Add a `name` field to use here instead of checking `is_default_testnet()`
+            // - Find out what zcashd calls the regtest cache dir for the `Network::new_regtest()` method, or
+            //   if it always uses an ephemeral db, and do the same for Regtest in Zebra (#8327).
+            Network::Testnet(params) if params.is_default_testnet() => "Testnet",
+            Network::Testnet(_params) => "UnknownTestnet",
         }
     }
 }
@@ -108,17 +163,69 @@ impl fmt::Display for Network {
 }
 
 impl Network {
+    /// Creates a new [`Network::Testnet`] with the default Testnet [`NetworkParameters`].
+    pub fn new_default_testnet() -> Self {
+        Self::Testnet(Arc::new(NetworkParameters::default()))
+    }
+
+    /// Creates a new configured [`Network::Testnet`] with the provided Testnet [`NetworkParameters`].
+    pub fn new_configured_testnet(params: NetworkParameters) -> Self {
+        Self::Testnet(Arc::new(params))
+    }
+
+    /// Returns true if the network is the default Testnet, or false otherwise.
+    pub fn is_default_testnet(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.is_default_testnet()
+        } else {
+            false
+        }
+    }
+
+    /// Returns the [`NetworkKind`] for this network.
+    pub fn kind(&self) -> NetworkKind {
+        match self {
+            Network::Mainnet => NetworkKind::Mainnet,
+            Network::Testnet(_) => NetworkKind::Testnet,
+        }
+    }
+
+    /// Returns the default [`Network`] for a [`NetworkKind`].
+    pub fn from_kind(kind: NetworkKind) -> Self {
+        match kind {
+            NetworkKind::Mainnet => Self::Mainnet,
+            NetworkKind::Testnet => Self::new_default_testnet(),
+        }
+    }
+
     /// Returns an iterator over [`Network`] variants.
     pub fn iter() -> impl Iterator<Item = Self> {
         // TODO: Use default values of `Testnet` variant when adding fields for #7845.
-        [Self::Mainnet, Self::Testnet].into_iter()
+        [Self::Mainnet, Self::new_default_testnet()].into_iter()
+    }
+
+    /// Returns true if the maximum block time rule is active for `network` and `height`.
+    ///
+    /// Always returns true if `network` is the Mainnet.
+    /// If `network` is the Testnet, the `height` should be at least
+    /// TESTNET_MAX_TIME_START_HEIGHT to return true.
+    /// Returns false otherwise.
+    ///
+    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
+        match self {
+            Network::Mainnet => true,
+            // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on NetworkParameters (#8364)
+            Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
+        }
     }
 
     /// Get the default port associated to this network.
     pub fn default_port(&self) -> u16 {
         match self {
             Network::Mainnet => 8233,
-            Network::Testnet => 18233,
+            // TODO: Add a `default_port` field to `NetworkParameters` to return here. (zcashd uses 18344 for Regtest)
+            Network::Testnet(_params) => 18233,
         }
     }
 
@@ -143,10 +250,7 @@ impl Network {
     /// Return the network name as defined in
     /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
     pub fn bip70_network_name(&self) -> String {
-        match self {
-            Network::Mainnet => "main".to_string(),
-            Network::Testnet => "test".to_string(),
-        }
+        self.kind().bip70_network_name()
     }
 
     /// Return the lowercase network name.
@@ -173,7 +277,7 @@ impl FromStr for Network {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         match string.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
-            "testnet" => Ok(Network::Testnet),
+            "testnet" => Ok(Network::new_default_testnet()),
             _ => Err(InvalidNetworkError(string.to_owned())),
         }
     }

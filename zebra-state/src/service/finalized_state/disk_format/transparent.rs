@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
-    parameters::Network::*,
+    parameters::NetworkKind,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::{self, Address::*},
 };
@@ -502,10 +502,10 @@ fn address_variant(address: &transparent::Address) -> u8 {
     //
     // (This probably doesn't matter, but it might help slightly with data compression.)
     match (address.network(), address) {
-        (Mainnet, PayToPublicKeyHash { .. }) => 0,
-        (Mainnet, PayToScriptHash { .. }) => 1,
-        (Testnet, PayToPublicKeyHash { .. }) => 2,
-        (Testnet, PayToScriptHash { .. }) => 3,
+        (NetworkKind::Mainnet, PayToPublicKeyHash { .. }) => 0,
+        (NetworkKind::Mainnet, PayToScriptHash { .. }) => 1,
+        (NetworkKind::Testnet, PayToPublicKeyHash { .. }) => 2,
+        (NetworkKind::Testnet, PayToScriptHash { .. }) => 3,
     }
 }
 
@@ -529,15 +529,16 @@ impl FromDisk for transparent::Address {
         let hash_bytes = hash_bytes.try_into().unwrap();
 
         let network = if address_variant < 2 {
-            Mainnet
+            NetworkKind::Mainnet
         } else {
-            Testnet
+            // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
+            NetworkKind::Testnet
         };
 
         if address_variant % 2 == 0 {
-            transparent::Address::from_pub_key_hash(&network, hash_bytes)
+            transparent::Address::from_pub_key_hash(network, hash_bytes)
         } else {
-            transparent::Address::from_script_hash(&network, hash_bytes)
+            transparent::Address::from_script_hash(network, hash_bytes)
         }
     }
 }

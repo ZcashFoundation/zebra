@@ -181,9 +181,9 @@ fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
 #[test]
 fn difficulty_is_valid_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-
-    difficulty_is_valid_for_network(Network::Mainnet)?;
-    difficulty_is_valid_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        difficulty_is_valid_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -285,9 +285,9 @@ fn equihash_is_valid_for_historical_blocks() -> Result<(), Report> {
 #[test]
 fn subsidy_is_valid_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-
-    subsidy_is_valid_for_network(Network::Mainnet)?;
-    subsidy_is_valid_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        subsidy_is_valid_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -388,9 +388,9 @@ fn coinbase_validation_failure() -> Result<(), Report> {
 #[test]
 fn funding_stream_validation() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-
-    funding_stream_validation_for_network(Network::Mainnet)?;
-    funding_stream_validation_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        funding_stream_validation_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -463,9 +463,9 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
 #[test]
 fn miner_fees_validation_success() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-
-    miner_fees_validation_for_network(Network::Mainnet)?;
-    miner_fees_validation_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        miner_fees_validation_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -546,12 +546,14 @@ fn merkle_root_is_valid() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     // test all original blocks available, all blocks validate
-    merkle_root_is_valid_for_network(Network::Mainnet)?;
-    merkle_root_is_valid_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        merkle_root_is_valid_for_network(network)?;
+    }
 
     // create and test fake blocks with v5 transactions, all blocks fail validation
-    merkle_root_fake_v5_for_network(Network::Mainnet)?;
-    merkle_root_fake_v5_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        merkle_root_fake_v5_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -683,8 +685,9 @@ fn legacy_sigops_count_for_historic_blocks() {
 fn transaction_expiration_height_validation() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    transaction_expiration_height_for_network(&Network::Mainnet)?;
-    transaction_expiration_height_for_network(&Network::Testnet)?;
+    for network in Network::iter() {
+        transaction_expiration_height_for_network(&network)?;
+    }
 
     Ok(())
 }
