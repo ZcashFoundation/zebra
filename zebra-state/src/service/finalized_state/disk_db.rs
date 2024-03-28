@@ -542,9 +542,7 @@ impl DiskDb {
                 .unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
 
-            // TODO: Consider displaying the disk and memory sizes in a human-readable format (e.g., MiB, GiB)
-            // This might require adding a dependency like the `human_bytes` crate (https://crates.io/crates/human_bytes)
-            // See https://github.com/ZcashFoundation/zebra/pull/8336#discussion_r1520535787
+            // TODO: Consider displaying the disk and memory sizes in a human-readable format - #8380.
             write!(
                 column_families_log_string,
                 "{} (Disk: {} bytes, Memory: {} bytes)",
@@ -785,7 +783,7 @@ impl DiskDb {
         // we read any existing column families off the disk, then add any new column families
         // from the current implementation.
         //
-        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference
+        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
         let column_families_on_disk = DB::list_cf(db_options, path).unwrap_or_default();
         let column_families = column_families_on_disk
             .into_iter()
