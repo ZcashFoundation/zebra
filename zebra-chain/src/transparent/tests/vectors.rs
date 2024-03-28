@@ -64,17 +64,17 @@ fn get_transparent_output_address() -> Result<()> {
     // for the prefixes.
 
     // Script hash 1b8a9bda4b62cd0d0582b55455d0778c86f8628f
-    let addr = transparent_output_address(&transaction.outputs()[0], Network::Mainnet)
+    let addr = transparent_output_address(&transaction.outputs()[0], &Network::Mainnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "t3M5FDmPfWNRG3HRLddbicsuSCvKuk9hxzZ");
-    let addr = transparent_output_address(&transaction.outputs()[0], Network::Testnet)
+    let addr = transparent_output_address(&transaction.outputs()[0], &Network::Testnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "t294SGSVoNq2daz15ZNbmAW65KQZ5e3nN5G");
     // Public key hash e4ff5512ffafe9287992a1cd177ca6e408e03003
-    let addr = transparent_output_address(&transaction.outputs()[1], Network::Mainnet)
+    let addr = transparent_output_address(&transaction.outputs()[1], &Network::Mainnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "t1ekRwsd4LaSsd6NXgsx66q2HxQWTLCF44y");
-    let addr = transparent_output_address(&transaction.outputs()[1], Network::Testnet)
+    let addr = transparent_output_address(&transaction.outputs()[1], &Network::Testnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "tmWbBGi7TjExNmLZyMcFpxVh3ZPbGrpbX3H");
 
@@ -103,7 +103,7 @@ fn get_transparent_output_address_with_blocks_for_network(network: Network) {
 
         for (idx, tx) in block.transactions.iter().enumerate() {
             for output in tx.outputs() {
-                let addr = output.address(network);
+                let addr = output.address(&network);
                 if addr.is_none() && idx == 0 && output.lock_script.as_raw_bytes()[0] == 0x21 {
                     // There are a bunch of coinbase transactions with pay-to-pubkey scripts
                     // which we don't support; skip them

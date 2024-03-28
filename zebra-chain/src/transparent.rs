@@ -426,7 +426,7 @@ impl Output {
     /// Return the destination address from a transparent output.
     ///
     /// Returns None if the address type is not valid or unrecognized.
-    pub fn address(&self, network: Network) -> Option<Address> {
+    pub fn address(&self, network: &Network) -> Option<Address> {
         zcash_primitives::transparent_output_address(self, network)
     }
 }

@@ -36,7 +36,7 @@ proptest! {
         let zero_lock_time = LockTime::Height(block::Height(0));
 
         let (transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -67,7 +67,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         let (mut transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -105,7 +105,7 @@ proptest! {
         let lock_time = LockTime::Height(unlock_height);
 
         let (transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -138,7 +138,7 @@ proptest! {
         };
 
         let (transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -172,7 +172,7 @@ proptest! {
         let lock_time = LockTime::Height(unlock_height);
 
         let (transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -213,7 +213,7 @@ proptest! {
         };
 
         let (transaction, known_utxos) = mock_transparent_transaction(
-            network,
+            &network,
             block_height,
             relative_source_fund_heights,
             transaction_version,
@@ -244,14 +244,14 @@ proptest! {
 fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)> {
     any::<Network>().prop_flat_map(|network| {
         let start_height_value = NetworkUpgrade::Sapling
-            .activation_height(network)
+            .activation_height(&network)
             .expect("Sapling to have an activation height")
             .0;
 
         let end_height_value = block::Height::MAX_EXPIRY_HEIGHT.0;
 
         (start_height_value..=end_height_value)
-            .prop_map(move |height_value| (network, block::Height(height_value)))
+            .prop_map(move |height_value| (network.clone(), block::Height(height_value)))
     })
 }
 
@@ -281,7 +281,7 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
 /// - if any item of `relative_source_heights` is not in the range `0.0..1.0` (see
 /// [`scale_block_height`] for details)
 fn mock_transparent_transaction(
-    network: Network,
+    network: &Network,
     block_height: block::Height,
     relative_source_heights: Vec<f64>,
     transaction_version: u8,
@@ -330,7 +330,7 @@ fn mock_transparent_transaction(
 /// The `transaction_version` might be reduced if it is not supported by the network upgrade active
 /// at the `block_height` of the specified `network`.
 fn sanitize_transaction_version(
-    network: Network,
+    network: &Network,
     transaction_version: u8,
     block_height: block::Height,
 ) -> (u8, NetworkUpgrade) {
@@ -450,7 +450,7 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = transaction::Verifier::new(network, state_service);
+        let verifier = transaction::Verifier::new(&network, state_service);
 
         // Test the transaction verifier
         verifier

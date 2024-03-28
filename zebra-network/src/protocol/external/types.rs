@@ -54,7 +54,7 @@ impl Version {
     ///
     /// If we are incompatible with our own minimum remote protocol version.
     pub fn min_remote_for_height(
-        network: Network,
+        network: &Network,
         height: impl Into<Option<block::Height>>,
     ) -> Version {
         let height = height.into().unwrap_or(block::Height(0));
@@ -78,9 +78,9 @@ impl Version {
     /// - during the initial block download,
     /// - after Zebra restarts, and
     /// - after Zebra's local network is slow or shut down.
-    fn initial_min_for_network(network: Network) -> Version {
+    fn initial_min_for_network(network: &Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-            .get(&network)
+            .get(network)
             .expect("We always have a value for testnet or mainnet")
     }
 
@@ -88,7 +88,7 @@ impl Version {
     /// `height`.
     ///
     /// This is the minimum peer version when Zebra is close to the current tip.
-    fn min_specified_for_height(network: Network, height: block::Height) -> Version {
+    fn min_specified_for_height(network: &Network, height: block::Height) -> Version {
         let network_upgrade = NetworkUpgrade::current(network, height);
         Version::min_specified_for_upgrade(network, network_upgrade)
     }
@@ -96,7 +96,7 @@ impl Version {
     /// Returns the minimum specified network protocol version for `network` and
     /// `network_upgrade`.
     pub(crate) fn min_specified_for_upgrade(
-        network: Network,
+        network: &Network,
         network_upgrade: NetworkUpgrade,
     ) -> Version {
         // TODO: Should we reject earlier protocol versions during our initial
@@ -196,17 +196,17 @@ mod test {
 
     #[test]
     fn version_extremes_mainnet() {
-        version_extremes(Mainnet)
+        version_extremes(&Mainnet)
     }
 
     #[test]
     fn version_extremes_testnet() {
-        version_extremes(Testnet)
+        version_extremes(&Testnet)
     }
 
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
     /// extreme values.
-    fn version_extremes(network: Network) {
+    fn version_extremes(network: &Network) {
         let _init_guard = zebra_test::init();
 
         assert_eq!(
@@ -224,17 +224,17 @@ mod test {
 
     #[test]
     fn version_consistent_mainnet() {
-        version_consistent(Mainnet)
+        version_consistent(&Mainnet)
     }
 
     #[test]
     fn version_consistent_testnet() {
-        version_consistent(Testnet)
+        version_consistent(&Testnet)
     }
 
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions
     /// are consistent for `network`.
-    fn version_consistent(network: Network) {
+    fn version_consistent(network: &Network) {
         let _init_guard = zebra_test::init();
 
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);

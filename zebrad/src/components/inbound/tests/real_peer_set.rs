@@ -641,12 +641,12 @@ async fn setup(
     // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
     let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
-        zebra_state::init(state_config, network, Height::MAX, 0);
+        zebra_state::init(state_config, &network, Height::MAX, 0);
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
     // Network
     let network_config = NetworkConfig {
-        network,
+        network: network.clone(),
         listen_addr: config_listen_addr,
 
         // Stop Zebra making outbound connections
@@ -746,7 +746,7 @@ async fn setup(
 
     // Open a fake peer connection to the inbound listener, using the isolated connection API
     let connected_peer_service = connect_isolated_tcp_direct_with_inbound(
-        network,
+        &network,
         listen_addr,
         user_agent,
         response_inbound_service,

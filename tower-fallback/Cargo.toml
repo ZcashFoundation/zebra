@@ -16,7 +16,7 @@ keywords = ["tower", "batch"]
 categories = ["algorithms", "asynchronous"]
 
 [dependencies]
-pin-project = "1.1.4"
+pin-project = "1.1.5"
 tower = "0.4.13"
 futures-core = "0.3.28"
 tracing = "0.1.39"

@@ -116,7 +116,7 @@ impl StartCmd {
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
-            config.network.network,
+            &config.network.network,
         );
 
         info!("opening database, this may take a few minutes");
@@ -124,7 +124,7 @@ impl StartCmd {
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::spawn_init(
                 config.state.clone(),
-                config.network.network,
+                &config.network.network,
                 max_checkpoint_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
@@ -171,7 +171,7 @@ impl StartCmd {
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
-                config.network.network,
+                &config.network.network,
                 state.clone(),
             )
             .await;
@@ -238,7 +238,7 @@ impl StartCmd {
             sync_status.clone(),
             address_book.clone(),
             latest_chain_tip.clone(),
-            config.network.network,
+            config.network.network.clone(),
         );
 
         // Start concurrent tasks which don't add load to other tasks
@@ -264,13 +264,13 @@ impl StartCmd {
         info!("spawning delete old databases task");
         let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
             &config.state,
-            config.network.network,
+            &config.network.network,
         );
 
         info!("spawning progress logging task");
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
-                config.network.network,
+                config.network.network.clone(),
                 latest_chain_tip.clone(),
                 sync_status.clone(),
             )
@@ -280,7 +280,7 @@ impl StartCmd {
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
         let end_of_support_task_handle = tokio::spawn(
-            sync::end_of_support::start(config.network.network, latest_chain_tip.clone())
+            sync::end_of_support::start(config.network.network.clone(), latest_chain_tip.clone())
                 .in_current_span(),
         );
 
@@ -309,7 +309,7 @@ impl StartCmd {
             info!("spawning shielded scanner with configured viewing keys");
             zebra_scan::spawn_init(
                 config.shielded_scan.clone(),
-                config.network.network,
+                config.network.network.clone(),
                 state,
                 chain_tip_change,
             )
@@ -327,7 +327,7 @@ impl StartCmd {
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
             let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-                config.network.network,
+                &config.network.network,
                 config.mining.clone(),
                 mempool,
                 read_only_state_service,

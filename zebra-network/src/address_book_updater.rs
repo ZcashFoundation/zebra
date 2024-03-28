@@ -56,7 +56,7 @@ impl AddressBookUpdater {
 
         let address_book = AddressBook::new(
             local_listener,
-            config.network,
+            &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),
         );

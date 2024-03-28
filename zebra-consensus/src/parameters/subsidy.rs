@@ -224,7 +224,7 @@ impl ParameterSubsidy for Network {
         // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
         match self {
             Network::Mainnet => NetworkUpgrade::Canopy
-                .activation_height(*self)
+                .activation_height(self)
                 .expect("canopy activation height should be available"),
             Network::Testnet => FIRST_HALVING_TESTNET,
         }

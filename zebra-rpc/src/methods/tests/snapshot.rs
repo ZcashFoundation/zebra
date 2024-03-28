@@ -35,14 +35,14 @@ async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
 
     tokio::join!(
-        test_rpc_response_data_for_network(Mainnet),
-        test_rpc_response_data_for_network(Testnet),
-        test_mocked_rpc_response_data_for_network(Mainnet),
-        test_mocked_rpc_response_data_for_network(Testnet),
+        test_rpc_response_data_for_network(&Mainnet),
+        test_rpc_response_data_for_network(&Testnet),
+        test_mocked_rpc_response_data_for_network(&Mainnet),
+        test_mocked_rpc_response_data_for_network(&Testnet),
     );
 }
 
-async fn test_rpc_response_data_for_network(network: Network) {
+async fn test_rpc_response_data_for_network(network: &Network) {
     // Create a continuous chain of mainnet and testnet blocks from genesis
     let block_data = network.blockchain_map();
 
@@ -77,7 +77,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         "/Zebra:RPC test/",
-        network,
+        network.clone(),
         false,
         true,
         Buffer::new(mempool.clone(), 1),
@@ -320,7 +320,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
 }
 
-async fn test_mocked_rpc_response_data_for_network(network: Network) {
+async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     // Prepare the test harness.
 
     let mut settings = insta::Settings::clone_current();
@@ -333,7 +333,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network) {
     let (rpc, _) = RpcImpl::new(
         "RPC test",
         "/Zebra:RPC test/",
-        network,
+        network.clone(),
         false,
         true,
         mempool,
@@ -542,7 +542,7 @@ fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::S
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
-fn network_string(network: Network) -> String {
+fn network_string(network: &Network) -> String {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
     net_suffix

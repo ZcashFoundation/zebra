@@ -141,7 +141,7 @@ impl FinalizedState {
     /// If there is no existing database, creates a new database on disk.
     pub fn new(
         config: &Config,
-        network: Network,
+        network: &Network,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
         Self::new_with_debug(
@@ -160,7 +160,7 @@ impl FinalizedState {
     /// This method is intended for use in tests.
     pub(crate) fn new_with_debug(
         config: &Config,
-        network: Network,
+        network: &Network,
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
         read_only: bool,
@@ -340,7 +340,7 @@ impl FinalizedState {
                 // thread, if it shows up in profiles
                 check::block_commitment_is_valid_for_chain_history(
                     block.clone(),
-                    self.network(),
+                    &self.network(),
                     &history_tree,
                 )?;
 
@@ -351,7 +351,12 @@ impl FinalizedState {
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut.push(self.network(), block.clone(), sapling_root, orchard_root)?;
+                history_tree_mut.push(
+                    &self.network(),
+                    block.clone(),
+                    &sapling_root,
+                    &orchard_root,
+                )?;
                 let treestate = Treestate {
                     note_commitment_trees,
                     history_tree,
@@ -409,7 +414,7 @@ impl FinalizedState {
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
-            self.network(),
+            &self.network(),
             source,
         );
 

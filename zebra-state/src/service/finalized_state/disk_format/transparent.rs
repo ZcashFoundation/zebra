@@ -535,9 +535,9 @@ impl FromDisk for transparent::Address {
         };
 
         if address_variant % 2 == 0 {
-            transparent::Address::from_pub_key_hash(network, hash_bytes)
+            transparent::Address::from_pub_key_hash(&network, hash_bytes)
         } else {
-            transparent::Address::from_script_hash(network, hash_bytes)
+            transparent::Address::from_script_hash(&network, hash_bytes)
         }
     }
 }

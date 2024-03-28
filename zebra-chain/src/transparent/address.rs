@@ -27,7 +27,7 @@ use proptest::prelude::*;
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
 #[derive(
-    Copy, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
+    Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
@@ -183,26 +183,26 @@ impl ToAddressWithNetwork for PublicKey {
 
 impl Address {
     /// Create an address for the given public key hash and network.
-    pub fn from_pub_key_hash(network: Network, pub_key_hash: [u8; 20]) -> Self {
+    pub fn from_pub_key_hash(network: &Network, pub_key_hash: [u8; 20]) -> Self {
         Self::PayToPublicKeyHash {
-            network,
+            network: network.clone(),
             pub_key_hash,
         }
     }
 
     /// Create an address for the given script hash and network.
-    pub fn from_script_hash(network: Network, script_hash: [u8; 20]) -> Self {
+    pub fn from_script_hash(network: &Network, script_hash: [u8; 20]) -> Self {
         Self::PayToScriptHash {
-            network,
+            network: network.clone(),
             script_hash,
         }
     }
 
     /// Returns the network for this address.
     pub fn network(&self) -> Network {
-        match *self {
-            Address::PayToScriptHash { network, .. } => network,
-            Address::PayToPublicKeyHash { network, .. } => network,
+        match self {
+            Address::PayToScriptHash { network, .. } => network.clone(),
+            Address::PayToPublicKeyHash { network, .. } => network.clone(),
         }
     }
 

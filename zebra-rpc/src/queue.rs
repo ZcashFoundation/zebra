@@ -157,7 +157,7 @@ impl Runner {
             };
 
             // get spacing between blocks
-            let spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
+            let spacing = NetworkUpgrade::target_spacing_for_height(&network, tip_height);
 
             // sleep until the next block
             tokio::time::sleep(spacing.to_std().expect("should never be less than zero")).await;

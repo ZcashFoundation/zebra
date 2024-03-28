@@ -60,7 +60,7 @@ pub const FAKE_SAPLING_VIEWING_KEY: &str = "zxviewsfake";
 ///
 /// The keys are seeded only from their index in the returned `Vec`, so repeated calls return same
 /// keys at a particular index.
-pub fn mock_sapling_scanning_keys(num_keys: u8, network: Network) -> Vec<SaplingScanningKey> {
+pub fn mock_sapling_scanning_keys(num_keys: u8, network: &Network) -> Vec<SaplingScanningKey> {
     let mut keys: Vec<SaplingScanningKey> = vec![];
 
     for seed in 0..num_keys {

@@ -65,7 +65,7 @@ proptest! {
                 _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -115,7 +115,7 @@ proptest! {
                 _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -129,7 +129,7 @@ proptest! {
 
             for (fake_chain_tip, transaction) in fake_chain_tips.iter().zip(transactions.iter_mut()) {
                 // Obtain a new chain tip based on the previous one.
-                let chain_tip = fake_chain_tip.to_chain_tip_block(&previous_chain_tip, network);
+                let chain_tip = fake_chain_tip.to_chain_tip_block(&previous_chain_tip, &network);
 
                 // Adjust the transaction expiry height based on the new chain
                 // tip height so that the mempool does not evict the transaction
@@ -196,7 +196,7 @@ proptest! {
                 mut tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
-            ) = setup(network);
+            ) = setup(&network);
 
             time::pause();
 
@@ -254,7 +254,7 @@ fn block1_chain_tip() -> Option<ChainTipBlock> {
 
 /// Create a new [`Mempool`] instance using mocked services.
 fn setup(
-    network: Network,
+    network: &Network,
 ) -> (
     Mempool,
     MockPeerSet,
@@ -319,7 +319,7 @@ impl FakeChainTip {
     /// Returns a new [`ChainTipBlock`] placed on top of the previous block if
     /// the chain is supposed to grow. Otherwise returns a [`ChainTipBlock`]
     /// that does not reference the previous one.
-    fn to_chain_tip_block(&self, previous: &ChainTipBlock, network: Network) -> ChainTipBlock {
+    fn to_chain_tip_block(&self, previous: &ChainTipBlock, network: &Network) -> ChainTipBlock {
         match self {
             Self::Grow(chain_tip_block) => {
                 let height = block::Height(previous.height.0 + 1);

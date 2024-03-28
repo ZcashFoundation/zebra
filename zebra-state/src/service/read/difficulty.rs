@@ -45,7 +45,7 @@ pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
 pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-    network: Network,
+    network: &Network,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let mut best_relevant_chain_and_history_tree_result =
         best_relevant_chain_and_history_tree(non_finalized_state, db);
@@ -209,7 +209,7 @@ fn difficulty_time_and_history_tree(
     relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
     tip_height: Height,
     tip_hash: block::Hash,
-    network: Network,
+    network: &Network,
     history_tree: Arc<HistoryTree>,
 ) -> GetBlockTemplateChainInfo {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
@@ -272,11 +272,11 @@ fn difficulty_time_and_history_tree(
 /// The `relevant_data` has recent block difficulties and times in reverse order from the tip.
 fn adjust_difficulty_and_time_for_testnet(
     result: &mut GetBlockTemplateChainInfo,
-    network: Network,
+    network: &Network,
     previous_block_height: Height,
     relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)>,
 ) {
-    if network == Network::Mainnet {
+    if network == &Network::Mainnet {
         return;
     }
 

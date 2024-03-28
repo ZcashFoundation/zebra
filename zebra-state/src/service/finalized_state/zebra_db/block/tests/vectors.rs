@@ -42,14 +42,14 @@ fn test_block_db_round_trip() {
         .iter()
         .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
 
-    test_block_db_round_trip_with(Mainnet, mainnet_test_cases);
-    test_block_db_round_trip_with(Testnet, testnet_test_cases);
+    test_block_db_round_trip_with(&Mainnet, mainnet_test_cases);
+    test_block_db_round_trip_with(&Testnet, testnet_test_cases);
 
     // It doesn't matter if these blocks are mainnet or testnet,
     // because there is no validation at this level of the database.
     //
     // These blocks have the same height and header hash, so they each need a new state.
-    test_block_db_round_trip_with(Mainnet, iter::once(large_multi_transaction_block()));
+    test_block_db_round_trip_with(&Mainnet, iter::once(large_multi_transaction_block()));
 
     // These blocks are unstable under serialization, so we apply a round-trip first.
     //
@@ -61,7 +61,7 @@ fn test_block_db_round_trip() {
     let block: Block = block_data
         .zcash_deserialize_into()
         .expect("deserialization of valid serialized block never fails");
-    test_block_db_round_trip_with(Mainnet, iter::once(block));
+    test_block_db_round_trip_with(&Mainnet, iter::once(block));
 
     let block = large_single_transaction_block_many_outputs();
     let block_data = block
@@ -70,11 +70,11 @@ fn test_block_db_round_trip() {
     let block: Block = block_data
         .zcash_deserialize_into()
         .expect("deserialization of valid serialized block never fails");
-    test_block_db_round_trip_with(Mainnet, iter::once(block));
+    test_block_db_round_trip_with(&Mainnet, iter::once(block));
 }
 
 fn test_block_db_round_trip_with(
-    network: Network,
+    network: &Network,
     block_test_cases: impl IntoIterator<Item = Block>,
 ) {
     let _init_guard = zebra_test::init();

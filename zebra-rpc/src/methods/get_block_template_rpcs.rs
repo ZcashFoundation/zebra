@@ -438,7 +438,7 @@ where
     /// If the `mining_config` is invalid.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        network: Network,
+        network: &Network,
         mining_config: crate::config::mining::Config,
         mempool: Mempool,
         state: State,
@@ -448,10 +448,10 @@ where
         address_book: AddressBook,
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
-        if let Some(miner_address) = mining_config.miner_address {
+        if let Some(miner_address) = mining_config.miner_address.clone() {
             assert_eq!(
                 miner_address.network(),
-                network,
+                network.clone(),
                 "incorrect miner address config: {miner_address} \
                          network.network {network} and miner address network {} must match",
                 miner_address.network(),
@@ -486,7 +486,7 @@ where
         );
 
         Self {
-            network,
+            network: network.clone(),
             miner_address: mining_config.miner_address,
             extra_coinbase_data,
             debug_like_zcashd,
@@ -576,8 +576,8 @@ where
         parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<get_block_template::Response>> {
         // Clone Configs
-        let network = self.network;
-        let miner_address = self.miner_address;
+        let network = self.network.clone();
+        let miner_address = self.miner_address.clone();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.extra_coinbase_data.clone();
 
@@ -626,7 +626,7 @@ where
                 //
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-                check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
+                check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
 
                 // TODO: return an error if we have no peers, like `zcashd` does,
                 //       and add a developer config that mines regardless of how many peers we have.
@@ -861,9 +861,9 @@ where
 
             // Randomly select some mempool transactions.
             let mempool_txs = zip317::select_mempool_transactions(
-                network,
+                &network,
                 next_block_height,
-                miner_address,
+                &miner_address,
                 mempool_txs,
                 debug_like_zcashd,
                 extra_coinbase_data.clone(),
@@ -881,8 +881,8 @@ where
             // - After this point, the template only depends on the previously fetched data.
 
             let response = GetBlockTemplate::new(
-                network,
-                miner_address,
+                &network,
+                &miner_address,
                 &chain_tip_and_local_time,
                 server_long_poll_id,
                 mempool_txs,
@@ -988,7 +988,7 @@ where
     }
 
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>> {
-        let network = self.network;
+        let network = self.network.clone();
         let solution_rate_fut = self.get_network_sol_ps(None, None);
         async move {
             Ok(get_mining_info::Response::new(
@@ -1062,7 +1062,7 @@ where
         &self,
         raw_address: String,
     ) -> BoxFuture<Result<validate_address::Response>> {
-        let network = self.network;
+        let network = self.network.clone();
 
         async move {
             let Ok(address) = raw_address
@@ -1107,7 +1107,7 @@ where
         &self,
         raw_address: String,
     ) -> BoxFuture<Result<types::z_validate_address::Response>> {
-        let network = self.network;
+        let network = self.network.clone();
 
         async move {
             let Ok(address) = raw_address
@@ -1148,7 +1148,7 @@ where
 
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>> {
         let latest_chain_tip = self.latest_chain_tip.clone();
-        let network = self.network;
+        let network = self.network.clone();
 
         async move {
             let height = if let Some(height) = height {
@@ -1167,7 +1167,7 @@ where
                 });
             }
 
-            let miner = miner_subsidy(height, network).map_err(|error| Error {
+            let miner = miner_subsidy(height, &network).map_err(|error| Error {
                 code: ErrorCode::ServerError(0),
                 message: error.to_string(),
                 data: None,
@@ -1176,7 +1176,7 @@ where
             let founders = Amount::zero();
 
             let funding_streams =
-                funding_stream_values(height, network).map_err(|error| Error {
+                funding_stream_values(height, &network).map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
                     message: error.to_string(),
                     data: None,
@@ -1184,7 +1184,7 @@ where
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
                 .map(|(receiver, value)| {
-                    let address = funding_stream_address(height, network, *receiver);
+                    let address = funding_stream_address(height, &network, *receiver);
                     (*receiver, FundingStream::new(*receiver, *value, address))
                 })
                 .collect();
@@ -1208,7 +1208,7 @@ where
     }
 
     fn get_difficulty(&self) -> BoxFuture<Result<f64>> {
-        let network = self.network;
+        let network = self.network.clone();
         let mut state = self.state.clone();
 
         async move {

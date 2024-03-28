@@ -771,7 +771,7 @@ async fn caches_getaddr_response() {
         let state_config = StateConfig::ephemeral();
         let address_book = AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
-            Mainnet,
+            &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
@@ -782,7 +782,7 @@ async fn caches_getaddr_response() {
 
         // UTXO verification doesn't matter for these tests.
         let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
-            zebra_state::init(state_config.clone(), network, Height::MAX, 0);
+            zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -792,8 +792,12 @@ async fn caches_getaddr_response() {
             _transaction_verifier,
             _groth16_download_handle,
             _max_checkpoint_height,
-        ) = zebra_consensus::router::init(consensus_config.clone(), network, state_service.clone())
-            .await;
+        ) = zebra_consensus::router::init(
+            consensus_config.clone(),
+            &network,
+            state_service.clone(),
+        )
+        .await;
 
         let peer_set = MockService::build()
             .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -882,7 +886,7 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
-        Mainnet,
+        &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
@@ -891,13 +895,13 @@ async fn setup(
 
     // UTXO verification doesn't matter for these tests.
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
-        zebra_state::init(state_config.clone(), network, Height::MAX, 0);
+        zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init(consensus_config.clone(), network, state_service.clone())
+        zebra_consensus::router::init(consensus_config.clone(), &network, state_service.clone())
             .await;
 
     let mut peer_set = MockService::build()
@@ -1053,7 +1057,7 @@ fn add_some_stuff_to_mempool(
     network: Network,
 ) -> Vec<VerifiedUnminedTx> {
     // get the genesis block coinbase transaction from the Zcash blockchain.
-    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, network)
+    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, &network)
         .take(1)
         .collect();
 

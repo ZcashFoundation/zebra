@@ -88,9 +88,9 @@ pub async fn show_block_chain_progress(
         .add(min_after_checkpoint_blocks)
         .expect("hard-coded checkpoint height is far below Height::MAX");
 
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, Height::MAX);
+    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(&network, Height::MAX);
     let max_block_spacing =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, Height::MAX);
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, Height::MAX);
 
     // We expect the state height to increase at least once in this interval.
     //
@@ -135,14 +135,14 @@ pub async fn show_block_chain_progress(
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
         if let Some(estimated_height) =
-            latest_chain_tip.estimate_network_chain_tip_height(network, now)
+            latest_chain_tip.estimate_network_chain_tip_height(&network, now)
         {
             // The estimate/actual race doesn't matter here,
             // because we're only using it for metrics and logging.
             let current_height = latest_chain_tip
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
-            let network_upgrade = NetworkUpgrade::current(network, current_height);
+            let network_upgrade = NetworkUpgrade::current(&network, current_height);
 
             // Send progress reports for block height
             //

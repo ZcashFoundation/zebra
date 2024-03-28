@@ -11,14 +11,14 @@ use eyre::Result;
 /// and its next block.
 #[test]
 fn tree() -> Result<()> {
-    tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Heartwood)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Heartwood)?;
-    tree_for_network_upgrade(Network::Mainnet, NetworkUpgrade::Canopy)?;
-    tree_for_network_upgrade(Network::Testnet, NetworkUpgrade::Canopy)?;
+    tree_for_network_upgrade(&Network::Mainnet, NetworkUpgrade::Heartwood)?;
+    tree_for_network_upgrade(&Network::Testnet, NetworkUpgrade::Heartwood)?;
+    tree_for_network_upgrade(&Network::Mainnet, NetworkUpgrade::Canopy)?;
+    tree_for_network_upgrade(&Network::Testnet, NetworkUpgrade::Canopy)?;
     Ok(())
 }
 
-fn tree_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade) -> Result<()> {
+fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) -> Result<()> {
     let (blocks, sapling_roots) = network.block_sapling_roots_map();
 
     let height = network_upgrade.activation_height(network).unwrap().0;

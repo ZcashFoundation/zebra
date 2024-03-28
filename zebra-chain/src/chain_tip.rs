@@ -84,7 +84,7 @@ pub trait ChainTip {
     /// and the height of the best tip.
     fn estimate_network_chain_tip_height(
         &self,
-        network: Network,
+        network: &Network,
         now: DateTime<Utc>,
     ) -> Option<block::Height> {
         let (current_height, current_block_time) = self.best_tip_height_and_block_time()?;
@@ -110,7 +110,7 @@ pub trait ChainTip {
     /// Returns `None` if the state is empty.
     fn estimate_distance_to_network_chain_tip(
         &self,
-        network: Network,
+        network: &Network,
     ) -> Option<(block::HeightDiff, block::Height)> {
         let (current_height, current_block_time) = self.best_tip_height_and_block_time()?;
 

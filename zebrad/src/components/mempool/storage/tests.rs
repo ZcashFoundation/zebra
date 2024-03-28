@@ -15,7 +15,7 @@ mod vectors;
 
 pub fn unmined_transactions_in_blocks(
     block_height_range: impl RangeBounds<u32>,
-    network: Network,
+    network: &Network,
 ) -> impl DoubleEndedIterator<Item = VerifiedUnminedTx> {
     let blocks = network.block_iter();
 

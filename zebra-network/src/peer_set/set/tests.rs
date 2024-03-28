@@ -336,7 +336,7 @@ impl PeerSetGuard {
             .expect("Invalid local listener address");
         let address_book = AddressBook::new(
             local_listener,
-            Network::Mainnet,
+            &Network::Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             Span::none(),
         );
@@ -347,7 +347,7 @@ impl PeerSetGuard {
 
 /// A pair of block height values, where one is before and the other is at or after an arbitrary
 /// network upgrade's activation height.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BlockHeightPairAcrossNetworkUpgrades {
     /// The network for which the block height values represent heights before and after an
     /// upgrade.
@@ -374,7 +374,7 @@ impl Arbitrary for BlockHeightPairAcrossNetworkUpgrades {
                 "missing activation height for network upgrade",
                 |(network, upgrade)| {
                     upgrade
-                        .activation_height(network)
+                        .activation_height(&network)
                         .map(|height| (network, height))
                 },
             )

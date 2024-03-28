@@ -42,7 +42,7 @@ pub(crate) async fn run() -> Result<()> {
     );
 
     let raw_blocks: Vec<String> =
-        get_raw_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
+        get_raw_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
 
     tracing::info!("got raw future blocks, spawning isolated zebrad...",);
 
