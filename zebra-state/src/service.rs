@@ -254,6 +254,10 @@ impl Drop for StateService {
             "dropping the state: dropped unused non-finalized state queue block",
         );
 
+        // Log database metrics before shutting down
+        info!("dropping the state: logging database metrics");
+        self.log_db_metrics();
+
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
     }
@@ -449,6 +453,11 @@ impl StateService {
         timer.finish(module_path!(), line!(), "legacy chain check");
 
         (state, read_service, latest_chain_tip, chain_tip_change)
+    }
+
+    /// Call read only state service to log rocksdb database metrics.
+    pub fn log_db_metrics(&self) {
+        self.read_service.db.print_db_metrics();
     }
 
     /// Queue a checkpoint verified block for verification and storage in the finalized state.
@@ -852,6 +861,11 @@ impl ReadStateService {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn db(&self) -> &ZebraDb {
         &self.db
+    }
+
+    /// Logs rocksdb metrics using the read only state service.
+    pub fn log_db_metrics(&self) {
+        self.db.print_db_metrics();
     }
 }
 

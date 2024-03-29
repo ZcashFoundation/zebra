@@ -131,6 +131,9 @@ impl StartCmd {
             )
             .await?;
 
+        info!("logging database metrics on startup");
+        read_only_state_service.log_db_metrics();
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);
