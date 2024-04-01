@@ -66,8 +66,10 @@ impl NetworkParameters {
 }
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
+// Note: The order of these variants is important for correct bincode (de)serialization
+//       of history trees in the db format.
+// TODO: Replace bincode (de)serialization of `HistoryTreeParts` in a db format upgrade?
 pub enum NetworkKind {
     /// The production mainnet.
     #[default]
@@ -75,6 +77,9 @@ pub enum NetworkKind {
 
     /// A test network.
     Testnet,
+
+    /// Regtest mode
+    Regtest,
 }
 
 impl From<Network> for NetworkKind {
@@ -92,7 +97,8 @@ pub enum Network {
     #[default]
     Mainnet,
 
-    /// The oldest public test network.
+    /// A test network such as the default public testnet,
+    /// a configured testnet, or Regtest.
     Testnet(Arc<NetworkParameters>),
 }
 
@@ -112,26 +118,21 @@ impl NetworkKind {
     /// Return the network name as defined in
     /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
     pub fn bip70_network_name(&self) -> String {
-        match self {
-            Self::Mainnet => "main".to_string(),
-            Self::Testnet => "test".to_string(),
-        }
-    }
-
-    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
-    pub fn from_zcash_address(network: zcash_address::Network) -> Self {
-        match network {
-            zcash_address::Network::Main => NetworkKind::Mainnet,
-            zcash_address::Network::Test | zcash_address::Network::Regtest => NetworkKind::Testnet,
+        if *self == Self::Mainnet {
+            "main".to_string()
+        } else {
+            "test".to_string()
         }
     }
 }
 
 impl From<NetworkKind> for &'static str {
     fn from(network: NetworkKind) -> &'static str {
+        // These should be different from the `Display` impl for `Network`
         match network {
             NetworkKind::Mainnet => "MainnetKind",
             NetworkKind::Testnet => "TestnetKind",
+            NetworkKind::Regtest => "RegtestKind",
         }
     }
 }
@@ -148,8 +149,7 @@ impl From<&Network> for &'static str {
             Network::Mainnet => "Mainnet",
             // TODO:
             // - Add a `name` field to use here instead of checking `is_default_testnet()`
-            // - Find out what zcashd calls the regtest cache dir for the `Network::new_regtest()` method, or
-            //   if it always uses an ephemeral db, and do the same for Regtest in Zebra (#8327).
+            // - zcashd calls the Regtest cache dir 'regtest' (#8327).
             Network::Testnet(params) if params.is_default_testnet() => "Testnet",
             Network::Testnet(_params) => "UnknownTestnet",
         }
@@ -186,15 +186,8 @@ impl Network {
     pub fn kind(&self) -> NetworkKind {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
+            // TODO: Return `NetworkKind::Regtest` if the parameters match the default Regtest params
             Network::Testnet(_) => NetworkKind::Testnet,
-        }
-    }
-
-    /// Returns the default [`Network`] for a [`NetworkKind`].
-    pub fn from_kind(kind: NetworkKind) -> Self {
-        match kind {
-            NetworkKind::Mainnet => Self::Mainnet,
-            NetworkKind::Testnet => Self::new_default_testnet(),
         }
     }
 

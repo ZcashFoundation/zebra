@@ -351,7 +351,10 @@ impl TryFrom<&Network> for zcash_primitives::consensus::Network {
             Network::Testnet(_params) if network.is_default_testnet() => {
                 Ok(zcash_primitives::consensus::Network::TestNetwork)
             }
-            Network::Testnet(_params) => Err(UnsupportedNetwork),
+            Network::Testnet(_params) => Err(UnsupportedNetwork(
+                "could not convert configured testnet to zcash_primitives::consensus::Network"
+                    .to_string(),
+            )),
         }
     }
 }
@@ -360,7 +363,9 @@ impl From<NetworkKind> for zcash_primitives::consensus::Network {
     fn from(network: NetworkKind) -> Self {
         match network {
             NetworkKind::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-            NetworkKind::Testnet => zcash_primitives::consensus::Network::TestNetwork,
+            NetworkKind::Testnet | NetworkKind::Regtest => {
+                zcash_primitives::consensus::Network::TestNetwork
+            }
         }
     }
 }

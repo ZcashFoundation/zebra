@@ -68,16 +68,9 @@ impl TryFrom<&Network> for zcash_address::Network {
             // TODO: If the network parameters match `Regtest` parameters, convert to
             //       `zcash_address::Network::Regtest instead of returning `UnsupportedAddress` error.
             //       (#7119, #7839)
-            Network::Testnet(_params) => Err(UnsupportedNetwork),
-        }
-    }
-}
-
-impl From<NetworkKind> for zcash_address::Network {
-    fn from(network: NetworkKind) -> Self {
-        match network {
-            NetworkKind::Mainnet => zcash_address::Network::Main,
-            NetworkKind::Testnet => zcash_address::Network::Test,
+            Network::Testnet(_params) => Err(UnsupportedNetwork(
+                "could not convert configured testnet to zcash_address::Network".to_string(),
+            )),
         }
     }
 }
@@ -205,10 +198,34 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling((*network).into(), data);
+                let address = ZcashAddress::from_sapling(network.to_zcash_address(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,
+        }
+    }
+}
+
+impl NetworkKind {
+    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
+    ///
+    /// This method is meant to be used for decoding Zcash addresses in zebra-rpc methods.
+    fn from_zcash_address(network: zcash_address::Network) -> Self {
+        match network {
+            zcash_address::Network::Main => NetworkKind::Mainnet,
+            zcash_address::Network::Test => NetworkKind::Testnet,
+            zcash_address::Network::Regtest => NetworkKind::Regtest,
+        }
+    }
+
+    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
+    ///
+    /// This method is meant to be used for encoding Zcash addresses in zebra-rpc methods.
+    fn to_zcash_address(self) -> zcash_address::Network {
+        match self {
+            NetworkKind::Mainnet => zcash_address::Network::Main,
+            NetworkKind::Testnet => zcash_address::Network::Test,
+            NetworkKind::Regtest => zcash_address::Network::Regtest,
         }
     }
 }

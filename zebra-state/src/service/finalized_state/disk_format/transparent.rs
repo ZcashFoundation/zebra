@@ -498,14 +498,17 @@ impl AddressTransaction {
 
 /// Returns a byte representing the [`transparent::Address`] variant.
 fn address_variant(address: &transparent::Address) -> u8 {
+    use NetworkKind::*;
     // Return smaller values for more common variants.
     //
     // (This probably doesn't matter, but it might help slightly with data compression.)
     match (address.network(), address) {
-        (NetworkKind::Mainnet, PayToPublicKeyHash { .. }) => 0,
-        (NetworkKind::Mainnet, PayToScriptHash { .. }) => 1,
-        (NetworkKind::Testnet, PayToPublicKeyHash { .. }) => 2,
-        (NetworkKind::Testnet, PayToScriptHash { .. }) => 3,
+        (Mainnet, PayToPublicKeyHash { .. }) => 0,
+        (Mainnet, PayToScriptHash { .. }) => 1,
+        // There's no way to distinguish between Regtest and Testnet for encoded transparent addresses,
+        // so the network kind should always be `Mainnet` or `Testnet`.
+        (Testnet | Regtest, PayToPublicKeyHash { .. }) => 2,
+        (Testnet | Regtest, PayToScriptHash { .. }) => 3,
     }
 }
 
@@ -531,7 +534,6 @@ impl FromDisk for transparent::Address {
         let network = if address_variant < 2 {
             NetworkKind::Mainnet
         } else {
-            // TODO: Replace `network` field on `Address` with the prefix and a method for checking if it's the mainnet prefix.
             NetworkKind::Testnet
         };
 

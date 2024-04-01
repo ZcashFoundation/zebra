@@ -29,10 +29,6 @@ use proptest::prelude::*;
 #[derive(
     Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
-#[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
-)]
 pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {

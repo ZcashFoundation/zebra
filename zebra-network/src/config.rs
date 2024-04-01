@@ -682,7 +682,12 @@ impl<'de> Deserialize<'de> for Config {
 
             Network::new_configured_testnet(network_params)
         } else {
-            Network::from_kind(network_kind)
+            // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
+            match network_kind {
+                NetworkKind::Mainnet => Network::Mainnet,
+                NetworkKind::Testnet => Network::new_default_testnet(),
+                NetworkKind::Regtest => unimplemented!("Regtest is not yet implemented in Zebra"),
+            }
         };
 
         let listen_addr = match listen_addr.parse::<SocketAddr>() {
