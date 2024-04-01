@@ -47,8 +47,8 @@ jsonrpc-core = { version = "18.0.0", optional = true }
 # Security: avoid default dependency on openssl
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"], optional = true }
 serde = { version = "1.0.196", optional = true }
-serde_json = { version = "1.0.113", optional = true }
-tokio = { version = "1.36.0", features = ["time"], optional = true }
+serde_json = { version = "1.0.115", optional = true }
+tokio = { version = "1.37.0", features = ["time"], optional = true }
 
 [dev-dependencies]
 
@@ -56,4 +56,4 @@ color-eyre = "0.6.3"
 jsonrpc-core = "18.0.0"
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"] }
 serde = "1.0.196"
-serde_json = "1.0.113"
+serde_json = "1.0.115"
