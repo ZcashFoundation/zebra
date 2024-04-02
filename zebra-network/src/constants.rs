@@ -16,6 +16,7 @@ use crate::protocol::external::types::*;
 use zebra_chain::{
     parameters::{
         Network::{self, *},
+        NetworkKind,
         NetworkUpgrade::*,
     },
     serialization::Duration32,
@@ -393,11 +394,11 @@ lazy_static! {
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
     // TODO: Move the value here to a field on `NetworkParameters` (#8367)
-    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<String, Version> = {
+    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 
-        hash_map.insert(Mainnet.bip70_network_name(), Version::min_specified_for_upgrade(&Mainnet, Nu5));
-        hash_map.insert(Network::new_default_testnet().bip70_network_name(), Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu5));
+        hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu5));
+        hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu5));
 
         hash_map
     };

@@ -29,9 +29,7 @@ pub fn funding_stream_values(
     let mut results = HashMap::new();
 
     if height >= canopy_height {
-        let range = FUNDING_STREAM_HEIGHT_RANGES
-            .get(&network.bip70_network_name())
-            .unwrap();
+        let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network.kind()).unwrap();
         if range.contains(&height) {
             let block_subsidy = block_subsidy(height, network)?;
             for (&receiver, &numerator) in FUNDING_STREAM_RECEIVER_NUMERATORS.iter() {
@@ -86,7 +84,7 @@ fn funding_stream_address_index(height: Height, network: &Network) -> usize {
         .expect("no overflow should happen in this sum")
         .checked_sub(funding_stream_address_period(
             FUNDING_STREAM_HEIGHT_RANGES
-                .get(&network.bip70_network_name())
+                .get(&network.kind())
                 .unwrap()
                 .start,
             network,
@@ -110,7 +108,7 @@ pub fn funding_stream_address(
 ) -> transparent::Address {
     let index = funding_stream_address_index(height, network);
     let address = &FUNDING_STREAM_ADDRESSES
-        .get(&network.bip70_network_name())
+        .get(&network.kind())
         .expect("there is always another hash map as value for a given valid network")
         .get(&receiver)
         .expect("in the inner hash map there is always a vector of strings with addresses")[index];

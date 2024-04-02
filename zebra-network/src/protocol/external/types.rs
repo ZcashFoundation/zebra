@@ -81,7 +81,7 @@ impl Version {
     /// - after Zebra's local network is slow or shut down.
     fn initial_min_for_network(network: &Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-            .get(&network.bip70_network_name())
+            .get(&network.kind())
             .expect("We always have a value for testnet or mainnet")
     }
 

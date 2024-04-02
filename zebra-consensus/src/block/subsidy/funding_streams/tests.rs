@@ -44,9 +44,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    let range = FUNDING_STREAM_HEIGHT_RANGES
-        .get(&network.bip70_network_name())
-        .unwrap();
+    let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network.kind()).unwrap();
     let end = range.end;
     let last = end - 1;
 
@@ -70,7 +68,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 let address =
                     transparent::Address::from_str(address).expect("address should deserialize");
                 assert_eq!(
-                    &address.network().bip70_network_name(),
+                    &address.network(),
                     network,
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );

@@ -70,8 +70,7 @@ impl ParameterCheckpoint for Network {
         // parse calls CheckpointList::from_list
         // TODO:
         // - Add a `genesis_hash` field to `NetworkParameters` and return it here (#8366)
-        // - Consider adding a `CUSTOM_TESTNET_CHECKPOINTS` constant to enable building with another checkpoints list
-        //   when using a configured testnet?
+        // - Try to disable checkpoints entirely for regtest and custom testnets
         let checkpoint_list: CheckpointList = match self {
             Network::Mainnet => MAINNET_CHECKPOINTS
                 .parse()
@@ -149,7 +148,8 @@ impl CheckpointList {
 
         // Check that the list starts with the correct genesis block
         match checkpoints.iter().next() {
-            // TODO: Move this check to `<Network as ParameterCheckpoint>::checkpoint_list(&network)` method above (#8366),
+            // TODO: If required (we may not need checkpoints at all in Regtest or custom testnets):
+            //       move this check to `<Network as ParameterCheckpoint>::checkpoint_list(&network)` method above (#8366),
             //       See <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385865347>
             Some((block::Height(0), hash))
                 if (hash == &Network::Mainnet.genesis_hash()
