@@ -343,11 +343,14 @@ impl TryFrom<&Network> for zcash_primitives::consensus::Network {
     fn try_from(network: &Network) -> Result<Self, Self::Error> {
         match network {
             Network::Mainnet => Ok(zcash_primitives::consensus::Network::MainNetwork),
-            // Note: There are differences between the `TestNetwork` parameters and those returned by
-            //       `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
-            //       Zebra is using the default public Testnet.
-            // TODO: Try to remove this conversion, if possible, by implementing `zcash_primitives::consensus::Parameters`
-            //       on `Network` (#8365).
+            // # Correctness:
+            //
+            // There are differences between the `TestNetwork` parameters and those returned by
+            // `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
+            // Zebra is using the default public Testnet.
+            //
+            // TODO: Remove this conversion by implementing `zcash_primitives::consensus::Parameters`
+            //       for `Network` (#8365).
             Network::Testnet(_params) if network.is_default_testnet() => {
                 Ok(zcash_primitives::consensus::Network::TestNetwork)
             }
@@ -366,15 +369,6 @@ impl From<NetworkKind> for zcash_primitives::consensus::Network {
             NetworkKind::Testnet | NetworkKind::Regtest => {
                 zcash_primitives::consensus::Network::TestNetwork
             }
-        }
-    }
-}
-
-impl From<zcash_primitives::consensus::Network> for Network {
-    fn from(network: zcash_primitives::consensus::Network) -> Self {
-        match network {
-            zcash_primitives::consensus::Network::MainNetwork => Network::Mainnet,
-            zcash_primitives::consensus::Network::TestNetwork => Network::new_default_testnet(),
         }
     }
 }

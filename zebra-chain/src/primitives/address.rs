@@ -51,6 +51,7 @@ impl TryFrom<zcash_address::Network> for Network {
         match network {
             zcash_address::Network::Main => Ok(Network::Mainnet),
             zcash_address::Network::Test => Ok(Network::new_default_testnet()),
+            // TODO: Add conversion to regtest (#7839)
             zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
         }
     }

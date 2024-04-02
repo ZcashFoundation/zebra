@@ -78,7 +78,8 @@ pub enum NetworkKind {
     /// A test network.
     Testnet,
 
-    /// Regtest mode
+    /// Regtest mode, not yet implemented
+    // TODO: Add `new_regtest()` and `is_regtest` methods on `Network`.
     Regtest,
 }
 
