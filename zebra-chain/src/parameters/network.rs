@@ -4,7 +4,7 @@ use std::{fmt, str::FromStr, sync::Arc};
 
 use thiserror::Error;
 
-use zcash_primitives::consensus::{Network as ZcashPrimitivesNetwork, Parameters as _};
+use zcash_primitives::constants;
 
 use crate::{
     block::{self, Height, HeightDiff},
@@ -107,13 +107,19 @@ impl NetworkKind {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(self).b58_pubkey_address_prefix()
+        match self {
+            Self::Mainnet => constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Testnet | Self::Regtest => constants::testnet::B58_PUBKEY_ADDRESS_PREFIX,
+        }
     }
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
-        <ZcashPrimitivesNetwork>::from(self).b58_script_address_prefix()
+        match self {
+            Self::Mainnet => constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Testnet | Self::Regtest => constants::testnet::B58_SCRIPT_ADDRESS_PREFIX,
+        }
     }
 
     /// Return the network name as defined in

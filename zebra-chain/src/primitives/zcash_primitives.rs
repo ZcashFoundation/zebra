@@ -7,7 +7,7 @@ use zcash_primitives::transaction as zp_tx;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkKind, NetworkUpgrade, UnsupportedNetwork},
+    parameters::{Network, NetworkUpgrade, UnsupportedNetwork},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -358,17 +358,6 @@ impl TryFrom<&Network> for zcash_primitives::consensus::Network {
                 "could not convert configured testnet to zcash_primitives::consensus::Network"
                     .to_string(),
             )),
-        }
-    }
-}
-
-impl From<NetworkKind> for zcash_primitives::consensus::Network {
-    fn from(network: NetworkKind) -> Self {
-        match network {
-            NetworkKind::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-            NetworkKind::Testnet | NetworkKind::Regtest => {
-                zcash_primitives::consensus::Network::TestNetwork
-            }
         }
     }
 }
