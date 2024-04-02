@@ -12,7 +12,6 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
-mod error;
 mod genesis;
 mod network;
 mod network_upgrade;
@@ -21,7 +20,6 @@ mod transaction;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
-pub use error::*;
 pub use genesis::*;
 pub use network::{Network, NetworkKind, NetworkParameters};
 pub use network_upgrade::*;

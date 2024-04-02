@@ -5,10 +5,7 @@
 use zcash_address::unified::{self, Container};
 use zcash_primitives::sapling;
 
-use crate::{
-    parameters::{Network, NetworkKind, UnsupportedNetwork},
-    transparent, BoxError,
-};
+use crate::{parameters::NetworkKind, transparent, BoxError};
 
 /// Zcash address variants
 pub enum Address {
@@ -41,39 +38,6 @@ pub enum Address {
         /// Transparent address
         transparent: Option<transparent::Address>,
     },
-}
-
-impl TryFrom<zcash_address::Network> for Network {
-    // TODO: better error type
-    type Error = BoxError;
-
-    fn try_from(network: zcash_address::Network) -> Result<Self, Self::Error> {
-        match network {
-            zcash_address::Network::Main => Ok(Network::Mainnet),
-            zcash_address::Network::Test => Ok(Network::new_default_testnet()),
-            // TODO: Add conversion to regtest (#7839)
-            zcash_address::Network::Regtest => Err("unsupported Zcash network parameters".into()),
-        }
-    }
-}
-
-impl TryFrom<&Network> for zcash_address::Network {
-    type Error = UnsupportedNetwork;
-
-    fn try_from(network: &Network) -> Result<Self, Self::Error> {
-        match network {
-            Network::Mainnet => Ok(zcash_address::Network::Main),
-            Network::Testnet(_params) if network.is_default_testnet() => {
-                Ok(zcash_address::Network::Test)
-            }
-            // TODO: If the network parameters match `Regtest` parameters, convert to
-            //       `zcash_address::Network::Regtest instead of returning `UnsupportedAddress` error.
-            //       (#7119, #7839)
-            Network::Testnet(_params) => Err(UnsupportedNetwork(
-                "could not convert configured testnet to zcash_address::Network".to_string(),
-            )),
-        }
-    }
 }
 
 impl zcash_address::TryFromAddress for Address {

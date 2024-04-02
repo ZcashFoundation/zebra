@@ -7,7 +7,7 @@ use zcash_primitives::transaction as zp_tx;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkUpgrade, UnsupportedNetwork},
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -334,30 +334,5 @@ pub(crate) fn transparent_output_address(
             transparent::Address::from_script_hash(network.kind(), script_hash),
         ),
         None => None,
-    }
-}
-
-impl TryFrom<&Network> for zcash_primitives::consensus::Network {
-    type Error = UnsupportedNetwork;
-
-    fn try_from(network: &Network) -> Result<Self, Self::Error> {
-        match network {
-            Network::Mainnet => Ok(zcash_primitives::consensus::Network::MainNetwork),
-            // # Correctness:
-            //
-            // There are differences between the `TestNetwork` parameters and those returned by
-            // `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
-            // Zebra is using the default public Testnet.
-            //
-            // TODO: Remove this conversion by implementing `zcash_primitives::consensus::Parameters`
-            //       for `Network` (#8365).
-            Network::Testnet(_params) if network.is_default_testnet() => {
-                Ok(zcash_primitives::consensus::Network::TestNetwork)
-            }
-            Network::Testnet(_params) => Err(UnsupportedNetwork(
-                "could not convert configured testnet to zcash_primitives::consensus::Network"
-                    .to_string(),
-            )),
-        }
     }
 }
