@@ -8,13 +8,10 @@ use zcash_primitives::constants;
 
 use crate::{
     block::{self, Height, HeightDiff},
-    parameters::NetworkUpgrade::Canopy,
+    parameters::NetworkUpgrade,
 };
 
 pub mod testnet;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
 
 #[cfg(test)]
 mod tests;
@@ -81,7 +78,6 @@ impl From<Network> for NetworkKind {
 
 /// An enum describing the possible network choices.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
@@ -231,7 +227,7 @@ impl Network {
         //
         // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
-        let canopy_activation = Canopy
+        let canopy_activation = NetworkUpgrade::Canopy
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 

@@ -242,12 +242,7 @@ impl Network {
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
     pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
-        let (mainnet_heights, testnet_heights) = {
-            #[cfg(not(feature = "zebra-test"))]
-            {
-                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
-            }
-
+        match self {
             // To prevent accidentally setting this somehow, only check the env var
             // when being compiled for tests. We can't use cfg(test) since the
             // test that uses this is in zebra-state, and cfg(test) is not
@@ -260,25 +255,20 @@ impl Network {
             // feature should only be enabled for tests:
             // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
             #[cfg(feature = "zebra-test")]
-            if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
-                (
-                    FAKE_MAINNET_ACTIVATION_HEIGHTS,
-                    FAKE_TESTNET_ACTIVATION_HEIGHTS,
-                )
-            } else {
-                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            Mainnet if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
+                FAKE_MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
             }
-        };
-        match self {
-            Mainnet => mainnet_heights,
-            // TODO: Add an `activation_heights` field to `testnet::Parameters` to return here. (#7970)
-            Testnet(_params) => testnet_heights,
+            #[cfg(feature = "zebra-test")]
+            Testnet(_) if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
+                FAKE_TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
+            }
+
+            Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
+            Testnet(params) => params.activation_heights.clone(),
         }
-        .iter()
-        .cloned()
-        .collect()
     }
 }
+
 impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
     pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
