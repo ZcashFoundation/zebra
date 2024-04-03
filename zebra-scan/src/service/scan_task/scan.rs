@@ -384,25 +384,6 @@ pub fn scan_block<K: ScanningKey>(
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
 
-    let network = match network {
-        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-        Network::Testnet(params) => {
-            // # Correctness:
-            //
-            // There are differences between the `TestNetwork` parameters and those returned by
-            // `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
-            // Zebra is using the default public Testnet.
-            //
-            // TODO: Remove this conversion by implementing `zcash_primitives::consensus::Parameters`
-            //       for `Network` (#8365).
-            assert!(
-                params.is_default_testnet(),
-                "could not convert configured testnet to zcash_primitives::consensus::Network"
-            );
-            zcash_primitives::consensus::Network::TestNetwork
-        }
-    };
-
     let chain_metadata = ChainMetadata {
         sapling_commitment_tree_size: sapling_tree_size,
         // Orchard is not supported at the moment so the tree size can be 0.
@@ -417,7 +398,7 @@ pub fn scan_block<K: ScanningKey>(
         .collect();
 
     zcash_client_backend::scanning::scan_block(
-        &network,
+        network,
         block_to_compact(block, chain_metadata),
         scanning_keys.as_slice(),
         // Ignore whether notes are change from a viewer's own spends for now.
