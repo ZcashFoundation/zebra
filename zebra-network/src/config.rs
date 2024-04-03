@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::{testnet, Network, NetworkKind};
+use zebra_chain::parameters::{testnet, Network, NetworkKind, NetworkUpgrade};
 
 use crate::{
     constants::{
@@ -625,12 +625,18 @@ impl<'de> Deserialize<'de> for Config {
     where
         D: Deserializer<'de>,
     {
+        /// Network consensus parameters for test networks such as Regtest and the default Testnet.
+        #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+        pub struct DTestnetParameters {
+            pub(super) activation_heights: Vec<(u32, NetworkUpgrade)>,
+        }
+
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, default)]
         struct DConfig {
             listen_addr: String,
             network: NetworkKind,
-            testnet_parameters: Option<testnet::Parameters>,
+            testnet_parameters: Option<DTestnetParameters>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -669,7 +675,7 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        let network = if let Some(network_params) = testnet_parameters {
+        let network = if let Some(DTestnetParameters { activation_heights }) = testnet_parameters {
             // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
             assert_eq!(
                 network_kind,
@@ -677,7 +683,17 @@ impl<'de> Deserialize<'de> for Config {
                 "set network to 'Testnet' to use configured testnet parameters"
             );
 
-            Network::new_configured_testnet(network_params)
+            let activation_heights = activation_heights
+                .into_iter()
+                .map(|(height, network_upgrade)| {
+                    (
+                        height.try_into().expect("activation height must be valid"),
+                        network_upgrade,
+                    )
+                })
+                .collect();
+
+            Network::new_configured_testnet(testnet::Parameters { activation_heights })
         } else {
             // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
             match network_kind {

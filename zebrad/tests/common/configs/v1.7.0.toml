@@ -61,6 +61,16 @@ network = "Testnet"
 peerset_initial_target_size = 25
 
 [network.testnet_parameters]
+activation_heights = [
+    [0, "Genesis"],
+    [1, "BeforeOverwinter"],
+    [207_500, "Overwinter"],
+    [280_000, "Sapling"],
+    [584_000, "Blossom"],
+    [903_800, "Heartwood"],
+    [1_028_500, "Canopy"],        
+    [1_842_420, "NU5"],        
+]
 
 [rpc]
 debug_force_finished_sync = false

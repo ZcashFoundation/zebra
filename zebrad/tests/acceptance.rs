@@ -924,6 +924,71 @@ fn invalid_generated_config() -> Result<()> {
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
 #[tracing::instrument]
+#[test]
+fn stored_configs_parsed_correctly() -> Result<()> {
+    let old_configs_dir = configs_dir();
+    use abscissa_core::Application;
+    use zebrad::application::ZebradApp;
+
+    tracing::info!(?old_configs_dir, "testing older config parsing");
+
+    for config_file in old_configs_dir
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_str()
+            .expect("config file names are valid unicode");
+
+        if config_file_name.starts_with('.') || config_file_name.starts_with('#') {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
+        // ignore files starting with getblocktemplate prefix
+        // if we were not built with the getblocktemplate-rpcs feature.
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
+            tracing::info!(
+                ?config_file_path,
+                "skipping getblocktemplate-rpcs config file path"
+            );
+            continue;
+        }
+
+        // ignore files starting with shieldedscan prefix
+        // if we were not built with the shielded-scan feature.
+        #[cfg(not(feature = "shielded-scan"))]
+        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
+            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
+            continue;
+        }
+
+        let stored_config_path = config_file_full_path(config_file.path());
+
+        tracing::info!(
+            ?stored_config_path,
+            "testing old config can be parsed by current zebrad"
+        );
+
+        ZebradApp::default()
+            .load_config(&stored_config_path)
+            .expect("config should parse");
+    }
+
+    Ok(())
+}
+
+/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+#[tracing::instrument]
 fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
 
