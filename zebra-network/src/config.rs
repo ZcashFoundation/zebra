@@ -584,6 +584,7 @@ impl Default for Config {
 
         let testnet_peers = [
             "dnsseed.testnet.z.cash:18233",
+            "dnsseed.str4d.xyz:18233",
             "testnet.seeder.zfnd.org:18233",
             "testnet.is.yolo.money:18233",
         ]
