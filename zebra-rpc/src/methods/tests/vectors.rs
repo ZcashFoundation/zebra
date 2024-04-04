@@ -140,6 +140,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
@@ -163,6 +164,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
@@ -186,6 +188,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
@@ -209,6 +212,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()

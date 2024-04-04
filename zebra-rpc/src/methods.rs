@@ -789,11 +789,38 @@ where
                 let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash.into());
                 let tx_ids_response_fut = state.clone().oneshot(request);
 
+                // Sapling trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
+                let sapling_tree_response_fut = state.clone().oneshot(request);
+
+                // Orchard trees
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
+                let orchard_tree_response_fut = state.clone().oneshot(request);
+
+                // Block header
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
+                // are consistent.
+                let request = zebra_state::ReadRequest::BlockHeader(hash.into());
+                let block_header_response_fut = state.clone().oneshot(request);
+
                 // Get block confirmations from the block height index
                 //
                 // # Concurrency
                 //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
                 // are consistent.
                 //
                 // All possible responses are valid, even if a block is added to the chain, or
@@ -807,34 +834,17 @@ where
                 let request = zebra_state::ReadRequest::Depth(hash);
                 let depth_response_fut = state.clone().oneshot(request);
 
-                // Sapling trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
-                let sapling_tree_response_fut = state.clone().oneshot(request);
-
-                // Orchard trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
-                let orchard_tree_response_fut = state.clone().oneshot(request);
-
                 let mut futs = FuturesOrdered::new();
                 futs.push_back(tx_ids_response_fut);
                 futs.push_back(sapling_tree_response_fut);
                 futs.push_back(orchard_tree_response_fut);
+                futs.push_back(block_header_response_fut);
                 futs.push_back(depth_response_fut);
 
                 let tx_ids_response = futs
                     .next()
                     .await
-                    .expect("should have 4 items in futs")
+                    .expect("should have 5 items in futs")
                     .map_err(|error| Error {
                         code: ErrorCode::ServerError(0),
                         message: error.to_string(),
@@ -844,7 +854,7 @@ where
                 let sapling_tree_response = futs
                     .next()
                     .await
-                    .expect("should have 3 items in futs")
+                    .expect("should have 4 items in futs")
                     .map_err(|error| Error {
                         code: ErrorCode::ServerError(0),
                         message: error.to_string(),
@@ -852,6 +862,16 @@ where
                     })?;
 
                 let orchard_tree_response = futs
+                    .next()
+                    .await
+                    .expect("should have 3 items in futs")
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                let block_header_response = futs
                     .next()
                     .await
                     .expect("should have 2 items in futs")
@@ -889,14 +909,6 @@ where
                     _ => unreachable!("unmatched response to a SaplingTree request"),
                 };
 
-                let confirmations = match depth_response {
-                    // Confirmations are one more than the depth.
-                    // Depth is limited by height, so it will never overflow an i64.
-                    zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
-                    zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
-                    _ => unreachable!("unmatched response to a depth request"),
-                };
-
                 // TODO:  look up the height if we only have a hash,
                 //        this needs a new state request for the height -> hash index
                 let height = hash_or_height.height();
@@ -905,6 +917,21 @@ where
                     zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
                     zebra_state::ReadResponse::OrchardTree(None) => 0,
                     _ => unreachable!("unmatched response to a OrchardTree request"),
+                };
+
+                let block_header = match block_header_response {
+                    zebra_state::ReadResponse::BlockHeader(header) => header,
+                    _ => unreachable!("unmatched response to a BlockHeader request"),
+                };
+
+                let time = block_header.map(|header| header.time.timestamp());
+
+                let confirmations = match depth_response {
+                    // Confirmations are one more than the depth.
+                    // Depth is limited by height, so it will never overflow an i64.
+                    zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
+                    zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
+                    _ => unreachable!("unmatched response to a depth request"),
                 };
 
                 let sapling = SaplingTrees {
@@ -921,6 +948,7 @@ where
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
+                    time,
                     tx,
                     trees,
                 })
@@ -1639,6 +1667,10 @@ pub enum GetBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         height: Option<Height>,
 
+        /// The height of the requested block.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        time: Option<i64>,
+
         /// List of transaction IDs in block order, hex-encoded.
         //
         // TODO: use a typed Vec<transaction::Hash> here
@@ -1655,6 +1687,7 @@ impl Default for GetBlock {
             hash: GetBlockHash::default(),
             confirmations: 0,
             height: None,
+            time: None,
             tx: Vec::new(),
             trees: GetBlockTrees::default(),
         }

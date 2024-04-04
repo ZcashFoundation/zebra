@@ -50,6 +50,9 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
+    /// The response to a `BlockHeader` request.
+    BlockHeader(Option<Arc<block::Header>>),
+
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
@@ -130,6 +133,9 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// The response to a `BlockHeader` request.
+    BlockHeader(Option<Arc<block::Header>>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<MinedTx>),
@@ -265,6 +271,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
+            ReadResponse::BlockHeader(header) => Ok(Response::BlockHeader(header)),
             ReadResponse::Transaction(tx_info) => {
                 Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }
