@@ -675,10 +675,12 @@ where
     }
 
     // TODO:
-    // - use a generic error constructor (#5548)
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
+    // - Type second argument as an enum with variant for each verbosity level and a `Fields` variant
+    //   for specifying exactly which fields should be included in the return value. Consider replacing
+    //   `ReadRequest::BlockHeader` with a `PartialBlockData` request that accepts the fields?
     fn get_block(
         &self,
         hash_or_height: String,
@@ -776,157 +778,85 @@ where
                     }
                 };
 
-                // Get transaction IDs from the transaction index by block hash
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                //
-                // A block's transaction IDs are never modified, so all possible responses are
-                // valid. Clients that query block heights must be able to handle chain forks,
-                // including getting transaction IDs from any chain fork.
-                let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash.into());
-                let tx_ids_response_fut = state.clone().oneshot(request);
-
-                // Sapling trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::SaplingTree(hash.into());
-                let sapling_tree_response_fut = state.clone().oneshot(request);
-
-                // Orchard trees
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::OrchardTree(hash.into());
-                let orchard_tree_response_fut = state.clone().oneshot(request);
-
-                // Block header
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
-                // are consistent.
-                let request = zebra_state::ReadRequest::BlockHeader(hash.into());
-                let block_header_response_fut = state.clone().oneshot(request);
-
-                // Get block confirmations from the block height index
-                //
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, block header, and confirmations
-                // are consistent.
-                //
-                // All possible responses are valid, even if a block is added to the chain, or
-                // the best chain changes. Clients must be able to handle chain forks, including
-                // different confirmation values before or after added blocks, and switching
-                // between -1 and multiple different confirmation values.
-
-                // From <https://zcash.github.io/rpc/getblock.html>
-                const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
-
-                let request = zebra_state::ReadRequest::Depth(hash);
-                let depth_response_fut = state.clone().oneshot(request);
-
-                let mut futs = FuturesOrdered::new();
-                futs.push_back(tx_ids_response_fut);
-                futs.push_back(sapling_tree_response_fut);
-                futs.push_back(orchard_tree_response_fut);
-                futs.push_back(block_header_response_fut);
-                futs.push_back(depth_response_fut);
-
-                let tx_ids_response = futs
-                    .next()
-                    .await
-                    .expect("should have 5 items in futs")
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let sapling_tree_response = futs
-                    .next()
-                    .await
-                    .expect("should have 4 items in futs")
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let orchard_tree_response = futs
-                    .next()
-                    .await
-                    .expect("should have 3 items in futs")
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let block_header_response = futs
-                    .next()
-                    .await
-                    .expect("should have 2 items in futs")
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let depth_response = futs
-                    .next()
-                    .await
-                    .expect("should have an item in futs")
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                let tx = match tx_ids_response {
-                    zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
-                        tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect()
-                    }
-                    zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
-                        message: "Block not found".to_string(),
-                        data: None,
-                    })?,
-                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
-
-                let sapling_note_commitment_tree_count = match sapling_tree_response {
-                    zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                    zebra_state::ReadResponse::SaplingTree(None) => 0,
-                    _ => unreachable!("unmatched response to a SaplingTree request"),
-                };
-
                 // TODO:  look up the height if we only have a hash,
                 //        this needs a new state request for the height -> hash index
                 let height = hash_or_height.height();
 
-                let orchard_note_commitment_tree_count = match orchard_tree_response {
-                    zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
-                    zebra_state::ReadResponse::OrchardTree(None) => 0,
-                    _ => unreachable!("unmatched response to a OrchardTree request"),
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let requests = [
+                    // Get transaction IDs from the transaction index by block hash
+                    //
+                    // # Concurrency
+                    //
+                    // A block's transaction IDs are never modified, so all possible responses are
+                    // valid. Clients that query block heights must be able to handle chain forks,
+                    // including getting transaction IDs from any chain fork.
+                    zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
+                    // Sapling trees
+                    zebra_state::ReadRequest::SaplingTree(hash.into()),
+                    // Orchard trees
+                    zebra_state::ReadRequest::OrchardTree(hash.into()),
+                    // Get block confirmations from the block height index
+                    //
+                    // # Concurrency
+                    //
+                    // All possible responses are valid, even if a block is added to the chain, or
+                    // the best chain changes. Clients must be able to handle chain forks, including
+                    // different confirmation values before or after added blocks, and switching
+                    // between -1 and multiple different confirmation values.
+                    zebra_state::ReadRequest::Depth(hash),
+                    // Block header
+                    zebra_state::ReadRequest::BlockHeader(hash.into()),
+                ];
+
+                let mut futs = FuturesOrdered::new();
+
+                for request in requests {
+                    futs.push_back(state.clone().oneshot(request));
+                }
+
+                let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
+                let tx = match tx_ids_response.map_server_error()? {
+                    zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
+                        .ok_or_server_error("Block not found")?
+                        .iter()
+                        .map(|tx_id| tx_id.encode_hex())
+                        .collect(),
+                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
                 };
 
-                let block_header = match block_header_response {
-                    zebra_state::ReadResponse::BlockHeader(header) => header,
+                let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
+                let sapling_note_commitment_tree_count =
+                    match sapling_tree_response.map_server_error()? {
+                        zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
+                        zebra_state::ReadResponse::SaplingTree(None) => 0,
+                        _ => unreachable!("unmatched response to a SaplingTree request"),
+                    };
+
+                let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
+                let orchard_note_commitment_tree_count =
+                    match orchard_tree_response.map_server_error()? {
+                        zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
+                        zebra_state::ReadResponse::OrchardTree(None) => 0,
+                        _ => unreachable!("unmatched response to a OrchardTree request"),
+                    };
+
+                let block_header_response = futs.next().await.expect("`futs` should not be empty");
+                let block_header = match block_header_response.map_server_error()? {
+                    zebra_state::ReadResponse::BlockHeader(header) => {
+                        header.ok_or_server_error("Block not found")?
+                    }
                     _ => unreachable!("unmatched response to a BlockHeader request"),
                 };
 
-                let time = block_header.map(|header| header.time.timestamp());
+                // From <https://zcash.github.io/rpc/getblock.html>
+                const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
-                let confirmations = match depth_response {
+                let depth_response = futs.next().await.expect("`futs` should not be empty");
+                let confirmations = match depth_response.map_server_error()? {
                     // Confirmations are one more than the depth.
                     // Depth is limited by height, so it will never overflow an i64.
                     zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
@@ -948,7 +878,7 @@ where
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
-                    time,
+                    time: Some(block_header.time.timestamp()),
                     tx,
                     trees,
                 })
@@ -1985,5 +1915,42 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
         };
 
         Ok(Height(sanitized_height))
+    }
+}
+
+trait MapServerError<T, E> {
+    fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
+}
+
+trait OkOrServerError<T> {
+    fn ok_or_server_error<S: ToString>(
+        self,
+        message: S,
+    ) -> std::result::Result<T, jsonrpc_core::Error>;
+}
+
+impl<T, E> MapServerError<T, E> for std::result::Result<T, E>
+where
+    E: ToString,
+{
+    fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error> {
+        self.map_err(|error| jsonrpc_core::Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })
+    }
+}
+
+impl<T> OkOrServerError<T> for Option<T> {
+    fn ok_or_server_error<S: ToString>(
+        self,
+        message: S,
+    ) -> std::result::Result<T, jsonrpc_core::Error> {
+        self.ok_or(jsonrpc_core::Error {
+            code: ErrorCode::ServerError(0),
+            message: message.to_string(),
+            data: None,
+        })
     }
 }
