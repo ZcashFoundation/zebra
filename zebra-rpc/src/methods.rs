@@ -38,6 +38,10 @@ use crate::{
     queue::Queue,
 };
 
+mod errors;
+
+use errors::{MapServerError, OkOrServerError};
+
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
 
@@ -1915,42 +1919,5 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
         };
 
         Ok(Height(sanitized_height))
-    }
-}
-
-trait MapServerError<T, E> {
-    fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
-}
-
-trait OkOrServerError<T> {
-    fn ok_or_server_error<S: ToString>(
-        self,
-        message: S,
-    ) -> std::result::Result<T, jsonrpc_core::Error>;
-}
-
-impl<T, E> MapServerError<T, E> for std::result::Result<T, E>
-where
-    E: ToString,
-{
-    fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error> {
-        self.map_err(|error| jsonrpc_core::Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })
-    }
-}
-
-impl<T> OkOrServerError<T> for Option<T> {
-    fn ok_or_server_error<S: ToString>(
-        self,
-        message: S,
-    ) -> std::result::Result<T, jsonrpc_core::Error> {
-        self.ok_or(jsonrpc_core::Error {
-            code: ErrorCode::ServerError(0),
-            message: message.to_string(),
-            data: None,
-        })
     }
 }
