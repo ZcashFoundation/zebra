@@ -682,9 +682,6 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
-    // - Type second argument as an enum with variant for each verbosity level and a `Fields` variant
-    //   for specifying exactly which fields should be included in the return value. Consider replacing
-    //   `ReadRequest::BlockHeader` with a `PartialBlockData` request that accepts the fields?
     fn get_block(
         &self,
         hash_or_height: String,
@@ -733,7 +730,7 @@ where
                     }),
                     _ => unreachable!("unmatched response to a block request"),
                 }
-            } else if verbosity == 1 {
+            } else if verbosity == 1 || verbosity == 2 {
                 // # Performance
                 //
                 // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
@@ -753,6 +750,8 @@ where
                 // All possible responses are valid, even if the best chain changes. Clients
                 // must be able to handle chain forks, including a hash for a block that is
                 // later discovered to be on a side chain.
+
+                let should_read_block_header = verbosity == 2;
 
                 let hash = match hash_or_height {
                     HashOrHeight::Hash(hash) => hash,
@@ -790,7 +789,7 @@ where
                 //
                 // We look up by block hash so the hash, transaction IDs, and confirmations
                 // are consistent.
-                let requests = [
+                let mut requests = vec![
                     // Get transaction IDs from the transaction index by block hash
                     //
                     // # Concurrency
@@ -812,9 +811,12 @@ where
                     // different confirmation values before or after added blocks, and switching
                     // between -1 and multiple different confirmation values.
                     zebra_state::ReadRequest::Depth(hash),
-                    // Block header
-                    zebra_state::ReadRequest::BlockHeader(hash.into()),
                 ];
+
+                if should_read_block_header {
+                    // Block header
+                    requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
+                }
 
                 let mut futs = FuturesOrdered::new();
 
@@ -848,14 +850,6 @@ where
                         _ => unreachable!("unmatched response to a OrchardTree request"),
                     };
 
-                let block_header_response = futs.next().await.expect("`futs` should not be empty");
-                let block_header = match block_header_response.map_server_error()? {
-                    zebra_state::ReadResponse::BlockHeader(header) => {
-                        header.ok_or_server_error("Block not found")?
-                    }
-                    _ => unreachable!("unmatched response to a BlockHeader request"),
-                };
-
                 // From <https://zcash.github.io/rpc/getblock.html>
                 const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
@@ -866,6 +860,23 @@ where
                     zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
                     zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
                     _ => unreachable!("unmatched response to a depth request"),
+                };
+
+                let time = if should_read_block_header {
+                    let block_header_response =
+                        futs.next().await.expect("`futs` should not be empty");
+
+                    match block_header_response.map_server_error()? {
+                        zebra_state::ReadResponse::BlockHeader(header) => Some(
+                            header
+                                .ok_or_server_error("Block not found")?
+                                .time
+                                .timestamp(),
+                        ),
+                        _ => unreachable!("unmatched response to a BlockHeader request"),
+                    }
+                } else {
+                    None
                 };
 
                 let sapling = SaplingTrees {
@@ -882,7 +893,7 @@ where
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
-                    time: Some(block_header.time.timestamp()),
+                    time,
                     tx,
                     trees,
                 })

@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review
+//! cargo insta test --review -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -166,6 +166,25 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("hash_verbosity_1", get_block, &settings);
+
+    // `getblock`, verbosity=2, height
+    let get_block = rpc
+        .get_block(BLOCK_HEIGHT.to_string(), Some(2u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("height_verbosity_2", get_block, &settings);
+
+    let get_block = rpc
+        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(2u8))
+        .await;
+    snapshot_rpc_getblock_invalid("excessive_height_verbosity_2", get_block, &settings);
+
+    // `getblock`, verbosity=2, hash
+    let get_block = rpc
+        .get_block(block_hash.to_string(), Some(2u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("hash_verbosity_2", get_block, &settings);
 
     // `getblock`, no verbosity - defaults to 1, height
     let get_block = rpc
