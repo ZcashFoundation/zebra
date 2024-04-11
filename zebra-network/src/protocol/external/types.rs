@@ -31,7 +31,7 @@ impl ParameterMagic for Network {
     fn magic_value(&self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
-            // TODO: Move `Magic` struct definition to `zebra-chain`, add it as a field in `NetworkParameters`, and return it here.
+            // TODO: Move `Magic` struct definition to `zebra-chain`, add it as a field in `testnet::Parameters`, and return it here.
             Network::Testnet(_params) => magics::TESTNET,
         }
     }

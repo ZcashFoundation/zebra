@@ -699,7 +699,7 @@ impl ParameterDifficulty for Network {
             /* 2^243 - 1 */
             Network::Mainnet => (U256::one() << 243) - 1,
             /* 2^251 - 1 */
-            // TODO: Add a `target_difficulty_limit` field to `NetworkParameters` to return here.
+            // TODO: Add a `target_difficulty_limit` field to `testnet::Parameters` to return here.
             Network::Testnet(_params) => (U256::one() << 251) - 1,
         };
 

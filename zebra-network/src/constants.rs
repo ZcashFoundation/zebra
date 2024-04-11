@@ -393,7 +393,7 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
-    // TODO: Move the value here to a field on `NetworkParameters` (#8367)
+    // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 

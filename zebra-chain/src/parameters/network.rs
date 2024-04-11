@@ -11,6 +11,8 @@ use crate::{
     parameters::NetworkUpgrade::Canopy,
 };
 
+pub mod testnet;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
@@ -53,18 +55,6 @@ mod tests;
 /// after the grace period.
 const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
-/// Network consensus parameters for test networks such as Regtest and the default Testnet.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct NetworkParameters {}
-
-impl NetworkParameters {
-    /// Returns true if the instance of [`NetworkParameters`] represents the default public Testnet.
-    pub fn is_default_testnet(&self) -> bool {
-        self == &Self::default()
-    }
-}
-
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
 //       of history trees in the db format.
@@ -100,7 +90,7 @@ pub enum Network {
 
     /// A test network such as the default public testnet,
     /// a configured testnet, or Regtest.
-    Testnet(Arc<NetworkParameters>),
+    Testnet(Arc<testnet::Parameters>),
 }
 
 impl NetworkKind {
@@ -172,13 +162,13 @@ impl fmt::Display for Network {
 }
 
 impl Network {
-    /// Creates a new [`Network::Testnet`] with the default Testnet [`NetworkParameters`].
+    /// Creates a new [`Network::Testnet`] with the default Testnet [`testnet::Parameters`].
     pub fn new_default_testnet() -> Self {
-        Self::Testnet(Arc::new(NetworkParameters::default()))
+        Self::Testnet(Arc::new(testnet::Parameters::default()))
     }
 
-    /// Creates a new configured [`Network::Testnet`] with the provided Testnet [`NetworkParameters`].
-    pub fn new_configured_testnet(params: NetworkParameters) -> Self {
+    /// Creates a new configured [`Network::Testnet`] with the provided Testnet [`testnet::Parameters`].
+    pub fn new_configured_testnet(params: testnet::Parameters) -> Self {
         Self::Testnet(Arc::new(params))
     }
 
@@ -217,7 +207,7 @@ impl Network {
     pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
         match self {
             Network::Mainnet => true,
-            // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on NetworkParameters (#8364)
+            // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on testnet::Parameters (#8364)
             Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
         }
     }
@@ -226,7 +216,7 @@ impl Network {
     pub fn default_port(&self) -> u16 {
         match self {
             Network::Mainnet => 8233,
-            // TODO: Add a `default_port` field to `NetworkParameters` to return here. (zcashd uses 18344 for Regtest)
+            // TODO: Add a `default_port` field to `testnet::Parameters` to return here. (zcashd uses 18344 for Regtest)
             Network::Testnet(_params) => 18233,
         }
     }

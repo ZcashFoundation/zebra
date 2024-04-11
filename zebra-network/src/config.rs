@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::{Network, NetworkKind, NetworkParameters};
+use zebra_chain::parameters::{testnet, Network, NetworkKind};
 
 use crate::{
     constants::{
@@ -630,7 +630,7 @@ impl<'de> Deserialize<'de> for Config {
         struct DConfig {
             listen_addr: String,
             network: NetworkKind,
-            testnet_parameters: Option<NetworkParameters>,
+            testnet_parameters: Option<testnet::Parameters>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,

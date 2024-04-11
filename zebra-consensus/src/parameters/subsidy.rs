@@ -104,7 +104,7 @@ lazy_static! {
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    // TODO: Move the value here to a field on `NetworkParameters` (#8367)
+    // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<NetworkKind, std::ops::Range<Height>> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(NetworkKind::Mainnet, Height(1_046_400)..Height(2_726_400));
@@ -113,7 +113,7 @@ lazy_static! {
     };
 
     /// Convenient storage for all addresses, for all receivers and networks
-    // TODO: Move the value here to a field on `NetworkParameters` (#8367)
+    // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     //       There are no funding stream addresses on Regtest in zcashd, zebrad should do the same for compatibility.
     pub static ref FUNDING_STREAM_ADDRESSES: HashMap<NetworkKind, HashMap<FundingStreamReceiver, Vec<String>>> = {
         let mut addresses_by_network = HashMap::with_capacity(2);
@@ -231,7 +231,7 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
                 .expect("canopy activation height should be available"),
-            // TODO: Check what zcashd does here, consider adding a field to `NetworkParameters` to make this configurable.
+            // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
             Network::Testnet(_params) => FIRST_HALVING_TESTNET,
         }
     }

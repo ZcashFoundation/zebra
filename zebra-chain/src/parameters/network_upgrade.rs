@@ -271,7 +271,7 @@ impl Network {
         };
         match self {
             Mainnet => mainnet_heights,
-            // TODO: Add an `activation_heights` field to `NetworkParameters` to return here. (#7970)
+            // TODO: Add an `activation_heights` field to `testnet::Parameters` to return here. (#7970)
             Testnet(_params) => testnet_heights,
         }
         .iter()
@@ -395,7 +395,7 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> Option<Duration> {
         match (network, height) {
-            // TODO: Move `TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT` to a field on NetworkParameters (#8364)
+            // TODO: Move `TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT` to a field on testnet::Parameters (#8364)
             (Network::Testnet(_params), height)
                 if height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT =>
             {
