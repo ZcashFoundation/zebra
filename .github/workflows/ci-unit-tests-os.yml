@@ -78,8 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable, beta]
         # TODO: When vars.EXPERIMENTAL_FEATURES has features in it, add it here.
         #       Or work out a way to trim the space from the variable: GitHub doesn't allow empty variables.
