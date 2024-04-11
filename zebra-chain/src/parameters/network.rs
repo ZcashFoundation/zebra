@@ -4,10 +4,7 @@ use std::{fmt, str::FromStr, sync::Arc};
 
 use thiserror::Error;
 
-use zcash_primitives::{
-    consensus::{self as zp_consensus, Parameters},
-    constants as zp_constants,
-};
+use zcash_primitives::{consensus as zp_consensus, constants as zp_constants};
 
 use crate::{
     block::{self, Height, HeightDiff},
@@ -279,7 +276,7 @@ impl FromStr for Network {
 #[error("Invalid network: {0}")]
 pub struct InvalidNetworkError(String);
 
-impl Parameters for Network {
+impl zp_consensus::Parameters for Network {
     fn activation_height(
         &self,
         nu: zcash_primitives::consensus::NetworkUpgrade,
