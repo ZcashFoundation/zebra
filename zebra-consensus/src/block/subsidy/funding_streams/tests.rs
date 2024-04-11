@@ -68,7 +68,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 let address =
                     transparent::Address::from_str(address).expect("address should deserialize");
                 assert_eq!(
-                    &address.network(),
+                    &address.network_kind(),
                     network,
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );

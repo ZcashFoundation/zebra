@@ -450,11 +450,11 @@ where
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
             assert_eq!(
-                miner_address.network(),
+                miner_address.network_kind(),
                 network.kind(),
                 "incorrect miner address config: {miner_address} \
                          network.network {network} and miner address network {} must match",
-                miner_address.network(),
+                miner_address.network_kind(),
             );
         }
 

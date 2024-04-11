@@ -33,7 +33,7 @@ pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {
         /// Production, test, or other network
-        network: NetworkKind,
+        network_kind: NetworkKind,
         /// 20 bytes specifying a script hash.
         script_hash: [u8; 20],
     },
@@ -41,7 +41,7 @@ pub enum Address {
     /// P2PKH (Pay to Public Key Hash) addresses
     PayToPublicKeyHash {
         /// Production, test, or other network
-        network: NetworkKind,
+        network_kind: NetworkKind,
         /// 20 bytes specifying a public key hash, which is a RIPEMD-160
         /// hash of a SHA-256 hash of a compressed ECDSA key encoding.
         pub_key_hash: [u8; 20],
@@ -54,17 +54,17 @@ impl fmt::Debug for Address {
 
         match self {
             Address::PayToScriptHash {
-                network,
+                network_kind,
                 script_hash,
             } => debug_struct
-                .field("network", network)
+                .field("network_kind", network_kind)
                 .field("script_hash", &hex::encode(script_hash))
                 .finish(),
             Address::PayToPublicKeyHash {
-                network,
+                network_kind,
                 pub_key_hash,
             } => debug_struct
-                .field("network", network)
+                .field("network_kind", network_kind)
                 .field("pub_key_hash", &hex::encode(pub_key_hash))
                 .finish(),
         }
@@ -97,17 +97,17 @@ impl ZcashSerialize for Address {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             Address::PayToScriptHash {
-                network,
+                network_kind,
                 script_hash,
             } => {
-                writer.write_all(&network.b58_script_address_prefix())?;
+                writer.write_all(&network_kind.b58_script_address_prefix())?;
                 writer.write_all(script_hash)?
             }
             Address::PayToPublicKeyHash {
-                network,
+                network_kind,
                 pub_key_hash,
             } => {
-                writer.write_all(&network.b58_pubkey_address_prefix())?;
+                writer.write_all(&network_kind.b58_pubkey_address_prefix())?;
                 writer.write_all(pub_key_hash)?
             }
         }
@@ -127,25 +127,25 @@ impl ZcashDeserialize for Address {
         match version_bytes {
             zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
-                    network: NetworkKind::Mainnet,
+                    network_kind: NetworkKind::Mainnet,
                     script_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
-                    network: NetworkKind::Testnet,
+                    network_kind: NetworkKind::Testnet,
                     script_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
-                    network: NetworkKind::Mainnet,
+                    network_kind: NetworkKind::Mainnet,
                     pub_key_hash: hash_bytes,
                 })
             }
             zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
-                    network: NetworkKind::Testnet,
+                    network_kind: NetworkKind::Testnet,
                     pub_key_hash: hash_bytes,
                 })
             }
@@ -160,18 +160,18 @@ trait ToAddressWithNetwork {
 }
 
 impl ToAddressWithNetwork for Script {
-    fn to_address(&self, network: NetworkKind) -> Address {
+    fn to_address(&self, network_kind: NetworkKind) -> Address {
         Address::PayToScriptHash {
-            network,
+            network_kind,
             script_hash: Address::hash_payload(self.as_raw_bytes()),
         }
     }
 }
 
 impl ToAddressWithNetwork for PublicKey {
-    fn to_address(&self, network: NetworkKind) -> Address {
+    fn to_address(&self, network_kind: NetworkKind) -> Address {
         Address::PayToPublicKeyHash {
-            network,
+            network_kind,
             pub_key_hash: Address::hash_payload(&self.serialize()[..]),
         }
     }
@@ -179,26 +179,26 @@ impl ToAddressWithNetwork for PublicKey {
 
 impl Address {
     /// Create an address for the given public key hash and network.
-    pub fn from_pub_key_hash(network: NetworkKind, pub_key_hash: [u8; 20]) -> Self {
+    pub fn from_pub_key_hash(network_kind: NetworkKind, pub_key_hash: [u8; 20]) -> Self {
         Self::PayToPublicKeyHash {
-            network,
+            network_kind,
             pub_key_hash,
         }
     }
 
     /// Create an address for the given script hash and network.
-    pub fn from_script_hash(network: NetworkKind, script_hash: [u8; 20]) -> Self {
+    pub fn from_script_hash(network_kind: NetworkKind, script_hash: [u8; 20]) -> Self {
         Self::PayToScriptHash {
-            network,
+            network_kind,
             script_hash,
         }
     }
 
     /// Returns the network kind for this address.
-    pub fn network(&self) -> NetworkKind {
+    pub fn network_kind(&self) -> NetworkKind {
         match self {
-            Address::PayToScriptHash { network, .. } => *network,
-            Address::PayToPublicKeyHash { network, .. } => *network,
+            Address::PayToScriptHash { network_kind, .. } => *network_kind,
+            Address::PayToPublicKeyHash { network_kind, .. } => *network_kind,
         }
     }
 
@@ -338,7 +338,7 @@ mod tests {
 
         assert_eq!(
             format!("{t_addr:?}"),
-            "TransparentAddress { network: Mainnet, script_hash: \"7d46a730d31f97b1930d3368a967c309bd4d136a\" }"
+            "TransparentAddress { network_kind: Mainnet, script_hash: \"7d46a730d31f97b1930d3368a967c309bd4d136a\" }"
         );
     }
 }

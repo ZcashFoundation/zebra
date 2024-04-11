@@ -135,7 +135,7 @@ impl Address {
     /// Returns the network for the address.
     pub fn network(&self) -> NetworkKind {
         match &self {
-            Self::Transparent(address) => address.network(),
+            Self::Transparent(address) => address.network_kind(),
             Self::Sapling { network, .. } | Self::Unified { network, .. } => *network,
         }
     }

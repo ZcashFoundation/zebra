@@ -502,7 +502,7 @@ fn address_variant(address: &transparent::Address) -> u8 {
     // Return smaller values for more common variants.
     //
     // (This probably doesn't matter, but it might help slightly with data compression.)
-    match (address.network(), address) {
+    match (address.network_kind(), address) {
         (Mainnet, PayToPublicKeyHash { .. }) => 0,
         (Mainnet, PayToScriptHash { .. }) => 1,
         // There's no way to distinguish between Regtest and Testnet for encoded transparent addresses,

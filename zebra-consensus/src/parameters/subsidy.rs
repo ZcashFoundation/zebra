@@ -231,7 +231,7 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
                 .expect("canopy activation height should be available"),
-            // TODO: Check what zcashd does here, consider adding a field to `NetworkParamters` to make this configurable.
+            // TODO: Check what zcashd does here, consider adding a field to `NetworkParameters` to make this configurable.
             Network::Testnet(_params) => FIRST_HALVING_TESTNET,
         }
     }
