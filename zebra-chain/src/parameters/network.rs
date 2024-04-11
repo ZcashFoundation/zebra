@@ -65,11 +65,11 @@ impl NetworkParameters {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
 //       of history trees in the db format.
 // TODO: Replace bincode (de)serialization of `HistoryTreeParts` in a db format upgrade?
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum NetworkKind {
     /// The production mainnet.
     #[default]

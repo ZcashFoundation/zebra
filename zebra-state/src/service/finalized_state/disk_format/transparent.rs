@@ -506,7 +506,8 @@ fn address_variant(address: &transparent::Address) -> u8 {
         (Mainnet, PayToPublicKeyHash { .. }) => 0,
         (Mainnet, PayToScriptHash { .. }) => 1,
         // There's no way to distinguish between Regtest and Testnet for encoded transparent addresses,
-        // so the network kind should always be `Mainnet` or `Testnet`.
+        // we can consider `Regtest` to use `Testnet` transparent addresses, so it's okay to use the `Testnet`
+        // address variant for `Regtest` transparent addresses in the db format
         (Testnet | Regtest, PayToPublicKeyHash { .. }) => 2,
         (Testnet | Regtest, PayToScriptHash { .. }) => 3,
     }
