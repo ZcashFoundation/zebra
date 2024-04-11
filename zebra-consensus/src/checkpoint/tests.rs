@@ -213,22 +213,15 @@ async fn continuous_blockchain_no_restart() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
-    for network in Network::iter() {
-        for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
-            continuous_blockchain(
-                Some(block::Height(height.try_into().unwrap())),
-                network.clone(),
-            )
-            .await?;
-        }
-
-        for height in 0..zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.len() {
-            continuous_blockchain(
-                Some(block::Height(height.try_into().unwrap())),
-                network.clone(),
-            )
-            .await?;
-        }
+    for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
+        continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
+    }
+    for height in 0..zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS.len() {
+        continuous_blockchain(
+            Some(block::Height(height.try_into().unwrap())),
+            Network::new_default_testnet(),
+        )
+        .await?;
     }
     Ok(())
 }
