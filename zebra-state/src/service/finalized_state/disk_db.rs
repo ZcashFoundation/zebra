@@ -542,24 +542,29 @@ impl DiskDb {
                 .unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
 
-            // TODO: Consider displaying the disk and memory sizes in a human-readable format - #8380.
             write!(
                 column_families_log_string,
-                "{} (Disk: {} bytes, Memory: {} bytes)",
+                "{} (Disk: {}, Memory: {})",
                 cf_name,
-                cf_disk_size,
-                mem_table_size.unwrap_or(0)
+                human_bytes::human_bytes(cf_disk_size as f64),
+                human_bytes::human_bytes(mem_table_size.unwrap_or(0) as f64)
             )
             .unwrap();
         }
 
         debug!("{}", column_families_log_string);
-        info!("Total Database Disk Size: {} bytes", total_size_on_disk);
         info!(
-            "Total Live Data Disk Size: {} bytes",
-            total_live_size_on_disk
+            "Total Database Disk Size: {}",
+            human_bytes::human_bytes(total_size_on_disk as f64)
         );
-        info!("Total Database Memory Size: {} bytes", total_size_in_mem);
+        info!(
+            "Total Live Data Disk Size: {}",
+            human_bytes::human_bytes(total_live_size_on_disk as f64)
+        );
+        info!(
+            "Total Database Memory Size: {}",
+            human_bytes::human_bytes(total_size_in_mem as f64)
+        );
     }
 
     /// Returns a forward iterator over the items in `cf` in `range`.
