@@ -135,7 +135,9 @@ impl NetworkKind {
 
 impl From<NetworkKind> for &'static str {
     fn from(network: NetworkKind) -> &'static str {
-        // These should be different from the `Display` impl for `Network`
+        // These should be different from the `Display` impl for `Network` so that its lowercase form
+        // can't be parsed as the default Testnet in the `Network` `FromStr` impl, it's easy to
+        // distinguish them in logs, and so it's generally harder to confuse the two.
         match network {
             NetworkKind::Mainnet => "MainnetKind",
             NetworkKind::Testnet => "TestnetKind",
@@ -271,6 +273,7 @@ impl Network {
     }
 }
 
+// This is used for parsing a command-line argument for the `TipHeight` command in zebrad.
 impl FromStr for Network {
     type Err = InvalidNetworkError;
 

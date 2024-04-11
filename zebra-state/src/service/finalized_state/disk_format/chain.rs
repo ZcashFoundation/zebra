@@ -44,7 +44,7 @@ impl FromDisk for ValueBalance<NonNegative> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct HistoryTreeParts {
-    network: NetworkKind,
+    network_kind: NetworkKind,
     size: u32,
     peaks: BTreeMap<u32, zcash_history::Entry>,
     current_height: Height,
@@ -57,7 +57,7 @@ impl HistoryTreeParts {
         network: &Network,
     ) -> Result<NonEmptyHistoryTree, HistoryTreeError> {
         assert_eq!(
-            self.network,
+            self.network_kind,
             network.kind(),
             "history tree network kind should match current network"
         );
@@ -69,7 +69,7 @@ impl HistoryTreeParts {
 impl From<&NonEmptyHistoryTree> for HistoryTreeParts {
     fn from(history_tree: &NonEmptyHistoryTree) -> Self {
         HistoryTreeParts {
-            network: history_tree.network().kind(),
+            network_kind: history_tree.network().kind(),
             size: history_tree.size(),
             peaks: history_tree.peaks().clone(),
             current_height: history_tree.current_height(),
