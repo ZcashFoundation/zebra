@@ -52,7 +52,7 @@ tracing = "0.1.39"
 futures = "0.3.30"
 
 zcash_client_backend = "0.10.0-rc.1"
-zcash_primitives = "0.13.0-rc.1"
+zcash_primitives = "0.13.0"
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35", features = ["shielded-scan"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.35", features = ["shielded-scan"] }
