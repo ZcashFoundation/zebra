@@ -5,19 +5,34 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## [Zebra 1.6.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.1) - 2024-04-15
 
-### Added 
-- `zebra_chain::Network` methods:
-  - `b58_pubkey_address_prefix`, `b58_script_address_prefix`, `num_funding_streams`
+This release adds an OpenAPI specification for Zebra's RPC methods and startup logs about Zebra's storage usage and other database information. 
+
+It also includes:
+- Bug fixes and improved error messages for some zebra-scan gRPC methods
+- A performance improvement in Zebra's `getblock` RPC method  
+
+### Added
+
+- Log database information such as storage usage on startup and shutdown ([#8336](https://github.com/ZcashFoundation/zebra/pull/8336), [#8389](https://github.com/ZcashFoundation/zebra/pull/8389))
+- OpenAPI specification for Zebra's RPC methods ([#8342](https://github.com/ZcashFoundation/zebra/pull/8342))
 
 ### Changed
-- Functions that take a `zebra_chain::Network` as an argument have been moved to be methods of `Network`, including
-  - `zebra_chain::parameters`: 
-    - `genesis::genesis_hash`, `NetworkUpgrade::activation_list`, `NetworkUpgrade::is_max_block_time_enforced`, 
-  - `zebra_chain::work::difficulty::ExpandedDifficulty::target_difficutly_limit`
-  - `zebra_consensus::height_for_first_halving`
-  - `zebra_consensus::checkpoint::CheckpointList::new` (now `Network::checkpoint_list`)
+
+- Removed `Copy` trait impl for `Network` ([#8354](https://github.com/ZcashFoundation/zebra/pull/8354))
+- Refactored code for network consensus parameters to `Network` methods ([#8340](https://github.com/ZcashFoundation/zebra/pull/8340))
+- Use official lightwallted image for CI ([#8323](https://github.com/ZcashFoundation/zebra/pull/8323))
+
+### Fixed
+
+- Improve zebra-scan gRPC method errors and add timeout to scan service to avoid hanging ([#8318](https://github.com/ZcashFoundation/zebra/pull/8318))
+- Await state service requests in `getblock` method in parallel ([#8376](https://github.com/ZcashFoundation/zebra/pull/8376))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @elijahhampton, @gustavovalverde, @idky137, @mpguerra, @oxarbitrage, @upbqdn and @zancas
 
 ## [Zebra 1.6.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.0) - 2024-02-23
 
