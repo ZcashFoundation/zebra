@@ -62,7 +62,6 @@ peerset_initial_target_size = 25
 
 [network.testnet_parameters]
 activation_heights = [
-    [0, "Genesis"],
     [1, "BeforeOverwinter"],
     [207_500, "Overwinter"],
     [280_000, "Sapling"],

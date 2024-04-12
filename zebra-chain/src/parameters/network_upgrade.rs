@@ -264,7 +264,7 @@ impl Network {
             }
 
             Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
-            Testnet(params) => params.activation_heights.clone(),
+            Testnet(params) => params.activation_heights().clone(),
         }
     }
 }

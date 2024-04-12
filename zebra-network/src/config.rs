@@ -625,9 +625,9 @@ impl<'de> Deserialize<'de> for Config {
     where
         D: Deserializer<'de>,
     {
-        /// Network consensus parameters for test networks such as Regtest and the default Testnet.
-        #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-        pub struct DTestnetParameters {
+        #[derive(Deserialize)]
+        struct DTestnetParameters {
+            #[serde(default)]
             pub(super) activation_heights: Vec<(u32, NetworkUpgrade)>,
         }
 
@@ -686,6 +686,11 @@ impl<'de> Deserialize<'de> for Config {
             let activation_heights = activation_heights
                 .into_iter()
                 .map(|(height, network_upgrade)| {
+                    assert!(
+                        network_upgrade != NetworkUpgrade::Genesis || height == 0,
+                        "Genesis network upgrade activation height is not configurable"
+                    );
+
                     (
                         height.try_into().expect("activation height must be valid"),
                         network_upgrade,
@@ -693,7 +698,11 @@ impl<'de> Deserialize<'de> for Config {
                 })
                 .collect();
 
-            Network::new_configured_testnet(testnet::Parameters { activation_heights })
+            let testnet_parameters = testnet::Parameters::build()
+                .activation_heights(activation_heights)
+                .finish();
+
+            Network::new_configured_testnet(testnet_parameters)
         } else {
             // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
             match network_kind {
