@@ -14,7 +14,7 @@ use zebra_chain::{
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, POW_AVERAGING_WINDOW},
+    parameters::{Network, NetworkKind, POW_AVERAGING_WINDOW},
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -449,13 +449,23 @@ where
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
-            assert_eq!(
-                miner_address.network_kind(),
-                network.kind(),
-                "incorrect miner address config: {miner_address} \
-                         network.network {network} and miner address network {} must match",
-                miner_address.network_kind(),
-            );
+            match network.kind() {
+                network_kind @ NetworkKind::Mainnet => assert_eq!(
+                    miner_address.network_kind(),
+                    NetworkKind::Mainnet,
+                    "Incorrect mining address config: Zebra is configured to run on a {network_kind} network, \
+                    but the configured mining address is for {}. The network kinds must match.",
+                    miner_address.network_kind(),
+                ),
+                // `Regtest` uses `Testnet` transparent addresses.
+                network_kind @ (NetworkKind::Testnet | NetworkKind::Regtest) => assert_eq!(
+                    miner_address.network_kind(),
+                    NetworkKind::Testnet,
+                    "Incorrect mining address config: Zebra is configured to run on a {network_kind} network, \
+                    but the configured mining address is for {}. The network kinds must match.",
+                    miner_address.network_kind(),
+                ),
+            }
         }
 
         // A limit on the configured extra coinbase data, regardless of the current block height.
