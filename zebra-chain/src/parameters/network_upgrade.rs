@@ -300,9 +300,8 @@ impl NetworkUpgrade {
         network
             .activation_list()
             .iter()
-            .filter(|(_, nu)| nu == &self)
+            .find(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
-            .next()
     }
 
     /// Returns `true` if `height` is the activation height of any network upgrade

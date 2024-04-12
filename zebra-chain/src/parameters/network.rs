@@ -290,12 +290,10 @@ impl zp_consensus::Parameters for Network {
             zp_consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
         };
 
-        self.activation_list()
-            .into_iter()
-            .find(|(_, nu)| *nu == target_nu)
-            .map(|(Height(height), _)| height)
-            // Heights are hard-coded below Height::MAX or checked when the config is parsed.
-            .map(zp_consensus::BlockHeight::from_u32)
+        // Heights are hard-coded below Height::MAX or checked when the config is parsed.
+        target_nu
+            .activation_height(self)
+            .map(|Height(h)| zp_consensus::BlockHeight::from_u32(h))
     }
 
     fn coin_type(&self) -> u32 {
