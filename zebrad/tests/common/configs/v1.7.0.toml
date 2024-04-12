@@ -60,16 +60,14 @@ max_connections_per_ip = 1
 network = "Testnet"
 peerset_initial_target_size = 25
 
-[network.testnet_parameters]
-activation_heights = [
-    [1, "BeforeOverwinter"],
-    [207_500, "Overwinter"],
-    [280_000, "Sapling"],
-    [584_000, "Blossom"],
-    [903_800, "Heartwood"],
-    [1_028_500, "Canopy"],        
-    [1_842_420, "NU5"],        
-]
+[network.testnet_parameters.activation_heights]
+BeforeOverwinter = 1
+Overwinter = 207_500
+Sapling = 280_000
+Blossom = 584_000
+Heartwood = 903_800
+Canopy = 1_028_500
+NU5 = 1_842_420
 
 [rpc]
 debug_force_finished_sync = false

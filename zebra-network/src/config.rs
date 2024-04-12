@@ -625,10 +625,23 @@ impl<'de> Deserialize<'de> for Config {
     where
         D: Deserializer<'de>,
     {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "PascalCase")]
+        struct DNetworkUpgradeActivationHeights {
+            before_overwinter: Option<u32>,
+            overwinter: Option<u32>,
+            sapling: Option<u32>,
+            blossom: Option<u32>,
+            heartwood: Option<u32>,
+            canopy: Option<u32>,
+            #[serde(rename = "NU5")]
+            nu5: Option<u32>,
+        }
+
         #[derive(Deserialize)]
         struct DTestnetParameters {
             #[serde(default)]
-            pub(super) activation_heights: Vec<(u32, NetworkUpgrade)>,
+            pub(super) activation_heights: DNetworkUpgradeActivationHeights,
         }
 
         #[derive(Deserialize)]
@@ -675,7 +688,21 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        let network = if let Some(DTestnetParameters { activation_heights }) = testnet_parameters {
+        let network = if let Some(DTestnetParameters {
+            activation_heights:
+                DNetworkUpgradeActivationHeights {
+                    before_overwinter,
+                    overwinter,
+                    sapling,
+                    blossom,
+                    heartwood,
+                    canopy,
+                    nu5,
+                },
+        }) = testnet_parameters
+        {
+            use NetworkUpgrade::*;
+
             // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
             assert_eq!(
                 network_kind,
@@ -683,19 +710,16 @@ impl<'de> Deserialize<'de> for Config {
                 "set network to 'Testnet' to use configured testnet parameters"
             );
 
-            let activation_heights = activation_heights
+            let activation_heights = before_overwinter
                 .into_iter()
-                .map(|(height, network_upgrade)| {
-                    assert!(
-                        network_upgrade != NetworkUpgrade::Genesis || height == 0,
-                        "Genesis network upgrade activation height is not configurable"
-                    );
-
-                    (
-                        height.try_into().expect("activation height must be valid"),
-                        network_upgrade,
-                    )
-                })
+                .map(|h| (h, BeforeOverwinter))
+                .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
+                .chain(sapling.into_iter().map(|h| (h, Sapling)))
+                .chain(blossom.into_iter().map(|h| (h, Blossom)))
+                .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
+                .chain(canopy.into_iter().map(|h| (h, Canopy)))
+                .chain(nu5.into_iter().map(|h| (h, Nu5)))
+                .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
                 .collect();
 
             let testnet_parameters = testnet::Parameters::build()
