@@ -60,7 +60,8 @@ impl ParametersBuilder {
     pub fn activation_heights(
         mut self,
         ConfiguredActivationHeights {
-            before_overwinter,
+            // TODO: Find out if `BeforeOverwinter` is required at Height(1), remove this filter if it's not required to be at Height(1)
+            before_overwinter: _,
             overwinter,
             sapling,
             blossom,
@@ -75,15 +76,14 @@ impl ParametersBuilder {
         //
         // These must be in order so that later network upgrades overwrite prior ones
         // if multiple network upgrades are configured with the same activation height.
-        let activation_heights: BTreeMap<_, _> = before_overwinter
+        let activation_heights: BTreeMap<_, _> = overwinter
             .into_iter()
-            .map(|h| (h, BeforeOverwinter))
-            .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
+            .map(|h| (h, Overwinter))
             .chain(sapling.into_iter().map(|h| (h, Sapling)))
             .chain(blossom.into_iter().map(|h| (h, Blossom)))
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
-            .chain(nu5.into_iter().map(|h| (h, Nu5))) // TODO: Find out if `BeforeOverwinter` is required at Height(1), remove this filter if it's not required to be at Height(1)
+            .chain(nu5.into_iter().map(|h| (h, Nu5)))
             .filter(|&(_, nu)| nu != NetworkUpgrade::BeforeOverwinter)
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();

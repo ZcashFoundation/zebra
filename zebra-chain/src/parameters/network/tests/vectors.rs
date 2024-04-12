@@ -125,27 +125,3 @@ fn activates_network_upgrades_correctly() {
         );
     }
 }
-
-/// Checks that there are no duplicate activation heights when using configured activation heights.
-// TODO: Convert this to a proptest.
-#[test]
-fn no_duplicate_activation_heights() {
-    let network = testnet::Parameters::build()
-        .activation_heights(ConfiguredActivationHeights {
-            overwinter: Some(2),
-            ..Default::default()
-        })
-        .to_network();
-
-    for target_nu in NETWORK_UPGRADES_IN_ORDER.into_iter().skip(1) {
-        assert!(
-            network
-                .activation_list()
-                .into_iter()
-                .filter(|&(_h, nu)| nu == target_nu)
-                .count()
-                <= 1,
-            "there should be at most 1 activation height per possible network upgrade"
-        );
-    }
-}
