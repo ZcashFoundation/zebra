@@ -19,9 +19,9 @@ impl Default for ParametersBuilder {
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
-            // TODO: Find out if `BeforeOverwinter` must always be active at height 1
             activation_heights: [
                 (Height(0), NetworkUpgrade::Genesis),
+                // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
                 (Height(1), NetworkUpgrade::BeforeOverwinter),
             ]
             .into_iter()
@@ -31,19 +31,35 @@ impl Default for ParametersBuilder {
 }
 
 impl ParametersBuilder {
-    /// Extends network upgrade activation heights with the provided activation heights.
-    pub fn activation_heights(
-        mut self,
-        new_activation_heights: Vec<(Height, NetworkUpgrade)>,
-    ) -> Self {
-        let new_activation_heights: BTreeMap<_, _> =
-            new_activation_heights.iter().cloned().collect();
+    /// Checks that the provided network upgrade activation heights are in the correct order, then
+    /// sets them as the new network upgrade activation heights.
+    pub fn activation_heights(mut self, activation_heights: Vec<(Height, NetworkUpgrade)>) -> Self {
+        let activation_heights: BTreeMap<_, _> = activation_heights
+            .into_iter()
+            // TODO: Find out if `BeforeOverwinter` is required at Height(1), remove this filter if it's not required to be at Height(1)
+            .filter(|&(_, nu)| nu != NetworkUpgrade::BeforeOverwinter)
+            .collect();
+
+        // Check that the provided network upgrade activation heights are in the same order by height as the default testnet activation heights
+        let network_upgrades: Vec<_> = activation_heights.iter().map(|(_h, &nu)| nu).collect();
+        let mut activation_heights_iter = activation_heights.iter();
+        for expected_network_upgrade in TESTNET_ACTIVATION_HEIGHTS.iter().map(|&(_, nu)| nu) {
+            if !network_upgrades.contains(&expected_network_upgrade) {
+                continue;
+            } else if let Some((_h, &network_upgrade)) = activation_heights_iter.next() {
+                assert!(
+                    network_upgrade == expected_network_upgrade,
+                    "network upgrades must be in order"
+                );
+            }
+        }
 
         // # Correctness
         //
         // Height(0) must be reserved for the `NetworkUpgrade::Genesis`.
-        self.activation_heights
-            .extend(new_activation_heights.range(Height(1)..));
+        self.activation_heights.split_off(&Height(2));
+        self.activation_heights.extend(activation_heights);
+
         self
     }
 
