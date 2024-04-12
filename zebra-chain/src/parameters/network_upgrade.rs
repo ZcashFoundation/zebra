@@ -7,7 +7,6 @@ use crate::parameters::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
@@ -280,11 +279,28 @@ impl NetworkUpgrade {
             .expect("every height has a current network upgrade")
     }
 
+    /// Returns the next expected network upgrade after this network upgrade
+    pub fn next_upgrade(self) -> Option<Self> {
+        match self {
+            Genesis => Some(BeforeOverwinter),
+            BeforeOverwinter => Some(Overwinter),
+            Overwinter => Some(Sapling),
+            Sapling => Some(Blossom),
+            Blossom => Some(Heartwood),
+            Heartwood => Some(Canopy),
+            Canopy => Some(Nu5),
+            Nu5 => None,
+        }
+    }
+
     /// Returns the next network upgrade for `network` and `height`.
     ///
     /// Returns None if the next upgrade has not been implemented in Zebra
     /// yet.
+    #[cfg(test)]
     pub fn next(network: &Network, height: block::Height) -> Option<NetworkUpgrade> {
+        use std::ops::Bound::*;
+
         network
             .activation_list()
             .range((Excluded(height), Unbounded))
@@ -302,6 +318,10 @@ impl NetworkUpgrade {
             .iter()
             .find(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
+            .or_else(|| {
+                self.next_upgrade()
+                    .and_then(|next_nu| next_nu.activation_height(network))
+            })
     }
 
     /// Returns `true` if `height` is the activation height of any network upgrade
