@@ -15,7 +15,10 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::{testnet, Network, NetworkKind, NetworkUpgrade};
+use zebra_chain::parameters::{
+    testnet::{self, ConfiguredActivationHeights},
+    Network, NetworkKind,
+};
 
 use crate::{
     constants::{
@@ -625,23 +628,10 @@ impl<'de> Deserialize<'de> for Config {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize, Default)]
-        #[serde(rename_all = "PascalCase")]
-        struct DNetworkUpgradeActivationHeights {
-            before_overwinter: Option<u32>,
-            overwinter: Option<u32>,
-            sapling: Option<u32>,
-            blossom: Option<u32>,
-            heartwood: Option<u32>,
-            canopy: Option<u32>,
-            #[serde(rename = "NU5")]
-            nu5: Option<u32>,
-        }
-
         #[derive(Deserialize)]
         struct DTestnetParameters {
             #[serde(default)]
-            pub(super) activation_heights: DNetworkUpgradeActivationHeights,
+            pub(super) activation_heights: ConfiguredActivationHeights,
         }
 
         #[derive(Deserialize)]
@@ -688,45 +678,17 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        let network = if let Some(DTestnetParameters {
-            activation_heights:
-                DNetworkUpgradeActivationHeights {
-                    before_overwinter,
-                    overwinter,
-                    sapling,
-                    blossom,
-                    heartwood,
-                    canopy,
-                    nu5,
-                },
-        }) = testnet_parameters
-        {
-            use NetworkUpgrade::*;
-
-            // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
+        // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
+        let network = if let Some(DTestnetParameters { activation_heights }) = testnet_parameters {
             assert_eq!(
                 network_kind,
                 NetworkKind::Testnet,
                 "set network to 'Testnet' to use configured testnet parameters"
             );
 
-            let activation_heights = before_overwinter
-                .into_iter()
-                .map(|h| (h, BeforeOverwinter))
-                .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
-                .chain(sapling.into_iter().map(|h| (h, Sapling)))
-                .chain(blossom.into_iter().map(|h| (h, Blossom)))
-                .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
-                .chain(canopy.into_iter().map(|h| (h, Canopy)))
-                .chain(nu5.into_iter().map(|h| (h, Nu5)))
-                .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
-                .collect();
-
-            let testnet_parameters = testnet::Parameters::build()
+            testnet::Parameters::build()
                 .activation_heights(activation_heights)
-                .finish();
-
-            Network::new_configured_testnet(testnet_parameters)
+                .to_network()
         } else {
             // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
             match network_kind {

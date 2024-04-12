@@ -2,8 +2,16 @@
 
 use zcash_primitives::consensus::{self as zp_consensus, Parameters};
 
-use crate::parameters::Network;
+use crate::{
+    block::Height,
+    parameters::{
+        testnet::{self, ConfiguredActivationHeights},
+        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+    },
+};
 
+/// Checks that every method in the `Parameters` impl for `zebra_chain::Network` has the same output
+/// as the Parameters impl for `zcash_primitives::consensus::Network` on Mainnet and the default Testnet.
 #[test]
 fn check_parameters_impl() {
     let zp_network_upgrades = [
@@ -78,6 +86,66 @@ fn check_parameters_impl() {
             network.b58_script_address_prefix(),
             zp_network.b58_script_address_prefix(),
             "Parameters::b58_script_address_prefix() outputs must match"
+        );
+    }
+}
+
+/// Checks that `NetworkUpgrade::activation_height()` returns the activation height of the next
+/// network upgrade if it doesn't find an activation height for a prior network upgrade, and that the
+/// `Genesis` upgrade is always at `Height(0)`.
+#[test]
+fn activates_network_upgrades_correctly() {
+    let expected_activation_height = 1;
+    let network = testnet::Parameters::build()
+        .activation_heights(ConfiguredActivationHeights {
+            nu5: Some(expected_activation_height),
+            ..Default::default()
+        })
+        .to_network();
+
+    let genesis_activation_height = NetworkUpgrade::Genesis
+        .activation_height(&network)
+        .expect("must return an activation height");
+
+    assert_eq!(
+        genesis_activation_height,
+        Height(0),
+        "activation height for all networks after Genesis and BeforeOverwinter should match NU5 activation height"
+    );
+
+    for nu in NETWORK_UPGRADES_IN_ORDER.into_iter().skip(1) {
+        let activation_height = nu
+            .activation_height(&network)
+            .expect("must return an activation height");
+
+        assert_eq!(
+            activation_height, Height(expected_activation_height),
+            "activation height for all networks after Genesis and BeforeOverwinter \
+            should match NU5 activation height, network_upgrade: {nu}, activation_height: {activation_height:?}"
+        );
+    }
+}
+
+/// Checks that there are no duplicate activation heights when using configured activation heights.
+// TODO: Convert this to a proptest.
+#[test]
+fn no_duplicate_activation_heights() {
+    let network = testnet::Parameters::build()
+        .activation_heights(ConfiguredActivationHeights {
+            overwinter: Some(2),
+            ..Default::default()
+        })
+        .to_network();
+
+    for target_nu in NETWORK_UPGRADES_IN_ORDER.into_iter().skip(1) {
+        assert!(
+            network
+                .activation_list()
+                .into_iter()
+                .filter(|&(_h, nu)| nu == target_nu)
+                .count()
+                <= 1,
+            "there should be at most 1 activation height per possible network upgrade"
         );
     }
 }

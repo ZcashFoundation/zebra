@@ -14,6 +14,18 @@ use hex::{FromHex, ToHex};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// A list of network upgrades in the order that they must be activated.
+pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 8] = [
+    Genesis,
+    BeforeOverwinter,
+    Overwinter,
+    Sapling,
+    Blossom,
+    Heartwood,
+    Canopy,
+    Nu5,
+];
+
 /// A Zcash network upgrade.
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
