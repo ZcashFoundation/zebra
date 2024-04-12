@@ -95,7 +95,13 @@ impl ParametersBuilder {
         for expected_network_upgrade in NETWORK_UPGRADES_IN_ORDER {
             if !network_upgrades.contains(&expected_network_upgrade) {
                 continue;
-            } else if let Some((_h, &network_upgrade)) = activation_heights_iter.next() {
+            } else if let Some((&height, &network_upgrade)) = activation_heights_iter.next() {
+                assert_ne!(
+                    height,
+                    Height(0),
+                    "Height(0) is reserved for the `Genesis` upgrade"
+                );
+
                 assert!(
                     network_upgrade == expected_network_upgrade,
                     "network upgrades must be activated in order, the correct order is {NETWORK_UPGRADES_IN_ORDER:?}"
