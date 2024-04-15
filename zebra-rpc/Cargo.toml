@@ -80,7 +80,7 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.35" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.35" }
 
 [dev-dependencies]
-insta = { version = "1.36.1", features = ["redactions", "json", "ron"] }
+insta = { version = "1.38.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
