@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
-    parameters::Network::*,
+    parameters::NetworkKind,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::{self, Address::*},
 };
@@ -498,14 +498,18 @@ impl AddressTransaction {
 
 /// Returns a byte representing the [`transparent::Address`] variant.
 fn address_variant(address: &transparent::Address) -> u8 {
+    use NetworkKind::*;
     // Return smaller values for more common variants.
     //
     // (This probably doesn't matter, but it might help slightly with data compression.)
-    match (address.network(), address) {
+    match (address.network_kind(), address) {
         (Mainnet, PayToPublicKeyHash { .. }) => 0,
         (Mainnet, PayToScriptHash { .. }) => 1,
-        (Testnet, PayToPublicKeyHash { .. }) => 2,
-        (Testnet, PayToScriptHash { .. }) => 3,
+        // There's no way to distinguish between Regtest and Testnet for encoded transparent addresses,
+        // we can consider `Regtest` to use `Testnet` transparent addresses, so it's okay to use the `Testnet`
+        // address variant for `Regtest` transparent addresses in the db format
+        (Testnet | Regtest, PayToPublicKeyHash { .. }) => 2,
+        (Testnet | Regtest, PayToScriptHash { .. }) => 3,
     }
 }
 
@@ -529,15 +533,15 @@ impl FromDisk for transparent::Address {
         let hash_bytes = hash_bytes.try_into().unwrap();
 
         let network = if address_variant < 2 {
-            Mainnet
+            NetworkKind::Mainnet
         } else {
-            Testnet
+            NetworkKind::Testnet
         };
 
         if address_variant % 2 == 0 {
-            transparent::Address::from_pub_key_hash(&network, hash_bytes)
+            transparent::Address::from_pub_key_hash(network, hash_bytes)
         } else {
-            transparent::Address::from_script_hash(&network, hash_bytes)
+            transparent::Address::from_script_hash(network, hash_bytes)
         }
     }
 }

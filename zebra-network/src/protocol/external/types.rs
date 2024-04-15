@@ -8,7 +8,7 @@ use zebra_chain::{
     },
 };
 
-use crate::constants::{self, magics};
+use crate::constants::{self, magics, CURRENT_NETWORK_PROTOCOL_VERSION};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -31,7 +31,8 @@ impl ParameterMagic for Network {
     fn magic_value(&self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
-            Network::Testnet => magics::TESTNET,
+            // TODO: Move `Magic` struct definition to `zebra-chain`, add it as a field in `testnet::Parameters`, and return it here.
+            Network::Testnet(_params) => magics::TESTNET,
         }
     }
 }
@@ -80,7 +81,7 @@ impl Version {
     /// - after Zebra's local network is slow or shut down.
     fn initial_min_for_network(network: &Network) -> Version {
         *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-            .get(network)
+            .get(&network.kind())
             .expect("We always have a value for testnet or mainnet")
     }
 
@@ -103,17 +104,22 @@ impl Version {
         //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
-            (Testnet, Overwinter) => 170_003,
+            (Testnet(params), Overwinter) if params.is_default_testnet() => 170_003,
             (Mainnet, Overwinter) => 170_005,
+            // TODO: Use 170_006 for (Testnet(params), Sapling) if params.is_regtest() (`Regtest` in zcashd uses
+            //       version 170_006 for Sapling, and the same values as Testnet for other network upgrades.)
             (_, Sapling) => 170_007,
-            (Testnet, Blossom) => 170_008,
+            (Testnet(params), Blossom) if params.is_default_testnet() => 170_008,
             (Mainnet, Blossom) => 170_009,
-            (Testnet, Heartwood) => 170_010,
+            (Testnet(params), Heartwood) if params.is_default_testnet() => 170_010,
             (Mainnet, Heartwood) => 170_011,
-            (Testnet, Canopy) => 170_012,
+            (Testnet(params), Canopy) if params.is_default_testnet() => 170_012,
             (Mainnet, Canopy) => 170_013,
-            (Testnet, Nu5) => 170_050,
+            (Testnet(params), Nu5) if params.is_default_testnet() => 170_050,
             (Mainnet, Nu5) => 170_100,
+
+            // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
+            (Testnet(_params), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
         })
     }
 }
@@ -201,7 +207,7 @@ mod test {
 
     #[test]
     fn version_extremes_testnet() {
-        version_extremes(&Testnet)
+        version_extremes(&Network::new_default_testnet())
     }
 
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
@@ -229,7 +235,7 @@ mod test {
 
     #[test]
     fn version_consistent_testnet() {
-        version_consistent(&Testnet)
+        version_consistent(&Network::new_default_testnet())
     }
 
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions

@@ -37,7 +37,7 @@ use serde::Serialize;
 use zebra_chain::{
     block::{self, Block, Height, SerializedBlock},
     orchard,
-    parameters::Network::{self, *},
+    parameters::Network,
     sapling,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction},
@@ -153,9 +153,9 @@ impl TransactionData {
 #[test]
 fn test_block_and_transaction_data() {
     let _init_guard = zebra_test::init();
-
-    test_block_and_transaction_data_with_network(Mainnet);
-    test_block_and_transaction_data_with_network(Testnet);
+    for network in Network::iter() {
+        test_block_and_transaction_data_with_network(network);
+    }
 }
 
 /// Snapshot finalized block and transaction data for `network`.
@@ -318,7 +318,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 // Skip these checks for empty history trees.
                 if let Some(history_tree_at_tip) = history_tree_at_tip.as_ref().as_ref() {
                     assert_eq!(history_tree_at_tip.current_height(), max_height);
-                    assert_eq!(history_tree_at_tip.network(), state.network());
+                    assert_eq!(history_tree_at_tip.network(), &state.network());
                 }
             }
 

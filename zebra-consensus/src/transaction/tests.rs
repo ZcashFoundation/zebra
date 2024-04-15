@@ -42,13 +42,8 @@ mod prop;
 fn v5_fake_transactions() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let networks = vec![
-        (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
-        (Network::Testnet, zebra_test::vectors::TESTNET_BLOCKS.iter()),
-    ];
-
-    for (network, blocks) in networks {
-        for transaction in fake_v5_transactions_for_network(&network, blocks) {
+    for network in Network::iter() {
+        for transaction in fake_v5_transactions_for_network(&network, network.block_iter()) {
             match check::has_inputs_and_outputs(&transaction) {
                 Ok(()) => (),
                 Err(TransactionError::NoInputs) | Err(TransactionError::NoOutputs) => (),
@@ -858,16 +853,12 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
     const V5_TRANSACTION_VERSION: u32 = 5;
 
     let canopy = NetworkUpgrade::Canopy;
-    let networks = vec![
-        (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
-        (Network::Testnet, zebra_test::vectors::TESTNET_BLOCKS.iter()),
-    ];
 
-    for (network, blocks) in networks {
+    for network in Network::iter() {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new(&network, state_service);
 
-        let transaction = fake_v5_transactions_for_network(&network, blocks)
+        let transaction = fake_v5_transactions_for_network(&network, network.block_iter())
             .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
 
@@ -899,7 +890,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
 
 #[test]
 fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
-    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Testnet)
+    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::new_default_testnet())
 }
 
 fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
@@ -1544,7 +1535,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 /// Test if V5 transaction with transparent funds is accepted.
 #[tokio::test]
 async fn v5_transaction_with_transparent_transfer_is_accepted() {
-    let network = Network::Testnet;
+    let network = Network::new_default_testnet();
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -1601,12 +1592,13 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 /// accepted.
 #[tokio::test]
 async fn v5_transaction_with_last_valid_expiry_height() {
+    let network = Network::new_default_testnet();
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(&Network::Testnet, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(&Network::Testnet)
+        .activation_height(&network)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -1646,12 +1638,13 @@ async fn v5_transaction_with_last_valid_expiry_height() {
 /// is equal to the height of the block the transaction belongs to.
 #[tokio::test]
 async fn v5_coinbase_transaction_expiry_height() {
+    let network = Network::new_default_testnet();
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(&Network::Testnet, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(&Network::Testnet)
+        .activation_height(&network)
         .expect("Nu5 activation height for testnet is specified");
 
     let (input, output) = mock_coinbase_transparent_output(block_height);
@@ -1761,12 +1754,14 @@ async fn v5_coinbase_transaction_expiry_height() {
 /// Tests if an expired non-coinbase V5 transaction is rejected.
 #[tokio::test]
 async fn v5_transaction_with_too_low_expiry_height() {
+    let network = Network::new_default_testnet();
+
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(&Network::Testnet, state_service);
+    let verifier = Verifier::new(&network, state_service);
 
     let block_height = NetworkUpgrade::Nu5
-        .activation_height(&Network::Testnet)
+        .activation_height(&network)
         .expect("Nu5 activation height for testnet is specified");
     let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
@@ -1864,7 +1859,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
 /// Test if V5 coinbase transaction is accepted.
 #[tokio::test]
 async fn v5_coinbase_transaction_is_accepted() {
-    let network = Network::Testnet;
+    let network = Network::new_default_testnet();
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -1916,7 +1911,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 /// script prevents spending the source UTXO.
 #[tokio::test]
 async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
-    let network = Network::Testnet;
+    let network = Network::new_default_testnet();
     let network_upgrade = NetworkUpgrade::Nu5;
 
     let nu5_activation_height = network_upgrade
@@ -2759,8 +2754,9 @@ fn add_to_sprout_pool_after_nu() {
 fn coinbase_outputs_are_decryptable_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Mainnet)?;
-    coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Testnet)?;
+    for network in Network::iter() {
+        coinbase_outputs_are_decryptable_for_historical_blocks_for_network(network)?;
+    }
 
     Ok(())
 }
@@ -2844,7 +2840,7 @@ fn fill_action_with_note_encryption_test_vector(
 /// viewing key.
 #[test]
 fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
-    let network = Network::Testnet;
+    let network = Network::new_default_testnet();
 
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_ZERO_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
@@ -2886,7 +2882,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
 /// viewing key.
 #[test]
 fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
-    let network = Network::Testnet;
+    let network = Network::new_default_testnet();
 
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
