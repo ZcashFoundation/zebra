@@ -1260,6 +1260,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "document-features"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5282ad69563b5fc40319526ba27e0e7363d552a896f0297d54f767717f9b95"
+dependencies = [
+ "litrs",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2492,6 +2501,12 @@ name = "linux-raw-sys"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
+
+[[package]]
+name = "litrs"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "lock_api"
@@ -5642,14 +5657,15 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 
 [[package]]
 name = "zcash_address"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bce173f1d9ed4f806e310bc3a873301531e7a6dc209928584d6404e3f8228ef4"
+checksum = "827c17a1f7e3a69f0d44e991ff610c7a842228afdc9dc2325ffdd1a67fee01e9"
 dependencies = [
  "bech32",
  "bs58",
  "f4jumble",
  "zcash_encoding",
+ "zcash_protocol",
 ]
 
 [[package]]
@@ -5774,6 +5790,16 @@ dependencies = [
  "tracing",
  "xdg",
  "zcash_primitives",
+]
+
+[[package]]
+name = "zcash_protocol"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f8189d4a304e8aa3aef3b75e89f3874bb0dc84b1cd623316a84e79e06cddabc"
+dependencies = [
+ "document-features",
+ "memuse",
 ]
 
 [[package]]
