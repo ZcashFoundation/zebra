@@ -124,7 +124,7 @@ zcash_primitives = { version = "0.13.0-rc.1", optional = true }
 zcash_client_backend = {version = "0.10.0-rc.1", optional = true}
 
 # For the openapi generator
-syn = { version = "2.0.53", features = ["full"], optional = true }
+syn = { version = "2.0.58", features = ["full"], optional = true }
 quote = { version = "1.0.35", optional = true }
 serde_yaml = { version = "0.9.33", optional = true }
 serde = { version = "1.0.196", features = ["serde_derive"], optional = true }
