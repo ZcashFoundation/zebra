@@ -1,6 +1,6 @@
 //! Fixed test vectors for transactions.
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::DateTime;
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
@@ -221,13 +221,6 @@ fn deserialize_large_transaction() {
     let output =
         transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..]).unwrap();
 
-    // Create a lock time.
-    let lock_time = LockTime::Time(DateTime::<Utc>::from_naive_utc_and_offset(
-        NaiveDateTime::from_timestamp_opt(61, 0)
-            .expect("in-range number of seconds and valid nanosecond"),
-        Utc,
-    ));
-
     // Serialize the input so that we can determine its serialized size.
     let mut input_data = Vec::new();
     input
@@ -242,14 +235,12 @@ fn deserialize_large_transaction() {
         .take(tx_inputs_num)
         .collect::<Vec<_>>();
 
-    let outputs = vec![output];
-
     // Create an oversized transaction. Adding the output and lock time causes
     // the transaction to overflow the threshold.
     let oversized_tx = Transaction::V1 {
         inputs,
-        outputs,
-        lock_time,
+        outputs: vec![output],
+        lock_time: LockTime::Time(DateTime::from_timestamp(61, 0).unwrap()),
     };
 
     // Serialize the transaction.
