@@ -67,7 +67,7 @@ serde = { version = "1.0.196", features = ["serde_derive"] }
 tempfile = "3.10.1"
 thiserror = "1.0.58"
 
-rayon = "1.9.0"
+rayon = "1.10.0"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.39"
