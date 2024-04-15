@@ -59,7 +59,7 @@ itertools = "0.12.1"
 lazy_static = "1.4.0"
 metrics = "0.22.3"
 mset = "0.1.1"
-regex = "1.10.3"
+regex = "1.10.4"
 rlimit = "0.10.1"
 rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
 semver = "1.0.22"
