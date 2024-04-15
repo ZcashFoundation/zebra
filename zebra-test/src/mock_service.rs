@@ -959,7 +959,6 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     }
 }
 
-#[allow(dead_code)]
 /// A representation of an assertion type.
 ///
 /// This trait is used to group the types of assertions that the [`MockService`] can do. There are
@@ -967,6 +966,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
 ///
 /// - [`PanicAssertion`]
 /// - [`PropTestAssertion`]
+#[allow(dead_code)]
 trait AssertionType {}
 
 /// Represents normal Rust assertions that panic, like [`assert_eq`].
