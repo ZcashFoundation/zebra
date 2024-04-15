@@ -184,7 +184,7 @@ toml = "0.8.11"
 futures = "0.3.30"
 rayon = "1.10.0"
 tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tokio-stream = { version = "0.1.14", features = ["time"] }
+tokio-stream = { version = "0.1.15", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.5"
 
@@ -268,7 +268,7 @@ hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
 tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
-tokio-stream = "0.1.14"
+tokio-stream = "0.1.15"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.12.2"
