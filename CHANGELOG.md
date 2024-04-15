@@ -17,6 +17,7 @@ It also includes:
 
 - Log database information such as storage usage on startup and shutdown ([#8336](https://github.com/ZcashFoundation/zebra/pull/8336), [#8389](https://github.com/ZcashFoundation/zebra/pull/8389))
 - OpenAPI specification for Zebra's RPC methods ([#8342](https://github.com/ZcashFoundation/zebra/pull/8342))
+- Add block times to output of getblock RPC method when called with `verbosity = 2` ([#8384](https://github.com/ZcashFoundation/zebra/pull/8384))
 
 ### Changed
 
