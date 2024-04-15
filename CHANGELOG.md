@@ -23,7 +23,6 @@ It also includes:
 
 - Removed `Copy` trait impl for `Network` ([#8354](https://github.com/ZcashFoundation/zebra/pull/8354))
 - Refactored code for network consensus parameters to `Network` methods ([#8340](https://github.com/ZcashFoundation/zebra/pull/8340))
-- Use official lightwallted image for CI ([#8323](https://github.com/ZcashFoundation/zebra/pull/8323))
 
 ### Fixed
 
