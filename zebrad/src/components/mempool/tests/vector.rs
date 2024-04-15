@@ -1,6 +1,6 @@
 //! Fixed test vectors for the mempool.
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use color_eyre::Report;
 use tokio::time::{self, timeout};
@@ -15,11 +15,9 @@ use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
-    mempool::{self, storage::tests::unmined_transactions_in_blocks, *},
+    mempool::{self, *},
     sync::RecentSyncLengths,
 };
-
-use super::UnboxMempoolError;
 
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;

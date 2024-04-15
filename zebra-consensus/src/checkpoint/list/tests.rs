@@ -5,8 +5,8 @@ use std::sync::Arc;
 use num_integer::div_ceil;
 
 use zebra_chain::{
-    block::{self, Block, HeightDiff, MAX_BLOCK_BYTES},
-    parameters::{Network, Network::*},
+    block::{Block, HeightDiff, MAX_BLOCK_BYTES},
+    parameters::Network::*,
     serialization::ZcashDeserialize,
 };
 use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};

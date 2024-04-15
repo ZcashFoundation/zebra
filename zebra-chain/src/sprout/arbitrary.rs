@@ -1,4 +1,4 @@
-use proptest::{arbitrary::any, array, prelude::*};
+use proptest::{array, prelude::*};
 
 use crate::{
     amount::{Amount, NonNegative},

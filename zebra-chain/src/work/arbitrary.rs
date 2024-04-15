@@ -1,6 +1,6 @@
 use super::*;
 
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 impl Arbitrary for equihash::Solution {
     type Parameters = ();

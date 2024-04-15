@@ -10,7 +10,7 @@ use zebra_chain::{
     fmt::DisplayToDebug,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
-    parameters::{Network, *},
+    parameters::*,
     value_balance::ValueBalance,
     LedgerState,
 };

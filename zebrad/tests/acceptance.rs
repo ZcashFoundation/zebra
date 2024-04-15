@@ -155,7 +155,7 @@ use std::{
 };
 
 use color_eyre::{
-    eyre::{eyre, Result, WrapErr},
+    eyre::{eyre, WrapErr},
     Help,
 };
 use semver::Version;

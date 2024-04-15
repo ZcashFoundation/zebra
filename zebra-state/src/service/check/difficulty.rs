@@ -5,7 +5,7 @@
 //!  * the Testnet minimum difficulty adjustment from ZIPs 205 and 208, and
 //!  * `median-time-past`.
 
-use std::{cmp::max, cmp::min, convert::TryInto};
+use std::{cmp::max, cmp::min};
 
 use chrono::{DateTime, Duration, Utc};
 

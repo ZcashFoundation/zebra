@@ -16,7 +16,7 @@ use tempfile::TempDir;
 use zebra_chain::parameters::Network::{self, *};
 use zebra_test::{
     args,
-    command::{Arguments, TestChild, TestDirExt},
+    command::{Arguments, TestDirExt},
     net::random_known_port,
     prelude::*,
 };

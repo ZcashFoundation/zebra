@@ -277,7 +277,6 @@ impl Drop for CachedFfiTransaction {
 #[cfg(test)]
 mod tests {
     use hex::FromHex;
-    use std::convert::TryInto;
     use std::sync::Arc;
     use zebra_chain::{
         parameters::{ConsensusBranchId, NetworkUpgrade::*},

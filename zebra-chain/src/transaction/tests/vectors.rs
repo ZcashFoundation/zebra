@@ -5,11 +5,10 @@ use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
 use crate::{
-    amount::Amount,
     block::{Block, Height, MAX_BLOCK_BYTES},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{hash::WtxId, sighash::SigHasher, txid::TxIdBuilder, Transaction},
+    transaction::{sighash::SigHasher, txid::TxIdBuilder},
     transparent::Script,
 };
 

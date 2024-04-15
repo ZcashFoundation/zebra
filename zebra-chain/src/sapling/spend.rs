@@ -3,14 +3,11 @@
 //! Zebra uses a generic spend type for `V4` and `V5` transactions.
 //! The anchor change is handled using the `AnchorVariant` type trait.
 
-use std::{convert::TryInto, fmt, io};
+use std::{fmt, io};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
-    primitives::{
-        redjubjub::{self, SpendAuth},
-        Groth16Proof,
-    },
+    primitives::{redjubjub::SpendAuth, Groth16Proof},
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,

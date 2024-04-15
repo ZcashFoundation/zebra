@@ -8,7 +8,6 @@ use crate::{
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{LockTime, Transaction},
 };
-use std::convert::TryInto;
 
 proptest! {
     /// Serialize and deserialize `Spend<PerSpendAnchor>`

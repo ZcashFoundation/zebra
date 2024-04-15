@@ -78,7 +78,7 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-use abscissa_core::{config, Command, FrameworkError, Runnable};
+use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};

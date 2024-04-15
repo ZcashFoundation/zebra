@@ -959,6 +959,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     }
 }
 
+#[allow(dead_code)]
 /// A representation of an assertion type.
 ///
 /// This trait is used to group the types of assertions that the [`MockService`] can do. There are

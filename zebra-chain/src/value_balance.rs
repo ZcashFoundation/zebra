@@ -6,7 +6,7 @@ use crate::{
     transparent,
 };
 
-use std::{borrow::Borrow, collections::HashMap, convert::TryInto};
+use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use crate::{amount::MAX_MONEY, transaction::Transaction};

@@ -15,7 +15,7 @@ use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
-use zebra_chain::primitives::ed25519::{batch, *};
+use zebra_chain::primitives::ed25519::*;
 
 use crate::BoxError;
 

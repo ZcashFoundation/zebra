@@ -158,6 +158,7 @@ impl ZcashDeserialize for Address {
     }
 }
 
+#[allow(dead_code)]
 trait ToAddressWithNetwork {
     /// Convert `self` to an `Address`, given the current `network`.
     fn to_address(&self, network: Network) -> Address;
@@ -223,6 +224,7 @@ impl Address {
         }
     }
 
+    #[allow(dead_code)]
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
     /// addresses.
@@ -268,9 +270,6 @@ impl Address {
 
 #[cfg(test)]
 mod tests {
-
-    use secp256k1::PublicKey;
-
     use super::*;
 
     #[test]

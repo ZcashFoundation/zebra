@@ -30,7 +30,7 @@ impl Network {
         }
     }
 
-    ///
+    /// Returns BTreemap of blocks.
     pub fn block_map(&self) -> BTreeMap<u32, &'static [u8]> {
         if self.is_mainnet() {
             zebra_test::vectors::MAINNET_BLOCKS.clone()
