@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: response
+---
+{
+  "Err": {
+    "code": -8,
+    "message": "block height not in best chain"
+  }
+}
