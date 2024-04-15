@@ -42,7 +42,7 @@ proptest-impl = [
 [dependencies]
 
 color-eyre = "0.6.3"
-indexmap = { version = "2.2.5", features = ["serde"] }
+indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.12.1"
 semver = "1.0.22"
 serde = { version = "1.0.196", features = ["serde_derive"] }

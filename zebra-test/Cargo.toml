@@ -16,7 +16,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 [dependencies]
 hex = "0.4.3"
-indexmap = "2.2.5"
+indexmap = "2.2.6"
 lazy_static = "1.4.0"
 insta = "1.36.1"
 itertools = "0.12.1"
