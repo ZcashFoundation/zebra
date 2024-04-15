@@ -126,7 +126,7 @@ redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.113", optional = true }
+serde_json = { version = "1.0.115", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
 tokio = { version = "1.37.0", optional = true }
