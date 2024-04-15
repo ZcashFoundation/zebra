@@ -227,6 +227,7 @@ fn update_checksum(checksum: &mut u32, item: [u8; 32]) {
     }
 }
 
+#[allow(unknown_lints, clippy::to_string_trait_impl)]
 impl ToString for LongPollId {
     /// Exact conversion from LongPollId to a string.
     fn to_string(&self) -> String {

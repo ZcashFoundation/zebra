@@ -69,7 +69,10 @@ pub(crate) async fn run() -> Result<()> {
         .expect("already checked that there is a cached state path");
 
     let mut scan_config = zebra_scan::Config::default();
-    scan_config.db_config_mut().cache_dir = zebrad_state_path.clone();
+    scan_config
+        .db_config_mut()
+        .cache_dir
+        .clone_from(&zebrad_state_path);
 
     // Logs the network as zebrad would as part of the metadata when starting up.
     // This is currently needed for the 'Check startup logs' step in CI to pass.
