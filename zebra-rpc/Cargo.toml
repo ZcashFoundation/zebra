@@ -56,7 +56,7 @@ jsonrpc-http-server = "18.0.0"
 serde_json = { version = "1.0.113", features = ["preserve_order"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
 
-tokio = { version = "1.36.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
 tracing = "0.1.39"
@@ -85,7 +85,7 @@ insta = { version = "1.36.1", features = ["redactions", "json", "ron"] }
 proptest = "1.4.0"
 
 thiserror = "1.0.58"
-tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.35", features = ["proptest-impl"] }
