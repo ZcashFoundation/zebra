@@ -202,12 +202,12 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 }
 
 #[tokio::test]
-async fn wallet_fake_generated_blocks() -> Result<()> {
+async fn memory_wallet_integration_test() -> Result<()> {
     use zcash_client_backend2::data_api::{ScannedBlock, ScannedBundles};
     use zcash_primitives2::{block::BlockHash, consensus::BlockHeight};
 
-    use crate::service::scan_task::wallet::{
-        create_account, get_wallet_chain_tip, init, insert_block,
+    use crate::service::scan_task::external_client::{
+        create_account, get_memory_wallet_block_hash, init, insert_block,
     };
 
     let extsk = ExtendedSpendingKey::master(&[]);
@@ -235,9 +235,10 @@ async fn wallet_fake_generated_blocks() -> Result<()> {
     // Insert a block
     let _ = insert_block(&mut database, scanned_block_converted);
 
+
     // Check inserted block
-    let chain_tip = get_wallet_chain_tip(&database).unwrap();
-    assert_eq!(chain_tip, block.coinbase_height());
+    let chain_hash = get_memory_wallet_block_hash(&database, Height(1)).unwrap().unwrap();
+    assert_eq!(chain_hash, block.hash());
 
     // Create an account
     let seed = [0u8; 32];

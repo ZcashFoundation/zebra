@@ -8,9 +8,9 @@ use zcash_client_backend2::{
     encoding::encode_extended_full_viewing_key,
 };
 use zcash_primitives2::{
-    consensus::Network, constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+    consensus::{BlockHeight, Network}, constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
 };
-use zebra_chain::block::Height;
+use zebra_chain::block::{Hash, Height};
 
 /// Create a new, empty `MemoryWalletDb`.
 pub fn init() -> MemoryWalletDb {
@@ -54,6 +54,14 @@ pub fn create_account(
 pub fn get_wallet_chain_tip(database: &MemoryWalletDb) -> Result<Option<Height>, WalletError> {
     database.chain_height().map(|height| match height {
         Some(h) => Ok(Some(Height(u32::from(h)))),
+        None => Ok(None),
+    })?
+}
+
+/// Get a block hash from a given height.
+pub fn get_memory_wallet_block_hash(database: &MemoryWalletDb, height: Height) -> Result<Option<Hash>, WalletError> {
+    database.get_block_hash(BlockHeight::from_u32(height.0)).map(|hash| match hash {
+        Some(h) => Ok(Some(Hash::from(h.0))),
         None => Ok(None),
     })?
 }
