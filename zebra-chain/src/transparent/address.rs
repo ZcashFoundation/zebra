@@ -2,10 +2,6 @@
 
 use std::{fmt, io};
 
-use ripemd::{Digest, Ripemd160};
-use secp256k1::PublicKey;
-use sha2::Sha256;
-
 use crate::{
     parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
@@ -158,30 +154,6 @@ impl ZcashDeserialize for Address {
     }
 }
 
-#[allow(dead_code)]
-trait ToAddressWithNetwork {
-    /// Convert `self` to an `Address`, given the current `network`.
-    fn to_address(&self, network: Network) -> Address;
-}
-
-impl ToAddressWithNetwork for Script {
-    fn to_address(&self, network: Network) -> Address {
-        Address::PayToScriptHash {
-            network,
-            script_hash: Address::hash_payload(self.as_raw_bytes()),
-        }
-    }
-}
-
-impl ToAddressWithNetwork for PublicKey {
-    fn to_address(&self, network: Network) -> Address {
-        Address::PayToPublicKeyHash {
-            network,
-            pub_key_hash: Address::hash_payload(&self.serialize()[..]),
-        }
-    }
-}
-
 impl Address {
     /// Create an address for the given public key hash and network.
     pub fn from_pub_key_hash(network: &Network, pub_key_hash: [u8; 20]) -> Self {
@@ -224,22 +196,6 @@ impl Address {
         }
     }
 
-    /// A hash of a transparent address payload, as used in
-    /// transparent pay-to-script-hash and pay-to-publickey-hash
-    /// addresses.
-    ///
-    /// The resulting hash in both of these cases is always exactly 20
-    /// bytes.
-    /// <https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address>
-    #[allow(dead_code)]
-    fn hash_payload(bytes: &[u8]) -> [u8; 20] {
-        let sha_hash = Sha256::digest(bytes);
-        let ripe_hash = Ripemd160::digest(sha_hash);
-        let mut payload = [0u8; 20];
-        payload[..].copy_from_slice(&ripe_hash[..]);
-        payload
-    }
-
     /// Given a transparent address (P2SH or a P2PKH), create a script that can be used in a coinbase
     /// transaction output.
     pub fn create_script_from_address(&self) -> Script {
@@ -270,7 +226,52 @@ impl Address {
 
 #[cfg(test)]
 mod tests {
+    use ripemd::{Digest, Ripemd160};
+    use secp256k1::PublicKey;
+    use sha2::Sha256;
+
     use super::*;
+
+    trait ToAddressWithNetwork {
+        /// Convert `self` to an `Address`, given the current `network`.
+        fn to_address(&self, network: Network) -> Address;
+    }
+
+    impl ToAddressWithNetwork for Script {
+        fn to_address(&self, network: Network) -> Address {
+            Address::PayToScriptHash {
+                network,
+                script_hash: Address::hash_payload(self.as_raw_bytes()),
+            }
+        }
+    }
+
+    impl ToAddressWithNetwork for PublicKey {
+        fn to_address(&self, network: Network) -> Address {
+            Address::PayToPublicKeyHash {
+                network,
+                pub_key_hash: Address::hash_payload(&self.serialize()[..]),
+            }
+        }
+    }
+
+    impl Address {
+        /// A hash of a transparent address payload, as used in
+        /// transparent pay-to-script-hash and pay-to-publickey-hash
+        /// addresses.
+        ///
+        /// The resulting hash in both of these cases is always exactly 20
+        /// bytes.
+        /// <https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address>
+        #[allow(dead_code)]
+        fn hash_payload(bytes: &[u8]) -> [u8; 20] {
+            let sha_hash = Sha256::digest(bytes);
+            let ripe_hash = Ripemd160::digest(sha_hash);
+            let mut payload = [0u8; 20];
+            payload[..].copy_from_slice(&ripe_hash[..]);
+            payload
+        }
+    }
 
     #[test]
     fn pubkey_mainnet() {
