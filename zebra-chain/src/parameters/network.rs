@@ -308,43 +308,29 @@ impl zp_consensus::Parameters for Network {
     fn address_network(&self) -> Option<zcash_address::Network> {
         match self {
             Network::Mainnet => Some(zcash_address::Network::Main),
-            Network::Testnet(params) if params.is_default_testnet() => {
-                Some(zcash_address::Network::Test)
-            }
-            _other => None,
+            // TODO: Check if network is `Regtest` first, and if it is, return `zcash_address::Network::Regtest`
+            Network::Testnet(_params) => Some(zcash_address::Network::Test),
         }
     }
 
     fn hrp_sapling_extended_spending_key(&self) -> &str {
         match self {
             Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
-            Network::Testnet(params) if params.is_default_testnet() => {
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
-            }
-            // TODO: Add this as a field to testnet params
-            _other => "secret-extended-key-unknown-test",
+            Network::Testnet(params) => params.hrp_sapling_extended_spending_key(),
         }
     }
 
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
         match self {
             Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-            Network::Testnet(params) if params.is_default_testnet() => {
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-            }
-            // TODO: Add this as a field to testnet params
-            _other => "zxviewunknowntestsapling",
+            Network::Testnet(params) => params.hrp_sapling_extended_full_viewing_key(),
         }
     }
 
     fn hrp_sapling_payment_address(&self) -> &str {
         match self {
             Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-            Network::Testnet(params) if params.is_default_testnet() => {
-                zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-            }
-            // TODO: Add this as a field to testnet params
-            _other => "zunknowntestsapling",
+            Network::Testnet(params) => params.hrp_sapling_payment_address(),
         }
     }
 

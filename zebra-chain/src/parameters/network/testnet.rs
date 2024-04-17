@@ -1,6 +1,8 @@
 //! Types and implementation for Testnet consensus parameters
 use std::collections::BTreeMap;
 
+use zcash_primitives::constants as zp_constants;
+
 use crate::{
     block::Height,
     parameters::{
@@ -35,6 +37,12 @@ pub struct ConfiguredActivationHeights {
 pub struct ParametersBuilder {
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
+    /// Sapling extended spending key human-readable prefix for this network
+    hrp_sapling_extended_spending_key: String,
+    /// Sapling extended full viewing key human-readable prefix for this network
+    hrp_sapling_extended_full_viewing_key: String,
+    /// Sapling payment address human-readable prefix for this network
+    hrp_sapling_payment_address: String,
 }
 
 impl Default for ParametersBuilder {
@@ -50,6 +58,12 @@ impl Default for ParametersBuilder {
             ]
             .into_iter()
             .collect(),
+            hrp_sapling_extended_spending_key:
+                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
+            hrp_sapling_extended_full_viewing_key:
+                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
+            hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
+                .to_string(),
         }
     }
 }
@@ -120,8 +134,18 @@ impl ParametersBuilder {
 
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
-        let Self { activation_heights } = self;
-        Parameters { activation_heights }
+        let Self {
+            activation_heights,
+            hrp_sapling_extended_spending_key,
+            hrp_sapling_extended_full_viewing_key,
+            hrp_sapling_payment_address,
+        } = self;
+        Parameters {
+            activation_heights,
+            hrp_sapling_extended_spending_key,
+            hrp_sapling_extended_full_viewing_key,
+            hrp_sapling_payment_address,
+        }
     }
 
     /// Converts the builder to a configured [`Network::Testnet`]
@@ -139,6 +163,12 @@ pub struct Parameters {
     ///       compiled with the `zebra-test` feature flag AND the `TEST_FAKE_ACTIVATION_HEIGHTS`
     ///       environment variable is set.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
+    /// Sapling extended spending key human-readable prefix for this network
+    hrp_sapling_extended_spending_key: String,
+    /// Sapling extended full viewing key human-readable prefix for this network
+    hrp_sapling_extended_full_viewing_key: String,
+    /// Sapling payment address human-readable prefix for this network
+    hrp_sapling_payment_address: String,
 }
 
 impl Default for Parameters {
@@ -146,6 +176,12 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
+            hrp_sapling_extended_spending_key:
+                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
+            hrp_sapling_extended_full_viewing_key:
+                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
+            hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
+                .to_string(),
         }
     }
 }
@@ -161,8 +197,23 @@ impl Parameters {
         self == &Self::default()
     }
 
-    /// Returns a reference to the network upgrade activation heights
+    /// Returns the network upgrade activation heights
     pub fn activation_heights(&self) -> &BTreeMap<Height, NetworkUpgrade> {
         &self.activation_heights
+    }
+
+    /// Returns the `hrp_sapling_extended_spending_key` field
+    pub fn hrp_sapling_extended_spending_key(&self) -> &str {
+        &self.hrp_sapling_extended_spending_key
+    }
+
+    /// Returns the `hrp_sapling_extended_full_viewing_key` field
+    pub fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+        &self.hrp_sapling_extended_full_viewing_key
+    }
+
+    /// Returns the `hrp_sapling_payment_address` field
+    pub fn hrp_sapling_payment_address(&self) -> &str {
+        &self.hrp_sapling_payment_address
     }
 }
