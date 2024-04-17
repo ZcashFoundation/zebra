@@ -21,7 +21,7 @@ fn activation_bijective() {
     let mainnet_nus: HashSet<&NetworkUpgrade> = mainnet_activations.values().collect();
     assert_eq!(MAINNET_ACTIVATION_HEIGHTS.len(), mainnet_nus.len());
 
-    let testnet_activations = Testnet.activation_list();
+    let testnet_activations = Network::new_default_testnet().activation_list();
     let testnet_heights: HashSet<&block::Height> = testnet_activations.keys().collect();
     assert_eq!(TESTNET_ACTIVATION_HEIGHTS.len(), testnet_heights.len());
 
@@ -38,7 +38,7 @@ fn activation_extremes_mainnet() {
 #[test]
 fn activation_extremes_testnet() {
     let _init_guard = zebra_test::init();
-    activation_extremes(Testnet)
+    activation_extremes(Network::new_default_testnet())
 }
 
 /// Test the activation_list, activation_height, current, and next functions
@@ -115,7 +115,7 @@ fn activation_consistent_mainnet() {
 #[test]
 fn activation_consistent_testnet() {
     let _init_guard = zebra_test::init();
-    activation_consistent(Testnet)
+    activation_consistent(Network::new_default_testnet())
 }
 
 /// Check that the `activation_height`, `is_activation_height`,
@@ -178,7 +178,7 @@ fn branch_id_extremes_mainnet() {
 #[test]
 fn branch_id_extremes_testnet() {
     let _init_guard = zebra_test::init();
-    branch_id_extremes(Testnet)
+    branch_id_extremes(Network::new_default_testnet())
 }
 
 /// Test the branch_id_list, branch_id, and current functions for `network` with
@@ -217,7 +217,7 @@ fn branch_id_consistent_mainnet() {
 #[test]
 fn branch_id_consistent_testnet() {
     let _init_guard = zebra_test::init();
-    branch_id_consistent(Testnet)
+    branch_id_consistent(Network::new_default_testnet())
 }
 
 /// Check that the branch_id and current functions are consistent for `network`.
