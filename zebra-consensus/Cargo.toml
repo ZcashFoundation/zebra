@@ -41,7 +41,7 @@ bls12_381 = "0.8.0"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"
 rand = "0.8.5"
-rayon = "1.9.0"
+rayon = "1.10.0"
 
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 displaydoc = "0.2.4"
@@ -53,7 +53,7 @@ futures = "0.3.30"
 futures-util = "0.3.28"
 metrics = "0.22.3"
 thiserror = "1.0.58"
-tokio = { version = "1.36.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio = { version = "1.37.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.39"
 tracing-futures = "0.2.5"
@@ -90,7 +90,7 @@ proptest = "1.4.0"
 proptest-derive = "0.4.0"
 spandoc = "0.2.2"
 
-tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.18"
 

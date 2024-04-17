@@ -172,19 +172,19 @@ zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.4", optional = tru
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.36", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.5.3", features = ["cargo"] }
+clap = { version = "4.5.4", features = ["cargo"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
-indexmap = "2.2.5"
+indexmap = "2.2.6"
 lazy_static = "1.4.0"
 semver = "1.0.22"
 serde = { version = "1.0.196", features = ["serde_derive"] }
 toml = "0.8.11"
 
 futures = "0.3.30"
-rayon = "1.9.0"
-tokio = { version = "1.36.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tokio-stream = { version = "0.1.14", features = ["time"] }
+rayon = "1.10.0"
+tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio-stream = { version = "0.1.15", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.5"
 
@@ -257,21 +257,21 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
-regex = "1.10.3"
-insta = { version = "1.36.1", features = ["json"] }
+regex = "1.10.4"
+insta = { version = "1.38.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.113", features = ["preserve_order"] }
+serde_json = { version = "1.0.115", features = ["preserve_order"] }
 tempfile = "3.10.1"
 
 hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
-tokio-stream = "0.1.14"
+tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
+tokio-stream = "0.1.15"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.12.2"
+prost = "0.12.4"
 tonic = "0.11.0"
 
 proptest = "1.4.0"
