@@ -502,6 +502,12 @@ impl FinalizedState {
                 let network = self.network();
 
                 rt.block_on(async move {
+                    // Send a ping to the server to check if it is available before inserting.
+                    if client.ping().send().await.is_err() {
+                        tracing::error!("Elasticsearch is not available, skipping block indexing");
+                        return;
+                    }
+
                     let response = client
                         .bulk(elasticsearch::BulkParts::Index(
                             format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
