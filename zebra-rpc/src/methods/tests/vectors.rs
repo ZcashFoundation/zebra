@@ -140,6 +140,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: None,
                 tx: block
                     .transactions
                     .iter()
@@ -163,6 +164,55 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: None,
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+            }
+        );
+    }
+
+    // Make height calls with verbosity=2 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(2u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+            }
+        );
+    }
+
+    // Make hash calls with verbosity=2 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), Some(2u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: None,
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
@@ -186,6 +236,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: None,
                 tx: block
                     .transactions
                     .iter()
@@ -209,6 +260,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: None,
                 tx: block
                     .transactions
                     .iter()

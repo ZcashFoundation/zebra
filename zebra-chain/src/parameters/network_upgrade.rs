@@ -273,7 +273,6 @@ impl Network {
             Testnet(_) if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
                 FAKE_TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
             }
-
             Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             Testnet(params) => params.activation_heights().clone(),
         }
