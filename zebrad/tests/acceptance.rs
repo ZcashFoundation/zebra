@@ -972,15 +972,13 @@ fn stored_configs_parsed_correctly() -> Result<()> {
             continue;
         }
 
-        let stored_config_path = config_file_full_path(config_file.path());
-
         tracing::info!(
-            ?stored_config_path,
+            ?config_file_path,
             "testing old config can be parsed by current zebrad"
         );
 
         ZebradApp::default()
-            .load_config(&stored_config_path)
+            .load_config(&config_file_path)
             .expect("config should parse");
     }
 

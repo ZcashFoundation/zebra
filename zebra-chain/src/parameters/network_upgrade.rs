@@ -319,10 +319,17 @@ impl NetworkUpgrade {
             .next()
     }
 
-    /// Returns the activation height for this network upgrade on `network`.
+    /// Returns the activation height for this network upgrade on `network`, or
+    ///
+    /// Returns the activation height of the first network upgrade that relies
+    /// on this network upgrade if there is no activation height for this network upgrade
+    /// such as on Regtest or a configured Testnet where multiple network upgrades have the
+    /// same activation height, or if one is omitted when others that rely on it are included.
     ///
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
+    ///
+    /// Returns None if this network upgrade has not been configured on a Testnet or Regtest.
     pub fn activation_height(&self, network: &Network) -> Option<block::Height> {
         network
             .activation_list()

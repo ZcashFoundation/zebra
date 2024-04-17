@@ -450,19 +450,21 @@ where
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
             match network.kind() {
-                network_kind @ NetworkKind::Mainnet => assert_eq!(
+                NetworkKind::Mainnet => assert_eq!(
                     miner_address.network_kind(),
                     NetworkKind::Mainnet,
-                    "Incorrect mining address config: Zebra is configured to run on a {network_kind} network, \
-                    but the configured mining address is for {}. The network kinds must match.",
+                    "Incorrect config: Zebra is configured to run on a Mainnet network, \
+                    which implies the configured mining address needs to be for Mainnet, \
+                    but the provided address is for {}.",
                     miner_address.network_kind(),
                 ),
                 // `Regtest` uses `Testnet` transparent addresses.
                 network_kind @ (NetworkKind::Testnet | NetworkKind::Regtest) => assert_eq!(
                     miner_address.network_kind(),
                     NetworkKind::Testnet,
-                    "Incorrect mining address config: Zebra is configured to run on a {network_kind} network, \
-                    but the configured mining address is for {}. The network kinds must match.",
+                    "Incorrect config: Zebra is configured to run on a {network_kind} network, \
+                    which implies the configured mining address needs to be for Testnet, \
+                    but the provided address is for {}.",
                     miner_address.network_kind(),
                 ),
             }

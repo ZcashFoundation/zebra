@@ -74,7 +74,8 @@ impl ParametersBuilder {
     pub fn activation_heights(
         mut self,
         ConfiguredActivationHeights {
-            // TODO: Find out if `BeforeOverwinter` is required at Height(1), remove this filter if it's not required to be at Height(1)
+            // TODO: Find out if `BeforeOverwinter` is required at Height(1), allow for
+            //       configuring its activation height if it's not required to be at Height(1)
             before_overwinter: _,
             overwinter,
             sapling,
