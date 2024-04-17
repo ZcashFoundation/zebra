@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::parameters::{testnet, Network, NetworkKind};
 
 use crate::{
     constants::{
@@ -222,10 +222,16 @@ impl Config {
     }
 
     /// Returns the initial seed peer hostnames for the configured network.
-    pub fn initial_peer_hostnames(&self) -> &IndexSet<String> {
-        match self.network {
-            Network::Mainnet => &self.initial_mainnet_peers,
-            Network::Testnet => &self.initial_testnet_peers,
+    pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
+        match &self.network {
+            Network::Mainnet => self.initial_mainnet_peers.clone(),
+            Network::Testnet(params) if params.is_default_testnet() => {
+                self.initial_testnet_peers.clone()
+            }
+            // TODO: Check if the network is an incompatible custom testnet (_not_ Regtest), then panic if `initial_testnet_peers`
+            //       contains any of the default testnet peers, or return `initial_testnet_peers` otherwise. See:
+            //       <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385881828>
+            Network::Testnet(_params) => IndexSet::new(),
         }
     }
 
@@ -623,7 +629,8 @@ impl<'de> Deserialize<'de> for Config {
         #[serde(deny_unknown_fields, default)]
         struct DConfig {
             listen_addr: String,
-            network: Network,
+            network: NetworkKind,
+            testnet_parameters: Option<testnet::Parameters>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -638,7 +645,8 @@ impl<'de> Deserialize<'de> for Config {
                 let config = Config::default();
                 Self {
                     listen_addr: "0.0.0.0".to_string(),
-                    network: config.network,
+                    network: Default::default(),
+                    testnet_parameters: None,
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -651,7 +659,8 @@ impl<'de> Deserialize<'de> for Config {
 
         let DConfig {
             listen_addr,
-            network,
+            network: network_kind,
+            testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -659,6 +668,24 @@ impl<'de> Deserialize<'de> for Config {
             crawl_new_peer_interval,
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
+
+        let network = if let Some(network_params) = testnet_parameters {
+            // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
+            assert_eq!(
+                network_kind,
+                NetworkKind::Testnet,
+                "set network to 'Testnet' to use configured testnet parameters"
+            );
+
+            Network::new_configured_testnet(network_params)
+        } else {
+            // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
+            match network_kind {
+                NetworkKind::Mainnet => Network::Mainnet,
+                NetworkKind::Testnet => Network::new_default_testnet(),
+                NetworkKind::Regtest => unimplemented!("Regtest is not yet implemented in Zebra"),
+            }
+        };
 
         let listen_addr = match listen_addr.parse::<SocketAddr>() {
             Ok(socket) => Ok(socket),

@@ -28,10 +28,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 
-use zebra_chain::{
-    block::Height,
-    parameters::Network::{self, *},
-};
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_state::{RawBytes, ReadDisk, SaplingScannedDatabaseIndex, TransactionLocation, KV};
 
 use crate::storage::{db::ScannerDb, Storage};
@@ -45,8 +42,9 @@ use crate::storage::{db::ScannerDb, Storage};
 fn test_database_format() {
     let _init_guard = zebra_test::init();
 
-    test_database_format_with_network(Mainnet);
-    test_database_format_with_network(Testnet);
+    for network in Network::iter() {
+        test_database_format_with_network(network);
+    }
 }
 
 /// Snapshot raw and typed database formats for `network`.

@@ -63,7 +63,7 @@ async fn check_transcripts_mainnet() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn check_transcripts_testnet() -> Result<(), Report> {
-    check_transcripts(Network::Testnet).await
+    check_transcripts(Network::new_default_testnet()).await
 }
 
 #[spandoc::spandoc]
