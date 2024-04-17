@@ -54,12 +54,12 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 humantime-serde = "1.1.1"
 human_bytes = { version = "0.4.3", default-features = false }
-indexmap = "2.2.5"
+indexmap = "2.2.6"
 itertools = "0.12.1"
 lazy_static = "1.4.0"
 metrics = "0.22.3"
 mset = "0.1.1"
-regex = "1.10.3"
+regex = "1.10.4"
 rlimit = "0.10.1"
 rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
 semver = "1.0.22"
@@ -67,15 +67,15 @@ serde = { version = "1.0.196", features = ["serde_derive"] }
 tempfile = "3.10.1"
 thiserror = "1.0.58"
 
-rayon = "1.9.0"
-tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync", "tracing"] }
+rayon = "1.10.0"
+tokio = { version = "1.37.0", features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.39"
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.113", package = "serde_json", optional = true }
+serde_json = { version = "1.0.115", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.36", features = ["async-error"] }
 
@@ -97,7 +97,7 @@ once_cell = "1.18.0"
 spandoc = "0.2.2"
 
 hex = { version = "0.4.3", features = ["serde"] }
-insta = { version = "1.36.1", features = ["ron", "redactions"] }
+insta = { version = "1.38.0", features = ["ron", "redactions"] }
 
 proptest = "1.4.0"
 proptest-derive = "0.4.0"
@@ -106,7 +106,7 @@ rand = "0.8.5"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"
 
-tokio = { version = "1.36.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.36", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.36" }
