@@ -704,7 +704,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 async fn rpc_getaddresstxids_response() {
     let _init_guard = zebra_test::init();
 
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         let blocks: Vec<Arc<Block>> = network
             .blockchain_map()
             .iter()
@@ -1243,6 +1243,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
+        parameters::NetworkKind,
         serialization::DateTime32,
         transaction::{zip317, VerifiedUnminedTx},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -1273,11 +1274,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
+    let network = NetworkKind::Mainnet;
     let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(&Mainnet, [0x7e; 20])),
-        true => Some(transparent::Address::from_pub_key_hash(
-            &Mainnet, [0x7e; 20],
-        )),
+        false => Some(transparent::Address::from_script_hash(network, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(network, [0x7e; 20])),
     };
 
     #[allow(clippy::unnecessary_struct_initialization)]

@@ -59,8 +59,9 @@ fn mempool_storage_basic() -> Result<()> {
 
     // Test multiple times to catch intermittent bugs since eviction is randomized
     for _ in 0..10 {
-        mempool_storage_basic_for_network(Network::Mainnet)?;
-        mempool_storage_basic_for_network(Network::Testnet)?;
+        for network in Network::iter() {
+            mempool_storage_basic_for_network(network)?;
+        }
     }
 
     Ok(())
@@ -235,10 +236,9 @@ fn mempool_storage_crud_same_effects_mainnet() {
 #[test]
 fn mempool_expired_basic() -> Result<()> {
     let _init_guard = zebra_test::init();
-
-    mempool_expired_basic_for_network(Network::Mainnet)?;
-    mempool_expired_basic_for_network(Network::Testnet)?;
-
+    for network in Network::iter() {
+        mempool_expired_basic_for_network(network)?;
+    }
     Ok(())
 }
 

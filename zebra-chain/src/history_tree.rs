@@ -372,8 +372,8 @@ impl NonEmptyHistoryTree {
     }
 
     /// Return the network where this tree is used.
-    pub fn network(&self) -> Network {
-        self.network.clone()
+    pub fn network(&self) -> &Network {
+        &self.network
     }
 }
 
