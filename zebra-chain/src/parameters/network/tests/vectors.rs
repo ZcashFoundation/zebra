@@ -99,7 +99,7 @@ fn check_parameters_impl() {
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
-        .activation_heights(ConfiguredActivationHeights {
+        .with_activation_heights(ConfiguredActivationHeights {
             nu5: Some(expected_activation_height),
             ..Default::default()
         })
@@ -137,7 +137,7 @@ fn check_network_name() {
     // Checks that reserved network names cannot be used for configured testnets.
     for reserved_network_name in RESERVED_NETWORK_NAMES {
         std::panic::catch_unwind(|| {
-            testnet::Parameters::build().network_name(reserved_network_name)
+            testnet::Parameters::build().with_network_name(reserved_network_name)
         })
         .expect_err("should panic when attempting to set network name as a reserved name");
     }
@@ -148,7 +148,7 @@ fn check_network_name() {
         "!!!!non-alphanumeric-name".to_string(),
     ] {
         std::panic::catch_unwind(|| {
-            testnet::Parameters::build().network_name(invalid_network_name)
+            testnet::Parameters::build().with_network_name(invalid_network_name)
         })
         .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
     }
@@ -171,8 +171,8 @@ fn check_network_name() {
     let expected_name = "ConfiguredTestnet_1";
     let network = testnet::Parameters::build()
         // Check that network name can contain `MAX_NETWORK_NAME_LENGTH` characters
-        .network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
-        .network_name(expected_name)
+        .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
+        .with_network_name(expected_name)
         .to_network();
 
     // Check that configured network name is displayed

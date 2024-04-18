@@ -630,8 +630,9 @@ impl<'de> Deserialize<'de> for Config {
     {
         #[derive(Deserialize)]
         struct DTestnetParameters {
+            network_name: Option<String>,
             #[serde(default)]
-            pub(super) activation_heights: ConfiguredActivationHeights,
+            activation_heights: ConfiguredActivationHeights,
         }
 
         #[derive(Deserialize)]
@@ -679,15 +680,25 @@ impl<'de> Deserialize<'de> for Config {
         } = DConfig::deserialize(deserializer)?;
 
         // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
-        let network = if let Some(DTestnetParameters { activation_heights }) = testnet_parameters {
+        let network = if let Some(DTestnetParameters {
+            network_name,
+            activation_heights,
+        }) = testnet_parameters
+        {
             assert_eq!(
                 network_kind,
                 NetworkKind::Testnet,
                 "set network to 'Testnet' to use configured testnet parameters"
             );
 
-            testnet::Parameters::build()
-                .activation_heights(activation_heights)
+            let mut params_builder = testnet::Parameters::build();
+
+            if let Some(network_name) = network_name {
+                params_builder = params_builder.with_network_name(network_name)
+            }
+
+            params_builder
+                .with_activation_heights(activation_heights)
                 .to_network()
         } else {
             // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.

@@ -79,7 +79,7 @@ impl Default for ParametersBuilder {
 
 impl ParametersBuilder {
     /// Sets the network name to be used in the [`Parameters`] being built.
-    pub fn network_name(mut self, network_name: impl fmt::Display) -> Self {
+    pub fn with_network_name(mut self, network_name: impl fmt::Display) -> Self {
         self.network_name = network_name.to_string();
 
         assert!(
@@ -104,7 +104,7 @@ impl ParametersBuilder {
 
     /// Checks that the provided network upgrade activation heights are in the correct order, then
     /// sets them as the new network upgrade activation heights.
-    pub fn activation_heights(
+    pub fn with_activation_heights(
         mut self,
         ConfiguredActivationHeights {
             // TODO: Find out if `BeforeOverwinter` is required at Height(1), allow for
