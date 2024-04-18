@@ -12,7 +12,14 @@ use crate::{
 };
 
 /// Reserved network names that should not be allowed for configured Testnets.
-pub const RESERVED_NETWORK_NAMES: [&str; 3] = ["Mainnet", "Testnet", "Regtest"];
+pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
+    "Mainnet",
+    "Testnet",
+    "Regtest",
+    "MainnetKind",
+    "TestnetKind",
+    "RegtestKind",
+];
 
 /// Maximum length for a configured network name.
 pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
