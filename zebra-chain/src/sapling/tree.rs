@@ -19,7 +19,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::{self, NonEmptyFrontier};
+use bridgetree::NonEmptyFrontier;
 use hex::ToHex;
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 

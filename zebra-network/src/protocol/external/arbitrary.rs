@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use proptest::{arbitrary::any, arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 use zebra_chain::{block, transaction};
 

@@ -1,6 +1,6 @@
 //! Randomised proptests for scanner database formats.
 
-use proptest::{arbitrary::any, prelude::*};
+use proptest::prelude::*;
 
 use crate::{
     service::finalized_state::arbitrary::assert_value_properties, SaplingScannedDatabaseIndex,

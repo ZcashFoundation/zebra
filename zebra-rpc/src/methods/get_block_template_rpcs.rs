@@ -7,7 +7,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{Service, ServiceExt};
 
-use zcash_address::{self, unified::Encoding, TryFromAddress};
+use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::Amount,

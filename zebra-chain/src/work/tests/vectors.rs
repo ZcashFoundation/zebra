@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use crate::{
     block::{Block, MAX_BLOCK_BYTES},
     serialization::{CompactSizeMessage, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},

@@ -2,7 +2,7 @@
 
 use std::{env, sync::Arc};
 
-use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+use proptest::{prelude::*, test_runner::Config};
 
 use crate::{
     block::{self, Block},

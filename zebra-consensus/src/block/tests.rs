@@ -1,22 +1,18 @@
 //! Tests for block verification
 
-use std::sync::Arc;
-
-use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    amount::{Amount, MAX_MONEY},
+    amount::MAX_MONEY,
     block::{
-        self,
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
         },
         Block, Height,
     },
-    parameters::{Network, NetworkUpgrade},
+    parameters::NetworkUpgrade,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},

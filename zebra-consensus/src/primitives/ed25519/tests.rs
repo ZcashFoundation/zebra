@@ -5,7 +5,6 @@ use std::time::Duration;
 use color_eyre::eyre::{eyre, Report, Result};
 use futures::stream::{FuturesOrdered, StreamExt};
 use tower::ServiceExt;
-use tower_batch_control::Batch;
 
 use crate::primitives::ed25519::*;
 

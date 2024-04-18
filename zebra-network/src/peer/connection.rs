@@ -9,11 +9,7 @@
 
 use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
 
-use futures::{
-    future::{self, Either},
-    prelude::*,
-    stream::Stream,
-};
+use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};

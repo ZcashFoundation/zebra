@@ -1,7 +1,5 @@
 //! Fixed test vectors for state contextual validation checks.
 
-use std::sync::Arc;
-
 use zebra_chain::serialization::ZcashDeserializeInto;
 
 use super::super::*;

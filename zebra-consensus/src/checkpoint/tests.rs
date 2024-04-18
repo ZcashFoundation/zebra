@@ -1,14 +1,10 @@
 //! Tests for checkpoint-based block verification
 
-use std::{cmp::min, mem::drop, time::Duration};
+use std::{cmp::min, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::{
-    future::TryFutureExt,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::timeout;
-use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};

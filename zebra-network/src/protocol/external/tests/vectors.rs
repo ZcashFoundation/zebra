@@ -1,6 +1,6 @@
 //! Fixed test vectors for external protocol messages.
 
-use std::{convert::TryInto, io::Write};
+use std::io::Write;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 

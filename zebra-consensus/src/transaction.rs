@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     future::Future,
-    iter::FromIterator,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},

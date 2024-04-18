@@ -1,8 +1,6 @@
 use super::*;
 
-use crate::block;
-
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 impl Arbitrary for CompactDifficulty {
     type Parameters = ();

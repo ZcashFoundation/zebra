@@ -6,7 +6,7 @@
 
 mod tests;
 
-use std::{collections::BTreeMap, convert::TryInto, io, sync::Arc};
+use std::{collections::BTreeMap, io, sync::Arc};
 
 use serde_big_array::BigArray;
 pub use zcash_history::{V1, V2};
