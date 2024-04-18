@@ -1,5 +1,5 @@
 //! Types and implementation for Testnet consensus parameters
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use zcash_primitives::constants as zp_constants;
 
@@ -10,6 +10,12 @@ use crate::{
         NETWORK_UPGRADES_IN_ORDER,
     },
 };
+
+/// Reserved network names that should not be allowed for configured Testnets.
+pub const RESERVED_NETWORK_NAMES: [&str; 3] = ["Mainnet", "Testnet", "Regtest"];
+
+/// Maximum length for a configured network name.
+pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
 
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default)]
@@ -50,7 +56,7 @@ pub struct ParametersBuilder {
 impl Default for ParametersBuilder {
     fn default() -> Self {
         Self {
-            network_name: "Testnet".to_string(),
+            network_name: "UnknownTestnet".to_string(),
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
@@ -73,8 +79,26 @@ impl Default for ParametersBuilder {
 
 impl ParametersBuilder {
     /// Sets the network name to be used in the [`Parameters`] being built.
-    pub fn network_name(mut self, network_name: String) -> Self {
-        self.network_name = network_name;
+    pub fn network_name(mut self, network_name: impl fmt::Display) -> Self {
+        self.network_name = network_name.to_string();
+
+        assert!(
+            !RESERVED_NETWORK_NAMES.contains(&self.network_name.as_str()),
+            "cannot use reserved network name '{network_name}' as configured Testnet name, reserved names: {RESERVED_NETWORK_NAMES:?}"
+        );
+
+        assert!(
+            self.network_name.len() <= MAX_NETWORK_NAME_LENGTH,
+            "network name {network_name} is too long, must be {MAX_NETWORK_NAME_LENGTH} characters or less"
+        );
+
+        assert!(
+            self.network_name
+                .chars()
+                .all(|x| x.is_alphanumeric() || x == '_'),
+            "network name must include only alphanumeric characters or '_'"
+        );
+
         self
     }
 
@@ -188,6 +212,7 @@ impl Default for Parameters {
     /// Returns an instance of the default public testnet [`Parameters`].
     fn default() -> Self {
         Self {
+            network_name: "Testnet".to_string(),
             activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             ..Self::build().finish()
         }
