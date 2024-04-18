@@ -1,6 +1,9 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
+use zcash_primitives::{
+    consensus::{self as zp_consensus, Parameters},
+    constants as zp_constants,
+};
 
 use crate::{
     block::Height,
@@ -266,4 +269,23 @@ fn check_configured_sapling_hrps() {
         expected_hrp_sapling_payment_address,
         "should return expected Sapling payment address HRP"
     );
+
+    // Check that default Mainnet, Testnet, and Regtest HRPs are valid, these calls will panic
+    // if any of the values fail validation.
+    testnet::Parameters::build()
+        .with_sapling_hrps(
+            zp_constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+        )
+        .with_sapling_hrps(
+            zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+        )
+        .with_sapling_hrps(
+            zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+        );
 }
