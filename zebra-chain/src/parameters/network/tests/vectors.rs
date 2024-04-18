@@ -8,7 +8,8 @@ use crate::{
         testnet::{
             self, ConfiguredActivationHeights, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
         },
-        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+        Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, NETWORK_UPGRADES_IN_ORDER,
+        TESTNET_ACTIVATION_HEIGHTS,
     },
 };
 
@@ -124,6 +125,26 @@ fn activates_network_upgrades_correctly() {
             activation_height, Height(expected_activation_height),
             "activation height for all networks after Genesis and BeforeOverwinter \
             should match NU5 activation height, network_upgrade: {nu}, activation_height: {activation_height:?}"
+        );
+    }
+
+    let expected_default_regtest_activation_heights = &[
+        (Height(0), NetworkUpgrade::Genesis),
+        (Height(1), NetworkUpgrade::BeforeOverwinter),
+    ];
+
+    for (network, expected_activation_heights) in [
+        (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
+        (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
+        (
+            Network::new_regtest(Default::default()),
+            expected_default_regtest_activation_heights,
+        ),
+    ] {
+        assert_eq!(
+            network.activation_list(),
+            expected_activation_heights.iter().cloned().collect(),
+            "network activation list should match expected activation heights"
         );
     }
 }
