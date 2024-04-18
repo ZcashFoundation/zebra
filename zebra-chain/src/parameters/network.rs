@@ -144,8 +144,6 @@ impl<'a> From<&'a Network> for &'a str {
     fn from(network: &'a Network) -> &'a str {
         match network {
             Network::Mainnet => "Mainnet",
-            // TODO:
-            // - zcashd calls the Regtest cache dir 'regtest' (#8327).
             Network::Testnet(params) => params.network_name(),
         }
     }
