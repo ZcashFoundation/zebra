@@ -35,6 +35,8 @@ pub struct ConfiguredActivationHeights {
 /// Builder for the [`Parameters`] struct.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ParametersBuilder {
+    /// The name of this network to be used by the `Display` trait impl.
+    network_name: String,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Sapling extended spending key human-readable prefix for this network
@@ -48,6 +50,7 @@ pub struct ParametersBuilder {
 impl Default for ParametersBuilder {
     fn default() -> Self {
         Self {
+            network_name: "Testnet".to_string(),
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
@@ -69,6 +72,12 @@ impl Default for ParametersBuilder {
 }
 
 impl ParametersBuilder {
+    /// Sets the network name to be used in the [`Parameters`] being built.
+    pub fn network_name(mut self, network_name: String) -> Self {
+        self.network_name = network_name;
+        self
+    }
+
     /// Checks that the provided network upgrade activation heights are in the correct order, then
     /// sets them as the new network upgrade activation heights.
     pub fn activation_heights(
@@ -136,12 +145,14 @@ impl ParametersBuilder {
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
         let Self {
+            network_name,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
         } = self;
         Parameters {
+            network_name,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
@@ -158,6 +169,8 @@ impl ParametersBuilder {
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Parameters {
+    /// The name of this network to be used by the `Display` trait impl.
+    network_name: String,
     /// The network upgrade activation heights for this network.
     ///
     /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
@@ -177,12 +190,7 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
-            hrp_sapling_extended_spending_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
-            hrp_sapling_extended_full_viewing_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
-            hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-                .to_string(),
+            ..Self::build().finish()
         }
     }
 }
@@ -196,6 +204,11 @@ impl Parameters {
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.
     pub fn is_default_testnet(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Returns the network upgrade activation heights
+    pub fn network_name(&self) -> &str {
+        &self.network_name
     }
 
     /// Returns the network upgrade activation heights
