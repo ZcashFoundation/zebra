@@ -57,13 +57,10 @@ initial_testnet_peers = [
 ]
 listen_addr = "0.0.0.0:8233"
 max_connections_per_ip = 1
-network = "Testnet"
+network = "Regtest"
 peerset_initial_target_size = 25
 
-[network.testnet_parameters]
-network_name = "ConfiguredTestnet_1"
-
-[network.testnet_parameters.activation_heights]
+[network.regtest_activation_heights]
 BeforeOverwinter = 1
 Overwinter = 207_500
 Sapling = 280_000

@@ -67,13 +67,7 @@ impl Default for ParametersBuilder {
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
-            activation_heights: [
-                (Height(0), NetworkUpgrade::Genesis),
-                // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
-                (Height(1), NetworkUpgrade::BeforeOverwinter),
-            ]
-            .into_iter()
-            .collect(),
+            activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             hrp_sapling_extended_spending_key:
                 zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
             hrp_sapling_extended_full_viewing_key:
@@ -166,6 +160,7 @@ impl ParametersBuilder {
         // # Correctness
         //
         // Height(0) must be reserved for the `NetworkUpgrade::Genesis`.
+        // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
         self.activation_heights.split_off(&Height(2));
         self.activation_heights.extend(activation_heights);
 
@@ -220,7 +215,6 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             network_name: "Testnet".to_string(),
-            activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             ..Self::build().finish()
         }
     }
@@ -230,6 +224,19 @@ impl Parameters {
     /// Creates a new [`ParametersBuilder`].
     pub fn build() -> ParametersBuilder {
         ParametersBuilder::default()
+    }
+
+    /// Accepts a [`ConfiguredActivationHeights`].
+    ///
+    /// Creates an instance of [`Parameters`] with `Regtest` values.
+    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
+        Self {
+            network_name: "Regtest".to_string(),
+            ..Self::build()
+                // Removes default Testnet activation heights, most network upgrades are disabled by default for Regtest
+                .with_activation_heights(activation_heights)
+                .finish()
+        }
     }
 
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.

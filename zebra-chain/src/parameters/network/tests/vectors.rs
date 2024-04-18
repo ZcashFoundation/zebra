@@ -164,8 +164,11 @@ fn check_network_name() {
         "Mainnet",
         "Mainnet should be displayed as 'Mainnet'"
     );
-
-    // TODO: Check Regtest
+    assert_eq!(
+        Network::new_regtest(Default::default()).to_string(),
+        "Regtest",
+        "Regtest should be displayed as 'Regtest'"
+    );
 
     // Check that network name can contain alphanumeric characters and '_'.
     let expected_name = "ConfiguredTestnet_1";

@@ -11,6 +11,8 @@ use crate::{
     parameters::NetworkUpgrade,
 };
 
+use self::testnet::ConfiguredActivationHeights;
+
 pub mod testnet;
 
 #[cfg(test)]
@@ -164,6 +166,11 @@ impl Network {
     /// Creates a new configured [`Network::Testnet`] with the provided Testnet [`testnet::Parameters`].
     pub fn new_configured_testnet(params: testnet::Parameters) -> Self {
         Self::Testnet(Arc::new(params))
+    }
+
+    /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
+    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
+        Self::new_configured_testnet(testnet::Parameters::new_regtest(activation_heights))
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.
