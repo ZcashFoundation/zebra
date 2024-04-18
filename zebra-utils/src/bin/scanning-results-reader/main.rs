@@ -41,15 +41,13 @@ use zebra_scan::{storage::Storage, Config};
 /// - The transaction fetched via RPC cannot be deserialized from raw bytes.
 #[allow(clippy::print_stdout)]
 pub fn main() {
-    // TODO: Implement `zcash_primitives::consensus::Parameters` for `Network` and remove this variable (#8365).
-    let network = zcash_primitives::consensus::Network::MainNetwork;
-    let zebra_network = zebra_chain::parameters::Network::Mainnet;
-    let storage = Storage::new(&Config::default(), &zebra_network, true);
+    let network = zebra_chain::parameters::Network::Mainnet;
+    let storage = Storage::new(&Config::default(), &network, true);
     // If the first memo is empty, it doesn't get printed. But we never print empty memos anyway.
     let mut prev_memo = "".to_owned();
 
     for (key, _) in storage.sapling_keys_last_heights().iter() {
-        let dfvk = sapling_key_to_scan_block_keys(key, &zebra_network)
+        let dfvk = sapling_key_to_scan_block_keys(key, &network)
             .expect("Scanning key from the storage should be valid")
             .0
             .into_iter()

@@ -4,17 +4,14 @@ use std::{fmt, str::FromStr, sync::Arc};
 
 use thiserror::Error;
 
-use zcash_primitives::constants;
+use zcash_primitives::{consensus as zp_consensus, constants as zp_constants};
 
 use crate::{
     block::{self, Height, HeightDiff},
-    parameters::NetworkUpgrade::Canopy,
+    parameters::NetworkUpgrade,
 };
 
 pub mod testnet;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
 
 #[cfg(test)]
 mod tests;
@@ -81,7 +78,6 @@ impl From<Network> for NetworkKind {
 
 /// An enum describing the possible network choices.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
@@ -98,8 +94,8 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => constants::testnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => zp_constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Testnet | Self::Regtest => zp_constants::testnet::B58_PUBKEY_ADDRESS_PREFIX,
         }
     }
 
@@ -107,8 +103,8 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => constants::testnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => zp_constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Testnet | Self::Regtest => zp_constants::testnet::B58_SCRIPT_ADDRESS_PREFIX,
         }
     }
 
@@ -231,7 +227,7 @@ impl Network {
         //
         // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
-        let canopy_activation = Canopy
+        let canopy_activation = NetworkUpgrade::Canopy
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
@@ -279,3 +275,70 @@ impl FromStr for Network {
 #[derive(Clone, Debug, Error)]
 #[error("Invalid network: {0}")]
 pub struct InvalidNetworkError(String);
+
+impl zp_consensus::Parameters for Network {
+    fn activation_height(
+        &self,
+        nu: zcash_primitives::consensus::NetworkUpgrade,
+    ) -> Option<zcash_primitives::consensus::BlockHeight> {
+        let target_nu = match nu {
+            zp_consensus::NetworkUpgrade::Overwinter => NetworkUpgrade::Overwinter,
+            zp_consensus::NetworkUpgrade::Sapling => NetworkUpgrade::Sapling,
+            zp_consensus::NetworkUpgrade::Blossom => NetworkUpgrade::Blossom,
+            zp_consensus::NetworkUpgrade::Heartwood => NetworkUpgrade::Heartwood,
+            zp_consensus::NetworkUpgrade::Canopy => NetworkUpgrade::Canopy,
+            zp_consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
+        };
+
+        // Heights are hard-coded below Height::MAX or checked when the config is parsed.
+        target_nu
+            .activation_height(self)
+            .map(|Height(h)| zp_consensus::BlockHeight::from_u32(h))
+    }
+
+    fn coin_type(&self) -> u32 {
+        match self {
+            Network::Mainnet => zp_constants::mainnet::COIN_TYPE,
+            // The regtest cointype reuses the testnet cointype,
+            // See <https://github.com/satoshilabs/slips/blob/master/slip-0044.md>
+            Network::Testnet(_) => zp_constants::testnet::COIN_TYPE,
+        }
+    }
+
+    fn address_network(&self) -> Option<zcash_address::Network> {
+        match self {
+            Network::Mainnet => Some(zcash_address::Network::Main),
+            // TODO: Check if network is `Regtest` first, and if it is, return `zcash_address::Network::Regtest`
+            Network::Testnet(_params) => Some(zcash_address::Network::Test),
+        }
+    }
+
+    fn hrp_sapling_extended_spending_key(&self) -> &str {
+        match self {
+            Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            Network::Testnet(params) => params.hrp_sapling_extended_spending_key(),
+        }
+    }
+
+    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
+        match self {
+            Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            Network::Testnet(params) => params.hrp_sapling_extended_full_viewing_key(),
+        }
+    }
+
+    fn hrp_sapling_payment_address(&self) -> &str {
+        match self {
+            Network::Mainnet => zp_constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+            Network::Testnet(params) => params.hrp_sapling_payment_address(),
+        }
+    }
+
+    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
+        self.kind().b58_pubkey_address_prefix()
+    }
+
+    fn b58_script_address_prefix(&self) -> [u8; 2] {
+        self.kind().b58_script_address_prefix()
+    }
+}
