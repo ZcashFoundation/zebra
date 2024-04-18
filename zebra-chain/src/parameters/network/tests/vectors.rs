@@ -151,7 +151,7 @@ fn activates_network_upgrades_correctly() {
 
 /// Checks that configured testnet names are validated and used correctly.
 #[test]
-fn check_network_name() {
+fn check_configured_network_name() {
     // Sets a no-op panic hook to avoid long output.
     std::panic::set_hook(Box::new(|_| {}));
 
@@ -204,5 +204,66 @@ fn check_network_name() {
         network.to_string(),
         expected_name,
         "network must be displayed as configured network name"
+    );
+}
+
+/// Checks that configured Sapling human-readable prefixes (HRPs) are validated and used correctly.
+#[test]
+fn check_configured_sapling_hrps() {
+    // Sets a no-op panic hook to avoid long output.
+    std::panic::set_hook(Box::new(|_| {}));
+
+    // Check that configured Sapling HRPs must be unique.
+    std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_sapling_hrps("", "", "");
+    })
+    .expect_err("should panic when setting non-unique Sapling HRPs");
+
+    // Check that max length is enforced, and that network names may only contain lowecase ASCII characters and dashes.
+    for invalid_hrp in [
+        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
+        "!!!!non-alphabetical-name".to_string(),
+        "A".to_string(),
+    ] {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_sapling_hrps(invalid_hrp, "dummy-hrp-a", "dummy-hrp-b");
+        })
+        .expect_err("should panic when setting Sapling HRPs that are too long or contain non-alphanumeric characters (except '-')");
+    }
+
+    // Check that Sapling HRPs can contain lowercase ascii characters and dashes.
+    let expected_hrp_sapling_extended_spending_key = "sapling-hrp-a";
+    let expected_hrp_sapling_extended_full_viewing_key = "sapling-hrp-b";
+    let expected_hrp_sapling_payment_address = "sapling-hrp-c";
+
+    let network = testnet::Parameters::build()
+        // Check that Sapling HRPs can contain `MAX_NETWORK_NAME_LENGTH` characters
+        .with_sapling_hrps(
+            "a".repeat(MAX_NETWORK_NAME_LENGTH),
+            "dummy-hrp-a",
+            "dummy-hrp-b",
+        )
+        .with_sapling_hrps(
+            expected_hrp_sapling_extended_spending_key,
+            expected_hrp_sapling_extended_full_viewing_key,
+            expected_hrp_sapling_payment_address,
+        )
+        .to_network();
+
+    // Check that configured Sapling HRPs are returned by `Parameters` trait methods
+    assert_eq!(
+        network.hrp_sapling_extended_spending_key(),
+        expected_hrp_sapling_extended_spending_key,
+        "should return expected Sapling extended spending key HRP"
+    );
+    assert_eq!(
+        network.hrp_sapling_extended_full_viewing_key(),
+        expected_hrp_sapling_extended_full_viewing_key,
+        "should return expected Sapling EFVK HRP"
+    );
+    assert_eq!(
+        network.hrp_sapling_payment_address(),
+        expected_hrp_sapling_payment_address,
+        "should return expected Sapling payment address HRP"
     );
 }

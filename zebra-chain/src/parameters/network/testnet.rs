@@ -24,6 +24,9 @@ pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
 /// Maximum length for a configured network name.
 pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
 
+/// Maximum length for a configured human-readable prefix.
+pub const MAX_HRP_LENGTH: usize = 30;
+
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
@@ -99,6 +102,44 @@ impl ParametersBuilder {
                 .all(|x| x.is_alphanumeric() || x == '_'),
             "network name must include only alphanumeric characters or '_'"
         );
+
+        self
+    }
+
+    /// Checks that the provided Sapling human-readable prefixes (HRPs) are valid and unique, then
+    /// sets the Sapling HRPs to be used in the [`Parameters`] being built.
+    pub fn with_sapling_hrps(
+        mut self,
+        hrp_sapling_extended_spending_key: impl fmt::Display,
+        hrp_sapling_extended_full_viewing_key: impl fmt::Display,
+        hrp_sapling_payment_address: impl fmt::Display,
+    ) -> Self {
+        self.hrp_sapling_extended_spending_key = hrp_sapling_extended_spending_key.to_string();
+        self.hrp_sapling_extended_full_viewing_key =
+            hrp_sapling_extended_full_viewing_key.to_string();
+        self.hrp_sapling_payment_address = hrp_sapling_payment_address.to_string();
+
+        let sapling_hrps = [
+            &self.hrp_sapling_extended_spending_key,
+            &self.hrp_sapling_extended_full_viewing_key,
+            &self.hrp_sapling_payment_address,
+        ];
+
+        for sapling_hrp in sapling_hrps {
+            assert!(sapling_hrp.len() <= MAX_HRP_LENGTH, "Sapling human-readable prefix {sapling_hrp} is too long, must be {MAX_HRP_LENGTH} characters or less");
+            assert!(
+                sapling_hrp.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "human-readable prefixes should contain only lowercase ASCII characters and dashes, hrp: {sapling_hrp}"
+            );
+            assert_eq!(
+                sapling_hrps
+                    .iter()
+                    .filter(|&&hrp| hrp == sapling_hrp)
+                    .count(),
+                1,
+                "Sapling human-readable prefixes must be unique, repeated Sapling HRP: {sapling_hrp}"
+            );
+        }
 
         self
     }
@@ -233,7 +274,13 @@ impl Parameters {
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
-                // Removes default Testnet activation heights, most network upgrades are disabled by default for Regtest
+                .with_sapling_hrps(
+                    zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                    zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                    zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+                )
+                // Removes default Testnet activation heights if not configured,
+                // most network upgrades are disabled by default for Regtest in zcashd
                 .with_activation_heights(activation_heights)
                 .finish()
         }
