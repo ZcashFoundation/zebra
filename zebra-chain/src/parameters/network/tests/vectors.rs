@@ -9,7 +9,8 @@ use crate::{
     block::Height,
     parameters::{
         testnet::{
-            self, ConfiguredActivationHeights, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
+            self, ConfiguredActivationHeights, MAX_HRP_LENGTH, MAX_NETWORK_NAME_LENGTH,
+            RESERVED_NETWORK_NAMES,
         },
         Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, NETWORK_UPGRADES_IN_ORDER,
         TESTNET_ACTIVATION_HEIGHTS,
@@ -240,12 +241,8 @@ fn check_configured_sapling_hrps() {
     let expected_hrp_sapling_payment_address = "sapling-hrp-c";
 
     let network = testnet::Parameters::build()
-        // Check that Sapling HRPs can contain `MAX_NETWORK_NAME_LENGTH` characters
-        .with_sapling_hrps(
-            "a".repeat(MAX_NETWORK_NAME_LENGTH),
-            "dummy-hrp-a",
-            "dummy-hrp-b",
-        )
+        // Check that Sapling HRPs can contain `MAX_HRP_LENGTH` characters
+        .with_sapling_hrps("a".repeat(MAX_HRP_LENGTH), "dummy-hrp-a", "dummy-hrp-b")
         .with_sapling_hrps(
             expected_hrp_sapling_extended_spending_key,
             expected_hrp_sapling_extended_full_viewing_key,
