@@ -697,44 +697,38 @@ impl<'de> Deserialize<'de> for Config {
                 .is_some()
         }
 
-        let network = if let Some(DTestnetParameters {
-            network_name,
-            activation_heights,
-        }) = testnet_parameters
-        {
-            if network_kind != NetworkKind::Testnet {
-                return Err(de::Error::custom(
-                    "network must be 'Testnet' to use configured testnet parameters",
-                ));
-            }
+        let network = match (network_kind, testnet_parameters) {
+            (NetworkKind::Mainnet, _) => Network::Mainnet,
+            (NetworkKind::Testnet, None) => Network::new_default_testnet(),
+            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_activation_heights),
+            (
+                NetworkKind::Testnet,
+                Some(DTestnetParameters {
+                    network_name,
+                    activation_heights,
+                }),
+            ) => {
+                let mut params_builder = testnet::Parameters::build();
 
-            let mut params_builder = testnet::Parameters::build();
-
-            if let Some(network_name) = network_name {
-                params_builder = params_builder.with_network_name(network_name)
-            }
-
-            // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-            if let Some(activation_heights) = activation_heights {
-                // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
-                // peers while activation heights are configured.
-                // TODO: Check that the network magic is different from the default Mainnet/Testnet network magic too?
-                if contains_default_initial_peers(&initial_testnet_peers) {
-                    return Err(de::Error::custom(
-                        "cannot use default initial testnet peers with configured activation heights",
-                    ));
+                if let Some(network_name) = network_name {
+                    params_builder = params_builder.with_network_name(network_name)
                 }
 
-                params_builder = params_builder.with_activation_heights(activation_heights)
-            }
+                // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
+                if let Some(activation_heights) = activation_heights {
+                    // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
+                    // peers while activation heights are configured.
+                    // TODO: Check that the network magic is different from the default Mainnet/Testnet network magic too?
+                    if contains_default_initial_peers(&initial_testnet_peers) {
+                        return Err(de::Error::custom(
+                            "cannot use default initial testnet peers with configured activation heights",
+                        ));
+                    }
 
-            params_builder.to_network()
-        } else {
-            // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
-            match network_kind {
-                NetworkKind::Mainnet => Network::Mainnet,
-                NetworkKind::Testnet => Network::new_default_testnet(),
-                NetworkKind::Regtest => Network::new_regtest(regtest_activation_heights),
+                    params_builder = params_builder.with_activation_heights(activation_heights)
+                }
+
+                params_builder.to_network()
             }
         };
 
