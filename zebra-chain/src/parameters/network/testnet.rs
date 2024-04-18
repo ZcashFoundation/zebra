@@ -108,7 +108,6 @@ impl ParametersBuilder {
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
-            .filter(|&(_, nu)| nu != NetworkUpgrade::BeforeOverwinter)
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
