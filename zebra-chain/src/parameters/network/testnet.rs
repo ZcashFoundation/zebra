@@ -237,7 +237,7 @@ impl Parameters {
         self == &Self::default()
     }
 
-    /// Returns the network upgrade activation heights
+    /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
     }
