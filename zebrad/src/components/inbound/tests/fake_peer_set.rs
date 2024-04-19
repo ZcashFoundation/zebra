@@ -1,13 +1,6 @@
 //! Inbound service tests with a fake peer set.
 
-use std::{
-    collections::HashSet,
-    iter::{self, FromIterator},
-    net::SocketAddr,
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};

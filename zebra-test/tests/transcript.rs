@@ -48,10 +48,6 @@ async fn self_check() {
     assert!(t1.check(t2).await.is_ok());
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Error")]
-struct Error;
-
 const TRANSCRIPT_DATA2: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
     ("req1", Ok("rsp1")),
     ("req2", Ok("rsp2")),

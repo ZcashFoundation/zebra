@@ -8,11 +8,10 @@ use zebra_chain::{
     amount::Amount,
     block::{Block, Height},
     parameters::Network,
-    transaction::{UnminedTxId, VerifiedUnminedTx},
 };
 
 use crate::components::mempool::{
-    config, storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
+    storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
 };
 
 /// Eviction memory time used for tests. Most tests won't care about this

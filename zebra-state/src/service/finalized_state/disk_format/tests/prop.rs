@@ -1,6 +1,6 @@
 //! Randomised tests for the finalized disk format.
 
-use proptest::{arbitrary::any, prelude::*};
+use proptest::prelude::*;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},

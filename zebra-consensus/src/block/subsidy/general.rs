@@ -2,7 +2,7 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::{collections::HashSet, convert::TryFrom};
+use std::collections::HashSet;
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},

@@ -1,9 +1,6 @@
 //! Note and value commitments.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt, io,
-};
+use std::{fmt, io};
 
 use bitvec::prelude::*;
 use jubjub::ExtendedPoint;

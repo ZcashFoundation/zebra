@@ -2,7 +2,7 @@
 
 use proptest::{collection::size_range, prelude::*};
 
-use std::{convert::TryInto, matches};
+use std::matches;
 
 use crate::serialization::{
     arbitrary::max_allocation_is_big_enough, zcash_deserialize::MAX_U8_ALLOCATION,

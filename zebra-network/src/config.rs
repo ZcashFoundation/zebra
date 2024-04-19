@@ -5,7 +5,6 @@ use std::{
     ffi::OsString,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
-    string::String,
     time::Duration,
 };
 
@@ -15,7 +14,10 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::{testnet, Network, NetworkKind};
+use zebra_chain::parameters::{
+    testnet::{self, ConfiguredActivationHeights},
+    Network, NetworkKind,
+};
 
 use crate::{
     constants::{
@@ -626,11 +628,17 @@ impl<'de> Deserialize<'de> for Config {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        struct DTestnetParameters {
+            #[serde(default)]
+            pub(super) activation_heights: ConfiguredActivationHeights,
+        }
+
+        #[derive(Deserialize)]
         #[serde(deny_unknown_fields, default)]
         struct DConfig {
             listen_addr: String,
             network: NetworkKind,
-            testnet_parameters: Option<testnet::Parameters>,
+            testnet_parameters: Option<DTestnetParameters>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -669,15 +677,17 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        let network = if let Some(network_params) = testnet_parameters {
-            // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
+        // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
+        let network = if let Some(DTestnetParameters { activation_heights }) = testnet_parameters {
             assert_eq!(
                 network_kind,
                 NetworkKind::Testnet,
                 "set network to 'Testnet' to use configured testnet parameters"
             );
 
-            Network::new_configured_testnet(network_params)
+            testnet::Parameters::build()
+                .activation_heights(activation_heights)
+                .to_network()
         } else {
             // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
             match network_kind {

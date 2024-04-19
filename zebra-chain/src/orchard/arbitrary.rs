@@ -7,7 +7,7 @@ use group::{
 use halo2::pasta::pallas;
 use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, VerificationKeyBytes};
 
-use proptest::{arbitrary::any, array, collection::vec, prelude::*};
+use proptest::{array, collection::vec, prelude::*};
 
 use super::{
     keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment,

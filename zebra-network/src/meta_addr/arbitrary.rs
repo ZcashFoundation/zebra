@@ -2,7 +2,7 @@
 
 use std::net::IpAddr;
 
-use proptest::{arbitrary::any, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 

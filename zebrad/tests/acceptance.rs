@@ -155,7 +155,7 @@ use std::{
 };
 
 use color_eyre::{
-    eyre::{eyre, Result, WrapErr},
+    eyre::{eyre, WrapErr},
     Help,
 };
 use semver::Version;
@@ -480,7 +480,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let ignored_cache_dir = run_dir.path().join("state");
     if cache_dir_config == EphemeralConfig::MisconfiguredCacheDir {
         // Write a configuration that sets both the cache_dir and ephemeral options
-        config.state.cache_dir = ignored_cache_dir.clone();
+        config.state.cache_dir.clone_from(&ignored_cache_dir);
     }
     if cache_dir_check == EphemeralCheck::ExistingDirectory {
         // We set the cache_dir config to a newly created empty temp directory,
@@ -918,6 +918,69 @@ fn invalid_generated_config() -> Result<()> {
 
     // Check that Zebra produced an informative message.
     output.stderr_contains("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file.")?;
+
+    Ok(())
+}
+
+/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+#[tracing::instrument]
+#[test]
+fn stored_configs_parsed_correctly() -> Result<()> {
+    let old_configs_dir = configs_dir();
+    use abscissa_core::Application;
+    use zebrad::application::ZebradApp;
+
+    tracing::info!(?old_configs_dir, "testing older config parsing");
+
+    for config_file in old_configs_dir
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        let config_file_path = config_file.path();
+        let config_file_name = config_file_path
+            .file_name()
+            .expect("config files must have a file name")
+            .to_str()
+            .expect("config file names are valid unicode");
+
+        if config_file_name.starts_with('.') || config_file_name.starts_with('#') {
+            // Skip editor files and other invalid config paths
+            tracing::info!(
+                ?config_file_path,
+                "skipping hidden/temporary config file path"
+            );
+            continue;
+        }
+
+        // ignore files starting with getblocktemplate prefix
+        // if we were not built with the getblocktemplate-rpcs feature.
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
+            tracing::info!(
+                ?config_file_path,
+                "skipping getblocktemplate-rpcs config file path"
+            );
+            continue;
+        }
+
+        // ignore files starting with shieldedscan prefix
+        // if we were not built with the shielded-scan feature.
+        #[cfg(not(feature = "shielded-scan"))]
+        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
+            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
+            continue;
+        }
+
+        tracing::info!(
+            ?config_file_path,
+            "testing old config can be parsed by current zebrad"
+        );
+
+        ZebradApp::default()
+            .load_config(&config_file_path)
+            .expect("config should parse");
+    }
 
     Ok(())
 }
@@ -2953,11 +3016,15 @@ fn scan_start_where_left() -> Result<()> {
         config.shielded_scan.sapling_keys_to_scan = keys;
 
         // Add the cache dir to shielded scan, make it the same as the zebrad cache state.
-        config.shielded_scan.db_config_mut().cache_dir = cache_dir.clone();
+        config
+            .shielded_scan
+            .db_config_mut()
+            .cache_dir
+            .clone_from(&cache_dir);
         config.shielded_scan.db_config_mut().ephemeral = false;
 
         // Add the cache dir to state.
-        config.state.cache_dir = cache_dir.clone();
+        config.state.cache_dir.clone_from(&cache_dir);
         config.state.ephemeral = false;
 
         // Remove the scan directory before starting.

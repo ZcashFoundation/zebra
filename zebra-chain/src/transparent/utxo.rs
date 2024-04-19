@@ -1,6 +1,6 @@
 //! Unspent transparent output data structures and functions.
 
-use std::{collections::HashMap, convert::TryInto};
+use std::collections::HashMap;
 
 use crate::{
     block::{self, Block, Height},

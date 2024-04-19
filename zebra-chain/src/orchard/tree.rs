@@ -19,7 +19,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::{self, NonEmptyFrontier};
+use bridgetree::NonEmptyFrontier;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::ToHex;
 use incrementalmerkletree::Hashable;

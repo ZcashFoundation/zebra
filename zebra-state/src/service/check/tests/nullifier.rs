@@ -1,6 +1,6 @@
 //! Randomised property tests for nullifier contextual validation
 
-use std::{convert::TryInto, env, sync::Arc};
+use std::{env, sync::Arc};
 
 use itertools::Itertools;
 use proptest::prelude::*;

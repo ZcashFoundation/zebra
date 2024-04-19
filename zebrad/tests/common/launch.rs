@@ -13,7 +13,6 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network::{self, *};

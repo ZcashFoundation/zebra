@@ -65,7 +65,7 @@ impl ZcashDeserialize for Groth16Proof {
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for Groth16Proof {

@@ -1,9 +1,7 @@
 //! Arbitrary data generation for serialization proptests
 
-use std::convert::TryInto;
-
 use chrono::{DateTime, TimeZone, Utc};
-use proptest::{arbitrary::any, prelude::*};
+use proptest::prelude::*;
 
 use super::{
     CompactSizeMessage, DateTime32, TrustedPreallocate, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,

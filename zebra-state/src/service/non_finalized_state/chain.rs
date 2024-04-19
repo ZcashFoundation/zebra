@@ -636,13 +636,11 @@ impl Chain {
                 .next()
                 .expect("Zebra should never reach the max height in normal operation.");
 
-            if self.sprout_trees_by_height.get(&next_height).is_none() {
-                // TODO: Use `try_insert` once it stabilises.
-                self.sprout_trees_by_height.insert(
-                    next_height,
-                    highest_removed_tree.expect("There should be a cached removed tree."),
-                );
-            }
+            self.sprout_trees_by_height
+                .entry(next_height)
+                .or_insert_with(|| {
+                    highest_removed_tree.expect("There should be a cached removed tree.")
+                });
         }
     }
 
@@ -839,13 +837,11 @@ impl Chain {
                 .next()
                 .expect("Zebra should never reach the max height in normal operation.");
 
-            if self.sapling_trees_by_height.get(&next_height).is_none() {
-                // TODO: Use `try_insert` once it stabilises.
-                self.sapling_trees_by_height.insert(
-                    next_height,
-                    highest_removed_tree.expect("There should be a cached removed tree."),
-                );
-            }
+            self.sapling_trees_by_height
+                .entry(next_height)
+                .or_insert_with(|| {
+                    highest_removed_tree.expect("There should be a cached removed tree.")
+                });
         }
     }
 
@@ -1048,13 +1044,11 @@ impl Chain {
                 .next()
                 .expect("Zebra should never reach the max height in normal operation.");
 
-            if self.orchard_trees_by_height.get(&next_height).is_none() {
-                // TODO: Use `try_insert` once it stabilises.
-                self.orchard_trees_by_height.insert(
-                    next_height,
-                    highest_removed_tree.expect("There should be a cached removed tree."),
-                );
-            }
+            self.orchard_trees_by_height
+                .entry(next_height)
+                .or_insert_with(|| {
+                    highest_removed_tree.expect("There should be a cached removed tree.")
+                });
         }
     }
 

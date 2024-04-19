@@ -4,17 +4,14 @@ use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use tower::{layer::Layer, timeout::TimeoutLayer, Service};
+use tower::{layer::Layer, timeout::TimeoutLayer};
 
 use zebra_chain::{
-    block::{self, Block},
-    parameters::Network,
+    block::Block,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_state as zs;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
-
-use crate::Config;
 
 use super::*;
 
