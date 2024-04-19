@@ -65,9 +65,6 @@ impl ParameterCheckpoint for Network {
 
     fn checkpoint_list(&self) -> CheckpointList {
         // parse calls CheckpointList::from_list
-        // TODO:
-        // - Add a `genesis_hash` field to `testnet::Parameters` and return it here (#8366)
-        // - Try to disable checkpoints entirely for regtest and custom testnets
         let checkpoint_list: CheckpointList = match self {
             Network::Mainnet => MAINNET_CHECKPOINTS
                 .parse()
@@ -77,12 +74,15 @@ impl ParameterCheckpoint for Network {
                 .expect("Hard-coded Testnet checkpoint list parses and validates"),
         };
 
-        match checkpoint_list.hash(block::Height(0)) {
-            Some(hash) if hash == self.genesis_hash() => checkpoint_list,
-            Some(_) => {
-                panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
+        // Check that the list starts with the correct genesis block
+        let first_checkpoint_height = checkpoint_list.iter().next();
+        match first_checkpoint_height {
+            Some((block::Height(0), &hash)) if hash == self.genesis_hash() => checkpoint_list,
+            Some((block::Height(0), _)) => {
+                panic!("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")
             }
-            None => unreachable!("Parser should have checked for a missing genesis checkpoint"),
+            Some(_) => panic!("checkpoints must start at the genesis block height 0"),
+            None => panic!("there must be at least one checkpoint, for the genesis block"),
         }
     }
 }
@@ -142,21 +142,6 @@ impl CheckpointList {
 
         let checkpoints: BTreeMap<block::Height, block::Hash> =
             original_checkpoints.into_iter().collect();
-
-        // Check that the list starts with the correct genesis block
-        match checkpoints.iter().next() {
-            // TODO: If required (we may not need checkpoints at all in Regtest or custom testnets):
-            //       move this check to `<Network as ParameterCheckpoint>::checkpoint_list(&network)` method above (#8366),
-            //       See <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385865347>
-            Some((block::Height(0), hash))
-                if (hash == &Network::Mainnet.genesis_hash()
-                    || hash == &Network::new_default_testnet().genesis_hash()) => {}
-            Some((block::Height(0), _)) => {
-                Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
-            }
-            Some(_) => Err("checkpoints must start at the genesis block height 0")?,
-            None => Err("there must be at least one checkpoint, for the genesis block")?,
-        };
 
         // This check rejects duplicate heights, whether they have the same or
         // different hashes
