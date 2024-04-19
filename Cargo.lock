@@ -1089,9 +1089,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-gen"
-version = "0.7.117"
+version = "0.7.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54b629c0d006c7e44c1444dd17d18a458c9390d32276b758ac7abd21a75c99b0"
+checksum = "383ecb9f96a536a1c7a2a61c5786f583da84f9240da149d78d005a4413c9a71e"
 dependencies = [
  "codespan-reporting",
  "proc-macro2",
@@ -5805,7 +5805,8 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.15"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=bump_v0.1.15#e9844798b13e7c441756854ae86ae0cd939a10d2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e3de6aece21108f502f724183955d244e02338613eaa4f9010386c63618a3a8"
 dependencies = [
  "bellman",
  "bindgen",
