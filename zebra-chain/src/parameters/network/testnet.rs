@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, fmt};
 use zcash_primitives::constants as zp_constants;
 
 use crate::{
-    block::Height,
+    block::{self, Height},
     parameters::{
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS, Network, NetworkUpgrade,
         NETWORK_UPGRADES_IN_ORDER,
@@ -26,6 +26,14 @@ pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
 
 /// Maximum length for a configured human-readable prefix.
 pub const MAX_HRP_LENGTH: usize = 30;
+
+/// The block hash of the Testnet genesis block, `zcash-cli -regtest getblockhash 0`
+const REGTEST_GENESIS_HASH: &str =
+    "029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327";
+
+/// The block hash of the Testnet genesis block, `zcash-cli -testnet getblockhash 0`
+const TESTNET_GENESIS_HASH: &str =
+    "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
 
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default)]
@@ -53,6 +61,8 @@ pub struct ConfiguredActivationHeights {
 pub struct ParametersBuilder {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The genesis block hash
+    genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Sapling extended spending key human-readable prefix for this network
@@ -77,6 +87,9 @@ impl Default for ParametersBuilder {
                 zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
             hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
                 .to_string(),
+            genesis_hash: TESTNET_GENESIS_HASH
+                .parse()
+                .expect("hard-coded hash parses"),
         }
     }
 }
@@ -141,6 +154,15 @@ impl ParametersBuilder {
             );
         }
 
+        self
+    }
+
+    /// Parses a hex-encoded block hash and sets the genesis hash to be used in the [`Parameters`] being built.
+    pub fn with_genesis_hash(mut self, genesis_hash: impl fmt::Display) -> Self {
+        self.genesis_hash = genesis_hash
+            .to_string()
+            .parse()
+            .expect("configured genesis hash must parse");
         self
     }
 
@@ -212,6 +234,7 @@ impl ParametersBuilder {
     pub fn finish(self) -> Parameters {
         let Self {
             network_name,
+            genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
@@ -223,6 +246,7 @@ impl ParametersBuilder {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            genesis_hash,
         }
     }
 
@@ -237,6 +261,8 @@ impl ParametersBuilder {
 pub struct Parameters {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The genesis block hash
+    genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
     ///
     /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
@@ -274,6 +300,7 @@ impl Parameters {
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
+                .with_genesis_hash(REGTEST_GENESIS_HASH)
                 .with_sapling_hrps(
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -295,13 +322,16 @@ impl Parameters {
     pub fn is_regtest(&self) -> bool {
         let Self {
             network_name,
+            genesis_hash,
+            // Activation heights are configurable on Regtest
+            activation_heights: _,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
-            ..
         } = Self::new_regtest(ConfiguredActivationHeights::default());
 
         self.network_name == network_name
+            && self.genesis_hash == genesis_hash
             && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
@@ -310,6 +340,11 @@ impl Parameters {
     /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
+    }
+
+    /// Returns the genesis hash
+    pub fn genesis_hash(&self) -> block::Hash {
+        self.genesis_hash
     }
 
     /// Returns the network upgrade activation heights

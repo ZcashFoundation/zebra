@@ -55,15 +55,12 @@ impl ParameterCheckpoint for Network {
     fn genesis_hash(&self) -> zebra_chain::block::Hash {
         match self {
             // zcash-cli getblockhash 0
-            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
-            // zcash-cli -testnet getblockhash 0
-            // TODO: Add a `genesis_hash` field to `testnet::Parameters` and return it here (#8366)
-            Network::Testnet(_params) => {
-                "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38"
-            }
+            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
+                .parse()
+                .expect("hard-coded hash parses"),
+            // See `zebra_chain::parameters::network::testnet` for more details.
+            Network::Testnet(params) => params.genesis_hash(),
         }
-        .parse()
-        .expect("hard-coded hash parses")
     }
 
     fn checkpoint_list(&self) -> CheckpointList {
