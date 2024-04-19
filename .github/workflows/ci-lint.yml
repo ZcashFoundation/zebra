@@ -151,7 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.2
       - name: actionlint
-        uses: reviewdog/action-actionlint@v1.43.0
+        uses: reviewdog/action-actionlint@v1.44.0
         with:
           level: warning
           fail_on_error: false
