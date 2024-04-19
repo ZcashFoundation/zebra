@@ -28,11 +28,7 @@
 //!
 //! [1]: crate::transaction::UnminedTx
 
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt,
-    sync::Arc,
-};
+use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;

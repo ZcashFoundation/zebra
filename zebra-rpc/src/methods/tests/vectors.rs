@@ -1,8 +1,7 @@
 //! Fixed test vectors for RPC methods.
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::ops::RangeInclusive;
 
-use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -11,8 +10,7 @@ use zebra_chain::{
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::{UnminedTx, UnminedTxId},
-    transparent,
+    transaction::UnminedTxId,
 };
 use zebra_node_services::BoxError;
 

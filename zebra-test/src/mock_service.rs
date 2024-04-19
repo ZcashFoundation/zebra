@@ -966,6 +966,7 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
 ///
 /// - [`PanicAssertion`]
 /// - [`PropTestAssertion`]
+#[allow(dead_code)]
 trait AssertionType {}
 
 /// Represents normal Rust assertions that panic, like [`assert_eq`].

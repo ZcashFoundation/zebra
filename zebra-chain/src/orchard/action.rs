@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, io};
+use std::io;
 
 use halo2::pasta::pallas;
 use reddsa::orchard::SpendAuth;

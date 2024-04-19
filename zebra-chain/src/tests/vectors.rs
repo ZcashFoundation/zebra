@@ -30,7 +30,9 @@ impl Network {
         }
     }
 
+    /// Returns blocks indexed by height in a [`BTreeMap`].
     ///
+    /// Returns Mainnet blocks if `self` is set to Mainnet, and Testnet blocks otherwise.
     pub fn block_map(&self) -> BTreeMap<u32, &'static [u8]> {
         if self.is_mainnet() {
             zebra_test::vectors::MAINNET_BLOCKS.clone()

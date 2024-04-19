@@ -1,7 +1,7 @@
 //! An address-with-metadata type used in Bitcoin networking.
 
 use std::{
-    cmp::{max, Ord, Ordering},
+    cmp::{max, Ordering},
     time::Instant,
 };
 

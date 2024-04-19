@@ -1,4 +1,4 @@
-use std::{cmp, convert::TryFrom, fmt};
+use std::{cmp, fmt};
 
 /// A 512-byte (plaintext) memo associated with a note, as described in
 /// [protocol specification §5.5][ps].

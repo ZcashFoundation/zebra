@@ -35,7 +35,7 @@
 
 use std::{cmp::min, path::PathBuf};
 
-use abscissa_core::{config, Command, FrameworkError, Runnable};
+use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use tokio::time::Instant;
 use tower::{Service, ServiceExt};

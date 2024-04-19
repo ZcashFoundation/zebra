@@ -4,7 +4,6 @@
 use std::{
     cmp::Reverse,
     collections::HashMap,
-    iter::Extend,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::Instant,

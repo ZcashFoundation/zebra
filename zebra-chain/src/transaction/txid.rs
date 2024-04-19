@@ -1,6 +1,6 @@
 //! Transaction ID computation. Contains code for generating the Transaction ID
 //! from the transaction.
-use std::{convert::TryInto, io};
+use std::io;
 
 use super::{Hash, Transaction};
 use crate::serialization::{sha256d, ZcashSerialize};
