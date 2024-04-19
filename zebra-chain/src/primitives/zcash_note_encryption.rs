@@ -22,29 +22,11 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 
     let alt_height = height.0.into();
     let null_sapling_ovk = zcash_primitives::keys::OutgoingViewingKey([0u8; 32]);
-    let network = match network {
-        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-        Network::Testnet(params) => {
-            // # Correctness:
-            //
-            // There are differences between the `TestNetwork` parameters and those returned by
-            // `CRegTestParams()` in zcashd, so this function can't return `TestNetwork` unless
-            // Zebra is using the default public Testnet.
-            //
-            // TODO: Remove this conversion by implementing `zcash_primitives::consensus::Parameters`
-            //       for `Network` (#8365).
-            assert!(
-                params.is_default_testnet(),
-                "could not convert configured testnet to zcash_primitives::consensus::Network"
-            );
-            zcash_primitives::consensus::Network::TestNetwork
-        }
-    };
 
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
             let recovery = zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
-                &network,
+                network,
                 alt_height,
                 &null_sapling_ovk,
                 output,

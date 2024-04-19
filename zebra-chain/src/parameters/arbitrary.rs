@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 
-use super::NetworkUpgrade;
+use super::{Network, NetworkUpgrade};
 
 impl NetworkUpgrade {
     /// Generates network upgrades.
@@ -31,4 +31,14 @@ impl NetworkUpgrade {
         ]
         .boxed()
     }
+}
+
+impl Arbitrary for Network {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        prop_oneof![Just(Self::Mainnet), Just(Self::new_default_testnet())].boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
