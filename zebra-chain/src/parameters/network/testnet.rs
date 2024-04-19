@@ -74,6 +74,7 @@ pub struct ParametersBuilder {
 }
 
 impl Default for ParametersBuilder {
+    /// Creates a [`ParametersBuilder`] with all of the default Testnet parameters except `network_name`.
     fn default() -> Self {
         Self {
             network_name: "UnknownTestnet".to_string(),
