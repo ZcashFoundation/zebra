@@ -1,7 +1,6 @@
 //! Wrapper around handshake logic that also opens a TCP connection.
 
 use std::{
-    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };

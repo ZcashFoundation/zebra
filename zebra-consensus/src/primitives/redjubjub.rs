@@ -16,7 +16,7 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::primitives::redjubjub::{batch, *};
+use zebra_chain::primitives::redjubjub::*;
 
 use crate::BoxError;
 

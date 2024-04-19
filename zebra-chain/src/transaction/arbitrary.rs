@@ -1,17 +1,9 @@
 //! Arbitrary data generation for transaction proptests
 
-use std::{
-    cmp::max,
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    ops::Neg,
-    sync::Arc,
-};
+use std::{cmp::max, collections::HashMap, ops::Neg, sync::Arc};
 
 use chrono::{TimeZone, Utc};
-use proptest::{
-    arbitrary::any, array, collection::vec, option, prelude::*, test_runner::TestRunner,
-};
+use proptest::{array, collection::vec, option, prelude::*, test_runner::TestRunner};
 use reddsa::{orchard::Binding, Signature};
 
 use crate::{

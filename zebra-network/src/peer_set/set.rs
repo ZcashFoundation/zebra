@@ -106,7 +106,7 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::{Future, FutureExt, TryFutureExt},
+    future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
     task::noop_waker,

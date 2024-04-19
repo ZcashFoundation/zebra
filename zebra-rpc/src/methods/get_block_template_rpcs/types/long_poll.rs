@@ -227,9 +227,8 @@ fn update_checksum(checksum: &mut u32, item: [u8; 32]) {
     }
 }
 
-impl ToString for LongPollId {
-    /// Exact conversion from LongPollId to a string.
-    fn to_string(&self) -> String {
+impl std::fmt::Display for LongPollId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let LongPollId {
             tip_height,
             tip_hash_checksum,
@@ -240,7 +239,8 @@ impl ToString for LongPollId {
 
         // We can't do this using `serde`, because it names each field,
         // but we want a single string containing all the fields.
-        format!(
+        write!(
+            f,
             // Height as decimal, padded with zeroes to the width of Height::MAX
             // Checksums as hex, padded with zeroes to the width of u32::MAX
             // Timestamp as decimal, padded with zeroes to the width of u32::MAX

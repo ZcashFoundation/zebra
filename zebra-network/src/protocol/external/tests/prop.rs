@@ -1,7 +1,5 @@
 //! Randomised property tests for Zebra's Zcash network protocol types.
 
-use std::convert::TryInto;
-
 use bytes::BytesMut;
 use proptest::{collection::vec, prelude::*};
 use tokio_util::codec::{Decoder, Encoder};

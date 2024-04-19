@@ -8,7 +8,7 @@ use std::{
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use halo2::pasta::pallas;
-use reddsa::{self, orchard::Binding, orchard::SpendAuth, Signature};
+use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
     amount::{Amount, NegativeAllowed},

@@ -9,7 +9,7 @@
 
 use std::{future::Future, time::Duration};
 
-use abscissa_core::{Application, Component, FrameworkError, Shutdown};
+use abscissa_core::{Component, FrameworkError, Shutdown};
 use color_eyre::Report;
 use tokio::runtime::Runtime;
 

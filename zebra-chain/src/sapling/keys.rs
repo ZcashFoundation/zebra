@@ -16,7 +16,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     error::{AddressError, RandError},
-    primitives::redjubjub::{self, SpendAuth},
+    primitives::redjubjub::SpendAuth,
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },

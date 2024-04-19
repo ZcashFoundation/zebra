@@ -155,7 +155,7 @@ use std::{
 };
 
 use color_eyre::{
-    eyre::{eyre, Result, WrapErr},
+    eyre::{eyre, WrapErr},
     Help,
 };
 use semver::Version;
@@ -480,7 +480,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let ignored_cache_dir = run_dir.path().join("state");
     if cache_dir_config == EphemeralConfig::MisconfiguredCacheDir {
         // Write a configuration that sets both the cache_dir and ephemeral options
-        config.state.cache_dir = ignored_cache_dir.clone();
+        config.state.cache_dir.clone_from(&ignored_cache_dir);
     }
     if cache_dir_check == EphemeralCheck::ExistingDirectory {
         // We set the cache_dir config to a newly created empty temp directory,
@@ -3016,11 +3016,15 @@ fn scan_start_where_left() -> Result<()> {
         config.shielded_scan.sapling_keys_to_scan = keys;
 
         // Add the cache dir to shielded scan, make it the same as the zebrad cache state.
-        config.shielded_scan.db_config_mut().cache_dir = cache_dir.clone();
+        config
+            .shielded_scan
+            .db_config_mut()
+            .cache_dir
+            .clone_from(&cache_dir);
         config.shielded_scan.db_config_mut().ephemeral = false;
 
         // Add the cache dir to state.
-        config.state.cache_dir = cache_dir.clone();
+        config.state.cache_dir.clone_from(&cache_dir);
         config.state.ephemeral = false;
 
         // Remove the scan directory before starting.

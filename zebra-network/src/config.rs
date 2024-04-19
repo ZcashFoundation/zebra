@@ -5,7 +5,6 @@ use std::{
     ffi::OsString,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
-    string::String,
     time::Duration,
 };
 

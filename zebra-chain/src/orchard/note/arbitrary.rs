@@ -1,4 +1,4 @@
-use proptest::{arbitrary::any, collection::vec, prelude::*};
+use proptest::{collection::vec, prelude::*};
 
 use super::*;
 

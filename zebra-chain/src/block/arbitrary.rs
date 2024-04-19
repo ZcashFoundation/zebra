@@ -1,22 +1,13 @@
 //! Randomised property testing for [`Block`]s.
 
-use std::{collections::HashMap, sync::Arc};
-
-use proptest::{
-    arbitrary::{any, Arbitrary},
-    prelude::*,
-};
+use proptest::prelude::*;
 
 use crate::{
     amount::NonNegative,
     block,
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
-    parameters::{
-        Network,
-        NetworkUpgrade::{self, *},
-        GENESIS_PREVIOUS_BLOCK_HASH,
-    },
+    parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization,
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{
