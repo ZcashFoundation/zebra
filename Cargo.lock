@@ -5788,8 +5788,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.14"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=bump-0.1.15#a98abdebfe29bc2fb0b6fee9167609d13e10e18f"
+version = "0.1.15"
+source = "git+https://github.com/ZcashFoundation/zcash_script?branch=bump_v0.1.15#e9844798b13e7c441756854ae86ae0cd939a10d2"
 dependencies = [
  "bellman",
  "bindgen",

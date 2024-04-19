@@ -16,7 +16,7 @@ categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 [dependencies]
 #zcash_script = "0.1.14"
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "bump-0.1.15" }
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "bump_v0.1.15" }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.35" }
 
