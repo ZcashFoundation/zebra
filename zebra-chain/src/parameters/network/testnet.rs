@@ -291,6 +291,22 @@ impl Parameters {
         self == &Self::default()
     }
 
+    /// Returns true if the instance of [`Parameters`] represents Regtest.
+    pub fn is_regtest(&self) -> bool {
+        let Self {
+            network_name,
+            hrp_sapling_extended_spending_key,
+            hrp_sapling_extended_full_viewing_key,
+            hrp_sapling_payment_address,
+            ..
+        } = Self::new_regtest(ConfiguredActivationHeights::default());
+
+        self.network_name == network_name
+            && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
+            && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
+            && self.hrp_sapling_payment_address == hrp_sapling_payment_address
+    }
+
     /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
