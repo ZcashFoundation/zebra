@@ -66,7 +66,13 @@ impl ParameterCheckpoint for Network {
     fn checkpoint_list(&self) -> CheckpointList {
         let checkpoints_for_network = match self {
             Network::Mainnet => MAINNET_CHECKPOINTS,
-            Network::Testnet(_) => TESTNET_CHECKPOINTS,
+            Network::Testnet(params) if !params.is_regtest() => TESTNET_CHECKPOINTS,
+            // Returns only the genesis checkpoint for Regtest
+            Network::Testnet(_params) => {
+                // It's okay to skip checking the hard-coded genesis checkpoint is the genesis checkpoint
+                return CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
+                    .expect("hard-coded checkpoint list parses and validates");
+            }
         };
 
         // Check that the list starts with the correct genesis block and parses checkpoint list.
@@ -80,7 +86,7 @@ impl ParameterCheckpoint for Network {
             // parse calls CheckpointList::from_list
             Ok((block::Height(0), hash)) if hash == self.genesis_hash() => checkpoints_for_network
                 .parse()
-                .expect("Hard-coded checkpoint list parses and validates"),
+                .expect("hard-coded checkpoint list parses and validates"),
             Ok((block::Height(0), _)) => {
                 panic!("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")
             }
@@ -150,6 +156,13 @@ impl CheckpointList {
 
         let checkpoints: BTreeMap<block::Height, block::Hash> =
             original_checkpoints.into_iter().collect();
+
+        // Check that the list starts with _some_ genesis block
+        match checkpoints.iter().next() {
+            Some((block::Height(0), _hash)) => {}
+            Some(_) => Err("checkpoints must start at the genesis block height 0")?,
+            None => Err("there must be at least one checkpoint, for the genesis block")?,
+        };
 
         // This check rejects duplicate heights, whether they have the same or
         // different hashes
