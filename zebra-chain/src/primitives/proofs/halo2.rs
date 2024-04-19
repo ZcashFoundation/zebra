@@ -36,7 +36,7 @@ impl ZcashDeserialize for Halo2Proof {
     }
 }
 #[cfg(any(test, feature = "proptest-impl"))]
-use proptest::{arbitrary::Arbitrary, prelude::*};
+use proptest::prelude::*;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 impl Arbitrary for Halo2Proof {

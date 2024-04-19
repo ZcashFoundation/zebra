@@ -5,7 +5,7 @@
 use hex::FromHex;
 use lazy_static::lazy_static;
 
-use std::{collections::BTreeMap, convert::TryInto};
+use std::collections::BTreeMap;
 
 trait ReverseCollection {
     /// Return a reversed copy of this collection

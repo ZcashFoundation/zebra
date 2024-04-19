@@ -38,7 +38,7 @@ async fn test_grpc_response_data() {
             zebra_test::net::random_known_port()
         ),
         test_mocked_rpc_response_data_for_network(
-            Network::Testnet,
+            Network::new_default_testnet(),
             zebra_test::net::random_known_port()
         ),
     );

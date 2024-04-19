@@ -1120,6 +1120,7 @@ impl Service<Request> for StateService {
             | Request::Transaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
+            | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_) => {
@@ -1283,6 +1284,31 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
                         Ok(ReadResponse::Block(block))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            // Used by the get_block (verbose) RPC and the StateService.
+            ReadRequest::BlockHeader(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let header = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block_header(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
+
+                        Ok(ReadResponse::BlockHeader(header))
                     })
                 })
                 .wait_for_panics()

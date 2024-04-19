@@ -7,14 +7,14 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{Service, ServiceExt};
 
-use zcash_address::{self, unified::Encoding, TryFromAddress};
+use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::Amount,
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, POW_AVERAGING_WINDOW},
+    parameters::{Network, NetworkKind, POW_AVERAGING_WINDOW},
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -449,13 +449,25 @@ where
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
-            assert_eq!(
-                miner_address.network(),
-                network.clone(),
-                "incorrect miner address config: {miner_address} \
-                         network.network {network} and miner address network {} must match",
-                miner_address.network(),
-            );
+            match network.kind() {
+                NetworkKind::Mainnet => assert_eq!(
+                    miner_address.network_kind(),
+                    NetworkKind::Mainnet,
+                    "Incorrect config: Zebra is configured to run on a Mainnet network, \
+                    which implies the configured mining address needs to be for Mainnet, \
+                    but the provided address is for {}.",
+                    miner_address.network_kind(),
+                ),
+                // `Regtest` uses `Testnet` transparent addresses.
+                network_kind @ (NetworkKind::Testnet | NetworkKind::Regtest) => assert_eq!(
+                    miner_address.network_kind(),
+                    NetworkKind::Testnet,
+                    "Incorrect config: Zebra is configured to run on a {network_kind} network, \
+                    which implies the configured mining address needs to be for Testnet, \
+                    but the provided address is for {}.",
+                    miner_address.network_kind(),
+                ),
+            }
         }
 
         // A limit on the configured extra coinbase data, regardless of the current block height.
@@ -1084,7 +1096,7 @@ where
                 return Ok(validate_address::Response::invalid());
             }
 
-            if address.network() == network {
+            if address.network() == network.kind() {
                 Ok(validate_address::Response {
                     address: Some(raw_address),
                     is_valid: true,
@@ -1124,7 +1136,7 @@ where
                     }
                 };
 
-            if address.network() == network {
+            if address.network() == network.kind() {
                 Ok(z_validate_address::Response {
                     is_valid: true,
                     address: Some(raw_address),

@@ -2,20 +2,17 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review
+//! cargo insta test --review -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use insta::dynamic_redaction;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::Block,
-    chain_tip::mock::MockChainTip,
-    parameters::Network::{Mainnet, Testnet},
-    serialization::ZcashDeserializeInto,
-    subtree::NoteCommitmentSubtreeData,
+    block::Block, chain_tip::mock::MockChainTip, parameters::Network::Mainnet,
+    serialization::ZcashDeserializeInto, subtree::NoteCommitmentSubtreeData,
 };
 use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::mock_service::MockService;
@@ -33,12 +30,13 @@ pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
+    let default_testnet = Network::new_default_testnet();
 
     tokio::join!(
         test_rpc_response_data_for_network(&Mainnet),
-        test_rpc_response_data_for_network(&Testnet),
+        test_rpc_response_data_for_network(&default_testnet),
         test_mocked_rpc_response_data_for_network(&Mainnet),
-        test_mocked_rpc_response_data_for_network(&Testnet),
+        test_mocked_rpc_response_data_for_network(&default_testnet),
     );
 }
 
@@ -166,6 +164,25 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("hash_verbosity_1", get_block, &settings);
+
+    // `getblock`, verbosity=2, height
+    let get_block = rpc
+        .get_block(BLOCK_HEIGHT.to_string(), Some(2u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("height_verbosity_2", get_block, &settings);
+
+    let get_block = rpc
+        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(2u8))
+        .await;
+    snapshot_rpc_getblock_invalid("excessive_height_verbosity_2", get_block, &settings);
+
+    // `getblock`, verbosity=2, hash
+    let get_block = rpc
+        .get_block(block_hash.to_string(), Some(2u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("hash_verbosity_2", get_block, &settings);
 
     // `getblock`, no verbosity - defaults to 1, height
     let get_block = rpc

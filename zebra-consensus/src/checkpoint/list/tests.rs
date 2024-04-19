@@ -5,8 +5,8 @@ use std::sync::Arc;
 use num_integer::div_ceil;
 
 use zebra_chain::{
-    block::{self, Block, HeightDiff, MAX_BLOCK_BYTES},
-    parameters::{Network, Network::*},
+    block::{Block, HeightDiff, MAX_BLOCK_BYTES},
+    parameters::Network::*,
     serialization::ZcashDeserialize,
 };
 use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
@@ -236,7 +236,7 @@ fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
         .expect("hard-coded Testnet checkpoint list should parse");
 
     let _ = Mainnet.checkpoint_list();
-    let _ = Testnet.checkpoint_list();
+    let _ = Network::new_default_testnet().checkpoint_list();
 
     Ok(())
 }
@@ -248,7 +248,7 @@ fn checkpoint_list_hard_coded_mandatory_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_mandatory_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_mandatory(Testnet)
+    checkpoint_list_hard_coded_mandatory(Network::new_default_testnet())
 }
 
 /// Check that the hard-coded lists cover the mandatory checkpoint
@@ -274,7 +274,7 @@ fn checkpoint_list_hard_coded_max_gap_mainnet() -> Result<(), BoxError> {
 
 #[test]
 fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
-    checkpoint_list_hard_coded_max_gap(Testnet)
+    checkpoint_list_hard_coded_max_gap(Network::new_default_testnet())
 }
 
 /// Check that the hard-coded checkpoints are within [`MAX_CHECKPOINT_HEIGHT_GAP`],

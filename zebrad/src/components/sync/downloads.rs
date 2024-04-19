@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    convert::{self, TryFrom},
+    convert,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},

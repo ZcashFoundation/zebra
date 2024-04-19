@@ -1,8 +1,4 @@
-use proptest::{arbitrary::any, prelude::*};
-
-use std::cmp::Ordering;
-
-use crate::block;
+use proptest::prelude::*;
 
 use super::super::*;
 

@@ -7,7 +7,6 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebra_chain::{block::Height, parameters::Network};

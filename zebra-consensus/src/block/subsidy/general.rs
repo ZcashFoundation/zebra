@@ -2,7 +2,7 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::{collections::HashSet, convert::TryFrom};
+use std::collections::HashSet;
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
@@ -122,9 +122,9 @@ mod test {
     #[test]
     fn halving_test() -> Result<(), Report> {
         let _init_guard = zebra_test::init();
-
-        halving_for_network(&Network::Mainnet)?;
-        halving_for_network(&Network::Testnet)?;
+        for network in Network::iter() {
+            halving_for_network(&network)?;
+        }
 
         Ok(())
     }
@@ -249,8 +249,9 @@ mod test {
     fn block_subsidy_test() -> Result<(), Report> {
         let _init_guard = zebra_test::init();
 
-        block_subsidy_for_network(&Network::Mainnet)?;
-        block_subsidy_for_network(&Network::Testnet)?;
+        for network in Network::iter() {
+            block_subsidy_for_network(&network)?;
+        }
 
         Ok(())
     }

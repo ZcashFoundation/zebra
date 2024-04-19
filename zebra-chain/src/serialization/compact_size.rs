@@ -5,8 +5,6 @@
 //! - [`CompactSizeMessage`] for sizes that must be less than the network message limit, and
 //! - [`CompactSize64`] for flags, arbitrary counts, and sizes that span multiple blocks.
 
-use std::convert::{TryFrom, TryInto};
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::serialization::{

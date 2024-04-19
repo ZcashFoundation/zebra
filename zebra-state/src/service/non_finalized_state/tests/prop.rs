@@ -10,7 +10,7 @@ use zebra_chain::{
     fmt::DisplayToDebug,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
-    parameters::{Network, *},
+    parameters::*,
     value_balance::ValueBalance,
     LedgerState,
 };
@@ -612,15 +612,15 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // blocks, heights, hashes
                 chain1.blocks = chain2.blocks.clone();
-                chain1.height_by_hash = chain2.height_by_hash.clone();
-                chain1.tx_loc_by_hash = chain2.tx_loc_by_hash.clone();
+                chain1.height_by_hash.clone_from(&chain2.height_by_hash);
+                chain1.tx_loc_by_hash.clone_from(&chain2.tx_loc_by_hash);
 
                 // transparent UTXOs
-                chain1.created_utxos = chain2.created_utxos.clone();
-                chain1.spent_utxos = chain2.spent_utxos.clone();
+                chain1.created_utxos.clone_from(&chain2.created_utxos);
+                chain1.spent_utxos.clone_from(&chain2.spent_utxos);
 
                 // note commitment trees
-                chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
+                chain1.sprout_trees_by_anchor.clone_from(&chain2.sprout_trees_by_anchor);
                 chain1.sprout_trees_by_height = chain2.sprout_trees_by_height.clone();
                 chain1.sapling_trees_by_height = chain2.sapling_trees_by_height.clone();
                 chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
@@ -641,9 +641,9 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.orchard_anchors_by_height = chain2.orchard_anchors_by_height.clone();
 
                 // nullifiers
-                chain1.sprout_nullifiers = chain2.sprout_nullifiers.clone();
-                chain1.sapling_nullifiers = chain2.sapling_nullifiers.clone();
-                chain1.orchard_nullifiers = chain2.orchard_nullifiers.clone();
+                chain1.sprout_nullifiers.clone_from(&chain2.sprout_nullifiers);
+                chain1.sapling_nullifiers.clone_from(&chain2.sapling_nullifiers);
+                chain1.orchard_nullifiers.clone_from(&chain2.orchard_nullifiers);
 
                 // proof of work
                 chain1.partial_cumulative_work = chain2.partial_cumulative_work;

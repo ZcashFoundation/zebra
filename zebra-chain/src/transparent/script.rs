@@ -95,7 +95,6 @@ mod proptests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
     proptest! {
         #[test]

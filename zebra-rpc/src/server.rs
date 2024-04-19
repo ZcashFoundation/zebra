@@ -13,7 +13,7 @@ use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::{CloseHandle, ServerBuilder};
 use tokio::task::JoinHandle;
 use tower::Service;
-use tracing::{Instrument, *};
+use tracing::*;
 
 use zebra_chain::{
     block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,

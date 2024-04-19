@@ -2,21 +2,19 @@
 
 use std::{env, io::ErrorKind};
 
-use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+use proptest::{prelude::*, test_runner::Config};
 
 use hex::{FromHex, ToHex};
 
 use zebra_test::prelude::*;
 
 use crate::{
-    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
     serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize},
-    LedgerState,
 };
 
 use super::super::{
     arbitrary::{allow_all_transparent_coinbase_spends, PREVOUTS_CHAIN_HEIGHT},
-    serialize::MAX_BLOCK_BYTES,
     *,
 };
 

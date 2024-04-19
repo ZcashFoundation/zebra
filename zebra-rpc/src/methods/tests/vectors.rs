@@ -1,8 +1,7 @@
 //! Fixed test vectors for RPC methods.
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::ops::RangeInclusive;
 
-use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -11,8 +10,7 @@ use zebra_chain::{
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::{UnminedTx, UnminedTxId},
-    transparent,
+    transaction::UnminedTxId,
 };
 use zebra_node_services::BoxError;
 
@@ -140,6 +138,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: None,
                 tx: block
                     .transactions
                     .iter()
@@ -163,6 +162,55 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: None,
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+            }
+        );
+    }
+
+    // Make height calls with verbosity=2 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(2u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+            }
+        );
+    }
+
+    // Make hash calls with verbosity=2 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), Some(2u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: None,
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
@@ -186,6 +234,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
+                time: None,
                 tx: block
                     .transactions
                     .iter()
@@ -209,6 +258,7 @@ async fn rpc_getblock() {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
+                time: None,
                 tx: block
                     .transactions
                     .iter()
@@ -654,7 +704,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 async fn rpc_getaddresstxids_response() {
     let _init_guard = zebra_test::init();
 
-    for network in [Mainnet, Testnet] {
+    for network in Network::iter() {
         let blocks: Vec<Arc<Block>> = network
             .blockchain_map()
             .iter()
@@ -1193,6 +1243,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
+        parameters::NetworkKind,
         serialization::DateTime32,
         transaction::{zip317, VerifiedUnminedTx},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -1223,11 +1274,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
+    let network = NetworkKind::Mainnet;
     let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(&Mainnet, [0x7e; 20])),
-        true => Some(transparent::Address::from_pub_key_hash(
-            &Mainnet, [0x7e; 20],
-        )),
+        false => Some(transparent::Address::from_script_hash(network, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(network, [0x7e; 20])),
     };
 
     #[allow(clippy::unnecessary_struct_initialization)]

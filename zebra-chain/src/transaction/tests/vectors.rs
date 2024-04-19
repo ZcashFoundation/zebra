@@ -5,11 +5,10 @@ use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 
 use crate::{
-    amount::Amount,
     block::{Block, Height, MAX_BLOCK_BYTES},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{hash::WtxId, sighash::SigHasher, txid::TxIdBuilder, Transaction},
+    transaction::{sighash::SigHasher, txid::TxIdBuilder},
     transparent::Script,
 };
 
@@ -343,9 +342,9 @@ fn empty_v5_librustzcash_round_trip() {
 #[test]
 fn fake_v5_round_trip() {
     let _init_guard = zebra_test::init();
-
-    fake_v5_round_trip_for_network(Network::Mainnet);
-    fake_v5_round_trip_for_network(Network::Testnet);
+    for network in Network::iter() {
+        fake_v5_round_trip_for_network(network);
+    }
 }
 
 fn fake_v5_round_trip_for_network(network: Network) {
@@ -491,9 +490,9 @@ fn invalid_orchard_nullifier() {
 #[test]
 fn fake_v5_librustzcash_round_trip() {
     let _init_guard = zebra_test::init();
-
-    fake_v5_librustzcash_round_trip_for_network(Network::Mainnet);
-    fake_v5_librustzcash_round_trip_for_network(Network::Testnet);
+    for network in Network::iter() {
+        fake_v5_librustzcash_round_trip_for_network(network);
+    }
 }
 
 fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
@@ -931,9 +930,9 @@ fn zip244_sighash() -> Result<()> {
 #[test]
 fn binding_signatures() {
     let _init_guard = zebra_test::init();
-
-    binding_signatures_for_network(Network::Mainnet);
-    binding_signatures_for_network(Network::Testnet);
+    for network in Network::iter() {
+        binding_signatures_for_network(network);
+    }
 }
 
 fn binding_signatures_for_network(network: Network) {

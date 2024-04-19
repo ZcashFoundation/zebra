@@ -1,10 +1,10 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
+use std::{borrow::Borrow, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::pasta::{group::ff::PrimeField, pallas};
+use halo2::pasta::group::ff::PrimeField;
 use hex::FromHex;
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
@@ -12,13 +12,12 @@ use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
+    primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
         zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
         TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
-    sprout,
 };
 
 use super::*;

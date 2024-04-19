@@ -7,13 +7,24 @@ use crate::parameters::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+/// A list of network upgrades in the order that they must be activated.
+pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 8] = [
+    Genesis,
+    BeforeOverwinter,
+    Overwinter,
+    Sapling,
+    Blossom,
+    Heartwood,
+    Canopy,
+    Nu5,
+];
 
 /// A Zcash network upgrade.
 ///
@@ -242,12 +253,7 @@ impl Network {
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
     pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
-        let (mainnet_heights, testnet_heights) = {
-            #[cfg(not(feature = "zebra-test"))]
-            {
-                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
-            }
-
+        match self {
             // To prevent accidentally setting this somehow, only check the env var
             // when being compiled for tests. We can't use cfg(test) since the
             // test that uses this is in zebra-state, and cfg(test) is not
@@ -260,24 +266,19 @@ impl Network {
             // feature should only be enabled for tests:
             // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
             #[cfg(feature = "zebra-test")]
-            if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
-                (
-                    FAKE_MAINNET_ACTIVATION_HEIGHTS,
-                    FAKE_TESTNET_ACTIVATION_HEIGHTS,
-                )
-            } else {
-                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            Mainnet if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
+                FAKE_MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
             }
-        };
-        match self {
-            Mainnet => mainnet_heights,
-            Testnet => testnet_heights,
+            #[cfg(feature = "zebra-test")]
+            Testnet(_) if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
+                FAKE_TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
+            }
+            Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
+            Testnet(params) => params.activation_heights().clone(),
         }
-        .iter()
-        .cloned()
-        .collect()
     }
 }
+
 impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
     pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
@@ -289,11 +290,28 @@ impl NetworkUpgrade {
             .expect("every height has a current network upgrade")
     }
 
+    /// Returns the next expected network upgrade after this network upgrade
+    pub fn next_upgrade(self) -> Option<Self> {
+        match self {
+            Genesis => Some(BeforeOverwinter),
+            BeforeOverwinter => Some(Overwinter),
+            Overwinter => Some(Sapling),
+            Sapling => Some(Blossom),
+            Blossom => Some(Heartwood),
+            Heartwood => Some(Canopy),
+            Canopy => Some(Nu5),
+            Nu5 => None,
+        }
+    }
+
     /// Returns the next network upgrade for `network` and `height`.
     ///
     /// Returns None if the next upgrade has not been implemented in Zebra
     /// yet.
+    #[cfg(test)]
     pub fn next(network: &Network, height: block::Height) -> Option<NetworkUpgrade> {
+        use std::ops::Bound::*;
+
         network
             .activation_list()
             .range((Excluded(height), Unbounded))
@@ -301,17 +319,27 @@ impl NetworkUpgrade {
             .next()
     }
 
-    /// Returns the activation height for this network upgrade on `network`.
+    /// Returns the activation height for this network upgrade on `network`, or
+    ///
+    /// Returns the activation height of the first network upgrade that follows
+    /// this network upgrade if there is no activation height for this network upgrade
+    /// such as on Regtest or a configured Testnet where multiple network upgrades have the
+    /// same activation height, or if one is omitted when others that follow it are included.
     ///
     /// Returns None if this network upgrade is a future upgrade, and its
     /// activation height has not been set yet.
+    ///
+    /// Returns None if this network upgrade has not been configured on a Testnet or Regtest.
     pub fn activation_height(&self, network: &Network) -> Option<block::Height> {
         network
             .activation_list()
             .iter()
-            .filter(|(_, nu)| nu == &self)
+            .find(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
-            .next()
+            .or_else(|| {
+                self.next_upgrade()
+                    .and_then(|next_nu| next_nu.activation_height(network))
+            })
     }
 
     /// Returns `true` if `height` is the activation height of any network upgrade
@@ -394,9 +422,14 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> Option<Duration> {
         match (network, height) {
-            (Network::Testnet, height) if height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT => None,
+            // TODO: Move `TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT` to a field on testnet::Parameters (#8364)
+            (Network::Testnet(_params), height)
+                if height < TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT =>
+            {
+                None
+            }
             (Network::Mainnet, _) => None,
-            (Network::Testnet, _) => {
+            (Network::Testnet(_params), _) => {
                 let network_upgrade = NetworkUpgrade::current(network, height);
                 Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
             }
