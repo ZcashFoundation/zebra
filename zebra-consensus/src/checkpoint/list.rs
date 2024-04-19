@@ -64,26 +64,39 @@ impl ParameterCheckpoint for Network {
     }
 
     fn checkpoint_list(&self) -> CheckpointList {
-        // parse calls CheckpointList::from_list
-        let checkpoint_list: CheckpointList = match self {
-            Network::Mainnet => MAINNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet(_params) => TESTNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Testnet checkpoint list parses and validates"),
+        let checkpoints_for_network = match self {
+            Network::Mainnet => MAINNET_CHECKPOINTS,
+            Network::Testnet(_) => TESTNET_CHECKPOINTS,
         };
 
-        // Check that the list starts with the correct genesis block
-        let first_checkpoint_height = checkpoint_list.iter().next();
+        // Check that the list starts with the correct genesis block and parses checkpoint list.
+        let first_checkpoint_height = checkpoints_for_network
+            .lines()
+            .next()
+            .map(checkpoint_height_and_hash)
+            .expect("there must be at least one checkpoint, for the genesis block");
+
         match first_checkpoint_height {
-            Some((block::Height(0), &hash)) if hash == self.genesis_hash() => checkpoint_list,
-            Some((block::Height(0), _)) => {
+            // parse calls CheckpointList::from_list
+            Ok((block::Height(0), hash)) if hash == self.genesis_hash() => checkpoints_for_network
+                .parse()
+                .expect("Hard-coded checkpoint list parses and validates"),
+            Ok((block::Height(0), _)) => {
                 panic!("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")
             }
-            Some(_) => panic!("checkpoints must start at the genesis block height 0"),
-            None => panic!("there must be at least one checkpoint, for the genesis block"),
+            Ok(_) => panic!("checkpoints must start at the genesis block height 0"),
+            Err(err) => panic!("{err}"),
         }
+    }
+}
+
+/// Parses a checkpoint to a [`block::Height`] and [`block::Hash`].
+fn checkpoint_height_and_hash(checkpoint: &str) -> Result<(block::Height, block::Hash), BoxError> {
+    let fields = checkpoint.split(' ').collect::<Vec<_>>();
+    if let [height, hash] = fields[..] {
+        Ok((height.parse()?, hash.parse()?))
+    } else {
+        Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()).into())
     }
 }
 
@@ -112,12 +125,7 @@ impl FromStr for CheckpointList {
         let mut checkpoint_list: Vec<(block::Height, block::Hash)> = Vec::new();
 
         for checkpoint in s.lines() {
-            let fields = checkpoint.split(' ').collect::<Vec<_>>();
-            if let [height, hash] = fields[..] {
-                checkpoint_list.push((height.parse()?, hash.parse()?));
-            } else {
-                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()))?;
-            };
+            checkpoint_list.push(checkpoint_height_and_hash(checkpoint)?);
         }
 
         CheckpointList::from_list(checkpoint_list)
