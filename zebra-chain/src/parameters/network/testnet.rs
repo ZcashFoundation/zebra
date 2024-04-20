@@ -71,6 +71,8 @@ pub struct ParametersBuilder {
     hrp_sapling_extended_full_viewing_key: String,
     /// Sapling payment address human-readable prefix for this network
     hrp_sapling_payment_address: String,
+    /// A flag for disabling proof-of-work checks when Zebra is validating blocks
+    disable_pow: bool,
 }
 
 impl Default for ParametersBuilder {
@@ -91,6 +93,7 @@ impl Default for ParametersBuilder {
             genesis_hash: TESTNET_GENESIS_HASH
                 .parse()
                 .expect("hard-coded hash parses"),
+            disable_pow: false,
         }
     }
 }
@@ -231,6 +234,12 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    pub fn with_disable_pow(mut self, disable_pow: bool) -> Self {
+        self.disable_pow = disable_pow;
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
         let Self {
@@ -240,14 +249,16 @@ impl ParametersBuilder {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            disable_pow,
         } = self;
         Parameters {
             network_name,
+            genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
-            genesis_hash,
+            disable_pow,
         }
     }
 
@@ -276,6 +287,8 @@ pub struct Parameters {
     hrp_sapling_extended_full_viewing_key: String,
     /// Sapling payment address human-readable prefix for this network
     hrp_sapling_payment_address: String,
+    /// A flag for disabling proof-of-work checks when Zebra is validating blocks
+    disable_pow: bool,
 }
 
 impl Default for Parameters {
@@ -302,6 +315,7 @@ impl Parameters {
             network_name: "Regtest".to_string(),
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
+                .with_disable_pow(true)
                 .with_sapling_hrps(
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -329,6 +343,7 @@ impl Parameters {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            disable_pow,
         } = Self::new_regtest(ConfiguredActivationHeights::default());
 
         self.network_name == network_name
@@ -336,6 +351,7 @@ impl Parameters {
             && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
+            && self.disable_pow == disable_pow
     }
 
     /// Returns the network name
@@ -366,5 +382,10 @@ impl Parameters {
     /// Returns the `hrp_sapling_payment_address` field
     pub fn hrp_sapling_payment_address(&self) -> &str {
         &self.hrp_sapling_payment_address
+    }
+
+    /// Returns true if proof-of-work validation should be disabled for this network
+    pub fn disable_pow(&self) -> bool {
+        self.disable_pow
     }
 }
