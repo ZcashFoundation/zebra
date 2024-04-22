@@ -49,7 +49,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_pub_key_hash(
-            NetworkKind::from_zcash_address(network),
+            network.into(),
             data,
         )))
     }
@@ -59,7 +59,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_script_hash(
-            NetworkKind::from_zcash_address(network),
+            network.into(),
             data,
         )))
     }
@@ -68,7 +68,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         data: [u8; 43],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = NetworkKind::from_zcash_address(network);
+        let network = network.into();
         sapling::PaymentAddress::from_bytes(&data)
             .map(|address| Self::Sapling { address, network })
             .ok_or_else(|| BoxError::from("not a valid sapling address").into())
@@ -78,7 +78,7 @@ impl zcash_address::TryFromAddress for Address {
         network: zcash_address::Network,
         unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
-        let network = NetworkKind::from_zcash_address(network);
+        let network = network.into();
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
@@ -163,7 +163,7 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address = ZcashAddress::from_sapling(network.to_zcash_address(), data);
+                let address = ZcashAddress::from_sapling(network.into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,
@@ -171,26 +171,34 @@ impl Address {
     }
 }
 
-impl NetworkKind {
-    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
-    ///
-    /// This method is meant to be used for decoding Zcash addresses in zebra-rpc methods.
-    fn from_zcash_address(network: zcash_address::Network) -> Self {
+impl From<zcash_address::Network> for NetworkKind {
+    fn from(network: zcash_address::Network) -> Self {
         match network {
             zcash_address::Network::Main => NetworkKind::Mainnet,
             zcash_address::Network::Test => NetworkKind::Testnet,
             zcash_address::Network::Regtest => NetworkKind::Regtest,
         }
     }
+}
 
-    /// Converts a [`zcash_address::Network`] to a [`NetworkKind`].
-    ///
-    /// This method is meant to be used for encoding Zcash addresses in zebra-rpc methods.
-    fn to_zcash_address(self) -> zcash_address::Network {
-        match self {
+impl From<&zcash_address::Network> for NetworkKind {
+    fn from(network: &zcash_address::Network) -> Self {
+        network.into()
+    }
+}
+
+impl From<NetworkKind> for zcash_address::Network {
+    fn from(network: NetworkKind) -> Self {
+        match network {
             NetworkKind::Mainnet => zcash_address::Network::Main,
             NetworkKind::Testnet => zcash_address::Network::Test,
             NetworkKind::Regtest => zcash_address::Network::Regtest,
         }
+    }
+}
+
+impl From<&NetworkKind> for zcash_address::Network {
+    fn from(network: &NetworkKind) -> Self {
+        network.into()
     }
 }
