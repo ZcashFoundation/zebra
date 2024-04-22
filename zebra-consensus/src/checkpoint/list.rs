@@ -64,34 +64,37 @@ impl ParameterCheckpoint for Network {
     }
 
     fn checkpoint_list(&self) -> CheckpointList {
-        let checkpoints_for_network = match self {
-            Network::Mainnet => MAINNET_CHECKPOINTS,
-            Network::Testnet(params) if !params.is_regtest() => TESTNET_CHECKPOINTS,
-            // Returns only the genesis checkpoint for Regtest
-            Network::Testnet(_params) => {
-                // It's okay to skip checking the hard-coded genesis checkpoint is the genesis checkpoint
-                return CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
-                    .expect("hard-coded checkpoint list parses and validates");
-            }
+        let (checkpoints_for_network, should_fallback_to_genesis_hash_as_checkpoint) = match self {
+            Network::Mainnet => (MAINNET_CHECKPOINTS, false),
+            Network::Testnet(params) if params.is_default_testnet() => (TESTNET_CHECKPOINTS, false),
+            Network::Testnet(_params) => (TESTNET_CHECKPOINTS, true),
         };
 
         // Check that the list starts with the correct genesis block and parses checkpoint list.
         let first_checkpoint_height = checkpoints_for_network
             .lines()
             .next()
-            .map(checkpoint_height_and_hash)
-            .expect("there must be at least one checkpoint, for the genesis block");
+            .map(checkpoint_height_and_hash);
 
         match first_checkpoint_height {
             // parse calls CheckpointList::from_list
-            Ok((block::Height(0), hash)) if hash == self.genesis_hash() => checkpoints_for_network
-                .parse()
-                .expect("hard-coded checkpoint list parses and validates"),
-            Ok((block::Height(0), _)) => {
-                panic!("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")
+            Some(Ok((block::Height(0), hash))) if hash == self.genesis_hash() => {
+                checkpoints_for_network
+                    .parse()
+                    .expect("hard-coded checkpoint list parses and validates")
             }
-            Ok(_) => panic!("checkpoints must start at the genesis block height 0"),
-            Err(err) => panic!("{err}"),
+            _ if should_fallback_to_genesis_hash_as_checkpoint => {
+                CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
+                    .expect("hard-coded checkpoint list parses and validates")
+            }
+            Some(Ok((block::Height(0), _))) => {
+                panic!("the genesis checkpoint does not match the {self} genesis hash")
+            }
+            Some(Ok(_)) => panic!("checkpoints must start at the genesis block height 0"),
+            Some(Err(err)) => panic!("{err}"),
+            None => panic!(
+                "there must be at least one checkpoint on default networks, for the genesis block"
+            ),
         }
     }
 }
