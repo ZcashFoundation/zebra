@@ -100,7 +100,7 @@ zcash_note_encryption = "0.4.0"
 zcash_primitives = { version = "0.13.0", features = ["transparent-inputs"] }
 
 # Time
-chrono = { version = "0.4.34", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
 humantime = "2.1.0"
 
 # Error Handling & Formatting
