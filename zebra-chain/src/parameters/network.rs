@@ -283,17 +283,8 @@ impl zcash_primitives::consensus::Parameters for Network {
         &self,
         nu: zcash_primitives::consensus::NetworkUpgrade,
     ) -> Option<zcash_primitives::consensus::BlockHeight> {
-        let target_nu = match nu {
-            zcash_primitives::consensus::NetworkUpgrade::Overwinter => NetworkUpgrade::Overwinter,
-            zcash_primitives::consensus::NetworkUpgrade::Sapling => NetworkUpgrade::Sapling,
-            zcash_primitives::consensus::NetworkUpgrade::Blossom => NetworkUpgrade::Blossom,
-            zcash_primitives::consensus::NetworkUpgrade::Heartwood => NetworkUpgrade::Heartwood,
-            zcash_primitives::consensus::NetworkUpgrade::Canopy => NetworkUpgrade::Canopy,
-            zcash_primitives::consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
-        };
-
         // Heights are hard-coded below Height::MAX or checked when the config is parsed.
-        target_nu
+        NetworkUpgrade::from(nu)
             .activation_height(self)
             .map(|Height(h)| zcash_primitives::consensus::BlockHeight::from_u32(h))
     }
