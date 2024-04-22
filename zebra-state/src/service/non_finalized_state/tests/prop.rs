@@ -451,7 +451,6 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
 /// Check that rejected blocks do not change the internal state of a genesis chain
 /// in a non-finalized state.
 #[test]
-#[cfg(not(target_os = "windows"))]
 fn rejection_restores_internal_state_genesis() -> Result<()> {
     let _init_guard = zebra_test::init();
 
