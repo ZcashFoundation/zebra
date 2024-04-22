@@ -339,3 +339,18 @@ impl zcash_primitives::consensus::Parameters for Network {
         self.kind().b58_script_address_prefix()
     }
 }
+
+impl zcash_protocol::consensus::Parameters for Network {
+    fn network_type(&self) -> zcash_address::Network {
+        self.kind().into()
+    }
+
+    fn activation_height(
+        &self,
+        nu: zcash_protocol::consensus::NetworkUpgrade,
+    ) -> Option<zcash_protocol::consensus::BlockHeight> {
+        NetworkUpgrade::from(nu)
+            .activation_height(self)
+            .map(|Height(h)| zcash_protocol::consensus::BlockHeight::from_u32(h))
+    }
+}
