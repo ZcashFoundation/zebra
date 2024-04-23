@@ -34,9 +34,9 @@ pub(crate) const REGTEST_SOLUTION_SIZE: usize = 36;
 
 /// Equihash Solution in compressed format.
 ///
-/// A wrapper around [u8; 1344] because Rust doesn't implement common
-/// traits like `Debug`, `Clone`, etc for collections like array
-/// beyond lengths 0 to 32.
+/// A wrapper around `[u8; n]` where `n` is the solution size because
+/// Rust doesn't implement common traits like `Debug`, `Clone`, etc.
+/// for collections like arrays beyond lengths 0 to 32.
 ///
 /// The size of an Equihash solution in bytes is always 1344 on Mainnet and Testnet, and
 /// is always 36 on Regtest so the length of this type is fixed.
