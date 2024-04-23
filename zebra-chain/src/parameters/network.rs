@@ -171,6 +171,14 @@ impl Network {
         Self::new_configured_testnet(testnet::Parameters::new_regtest(activation_heights))
     }
 
+    /// Returns true if the network is Mainnet or the default Testnet, or false otherwise.
+    pub fn is_a_default_network(&self) -> bool {
+        match self {
+            Network::Mainnet => true,
+            Network::Testnet(params) => params.is_default_testnet(),
+        }
+    }
+
     /// Returns true if the network is the default Testnet, or false otherwise.
     pub fn is_default_testnet(&self) -> bool {
         if let Self::Testnet(params) = self {
@@ -193,6 +201,15 @@ impl Network {
     pub fn disable_pow(&self) -> bool {
         if let Self::Testnet(params) = self {
             params.disable_pow()
+        } else {
+            false
+        }
+    }
+
+    /// Returns true if blocks should be contextually validated without checkpoints on this network
+    pub fn debug_validate_without_checkpoints(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.debug_validate_without_checkpoints()
         } else {
             false
         }
@@ -243,6 +260,8 @@ impl Network {
     /// Mandatory checkpoints are a Zebra-specific feature.
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
+    ///
+    /// ZIP-212 grace period is only applied to default networks.
     pub fn mandatory_checkpoint_height(&self) -> Height {
         // Currently this is after the ZIP-212 grace period.
         //
@@ -252,8 +271,12 @@ impl Network {
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
-        (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
-            .expect("ZIP-212 grace period ends at a valid block height")
+        if self.is_a_default_network() {
+            (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
+                .expect("ZIP-212 grace period ends at a valid block height")
+        } else {
+            canopy_activation
+        }
     }
 
     /// Return the network name as defined in

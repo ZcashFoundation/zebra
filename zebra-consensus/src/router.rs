@@ -369,9 +369,13 @@ pub fn init_checkpoint_list(config: Config, network: &Network) -> (CheckpointLis
 
     let max_checkpoint_height = if config.checkpoint_sync {
         list.max_height()
-    } else {
+    } else if network.is_a_default_network() {
         list.min_height_in_range(network.mandatory_checkpoint_height()..)
             .expect("hardcoded checkpoint list extends past canopy activation")
+    } else {
+        // Allow for validating blocks below mandatory checkpoint height on configured Testnets and Regtest without
+        // actually checking the checkpoints if checkpoint sync is disabled.
+        network.mandatory_checkpoint_height()
     };
 
     (list, max_checkpoint_height)

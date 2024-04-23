@@ -73,6 +73,9 @@ pub struct ParametersBuilder {
     hrp_sapling_payment_address: String,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// A flag for allowing Zebra to try contextually validating the first queued block
+    /// for a given height below the mandatory checkpoint height.
+    debug_validate_without_checkpoints: bool,
 }
 
 impl Default for ParametersBuilder {
@@ -94,6 +97,7 @@ impl Default for ParametersBuilder {
                 .parse()
                 .expect("hard-coded hash parses"),
             disable_pow: false,
+            debug_validate_without_checkpoints: false,
         }
     }
 }
@@ -240,6 +244,15 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the `debug_validate_without_checkpoints` flag to be used in the [`Parameters`] being built.
+    pub fn with_debug_validate_without_checkpoints(
+        mut self,
+        debug_validate_without_checkpoints: bool,
+    ) -> Self {
+        self.debug_validate_without_checkpoints = debug_validate_without_checkpoints;
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
         let Self {
@@ -250,6 +263,7 @@ impl ParametersBuilder {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
+            debug_validate_without_checkpoints,
         } = self;
         Parameters {
             network_name,
@@ -259,6 +273,7 @@ impl ParametersBuilder {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
+            debug_validate_without_checkpoints,
         }
     }
 
@@ -289,6 +304,9 @@ pub struct Parameters {
     hrp_sapling_payment_address: String,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// A flag for allowing Zebra to try contextually validating the first queued block
+    /// for a given height below the mandatory checkpoint height.
+    debug_validate_without_checkpoints: bool,
 }
 
 impl Default for Parameters {
@@ -316,6 +334,7 @@ impl Parameters {
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
                 .with_disable_pow(true)
+                .with_debug_validate_without_checkpoints(true)
                 .with_sapling_hrps(
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -344,6 +363,7 @@ impl Parameters {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
+            debug_validate_without_checkpoints,
         } = Self::new_regtest(ConfiguredActivationHeights::default());
 
         self.network_name == network_name
@@ -352,6 +372,7 @@ impl Parameters {
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
             && self.disable_pow == disable_pow
+            && self.debug_validate_without_checkpoints == debug_validate_without_checkpoints
     }
 
     /// Returns the network name
@@ -387,5 +408,10 @@ impl Parameters {
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         self.disable_pow
+    }
+
+    /// Returns true if blocks should be contextually validated without checkpoints on this network
+    pub fn debug_validate_without_checkpoints(&self) -> bool {
+        self.debug_validate_without_checkpoints
     }
 }

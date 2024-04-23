@@ -672,8 +672,8 @@ impl<'de> Deserialize<'de> for Config {
             network: network_kind,
             testnet_parameters,
             regtest_activation_heights,
-            initial_mainnet_peers,
-            initial_testnet_peers,
+            mut initial_mainnet_peers,
+            mut initial_testnet_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -700,7 +700,11 @@ impl<'de> Deserialize<'de> for Config {
         let network = match (network_kind, testnet_parameters) {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_activation_heights),
+            (NetworkKind::Regtest, _) => {
+                initial_mainnet_peers = Default::default();
+                initial_testnet_peers = Default::default();
+                Network::new_regtest(regtest_activation_heights)
+            }
             (
                 NetworkKind::Testnet,
                 Some(DTestnetParameters {

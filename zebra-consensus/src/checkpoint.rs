@@ -777,6 +777,19 @@ where
                     .hash(height)
                     .expect("every checkpoint height must have a hash"),
             ),
+            // Contextually validate and commit the first queued block for a height below the mandatory checkpoint height if
+            // `debug_validate_without_checkpoints` is true for this network.
+            WaitingForBlocks if self.network.debug_validate_without_checkpoints() => {
+                if let Some((height, hash)) = self
+                    .queued
+                    .first_key_value()
+                    .and_then(|(h, blocks)| blocks.first().map(|block| (*h, block.block.hash)))
+                {
+                    (height, hash)
+                } else {
+                    return;
+                }
+            }
             WaitingForBlocks => {
                 return;
             }
