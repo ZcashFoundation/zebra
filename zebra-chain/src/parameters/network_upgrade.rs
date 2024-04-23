@@ -340,9 +340,6 @@ impl NetworkUpgrade {
                 self.next_upgrade()
                     .and_then(|next_nu| next_nu.activation_height(network))
             })
-            // TODO: Remove `.expect()` calls on the return value of this function (except for Genesis), or
-            //       update this method's return type
-            .or(Some(block::Height::MAX))
     }
 
     /// Returns `true` if `height` is the activation height of any network upgrade
