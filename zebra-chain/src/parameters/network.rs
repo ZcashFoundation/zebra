@@ -240,6 +240,12 @@ impl Network {
     /// Mandatory checkpoints are a Zebra-specific feature.
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
+    ///
+    /// ZIP-212 grace period is only applied to default networks.
+    // TODO:
+    // - Support constructing pre-Canopy coinbase tx and block templates and return `Height::MAX` instead of panicking
+    //   when Canopy activation height is `None` (#8434)
+    // - Add semantic block validation during the ZIP-212 grace period and update this method to always apply the ZIP-212 grace period
     pub fn mandatory_checkpoint_height(&self) -> Height {
         // Currently this is after the ZIP-212 grace period.
         //
@@ -249,8 +255,17 @@ impl Network {
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
-        (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
-            .expect("ZIP-212 grace period ends at a valid block height")
+        let is_a_default_network = match self {
+            Network::Mainnet => true,
+            Network::Testnet(params) => params.is_default_testnet(),
+        };
+
+        if is_a_default_network {
+            (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
+                .expect("ZIP-212 grace period ends at a valid block height")
+        } else {
+            canopy_activation
+        }
     }
 
     /// Return the network name as defined in
