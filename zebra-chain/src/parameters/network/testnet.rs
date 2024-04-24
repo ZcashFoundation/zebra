@@ -1,5 +1,5 @@
 //! Types and implementation for Testnet consensus parameters
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use zcash_primitives::constants as zp_constants;
 
@@ -10,6 +10,19 @@ use crate::{
         NETWORK_UPGRADES_IN_ORDER,
     },
 };
+
+/// Reserved network names that should not be allowed for configured Testnets.
+pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
+    "Mainnet",
+    "Testnet",
+    "Regtest",
+    "MainnetKind",
+    "TestnetKind",
+    "RegtestKind",
+];
+
+/// Maximum length for a configured network name.
+pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
 
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default)]
@@ -35,6 +48,8 @@ pub struct ConfiguredActivationHeights {
 /// Builder for the [`Parameters`] struct.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ParametersBuilder {
+    /// The name of this network to be used by the `Display` trait impl.
+    network_name: String,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Sapling extended spending key human-readable prefix for this network
@@ -48,6 +63,7 @@ pub struct ParametersBuilder {
 impl Default for ParametersBuilder {
     fn default() -> Self {
         Self {
+            network_name: "UnknownTestnet".to_string(),
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
@@ -69,9 +85,33 @@ impl Default for ParametersBuilder {
 }
 
 impl ParametersBuilder {
+    /// Sets the network name to be used in the [`Parameters`] being built.
+    pub fn with_network_name(mut self, network_name: impl fmt::Display) -> Self {
+        self.network_name = network_name.to_string();
+
+        assert!(
+            !RESERVED_NETWORK_NAMES.contains(&self.network_name.as_str()),
+            "cannot use reserved network name '{network_name}' as configured Testnet name, reserved names: {RESERVED_NETWORK_NAMES:?}"
+        );
+
+        assert!(
+            self.network_name.len() <= MAX_NETWORK_NAME_LENGTH,
+            "network name {network_name} is too long, must be {MAX_NETWORK_NAME_LENGTH} characters or less"
+        );
+
+        assert!(
+            self.network_name
+                .chars()
+                .all(|x| x.is_alphanumeric() || x == '_'),
+            "network name must include only alphanumeric characters or '_'"
+        );
+
+        self
+    }
+
     /// Checks that the provided network upgrade activation heights are in the correct order, then
     /// sets them as the new network upgrade activation heights.
-    pub fn activation_heights(
+    pub fn with_activation_heights(
         mut self,
         ConfiguredActivationHeights {
             // TODO: Find out if `BeforeOverwinter` is required at Height(1), allow for
@@ -99,7 +139,6 @@ impl ParametersBuilder {
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
-            .filter(|&(_, nu)| nu != NetworkUpgrade::BeforeOverwinter)
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
@@ -136,12 +175,14 @@ impl ParametersBuilder {
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
         let Self {
+            network_name,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
         } = self;
         Parameters {
+            network_name,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
@@ -158,6 +199,8 @@ impl ParametersBuilder {
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Parameters {
+    /// The name of this network to be used by the `Display` trait impl.
+    network_name: String,
     /// The network upgrade activation heights for this network.
     ///
     /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
@@ -176,13 +219,9 @@ impl Default for Parameters {
     /// Returns an instance of the default public testnet [`Parameters`].
     fn default() -> Self {
         Self {
+            network_name: "Testnet".to_string(),
             activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
-            hrp_sapling_extended_spending_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
-            hrp_sapling_extended_full_viewing_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
-            hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-                .to_string(),
+            ..Self::build().finish()
         }
     }
 }
@@ -196,6 +235,11 @@ impl Parameters {
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.
     pub fn is_default_testnet(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Returns the network name
+    pub fn network_name(&self) -> &str {
+        &self.network_name
     }
 
     /// Returns the network upgrade activation heights
