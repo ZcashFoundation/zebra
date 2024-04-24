@@ -97,7 +97,7 @@ orchard = "0.6.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.4.0"
 zcash_note_encryption = "0.4.0"
-zcash_primitives = { version = "0.13.0-rc.1", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.13.0", features = ["transparent-inputs"] }
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }

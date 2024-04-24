@@ -138,15 +138,13 @@ impl fmt::Display for NetworkKind {
     }
 }
 
-impl From<&Network> for &'static str {
-    fn from(network: &Network) -> &'static str {
+impl<'a> From<&'a Network> for &'a str {
+    fn from(network: &'a Network) -> &'a str {
         match network {
             Network::Mainnet => "Mainnet",
             // TODO:
-            // - Add a `name` field to use here instead of checking `is_default_testnet()`
             // - zcashd calls the Regtest cache dir 'regtest' (#8327).
-            Network::Testnet(params) if params.is_default_testnet() => "Testnet",
-            Network::Testnet(_params) => "UnknownTestnet",
+            Network::Testnet(params) => params.network_name(),
         }
     }
 }
