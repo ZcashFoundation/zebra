@@ -57,7 +57,10 @@ async fn test_mocked_getinfo_for_network(
     // test the response
     assert_eq!(
         get_info_response.into_inner().min_sapling_birthday_height,
-        network.sapling_activation_height().0,
+        network
+            .sapling_activation_height()
+            .expect("must have Sapling activation height for default network")
+            .0,
         "get_info response min sapling height should match network sapling activation height"
     );
 }
@@ -396,7 +399,9 @@ async fn call_get_info(
             .expect_request_that(|req| matches!(req, ScanRequest::Info))
             .await
             .respond(ScanResponse::Info {
-                min_sapling_birthday_height: network.sapling_activation_height(),
+                min_sapling_birthday_height: network
+                    .sapling_activation_height()
+                    .expect("must have Sapling activation height for default network"),
             })
     });
 

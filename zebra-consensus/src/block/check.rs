@@ -155,7 +155,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
 
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(network)
-        .expect("Canopy activation height is known");
+        .expect("Canopy activation height is required for semantic block validation");
 
     if height < SLOW_START_INTERVAL {
         unreachable!(

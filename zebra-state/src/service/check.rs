@@ -306,7 +306,7 @@ fn difficulty_threshold_and_time_are_valid(
 /// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
 /// They are only changed from the defaults for testing.
 pub(crate) fn legacy_chain<I>(
-    nu5_activation_height: block::Height,
+    nu5_activation_height: Option<block::Height>,
     ancestors: I,
     network: &Network,
     max_legacy_chain_blocks: usize,
@@ -323,11 +323,7 @@ where
         //
         // If the cached tip is close to NU5 activation, but there aren't any V5 transactions in the
         // chain yet, we could reach MAX_BLOCKS_TO_CHECK in Canopy, and incorrectly return an error.
-        if block
-            .coinbase_height()
-            .expect("valid blocks have coinbase heights")
-            < nu5_activation_height
-        {
+        if block.coinbase_height() < nu5_activation_height {
             return Ok(());
         }
 

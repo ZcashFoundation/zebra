@@ -267,6 +267,12 @@ impl Network {
         //
         // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
 
+        // TODO:
+        // - Support constructing pre-Canopy coinbase tx and block templates and return `Height::MAX` instead of panicking
+        //   when Canopy activation height is `None` (#8434)
+        // - Add semantic block validation during the ZIP-212 grace period and update this method to return the lesser of
+        //   `canopy_activation + ZIP_212_GRACE_PERIOD_DURATION` or the NU5 activation height. (#8430)
+
         let canopy_activation = NetworkUpgrade::Canopy
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
@@ -296,10 +302,8 @@ impl Network {
     }
 
     /// Returns the Sapling activation height for this network.
-    pub fn sapling_activation_height(&self) -> Height {
-        super::NetworkUpgrade::Sapling
-            .activation_height(self)
-            .expect("Sapling activation height needs to be set")
+    pub fn sapling_activation_height(&self) -> Option<Height> {
+        super::NetworkUpgrade::Sapling.activation_height(self)
     }
 }
 

@@ -127,7 +127,7 @@ fn activation_consistent(network: Network) {
     for &network_upgrade in network_upgrades {
         let height = network_upgrade
             .activation_height(&network)
-            .expect("activations must have a height");
+            .expect("activations must have a height on default networks");
         assert!(NetworkUpgrade::is_activation_height(&network, height));
 
         if height > block::Height(0) {

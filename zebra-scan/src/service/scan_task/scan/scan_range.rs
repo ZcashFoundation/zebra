@@ -6,7 +6,7 @@ use crate::{
     scan::{get_min_height, scan_height_and_store_results, wait_for_height, State, CHECK_INTERVAL},
     storage::Storage,
 };
-use color_eyre::eyre::Report;
+use color_eyre::eyre::{eyre, Report};
 use tokio::{
     sync::{mpsc::Sender, watch},
     task::JoinHandle,
@@ -88,7 +88,10 @@ pub async fn scan_range(
     storage: Storage,
     subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<(), Report> {
-    let sapling_activation_height = storage.network().sapling_activation_height();
+    let sapling_activation_height = storage
+        .network()
+        .sapling_activation_height()
+        .ok_or(eyre!("missing Sapling activation height"))?;
     // Do not scan and notify if we are below sapling activation height.
     wait_for_height(
         sapling_activation_height,

@@ -352,7 +352,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
         .activation_height(&network)
-        .expect("a valid height")
+        .expect("must have activation height on default network")
         .0;
 
     // skip blocks that are before overwinter as they will not have a valid consensus branch id
@@ -500,7 +500,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
 
     let overwinter_activation_height = NetworkUpgrade::Overwinter
         .activation_height(&network)
-        .expect("a valid height")
+        .expect("must have activation height on default network")
         .0;
 
     let nu5_activation_height = NetworkUpgrade::Nu5

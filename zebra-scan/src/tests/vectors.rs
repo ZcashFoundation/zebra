@@ -170,7 +170,9 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
             .expect("height is stored")
             .next()
             .expect("height is not maximum"),
-        network.sapling_activation_height()
+        network
+            .sapling_activation_height()
+            .expect("should have Sapling activation height on default networks")
     );
 
     let nf = Nullifier([7; 32]);

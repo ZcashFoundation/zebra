@@ -306,7 +306,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(Some(nu_activation_height), chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -323,7 +323,7 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(Some(nu_activation_height), chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -360,7 +360,7 @@ proptest! {
         );
 
         let response = crate::service::check::legacy_chain(
-            nu_activation_height,
+            Some(nu_activation_height),
             chain.clone().into_iter().rev(),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
@@ -380,7 +380,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(Some(nu_activation_height), chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));

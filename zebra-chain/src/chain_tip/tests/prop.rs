@@ -25,7 +25,7 @@ proptest! {
         let (chain_tip, mock_chain_tip_sender) = MockChainTip::new();
         let blossom_activation_height = NetworkUpgrade::Blossom
             .activation_height(&network)
-            .expect("Blossom activation height is missing");
+            .expect("Blossom activation height is missing on default network");
 
         block_heights.sort();
         let current_height = block_heights[0];

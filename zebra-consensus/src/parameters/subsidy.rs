@@ -230,7 +230,7 @@ impl ParameterSubsidy for Network {
         match self {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
-                .expect("canopy activation height should be available"),
+                .expect("Canopy activation height should be available"),
             // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
             Network::Testnet(_params) => FIRST_HALVING_TESTNET,
         }

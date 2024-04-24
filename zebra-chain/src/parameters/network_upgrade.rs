@@ -402,14 +402,10 @@ impl NetworkUpgrade {
             ),
         ]
         .into_iter()
-        .map(move |(upgrade, spacing_seconds)| {
-            let activation_height = upgrade
-                .activation_height(network)
-                .expect("missing activation height for target spacing change");
-
+        .filter_map(move |(upgrade, spacing_seconds)| {
+            let activation_height = upgrade.activation_height(network)?;
             let target_spacing = Duration::seconds(spacing_seconds);
-
-            (activation_height, target_spacing)
+            Some((activation_height, target_spacing))
         })
     }
 

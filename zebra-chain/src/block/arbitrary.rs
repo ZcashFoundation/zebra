@@ -260,8 +260,9 @@ impl Default for LedgerState {
         let default_override = LedgerStateOverride::default();
 
         let most_recent_nu = NetworkUpgrade::current(&default_network, Height::MAX);
-        let most_recent_activation_height =
-            most_recent_nu.activation_height(&default_network).unwrap();
+        let most_recent_activation_height = most_recent_nu
+            .activation_height(&default_network)
+            .expect("should have an activation height in default networks");
 
         LedgerState {
             height: most_recent_activation_height,
@@ -467,8 +468,10 @@ impl Block {
                     let current_height = block.coinbase_height().unwrap();
                     let heartwood_height = NetworkUpgrade::Heartwood
                         .activation_height(&current.network)
-                        .unwrap();
-                    let nu5_height = NetworkUpgrade::Nu5.activation_height(&current.network);
+                        .expect("should have an activation height in default networks");
+                    let nu5_height = NetworkUpgrade::Nu5
+                        .activation_height(&current.network)
+                        .expect("should have an activation height in default networks");
 
                     match current_height.cmp(&heartwood_height) {
                         std::cmp::Ordering::Less => {
@@ -491,7 +494,7 @@ impl Block {
                                 Some(tree) => tree.hash().unwrap_or_else(|| [0u8; 32].into()),
                                 None => [0u8; 32].into(),
                             };
-                            if nu5_height.is_some() && current_height >= nu5_height.unwrap() {
+                            if current_height >= nu5_height {
                                 // From zebra-state/src/service/check.rs
                                 let auth_data_root = block.auth_data_root();
                                 let hash_block_commitments =
@@ -696,7 +699,11 @@ impl Arbitrary for Commitment {
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         (any::<[u8; 32]>(), any::<Network>(), any::<Height>())
             .prop_map(|(commitment_bytes, network, block_height)| {
-                if block_height == Heartwood.activation_height(&network).unwrap() {
+                if block_height
+                    == Heartwood
+                        .activation_height(&network)
+                        .expect("should have an activation height in default networks")
+                {
                     Commitment::ChainHistoryActivationReserved
                 } else {
                     Commitment::from_bytes(commitment_bytes, &network, block_height)

@@ -112,7 +112,7 @@ fn activates_network_upgrades_correctly() {
 
     let genesis_activation_height = NetworkUpgrade::Genesis
         .activation_height(&network)
-        .expect("must return an activation height");
+        .expect("must always return an activation height for Genesis network upgrade");
 
     assert_eq!(
         genesis_activation_height,
@@ -123,7 +123,7 @@ fn activates_network_upgrades_correctly() {
     for nu in NETWORK_UPGRADES_IN_ORDER.into_iter().skip(1) {
         let activation_height = nu
             .activation_height(&network)
-            .expect("must return an activation height");
+            .expect("must return an activation height for all network upgrades when there's an NU5 activation height");
 
         assert_eq!(
             activation_height, Height(expected_activation_height),

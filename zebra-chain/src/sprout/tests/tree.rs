@@ -92,7 +92,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     // Load the Genesis height.
     let genesis_height = NetworkUpgrade::Genesis
         .activation_height(&network)
-        .unwrap()
+        .expect("must have activation height on default network")
         .0;
 
     // Load the Genesis block.
