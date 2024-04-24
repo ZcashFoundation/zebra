@@ -607,6 +607,8 @@ fn best_relevant_chain(
         .into_iter()
         .take(POW_MEDIAN_BLOCK_SPAN)
         .collect();
+
+    // TODO: Find out what zcashd does here.
     let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
         "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
     })?;

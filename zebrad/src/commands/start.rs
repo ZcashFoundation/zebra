@@ -78,14 +78,17 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
+use std::sync::Arc;
+
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_consensus::router::BackgroundTaskHandles;
+use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -110,9 +113,8 @@ pub struct StartCmd {
 }
 
 impl StartCmd {
-    async fn start(&self) -> Result<(), Report> {
-        let config = APPLICATION.config();
-
+    /// Starts `zebrad` with the provided config.
+    pub async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
@@ -135,7 +137,7 @@ impl StartCmd {
         read_only_state_service.log_db_metrics();
 
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(config.clone()))
             .service(state_service);
 
         info!("initializing network");
@@ -177,7 +179,7 @@ impl StartCmd {
             .await;
 
         info!("initializing syncer");
-        let (syncer, sync_status) = ChainSync::new(
+        let (mut syncer, sync_status) = ChainSync::new(
             &config,
             max_checkpoint_height,
             peer_set.clone(),
@@ -300,7 +302,28 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
+        let syncer_task_handle = if config.network.network.is_regtest() {
+            if !syncer
+                .state_contains(config.network.network.genesis_hash())
+                .await?
+            {
+                let genesis_hash = block_verifier_router
+                    .clone()
+                    .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                    .await
+                    .expect("should validate Regtest genesis block");
+
+                assert_eq!(
+                    genesis_hash,
+                    config.network.network.genesis_hash(),
+                    "validated block hash should match network genesis hash"
+                )
+            }
+
+            tokio::spawn(std::future::pending().in_current_span())
+        } else {
+            tokio::spawn(syncer.sync().in_current_span())
+        };
 
         #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task only if we have keys to scan for.
@@ -505,9 +528,7 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: Arc<ZebradConfig>) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
         //
         // TODO: do we also need to account for concurrent use across services?
@@ -536,8 +557,10 @@ impl Runnable for StartCmd {
             .rt
             .take();
 
+        let config = APPLICATION.config();
+
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(config));
 
         info!("stopping zebrad");
     }
