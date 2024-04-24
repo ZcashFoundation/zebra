@@ -179,6 +179,8 @@ fn check_configured_network_name() {
         .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
     }
 
+    drop(std::panic::take_hook());
+
     // Checks that network names are displayed correctly
     assert_eq!(
         Network::new_default_testnet().to_string(),
@@ -235,6 +237,8 @@ fn check_configured_sapling_hrps() {
         })
         .expect_err("should panic when setting Sapling HRPs that are too long or contain non-alphanumeric characters (except '-')");
     }
+
+    drop(std::panic::take_hook());
 
     // Check that Sapling HRPs can contain lowercase ascii characters and dashes.
     let expected_hrp_sapling_extended_spending_key = "sapling-hrp-a";
@@ -312,6 +316,8 @@ fn check_network_name() {
         })
         .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
     }
+
+    drop(std::panic::take_hook());
 
     // Checks that network names are displayed correctly
     assert_eq!(
