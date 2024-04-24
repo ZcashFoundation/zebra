@@ -79,8 +79,19 @@ impl NoteCommitmentTrees {
         let mut sapling_result = None;
         let mut orchard_result = None;
 
+        // Note: Only updating the note commitment trees when there are more notes that
+        //       need to be appended to the tree prevents unnecessarily duplicating note commitment
+        //       tree data in the non-finalized state.
+        let has_sprout_notes = !sprout_note_commitments.is_empty();
+        let has_sapling_notes = !sapling_note_commitments.is_empty();
+        let has_orchard_notes = !orchard_note_commitments.is_empty();
+
+        if !(has_sprout_notes || has_sapling_notes || has_orchard_notes) {
+            return Ok(());
+        }
+
         rayon::in_place_scope_fifo(|scope| {
-            if !sprout_note_commitments.is_empty() {
+            if has_sprout_notes {
                 scope.spawn_fifo(|_scope| {
                     sprout_result = Some(Self::update_sprout_note_commitment_tree(
                         sprout,
@@ -89,7 +100,7 @@ impl NoteCommitmentTrees {
                 });
             }
 
-            if !sapling_note_commitments.is_empty() {
+            if has_sapling_notes {
                 scope.spawn_fifo(|_scope| {
                     sapling_result = Some(Self::update_sapling_note_commitment_tree(
                         sapling,
@@ -98,7 +109,7 @@ impl NoteCommitmentTrees {
                 });
             }
 
-            if !orchard_note_commitments.is_empty() {
+            if has_orchard_notes {
                 scope.spawn_fifo(|_scope| {
                     orchard_result = Some(Self::update_orchard_note_commitment_tree(
                         orchard,
