@@ -178,7 +178,7 @@ humantime-serde = "1.1.1"
 indexmap = "2.2.6"
 lazy_static = "1.4.0"
 semver = "1.0.22"
-serde = { version = "1.0.197", features = ["serde_derive"] }
+serde = { version = "1.0.198", features = ["serde_derive"] }
 toml = "0.8.11"
 
 futures = "0.3.30"
@@ -193,7 +193,7 @@ color-eyre = { version = "0.6.3", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tracing-appender = "0.2.3"
@@ -210,7 +210,7 @@ num-integer = "0.1.46"
 rand = "0.8.5"
 
 # prod feature internal-miner
-thread-priority = { version = "0.16.0", optional = true }
+thread-priority = { version = "1.0.0", optional = true }
 
 # prod feature sentry
 sentry = { version = "0.32.2", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
