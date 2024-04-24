@@ -98,8 +98,9 @@ fn check_parameters_impl() {
 }
 
 /// Checks that `NetworkUpgrade::activation_height()` returns the activation height of the next
-/// network upgrade if it doesn't find an activation height for a prior network upgrade, and that the
-/// `Genesis` upgrade is always at `Height(0)`.
+/// network upgrade if it doesn't find an activation height for a prior network upgrade, that the
+/// `Genesis` upgrade is always at `Height(0)`, and that the default Mainnet/Testnet/Regtest activation
+/// heights are what's expected.
 #[test]
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
