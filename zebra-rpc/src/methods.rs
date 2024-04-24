@@ -1098,6 +1098,11 @@ where
                     data: None,
                 })?;
 
+            // # Concurrency
+            //
+            // For consistency, this lookup must be performed first, then all the other
+            // lookups must be based on the hash.
+
             // Fetch the block referenced by [`hash_or_height`] from the state.
             // TODO: If this RPC is called a lot, just get the block header,
             // rather than the whole block.
@@ -1128,6 +1133,9 @@ where
                 _ => unreachable!("unmatched response to a block request"),
             };
 
+            let hash = hash_or_height.hash().unwrap_or_else(|| block.hash());
+            let hash_or_height = hash.into();
+
             // Fetch the Sapling & Orchard treestates referenced by
             // [`hash_or_height`] from the state.
 
@@ -1155,8 +1163,6 @@ where
 
             // We've got all the data we need for the RPC response, so we
             // assemble the response.
-
-            let hash = block.hash();
 
             let height = block
                 .coinbase_height()
