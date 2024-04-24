@@ -286,3 +286,58 @@ fn check_configured_sapling_hrps() {
             zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
         );
 }
+
+/// Checks that configured testnet names are validated and used correctly.
+#[test]
+fn check_network_name() {
+    // Sets a no-op panic hook to avoid long output.
+    std::panic::set_hook(Box::new(|_| {}));
+
+    // Checks that reserved network names cannot be used for configured testnets.
+    for reserved_network_name in RESERVED_NETWORK_NAMES {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_network_name(reserved_network_name)
+        })
+        .expect_err("should panic when attempting to set network name as a reserved name");
+    }
+
+    // Check that max length is enforced, and that network names may only contain alphanumeric characters and '_'.
+    for invalid_network_name in [
+        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
+        "!!!!non-alphanumeric-name".to_string(),
+    ] {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_network_name(invalid_network_name)
+        })
+        .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
+    }
+
+    // Checks that network names are displayed correctly
+    assert_eq!(
+        Network::new_default_testnet().to_string(),
+        "Testnet",
+        "default testnet should be displayed as 'Testnet'"
+    );
+    assert_eq!(
+        Network::Mainnet.to_string(),
+        "Mainnet",
+        "Mainnet should be displayed as 'Mainnet'"
+    );
+
+    // TODO: Check Regtest
+
+    // Check that network name can contain alphanumeric characters and '_'.
+    let expected_name = "ConfiguredTestnet_1";
+    let network = testnet::Parameters::build()
+        // Check that network name can contain `MAX_NETWORK_NAME_LENGTH` characters
+        .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
+        .with_network_name(expected_name)
+        .to_network();
+
+    // Check that configured network name is displayed
+    assert_eq!(
+        network.to_string(),
+        expected_name,
+        "network must be displayed as configured network name"
+    );
+}

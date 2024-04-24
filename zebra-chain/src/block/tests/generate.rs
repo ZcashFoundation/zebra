@@ -1,6 +1,6 @@
 //! Generate large transparent blocks and transactions for testing.
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::DateTime;
 use std::sync::Arc;
 
 use crate::{
@@ -40,18 +40,6 @@ pub fn transaction() -> (Transaction, Vec<u8>) {
     let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
 
     (transaction, transaction_bytes)
-}
-
-/// Returns a generated transparent lock time, and its canonical serialized bytes.
-pub fn lock_time() -> (LockTime, Vec<u8>) {
-    let lock_time = LockTime::Time(DateTime::<Utc>::from_naive_utc_and_offset(
-        NaiveDateTime::from_timestamp_opt(61, 0)
-            .expect("in-range number of seconds and valid nanosecond"),
-        Utc,
-    ));
-    let lock_time_bytes = lock_time.zcash_serialize_to_vec().unwrap();
-
-    (lock_time, lock_time_bytes)
 }
 
 /// Returns a generated transparent input, and its canonical serialized bytes.
@@ -182,8 +170,8 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     // A block header
     let (block_header, block_header_bytes) = block_header();
 
-    // A LockTime
-    let (lock_time, lock_time_bytes) = lock_time();
+    let lock_time = LockTime::Time(DateTime::from_timestamp(61, 0).unwrap());
+    let lock_time_bytes = lock_time.zcash_serialize_to_vec().unwrap();
 
     // Calculate the number of inputs we need,
     // subtracting the bytes used to serialize the expected input count,
@@ -256,8 +244,8 @@ fn single_transaction_block_many_outputs(oversized: bool) -> Block {
     // A block header
     let (block_header, block_header_bytes) = block_header();
 
-    // A LockTime
-    let (lock_time, lock_time_bytes) = lock_time();
+    let lock_time = LockTime::Time(DateTime::from_timestamp(61, 0).unwrap());
+    let lock_time_bytes = lock_time.zcash_serialize_to_vec().unwrap();
 
     // Calculate the number of outputs we need,
     // subtracting the bytes used to serialize the expected output count,
