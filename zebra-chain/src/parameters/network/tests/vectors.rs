@@ -134,7 +134,7 @@ fn activates_network_upgrades_correctly() {
 
     let expected_default_regtest_activation_heights = &[
         (Height(0), NetworkUpgrade::Genesis),
-        (Height(1), NetworkUpgrade::BeforeOverwinter),
+        (Height(1), NetworkUpgrade::Canopy),
     ];
 
     for (network, expected_activation_heights) in [
