@@ -132,10 +132,10 @@ impl NoteCommitmentTrees {
     /// Update the sprout note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     fn update_sprout_note_commitment_tree(
-        mut sprout: Arc<sprout::tree::NoteCommitmentTree>,
+        sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sprout_note_commitments: Vec<sprout::NoteCommitment>,
     ) -> Result<Arc<sprout::tree::NoteCommitmentTree>, NoteCommitmentTreeError> {
-        let sprout_nct = Arc::make_mut(&mut sprout);
+        let mut sprout_nct = Arc::unwrap_or_clone(sprout);
 
         for sprout_note_commitment in sprout_note_commitments {
             sprout_nct.append(sprout_note_commitment)?;
@@ -144,14 +144,14 @@ impl NoteCommitmentTrees {
         // Re-calculate and cache the tree root.
         let _ = sprout_nct.root();
 
-        Ok(sprout)
+        Ok(Arc::new(sprout_nct))
     }
 
     /// Update the sapling note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
     pub fn update_sapling_note_commitment_tree(
-        mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
+        sapling: Arc<sapling::tree::NoteCommitmentTree>,
         sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
@@ -160,7 +160,7 @@ impl NoteCommitmentTrees {
         ),
         NoteCommitmentTreeError,
     > {
-        let sapling_nct = Arc::make_mut(&mut sapling);
+        let mut sapling_nct = Arc::unwrap_or_clone(sapling);
 
         // It is impossible for blocks to contain more than one level 16 sapling root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
@@ -187,14 +187,14 @@ impl NoteCommitmentTrees {
         // Re-calculate and cache the tree root.
         let _ = sapling_nct.root();
 
-        Ok((sapling, subtree_root))
+        Ok((Arc::new(sapling_nct), subtree_root))
     }
 
     /// Update the orchard note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]
     pub fn update_orchard_note_commitment_tree(
-        mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
+        orchard: Arc<orchard::tree::NoteCommitmentTree>,
         orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
@@ -203,7 +203,7 @@ impl NoteCommitmentTrees {
         ),
         NoteCommitmentTreeError,
     > {
-        let orchard_nct = Arc::make_mut(&mut orchard);
+        let mut orchard_nct = Arc::unwrap_or_clone(orchard);
 
         // It is impossible for blocks to contain more than one level 16 orchard root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
@@ -224,6 +224,6 @@ impl NoteCommitmentTrees {
         // Re-calculate and cache the tree root.
         let _ = orchard_nct.root();
 
-        Ok((orchard, subtree_root))
+        Ok((Arc::new(orchard_nct), subtree_root))
     }
 }
