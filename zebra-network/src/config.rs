@@ -230,9 +230,7 @@ impl Config {
             Network::Testnet(params) if params.is_default_testnet() => {
                 self.initial_testnet_peers.clone()
             }
-            // TODO: Check if the network is an incompatible custom testnet (_not_ Regtest), then panic if `initial_testnet_peers`
-            //       contains any of the default testnet peers, or return `initial_testnet_peers` otherwise. See:
-            //       <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385881828>
+            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_default_testnet()` (#8361)
             Network::Testnet(_params) => IndexSet::new(),
         }
     }
@@ -248,8 +246,13 @@ impl Config {
         let dns_peers =
             Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
 
-        // Ignore disk errors because the cache is optional and the method already logs them.
-        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+        // TODO: Add a `disable_peers` field to `Network` to check instead of `!is_regtest()` (#8361)
+        let disk_peers = if !self.network.is_regtest() {
+            // Ignore disk errors because the cache is optional and the method already logs them.
+            self.load_peer_cache().await.unwrap_or_default()
+        } else {
+            Default::default()
+        };
 
         dns_peers.into_iter().chain(disk_peers).collect()
     }
