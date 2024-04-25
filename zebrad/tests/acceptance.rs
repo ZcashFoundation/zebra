@@ -3126,3 +3126,15 @@ async fn validate_regtest_genesis_block() {
         "validated block hash should match network genesis hash"
     )
 }
+
+/// Test successful `getblocktemplate` and `submitblock` RPC calls on Regtest on Canopy and NU5.
+///
+/// See [`common::regtest::submit_blocks`] for more information.
+#[tokio::test]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn regtest_submit_blocks() -> Result<()> {
+    for nu5_activation_height in [None, Some(1), Some(1_000)] {
+        common::regtest::submit_blocks::run(nu5_activation_height).await?;
+    }
+    Ok(())
+}
