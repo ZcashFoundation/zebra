@@ -630,8 +630,7 @@ impl<'de> Deserialize<'de> for Config {
         #[derive(Deserialize)]
         struct DTestnetParameters {
             network_name: Option<String>,
-            #[serde(default)]
-            activation_heights: ConfiguredActivationHeights,
+            activation_heights: Option<ConfiguredActivationHeights>,
         }
 
         #[derive(Deserialize)]
@@ -640,6 +639,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: String,
             network: NetworkKind,
             testnet_parameters: Option<DTestnetParameters>,
+            regtest_activation_heights: ConfiguredActivationHeights,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -656,6 +656,7 @@ impl<'de> Deserialize<'de> for Config {
                     listen_addr: "0.0.0.0".to_string(),
                     network: Default::default(),
                     testnet_parameters: None,
+                    regtest_activation_heights: ConfiguredActivationHeights::default(),
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -670,6 +671,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             network: network_kind,
             testnet_parameters,
+            regtest_activation_heights,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -678,33 +680,55 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        // TODO: Panic here if the initial testnet peers are the default initial testnet peers.
-        let network = if let Some(DTestnetParameters {
-            network_name,
-            activation_heights,
-        }) = testnet_parameters
-        {
-            assert_eq!(
-                network_kind,
+        /// Accepts an [`IndexSet`] of initial peers,
+        ///
+        /// Returns true if any of them are the default Testnet or Mainnet initial peers.
+        fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
+            let Config {
+                initial_mainnet_peers: mut default_initial_peers,
+                initial_testnet_peers: default_initial_testnet_peers,
+                ..
+            } = Config::default();
+            default_initial_peers.extend(default_initial_testnet_peers);
+
+            initial_peers
+                .intersection(&default_initial_peers)
+                .next()
+                .is_some()
+        }
+
+        let network = match (network_kind, testnet_parameters) {
+            (NetworkKind::Mainnet, _) => Network::Mainnet,
+            (NetworkKind::Testnet, None) => Network::new_default_testnet(),
+            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_activation_heights),
+            (
                 NetworkKind::Testnet,
-                "set network to 'Testnet' to use configured testnet parameters"
-            );
+                Some(DTestnetParameters {
+                    network_name,
+                    activation_heights,
+                }),
+            ) => {
+                let mut params_builder = testnet::Parameters::build();
 
-            let mut params_builder = testnet::Parameters::build();
+                if let Some(network_name) = network_name {
+                    params_builder = params_builder.with_network_name(network_name)
+                }
 
-            if let Some(network_name) = network_name {
-                params_builder = params_builder.with_network_name(network_name)
-            }
+                // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
+                if let Some(activation_heights) = activation_heights {
+                    // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
+                    // peers while activation heights are configured.
+                    // TODO: Check that the network magic is different from the default Mainnet/Testnet network magic too?
+                    if contains_default_initial_peers(&initial_testnet_peers) {
+                        return Err(de::Error::custom(
+                            "cannot use default initial testnet peers with configured activation heights",
+                        ));
+                    }
 
-            params_builder
-                .with_activation_heights(activation_heights)
-                .to_network()
-        } else {
-            // Convert to default `Network` for a `NetworkKind` if there are no testnet parameters.
-            match network_kind {
-                NetworkKind::Mainnet => Network::Mainnet,
-                NetworkKind::Testnet => Network::new_default_testnet(),
-                NetworkKind::Regtest => unimplemented!("Regtest is not yet implemented in Zebra"),
+                    params_builder = params_builder.with_activation_heights(activation_heights)
+                }
+
+                params_builder.to_network()
             }
         };
 
