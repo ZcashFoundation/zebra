@@ -197,7 +197,6 @@ impl Network {
             false
         }
     }
-
     /// Returns the [`NetworkKind`] for this network.
     pub fn kind(&self) -> NetworkKind {
         match self {

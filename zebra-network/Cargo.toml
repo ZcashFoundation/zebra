@@ -56,9 +56,9 @@ pin-project = "1.1.5"
 rand = "0.8.5"
 rayon = "1.10.0"
 regex = "1.10.4"
-serde = { version = "1.0.196", features = ["serde_derive"] }
+serde = { version = "1.0.198", features = ["serde_derive"] }
 tempfile = "3.10.1"
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 
 futures = "0.3.30"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
