@@ -24,6 +24,9 @@ pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
 /// Maximum length for a configured network name.
 pub const MAX_NETWORK_NAME_LENGTH: usize = 30;
 
+/// Maximum length for a configured human-readable prefix.
+pub const MAX_HRP_LENGTH: usize = 30;
+
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
@@ -67,13 +70,7 @@ impl Default for ParametersBuilder {
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
-            activation_heights: [
-                (Height(0), NetworkUpgrade::Genesis),
-                // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
-                (Height(1), NetworkUpgrade::BeforeOverwinter),
-            ]
-            .into_iter()
-            .collect(),
+            activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             hrp_sapling_extended_spending_key:
                 zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
             hrp_sapling_extended_full_viewing_key:
@@ -105,6 +102,44 @@ impl ParametersBuilder {
                 .all(|x| x.is_alphanumeric() || x == '_'),
             "network name must include only alphanumeric characters or '_'"
         );
+
+        self
+    }
+
+    /// Checks that the provided Sapling human-readable prefixes (HRPs) are valid and unique, then
+    /// sets the Sapling HRPs to be used in the [`Parameters`] being built.
+    pub fn with_sapling_hrps(
+        mut self,
+        hrp_sapling_extended_spending_key: impl fmt::Display,
+        hrp_sapling_extended_full_viewing_key: impl fmt::Display,
+        hrp_sapling_payment_address: impl fmt::Display,
+    ) -> Self {
+        self.hrp_sapling_extended_spending_key = hrp_sapling_extended_spending_key.to_string();
+        self.hrp_sapling_extended_full_viewing_key =
+            hrp_sapling_extended_full_viewing_key.to_string();
+        self.hrp_sapling_payment_address = hrp_sapling_payment_address.to_string();
+
+        let sapling_hrps = [
+            &self.hrp_sapling_extended_spending_key,
+            &self.hrp_sapling_extended_full_viewing_key,
+            &self.hrp_sapling_payment_address,
+        ];
+
+        for sapling_hrp in sapling_hrps {
+            assert!(sapling_hrp.len() <= MAX_HRP_LENGTH, "Sapling human-readable prefix {sapling_hrp} is too long, must be {MAX_HRP_LENGTH} characters or less");
+            assert!(
+                sapling_hrp.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "human-readable prefixes should contain only lowercase ASCII characters and dashes, hrp: {sapling_hrp}"
+            );
+            assert_eq!(
+                sapling_hrps
+                    .iter()
+                    .filter(|&&hrp| hrp == sapling_hrp)
+                    .count(),
+                1,
+                "Sapling human-readable prefixes must be unique, repeated Sapling HRP: {sapling_hrp}"
+            );
+        }
 
         self
     }
@@ -166,6 +201,7 @@ impl ParametersBuilder {
         // # Correctness
         //
         // Height(0) must be reserved for the `NetworkUpgrade::Genesis`.
+        // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
         self.activation_heights.split_off(&Height(2));
         self.activation_heights.extend(activation_heights);
 
@@ -220,7 +256,6 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             network_name: "Testnet".to_string(),
-            activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             ..Self::build().finish()
         }
     }
@@ -232,9 +267,44 @@ impl Parameters {
         ParametersBuilder::default()
     }
 
+    /// Accepts a [`ConfiguredActivationHeights`].
+    ///
+    /// Creates an instance of [`Parameters`] with `Regtest` values.
+    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
+        Self {
+            network_name: "Regtest".to_string(),
+            ..Self::build()
+                .with_sapling_hrps(
+                    zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                    zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                    zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+                )
+                // Removes default Testnet activation heights if not configured,
+                // most network upgrades are disabled by default for Regtest in zcashd
+                .with_activation_heights(activation_heights)
+                .finish()
+        }
+    }
+
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.
     pub fn is_default_testnet(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Returns true if the instance of [`Parameters`] represents Regtest.
+    pub fn is_regtest(&self) -> bool {
+        let Self {
+            network_name,
+            hrp_sapling_extended_spending_key,
+            hrp_sapling_extended_full_viewing_key,
+            hrp_sapling_payment_address,
+            ..
+        } = Self::new_regtest(ConfiguredActivationHeights::default());
+
+        self.network_name == network_name
+            && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
+            && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
+            && self.hrp_sapling_payment_address == hrp_sapling_payment_address
     }
 
     /// Returns the network name

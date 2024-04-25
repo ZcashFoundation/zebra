@@ -1,14 +1,19 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
+use zcash_primitives::{
+    consensus::{self as zp_consensus, Parameters},
+    constants as zp_constants,
+};
 
 use crate::{
     block::Height,
     parameters::{
         testnet::{
-            self, ConfiguredActivationHeights, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
+            self, ConfiguredActivationHeights, MAX_HRP_LENGTH, MAX_NETWORK_NAME_LENGTH,
+            RESERVED_NETWORK_NAMES,
         },
-        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+        Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, NETWORK_UPGRADES_IN_ORDER,
+        TESTNET_ACTIVATION_HEIGHTS,
     },
 };
 
@@ -93,8 +98,9 @@ fn check_parameters_impl() {
 }
 
 /// Checks that `NetworkUpgrade::activation_height()` returns the activation height of the next
-/// network upgrade if it doesn't find an activation height for a prior network upgrade, and that the
-/// `Genesis` upgrade is always at `Height(0)`.
+/// network upgrade if it doesn't find an activation height for a prior network upgrade, that the
+/// `Genesis` upgrade is always at `Height(0)`, and that the default Mainnet/Testnet/Regtest activation
+/// heights are what's expected.
 #[test]
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
@@ -126,6 +132,164 @@ fn activates_network_upgrades_correctly() {
             should match NU5 activation height, network_upgrade: {nu}, activation_height: {activation_height:?}"
         );
     }
+
+    let expected_default_regtest_activation_heights = &[
+        (Height(0), NetworkUpgrade::Genesis),
+        (Height(1), NetworkUpgrade::BeforeOverwinter),
+    ];
+
+    for (network, expected_activation_heights) in [
+        (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
+        (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
+        (
+            Network::new_regtest(Default::default()),
+            expected_default_regtest_activation_heights,
+        ),
+    ] {
+        assert_eq!(
+            network.activation_list(),
+            expected_activation_heights.iter().cloned().collect(),
+            "network activation list should match expected activation heights"
+        );
+    }
+}
+
+/// Checks that configured testnet names are validated and used correctly.
+#[test]
+fn check_configured_network_name() {
+    // Sets a no-op panic hook to avoid long output.
+    std::panic::set_hook(Box::new(|_| {}));
+
+    // Checks that reserved network names cannot be used for configured testnets.
+    for reserved_network_name in RESERVED_NETWORK_NAMES {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_network_name(reserved_network_name)
+        })
+        .expect_err("should panic when attempting to set network name as a reserved name");
+    }
+
+    // Check that max length is enforced, and that network names may only contain alphanumeric characters and '_'.
+    for invalid_network_name in [
+        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
+        "!!!!non-alphanumeric-name".to_string(),
+    ] {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_network_name(invalid_network_name)
+        })
+        .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
+    }
+
+    drop(std::panic::take_hook());
+
+    // Checks that network names are displayed correctly
+    assert_eq!(
+        Network::new_default_testnet().to_string(),
+        "Testnet",
+        "default testnet should be displayed as 'Testnet'"
+    );
+    assert_eq!(
+        Network::Mainnet.to_string(),
+        "Mainnet",
+        "Mainnet should be displayed as 'Mainnet'"
+    );
+    assert_eq!(
+        Network::new_regtest(Default::default()).to_string(),
+        "Regtest",
+        "Regtest should be displayed as 'Regtest'"
+    );
+
+    // Check that network name can contain alphanumeric characters and '_'.
+    let expected_name = "ConfiguredTestnet_1";
+    let network = testnet::Parameters::build()
+        // Check that network name can contain `MAX_NETWORK_NAME_LENGTH` characters
+        .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
+        .with_network_name(expected_name)
+        .to_network();
+
+    // Check that configured network name is displayed
+    assert_eq!(
+        network.to_string(),
+        expected_name,
+        "network must be displayed as configured network name"
+    );
+}
+
+/// Checks that configured Sapling human-readable prefixes (HRPs) are validated and used correctly.
+#[test]
+fn check_configured_sapling_hrps() {
+    // Sets a no-op panic hook to avoid long output.
+    std::panic::set_hook(Box::new(|_| {}));
+
+    // Check that configured Sapling HRPs must be unique.
+    std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_sapling_hrps("", "", "");
+    })
+    .expect_err("should panic when setting non-unique Sapling HRPs");
+
+    // Check that max length is enforced, and that network names may only contain lowecase ASCII characters and dashes.
+    for invalid_hrp in [
+        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
+        "!!!!non-alphabetical-name".to_string(),
+        "A".to_string(),
+    ] {
+        std::panic::catch_unwind(|| {
+            testnet::Parameters::build().with_sapling_hrps(invalid_hrp, "dummy-hrp-a", "dummy-hrp-b");
+        })
+        .expect_err("should panic when setting Sapling HRPs that are too long or contain non-alphanumeric characters (except '-')");
+    }
+
+    drop(std::panic::take_hook());
+
+    // Check that Sapling HRPs can contain lowercase ascii characters and dashes.
+    let expected_hrp_sapling_extended_spending_key = "sapling-hrp-a";
+    let expected_hrp_sapling_extended_full_viewing_key = "sapling-hrp-b";
+    let expected_hrp_sapling_payment_address = "sapling-hrp-c";
+
+    let network = testnet::Parameters::build()
+        // Check that Sapling HRPs can contain `MAX_HRP_LENGTH` characters
+        .with_sapling_hrps("a".repeat(MAX_HRP_LENGTH), "dummy-hrp-a", "dummy-hrp-b")
+        .with_sapling_hrps(
+            expected_hrp_sapling_extended_spending_key,
+            expected_hrp_sapling_extended_full_viewing_key,
+            expected_hrp_sapling_payment_address,
+        )
+        .to_network();
+
+    // Check that configured Sapling HRPs are returned by `Parameters` trait methods
+    assert_eq!(
+        network.hrp_sapling_extended_spending_key(),
+        expected_hrp_sapling_extended_spending_key,
+        "should return expected Sapling extended spending key HRP"
+    );
+    assert_eq!(
+        network.hrp_sapling_extended_full_viewing_key(),
+        expected_hrp_sapling_extended_full_viewing_key,
+        "should return expected Sapling EFVK HRP"
+    );
+    assert_eq!(
+        network.hrp_sapling_payment_address(),
+        expected_hrp_sapling_payment_address,
+        "should return expected Sapling payment address HRP"
+    );
+
+    // Check that default Mainnet, Testnet, and Regtest HRPs are valid, these calls will panic
+    // if any of the values fail validation.
+    testnet::Parameters::build()
+        .with_sapling_hrps(
+            zp_constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+        )
+        .with_sapling_hrps(
+            zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+        )
+        .with_sapling_hrps(
+            zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+        );
 }
 
 /// Checks that configured testnet names are validated and used correctly.
@@ -152,6 +316,8 @@ fn check_network_name() {
         })
         .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
     }
+
+    drop(std::panic::take_hook());
 
     // Checks that network names are displayed correctly
     assert_eq!(
