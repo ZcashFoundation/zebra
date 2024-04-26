@@ -55,38 +55,57 @@ impl ParameterCheckpoint for Network {
     fn genesis_hash(&self) -> zebra_chain::block::Hash {
         match self {
             // zcash-cli getblockhash 0
-            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
-            // zcash-cli -testnet getblockhash 0
-            // TODO: Add a `genesis_hash` field to `testnet::Parameters` and return it here (#8366)
-            Network::Testnet(_params) => {
-                "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38"
-            }
+            Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
+                .parse()
+                .expect("hard-coded hash parses"),
+            // See `zebra_chain::parameters::network::testnet` for more details.
+            Network::Testnet(params) => params.genesis_hash(),
         }
-        .parse()
-        .expect("hard-coded hash parses")
     }
 
     fn checkpoint_list(&self) -> CheckpointList {
-        // parse calls CheckpointList::from_list
-        // TODO:
-        // - Add a `genesis_hash` field to `testnet::Parameters` and return it here (#8366)
-        // - Try to disable checkpoints entirely for regtest and custom testnets
-        let checkpoint_list: CheckpointList = match self {
-            Network::Mainnet => MAINNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Mainnet checkpoint list parses and validates"),
-            Network::Testnet(_params) => TESTNET_CHECKPOINTS
-                .parse()
-                .expect("Hard-coded Testnet checkpoint list parses and validates"),
+        let (checkpoints_for_network, should_fallback_to_genesis_hash_as_checkpoint) = match self {
+            Network::Mainnet => (MAINNET_CHECKPOINTS, false),
+            Network::Testnet(params) if params.is_default_testnet() => (TESTNET_CHECKPOINTS, false),
+            Network::Testnet(_params) => (TESTNET_CHECKPOINTS, true),
         };
 
-        match checkpoint_list.hash(block::Height(0)) {
-            Some(hash) if hash == self.genesis_hash() => checkpoint_list,
-            Some(_) => {
-                panic!("The hard-coded genesis checkpoint does not match the network genesis hash")
+        // Check that the list starts with the correct genesis block and parses checkpoint list.
+        let first_checkpoint_height = checkpoints_for_network
+            .lines()
+            .next()
+            .map(checkpoint_height_and_hash);
+
+        match first_checkpoint_height {
+            // parse calls CheckpointList::from_list
+            Some(Ok((block::Height(0), hash))) if hash == self.genesis_hash() => {
+                checkpoints_for_network
+                    .parse()
+                    .expect("hard-coded checkpoint list parses and validates")
             }
-            None => unreachable!("Parser should have checked for a missing genesis checkpoint"),
+            _ if should_fallback_to_genesis_hash_as_checkpoint => {
+                CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
+                    .expect("hard-coded checkpoint list parses and validates")
+            }
+            Some(Ok((block::Height(0), _))) => {
+                panic!("the genesis checkpoint does not match the {self} genesis hash")
+            }
+            Some(Ok(_)) => panic!("checkpoints must start at the genesis block height 0"),
+            Some(Err(err)) => panic!("{err}"),
+            None => panic!(
+                "there must be at least one checkpoint on default networks, for the genesis block"
+            ),
         }
+    }
+}
+
+/// Parses a checkpoint to a [`block::Height`] and [`block::Hash`].
+fn checkpoint_height_and_hash(checkpoint: &str) -> Result<(block::Height, block::Hash), BoxError> {
+    let fields = checkpoint.split(' ').collect::<Vec<_>>();
+    if let [height, hash] = fields[..] {
+        Ok((height.parse()?, hash.parse()?))
+    } else {
+        Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()).into())
     }
 }
 
@@ -115,12 +134,7 @@ impl FromStr for CheckpointList {
         let mut checkpoint_list: Vec<(block::Height, block::Hash)> = Vec::new();
 
         for checkpoint in s.lines() {
-            let fields = checkpoint.split(' ').collect::<Vec<_>>();
-            if let [height, hash] = fields[..] {
-                checkpoint_list.push((height.parse()?, hash.parse()?));
-            } else {
-                Err(format!("Invalid checkpoint format: expected 2 space-separated fields but found {}: '{checkpoint}'", fields.len()))?;
-            };
+            checkpoint_list.push(checkpoint_height_and_hash(checkpoint)?);
         }
 
         CheckpointList::from_list(checkpoint_list)
@@ -146,17 +160,9 @@ impl CheckpointList {
         let checkpoints: BTreeMap<block::Height, block::Hash> =
             original_checkpoints.into_iter().collect();
 
-        // Check that the list starts with the correct genesis block
+        // Check that the list starts with _some_ genesis block
         match checkpoints.iter().next() {
-            // TODO: If required (we may not need checkpoints at all in Regtest or custom testnets):
-            //       move this check to `<Network as ParameterCheckpoint>::checkpoint_list(&network)` method above (#8366),
-            //       See <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385865347>
-            Some((block::Height(0), hash))
-                if (hash == &Network::Mainnet.genesis_hash()
-                    || hash == &Network::new_default_testnet().genesis_hash()) => {}
-            Some((block::Height(0), _)) => {
-                Err("the genesis checkpoint does not match the Mainnet or Testnet genesis hash")?
-            }
+            Some((block::Height(0), _hash)) => {}
             Some(_) => Err("checkpoints must start at the genesis block height 0")?,
             None => Err("there must be at least one checkpoint, for the genesis block")?,
         };
