@@ -189,6 +189,14 @@ impl Network {
         }
     }
 
+    /// Returns true if proof-of-work validation should be disabled for this network
+    pub fn disable_pow(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.disable_pow()
+        } else {
+            false
+        }
+    }
     /// Returns the [`NetworkKind`] for this network.
     pub fn kind(&self) -> NetworkKind {
         match self {
