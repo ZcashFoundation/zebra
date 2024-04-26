@@ -193,6 +193,6 @@ impl From<NetworkKind> for zcash_address::Network {
 
 impl From<&NetworkKind> for zcash_address::Network {
     fn from(network: &NetworkKind) -> Self {
-        network.into()
+        (*network).into()
     }
 }
