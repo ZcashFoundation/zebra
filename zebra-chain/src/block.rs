@@ -25,6 +25,7 @@ mod header;
 mod height;
 mod serialize;
 
+pub mod genesis;
 pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]

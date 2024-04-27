@@ -9,6 +9,8 @@ use crate::{
     parameters::NetworkUpgrade,
 };
 
+use self::testnet::ConfiguredActivationHeights;
+
 pub mod testnet;
 
 #[cfg(test)]
@@ -144,8 +146,6 @@ impl<'a> From<&'a Network> for &'a str {
     fn from(network: &'a Network) -> &'a str {
         match network {
             Network::Mainnet => "Mainnet",
-            // TODO:
-            // - zcashd calls the Regtest cache dir 'regtest' (#8327).
             Network::Testnet(params) => params.network_name(),
         }
     }
@@ -168,6 +168,11 @@ impl Network {
         Self::Testnet(Arc::new(params))
     }
 
+    /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
+    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
+        Self::new_configured_testnet(testnet::Parameters::new_regtest(activation_heights))
+    }
+
     /// Returns true if the network is the default Testnet, or false otherwise.
     pub fn is_default_testnet(&self) -> bool {
         if let Self::Testnet(params) = self {
@@ -177,6 +182,23 @@ impl Network {
         }
     }
 
+    /// Returns true if the network is Regtest, or false otherwise.
+    pub fn is_regtest(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.is_regtest()
+        } else {
+            false
+        }
+    }
+
+    /// Returns true if proof-of-work validation should be disabled for this network
+    pub fn disable_pow(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.disable_pow()
+        } else {
+            false
+        }
+    }
     /// Returns the [`NetworkKind`] for this network.
     pub fn kind(&self) -> NetworkKind {
         match self {
