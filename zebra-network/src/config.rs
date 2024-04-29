@@ -230,9 +230,7 @@ impl Config {
             Network::Testnet(params) if params.is_default_testnet() => {
                 self.initial_testnet_peers.clone()
             }
-            // TODO: Check if the network is an incompatible custom testnet (_not_ Regtest), then panic if `initial_testnet_peers`
-            //       contains any of the default testnet peers, or return `initial_testnet_peers` otherwise. See:
-            //       <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385881828>
+            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_default_testnet()` (#8361)
             Network::Testnet(_params) => IndexSet::new(),
         }
     }
@@ -639,7 +637,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: String,
             network: NetworkKind,
             testnet_parameters: Option<DTestnetParameters>,
-            regtest_activation_heights: ConfiguredActivationHeights,
+            regtest_nu5_activation_height: Option<u32>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -656,7 +654,7 @@ impl<'de> Deserialize<'de> for Config {
                     listen_addr: "0.0.0.0".to_string(),
                     network: Default::default(),
                     testnet_parameters: None,
-                    regtest_activation_heights: ConfiguredActivationHeights::default(),
+                    regtest_nu5_activation_height: None,
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -671,7 +669,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             network: network_kind,
             testnet_parameters,
-            regtest_activation_heights,
+            regtest_nu5_activation_height,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -700,7 +698,7 @@ impl<'de> Deserialize<'de> for Config {
         let network = match (network_kind, testnet_parameters) {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_activation_heights),
+            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_nu5_activation_height),
             (
                 NetworkKind::Testnet,
                 Some(DTestnetParameters {
