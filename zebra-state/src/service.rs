@@ -422,11 +422,10 @@ impl StateService {
         tracing::info!("starting legacy chain check");
         let timer = CodeTimer::start();
 
-        if let Some(tip) = state.best_tip() {
-            let nu5_activation_height = NetworkUpgrade::Nu5
-                .activation_height(network)
-                .expect("NU5 activation height is set");
-
+        if let (Some(tip), Some(nu5_activation_height)) = (
+            state.best_tip(),
+            NetworkUpgrade::Nu5.activation_height(network),
+        ) {
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
                 any_ancestor_blocks(
