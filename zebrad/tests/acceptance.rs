@@ -161,10 +161,12 @@ use color_eyre::{
 use semver::Version;
 use serde_json::Value;
 
+use tower::ServiceExt;
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, genesis::regtest_genesis_block, Height},
     parameters::Network::{self, *},
 };
+use zebra_consensus::ParameterCheckpoint;
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
@@ -3098,4 +3100,30 @@ fn scan_start_where_left() -> Result<()> {
 #[cfg(feature = "shielded-scan")]
 async fn scan_task_commands() -> Result<()> {
     common::shielded_scan::scan_task_commands::run().await
+}
+
+/// Checks that the Regtest genesis block can be validated.
+#[tokio::test]
+async fn validate_regtest_genesis_block() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Default::default());
+    let state = zebra_state::init_test(&network);
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state).await;
+
+    let genesis_hash = block_verifier_router
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    assert_eq!(
+        genesis_hash,
+        network.genesis_hash(),
+        "validated block hash should match network genesis hash"
+    )
 }

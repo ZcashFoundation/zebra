@@ -10,7 +10,7 @@ impl Arbitrary for equihash::Solution {
             .prop_map(|v| {
                 let mut bytes = [0; equihash::SOLUTION_SIZE];
                 bytes.copy_from_slice(v.as_slice());
-                Self(bytes)
+                Self::Common(bytes)
             })
             .boxed()
     }
