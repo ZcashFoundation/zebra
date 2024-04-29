@@ -47,7 +47,7 @@ elasticsearch = [
 
 [dependencies]
 bincode = "1.3.3"
-chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 futures = "0.3.30"
 hex = "0.4.3"
@@ -63,9 +63,9 @@ regex = "1.10.4"
 rlimit = "0.10.1"
 rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
 semver = "1.0.22"
-serde = { version = "1.0.196", features = ["serde_derive"] }
+serde = { version = "1.0.198", features = ["serde_derive"] }
 tempfile = "3.10.1"
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 
 rayon = "1.10.0"
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "sync", "tracing"] }
@@ -75,7 +75,7 @@ tracing = "0.1.39"
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.115", package = "serde_json", optional = true }
+serde_json = { version = "1.0.116", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.36", features = ["async-error"] }
 

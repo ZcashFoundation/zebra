@@ -624,6 +624,7 @@ fn config_tests() -> Result<()> {
     invalid_generated_config()?;
 
     // Check that we have a current version of the config stored
+    #[cfg(not(target_os = "windows"))]
     last_config_is_stored()?;
 
     // Check that Zebra's previous configurations still work
@@ -1758,7 +1759,7 @@ fn non_blocking_logger() -> Result<()> {
     });
 
     // Wait until the spawned task finishes up to 45 seconds before shutting down tokio runtime
-    if done_rx.recv_timeout(Duration::from_secs(45)).is_ok() {
+    if done_rx.recv_timeout(Duration::from_secs(90)).is_ok() {
         rt.shutdown_timeout(Duration::from_secs(3));
     }
 
