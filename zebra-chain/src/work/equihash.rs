@@ -69,7 +69,9 @@ impl Solution {
     /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
     #[allow(clippy::unwrap_in_result)]
     pub fn check(&self, header: &Header) -> Result<(), Error> {
-        // TODO: Add Equihash parameters to `testnet::Parameters`
+        // TODO:
+        // - Add Equihash parameters field to `testnet::Parameters`
+        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters
         let n = 200;
         let k = 9;
         let nonce = &header.nonce;
