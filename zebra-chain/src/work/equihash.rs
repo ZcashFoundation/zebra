@@ -71,7 +71,7 @@ impl Solution {
     pub fn check(&self, header: &Header) -> Result<(), Error> {
         // TODO:
         // - Add Equihash parameters field to `testnet::Parameters`
-        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters
+        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters - rename to `Other`
         let n = 200;
         let k = 9;
         let nonce = &header.nonce;
