@@ -199,14 +199,13 @@ impl Network {
     pub fn kind(&self) -> NetworkKind {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
-            // TODO: Return `NetworkKind::Regtest` if the parameters match the default Regtest params
+            Network::Testnet(params) if params.is_regtest() => NetworkKind::Regtest,
             Network::Testnet(_) => NetworkKind::Testnet,
         }
     }
 
     /// Returns an iterator over [`Network`] variants.
     pub fn iter() -> impl Iterator<Item = Self> {
-        // TODO: Use default values of `Testnet` variant when adding fields for #7845.
         [Self::Mainnet, Self::new_default_testnet()].into_iter()
     }
 
