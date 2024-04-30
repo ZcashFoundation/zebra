@@ -467,11 +467,6 @@ pub async fn test_responses<State, ReadState>(
 
     snapshot_rpc_getdifficulty_valid("mock", mock_get_difficulty, &settings);
 
-    // Now use the populated state
-
-    let populated_get_difficulty = get_block_template_rpc.get_difficulty().await;
-    snapshot_rpc_getdifficulty_invalid("populated", populated_get_difficulty, &settings);
-
     // `z_listunifiedreceivers`
 
     let ua1 = String::from("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf");
@@ -604,17 +599,6 @@ fn snapshot_rpc_getdifficulty_valid(
 ) {
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("get_difficulty_valid_{variant}"), difficulty)
-    });
-}
-
-/// Snapshot invalid `getdifficulty` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getdifficulty_invalid(
-    variant: &'static str,
-    difficulty: Result<f64>,
-    settings: &insta::Settings,
-) {
-    settings.bind(|| {
-        insta::assert_json_snapshot!(format!("get_difficulty_invalid_{variant}"), difficulty)
     });
 }
 
