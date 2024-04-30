@@ -64,14 +64,14 @@ pub(crate) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: [CompactDifficulty; POW_ADJUSTMENT_BLOCK_SPAN],
+    relevant_difficulty_thresholds: Vec<CompactDifficulty>,
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: [DateTime<Utc>; POW_ADJUSTMENT_BLOCK_SPAN],
+    relevant_times: Vec<DateTime<Utc>>,
 }
 
 impl AdjustedDifficulty {
@@ -137,13 +137,6 @@ impl AdjustedDifficulty {
             .into_iter()
             .take(POW_ADJUSTMENT_BLOCK_SPAN)
             .unzip::<_, _, Vec<_>, Vec<_>>();
-
-        let relevant_difficulty_thresholds = relevant_difficulty_thresholds
-            .try_into()
-            .expect("not enough context: difficulty adjustment needs at least 28 (PoWAveragingWindow + PoWMedianBlockSpan) headers");
-        let relevant_times = relevant_times
-            .try_into()
-            .expect("not enough context: difficulty adjustment needs at least 28 (PoWAveragingWindow + PoWMedianBlockSpan) headers");
 
         AdjustedDifficulty {
             candidate_time: candidate_header_time,
@@ -226,7 +219,11 @@ impl AdjustedDifficulty {
         // specification is unreachable.
 
         let averaging_window_thresholds =
-            &self.relevant_difficulty_thresholds[0..POW_AVERAGING_WINDOW];
+            if self.relevant_difficulty_thresholds.len() >= POW_AVERAGING_WINDOW {
+                &self.relevant_difficulty_thresholds[0..POW_AVERAGING_WINDOW]
+            } else {
+                return self.network.target_difficulty_limit();
+            };
 
         // Since the PoWLimits are `2^251 − 1` for Testnet, and `2^243 − 1` for
         // Mainnet, the sum of 17 `ExpandedDifficulty` will be less than or equal
@@ -297,10 +294,14 @@ impl AdjustedDifficulty {
     fn median_timespan(&self) -> Duration {
         let newer_median = self.median_time_past();
 
-        let older_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
-            [POW_AVERAGING_WINDOW..]
-            .try_into()
-            .expect("relevant times is the correct length");
+        let older_times: Vec<_> = self
+            .relevant_times
+            .iter()
+            .rev()
+            .cloned()
+            .take(POW_MEDIAN_BLOCK_SPAN)
+            .collect();
+
         let older_median = AdjustedDifficulty::median_time(older_times);
 
         // `ActualTimespan` in the Zcash specification
@@ -314,22 +315,30 @@ impl AdjustedDifficulty {
     /// Zcash specification. (These functions are identical, but they are
     /// specified in slightly different ways.)
     pub fn median_time_past(&self) -> DateTime<Utc> {
-        let median_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN] = self.relevant_times
-            [0..POW_MEDIAN_BLOCK_SPAN]
-            .try_into()
-            .expect("relevant times is the correct length");
+        let median_times: Vec<DateTime<Utc>> = self
+            .relevant_times
+            .iter()
+            .take(POW_MEDIAN_BLOCK_SPAN)
+            .cloned()
+            .collect();
 
         AdjustedDifficulty::median_time(median_times)
     }
 
     /// Calculate the median of the `median_block_span_times`: the `time`s from a
-    /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
+    /// Vec of `PoWMedianBlockSpan` (11) or fewer blocks in the relevant chain.
     ///
     /// Implements `MedianTime` from the Zcash specification.
-    pub(crate) fn median_time(
-        mut median_block_span_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN],
-    ) -> DateTime<Utc> {
+    ///
+    /// # Panics
+    ///
+    /// If provided an empty Vec
+    pub(crate) fn median_time(mut median_block_span_times: Vec<DateTime<Utc>>) -> DateTime<Utc> {
         median_block_span_times.sort_unstable();
-        median_block_span_times[POW_MEDIAN_BLOCK_SPAN / 2]
+
+        // > median(𝑆) := sorted(𝑆)ceiling((length(𝑆)+1)/2)
+        // <https://zips.z.cash/protocol/protocol.pdf>, section 7.7.3, Difficulty Adjustment (p. 132)
+        let median_idx = (POW_MEDIAN_BLOCK_SPAN / 2).min(median_block_span_times.len() / 2);
+        median_block_span_times[median_idx]
     }
 }

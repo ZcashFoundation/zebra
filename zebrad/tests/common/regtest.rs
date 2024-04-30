@@ -29,6 +29,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     let network = Network::new_regtest(None);
     let mut config = random_known_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
     let rpc_address = config.rpc.listen_addr.unwrap();
 
     let mut zebrad = testdir()?
