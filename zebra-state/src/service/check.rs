@@ -80,23 +80,25 @@ where
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
 
-    if relevant_chain.is_empty() {
-        // skip this check during tests if we don't have enough blocks in the chain
-        // process_queued also checks the chain length, so we can skip this assertion during testing
-        // (tests that want to check this code should use the correct number of blocks)
-        //
-        // TODO: accept a NotReadyToBeCommitted error in those tests instead
-        #[cfg(test)]
+    // skip this check during tests if we don't have enough blocks in the chain
+    // process_queued also checks the chain length, so we can skip this assertion during testing
+    // (tests that want to check this code should use the correct number of blocks)
+    //
+    // TODO: accept a NotReadyToBeCommitted error in those tests instead
+    #[cfg(test)]
+    if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
         return Ok(());
+    }
 
-        // In production, blocks without enough context are invalid.
-        //
-        // The BlockVerifierRouter makes sure that the first 1 million blocks (or more) are
-        // checkpoint verified. The state queues and block write task make sure that blocks are
-        // committed in strict height order. But this function is only called on semantically
-        // verified blocks, so there will be at least 1 million blocks in the state when it is
-        // called. So this error should never happen.
-        #[cfg(not(test))]
+    // In production, blocks without enough context are invalid.
+    //
+    // The BlockVerifierRouter makes sure that the first 1 million blocks (or more) are
+    // checkpoint verified. The state queues and block write task make sure that blocks are
+    // committed in strict height order. But this function is only called on semantically
+    // verified blocks, so there will be at least 1 million blocks in the state when it is
+    // called. So this error should never happen.
+    #[cfg(not(test))]
+    if relevant_chain.is_empty() {
         return Err(ValidateContextError::NotReadyToBeCommitted);
     }
 
