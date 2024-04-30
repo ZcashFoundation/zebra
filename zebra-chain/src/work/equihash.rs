@@ -29,16 +29,26 @@ pub struct SolverCancelled;
 /// The size of an Equihash solution in bytes (always 1344).
 pub(crate) const SOLUTION_SIZE: usize = 1344;
 
+/// The size of an Equihash solution in bytes on Regtest (always 36).
+pub(crate) const REGTEST_SOLUTION_SIZE: usize = 36;
+
 /// Equihash Solution in compressed format.
 ///
-/// A wrapper around [u8; 1344] because Rust doesn't implement common
-/// traits like `Debug`, `Clone`, etc for collections like array
-/// beyond lengths 0 to 32.
+/// A wrapper around `[u8; n]` where `n` is the solution size because
+/// Rust doesn't implement common traits like `Debug`, `Clone`, etc.
+/// for collections like arrays beyond lengths 0 to 32.
 ///
-/// The size of an Equihash solution in bytes is always 1344 so the
-/// length of this type is fixed.
+/// The size of an Equihash solution in bytes is always 1344 on Mainnet and Testnet, and
+/// is always 36 on Regtest so the length of this type is fixed.
 #[derive(Deserialize, Serialize)]
-pub struct Solution(#[serde(with = "BigArray")] pub [u8; SOLUTION_SIZE]);
+// It's okay to use the extra space on Regtest
+#[allow(clippy::large_enum_variant)]
+pub enum Solution {
+    /// Equihash solution on Mainnet or Testnet
+    Common(#[serde(with = "BigArray")] [u8; SOLUTION_SIZE]),
+    /// Equihash solution on Regtest
+    Regtest(#[serde(with = "BigArray")] [u8; REGTEST_SOLUTION_SIZE]),
+}
 
 impl Solution {
     /// The length of the portion of the header used as input when verifying
@@ -48,15 +58,25 @@ impl Solution {
     /// to the verification function.
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
 
+    /// Returns the inner value of the [`Solution`] as a byte slice.
+    fn value(&self) -> &[u8] {
+        match self {
+            Solution::Common(solution) => solution.as_slice(),
+            Solution::Regtest(solution) => solution.as_slice(),
+        }
+    }
+
     /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
     #[allow(clippy::unwrap_in_result)]
     pub fn check(&self, header: &Header) -> Result<(), Error> {
+        // TODO:
+        // - Add Equihash parameters field to `testnet::Parameters`
+        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters - rename to `Other`
         let n = 200;
         let k = 9;
         let nonce = &header.nonce;
-        let solution = &self.0;
-        let mut input = Vec::new();
 
+        let mut input = Vec::new();
         header
             .zcash_serialize(&mut input)
             .expect("serialization into a vec can't fail");
@@ -65,7 +85,7 @@ impl Solution {
         // This data is kept constant during solver runs, so the verifier API takes it separately.
         let input = &input[0..Solution::INPUT_LENGTH];
 
-        equihash::is_valid_solution(n, k, input, nonce.as_ref(), solution)?;
+        equihash::is_valid_solution(n, k, input, nonce.as_ref(), self.value())?;
 
         Ok(())
     }
@@ -73,23 +93,29 @@ impl Solution {
     /// Returns a [`Solution`] containing the bytes from `solution`.
     /// Returns an error if `solution` is the wrong length.
     pub fn from_bytes(solution: &[u8]) -> Result<Self, SerializationError> {
-        if solution.len() != SOLUTION_SIZE {
-            return Err(SerializationError::Parse(
+        match solution.len() {
+            // Won't panic, because we just checked the length.
+            SOLUTION_SIZE => {
+                let mut bytes = [0; SOLUTION_SIZE];
+                bytes.copy_from_slice(solution);
+                Ok(Self::Common(bytes))
+            }
+            REGTEST_SOLUTION_SIZE => {
+                let mut bytes = [0; REGTEST_SOLUTION_SIZE];
+                bytes.copy_from_slice(solution);
+                Ok(Self::Regtest(bytes))
+            }
+            _unexpected_len => Err(SerializationError::Parse(
                 "incorrect equihash solution size",
-            ));
+            )),
         }
-
-        let mut bytes = [0; SOLUTION_SIZE];
-        // Won't panic, because we just checked the length.
-        bytes.copy_from_slice(solution);
-
-        Ok(Self(bytes))
     }
 
     /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
     #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn for_proposal() -> Self {
-        Self([0; SOLUTION_SIZE])
+        // TODO: Accept network as an argument, and if it's Regtest, return the shorter null solution.
+        Self::Common([0; SOLUTION_SIZE])
     }
 
     /// Mines and returns one or more [`Solution`]s based on a template `header`.
@@ -126,14 +152,14 @@ impl Solution {
 
 impl PartialEq<Solution> for Solution {
     fn eq(&self, other: &Solution) -> bool {
-        self.0.as_ref() == other.0.as_ref()
+        self.value() == other.value()
     }
 }
 
 impl fmt::Debug for Solution {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("EquihashSolution")
-            .field(&hex::encode(&self.0[..]))
+            .field(&hex::encode(self.value()))
             .finish()
     }
 }
@@ -153,13 +179,13 @@ impl Eq for Solution {}
 #[cfg(any(test, feature = "proptest-impl"))]
 impl Default for Solution {
     fn default() -> Self {
-        Self([0; SOLUTION_SIZE])
+        Self::Common([0; SOLUTION_SIZE])
     }
 }
 
 impl ZcashSerialize for Solution {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        zcash_serialize_bytes(&self.0.to_vec(), writer)
+        zcash_serialize_bytes(&self.value().to_vec(), writer)
     }
 }
 
