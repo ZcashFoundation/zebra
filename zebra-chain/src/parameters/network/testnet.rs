@@ -310,7 +310,7 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    pub fn new_regtest(_nu5_activation_height: Option<u32>) -> Self {
+    pub fn new_regtest() -> Self {
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
@@ -347,7 +347,7 @@ impl Parameters {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
-        } = Self::new_regtest(None);
+        } = Self::new_regtest();
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash

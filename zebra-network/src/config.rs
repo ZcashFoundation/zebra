@@ -637,7 +637,6 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: String,
             network: NetworkKind,
             testnet_parameters: Option<DTestnetParameters>,
-            regtest_nu5_activation_height: Option<u32>,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -654,7 +653,6 @@ impl<'de> Deserialize<'de> for Config {
                     listen_addr: "0.0.0.0".to_string(),
                     network: Default::default(),
                     testnet_parameters: None,
-                    regtest_nu5_activation_height: None,
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -669,7 +667,6 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             network: network_kind,
             testnet_parameters,
-            regtest_nu5_activation_height,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -698,7 +695,7 @@ impl<'de> Deserialize<'de> for Config {
         let network = match (network_kind, testnet_parameters) {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_nu5_activation_height),
+            (NetworkKind::Regtest, _) => Network::new_regtest(),
             (
                 NetworkKind::Testnet,
                 Some(DTestnetParameters {

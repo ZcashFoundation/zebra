@@ -27,7 +27,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
     info!("starting regtest submit_blocks test");
 
-    let network = Network::new_regtest(None);
+    let network = Network::new_regtest();
     let mut config = random_known_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
     let rpc_address = config.rpc.listen_addr.unwrap();

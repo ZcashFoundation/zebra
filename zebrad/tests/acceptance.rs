@@ -3107,7 +3107,7 @@ async fn scan_task_commands() -> Result<()> {
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
+    let network = Network::new_regtest();
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,

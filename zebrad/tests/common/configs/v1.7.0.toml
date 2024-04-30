@@ -60,8 +60,6 @@ max_connections_per_ip = 1
 network = "Regtest"
 peerset_initial_target_size = 25
 
-regtest_nu5_activation_height = 1
-
 [network.testnet_parameters]
 network_name = "ConfiguredTestnet_1"
 
