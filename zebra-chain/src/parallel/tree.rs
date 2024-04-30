@@ -79,9 +79,6 @@ impl NoteCommitmentTrees {
         let mut sapling_result = None;
         let mut orchard_result = None;
 
-        // Note: Only updating the note commitment trees when there are more notes that
-        //       need to be appended to the tree prevents unnecessarily duplicating note commitment
-        //       tree data in the non-finalized state.
         let has_sprout_notes = !sprout_note_commitments.is_empty();
         let has_sapling_notes = !sapling_note_commitments.is_empty();
         let has_orchard_notes = !orchard_note_commitments.is_empty();
