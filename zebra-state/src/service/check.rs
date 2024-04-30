@@ -80,7 +80,7 @@ where
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
 
-    if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
+    if relevant_chain.is_empty() {
         // skip this check during tests if we don't have enough blocks in the chain
         // process_queued also checks the chain length, so we can skip this assertion during testing
         // (tests that want to check this code should use the correct number of blocks)

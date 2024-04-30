@@ -264,6 +264,8 @@ impl Network {
                 .expect("ZIP-212 grace period ends at a valid block height")
         } else {
             canopy_activation
+                .previous()
+                .expect("Canopy activation must be above Genesis height")
         }
     }
 

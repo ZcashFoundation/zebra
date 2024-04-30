@@ -310,7 +310,7 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    pub fn new_regtest(nu5_activation_height: Option<u32>) -> Self {
+    pub fn new_regtest(_nu5_activation_height: Option<u32>) -> Self {
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
@@ -324,8 +324,7 @@ impl Parameters {
                 // Removes default Testnet activation heights if not configured,
                 // most network upgrades are disabled by default for Regtest in zcashd
                 .with_activation_heights(ConfiguredActivationHeights {
-                    canopy: Some(1),
-                    nu5: nu5_activation_height,
+                    nu5: Some(1),
                     ..Default::default()
                 })
                 .finish()
