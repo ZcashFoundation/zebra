@@ -26,7 +26,8 @@ pub const POW_MEDIAN_BLOCK_SPAN: usize = 11;
 
 /// The overall block span used for adjusting Zcash block difficulty.
 ///
-/// `PoWAveragingWindow + PoWMedianBlockSpan` in the Zcash specification.
+/// `PoWAveragingWindow + PoWMedianBlockSpan` in the Zcash specification based on
+/// > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
 pub const POW_ADJUSTMENT_BLOCK_SPAN: usize = POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
 
 /// The damping factor for median timespan variance.

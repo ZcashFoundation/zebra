@@ -284,7 +284,7 @@ where
 /// in the `getblocktemplate` RPC.
 pub fn generate_coinbase_and_roots(
     network: &Network,
-    height: Height,
+    block_template_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: &[VerifiedUnminedTx],
     history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
@@ -295,7 +295,7 @@ pub fn generate_coinbase_and_roots(
     let miner_fee = calculate_miner_fee(mempool_txs);
     let coinbase_txn = generate_coinbase_transaction(
         network,
-        height,
+        block_template_height,
         miner_address,
         miner_fee,
         like_zcashd,
@@ -308,7 +308,7 @@ pub fn generate_coinbase_and_roots(
     let chain_history_root = history_tree
         .hash()
         .or_else(|| {
-            (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
+            (NetworkUpgrade::Heartwood.activation_height(network) == Some(block_template_height))
                 .then_some([0; 32].into())
         })
         .expect("history tree can't be empty");

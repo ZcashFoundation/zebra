@@ -46,10 +46,6 @@ pub(crate) use difficulty::AdjustedDifficulty;
 ///
 /// The relevant chain is an iterator over the ancestors of `block`, starting
 /// with its parent block.
-///
-/// # Panics
-///
-/// If the state contains less than 28 ([`POW_ADJUSTMENT_BLOCK_SPAN`]) blocks.
 #[tracing::instrument(skip(semantically_verified, finalized_tip_height, relevant_chain))]
 pub(crate) fn block_is_valid_for_recent_chain<C>(
     semantically_verified: &SemanticallyVerifiedBlock,
@@ -97,6 +93,16 @@ where
     // committed in strict height order. But this function is only called on semantically
     // verified blocks, so there will be at least 1 million blocks in the state when it is
     // called. So this error should never happen on Mainnet or the default Testnet.
+    //
+    // It's okay to use a relevant chain of fewer than `POW_ADJUSTMENT_BLOCK_SPAN` blocks, because
+    // the MedianTime function uses height 0 if passed a negative height by the ActualTimespan function:
+    // > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
+    // > MedianTime(height : N) := median([[ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to height − 1 ]])
+    // and the MeanTarget function only requires the past `PoWAveragingWindow` (17) blocks for heights above 17,
+    // > PoWLimit, if height ≤ PoWAveragingWindow
+    // > ([ToTarget(nBits(𝑖)) for 𝑖 from height−PoWAveragingWindow up to height−1]) otherwise
+    //
+    // See the 'Difficulty Adjustment' section (page 132) in the Zcash specification.
     #[cfg(not(test))]
     if relevant_chain.is_empty() {
         return Err(ValidateContextError::NotReadyToBeCommitted);
