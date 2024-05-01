@@ -184,7 +184,8 @@ use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::random_known_rpc_port_config,
     config::{
-        config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
+        config_file_full_path, configs_dir, default_test_config, external_address_test_config,
+        persistent_test_config, testdir,
     },
     launch::{
         spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
@@ -3126,4 +3127,31 @@ async fn validate_regtest_genesis_block() {
         network.genesis_hash(),
         "validated block hash should match network genesis hash"
     )
+}
+
+/// Test that Version messages are sent with the external address when configured to do so.
+#[test]
+fn external_address() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let testdir = testdir()?.with_config(&mut external_address_test_config(&Mainnet)?)?;
+    let mut child = testdir.spawn_child(args!["start"])?;
+
+    // Give enough time to start connecting to some peers.
+    std::thread::sleep(Duration::from_secs(10));
+
+    child.kill(false)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Zebra started
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure we are using external address for Version messages.
+    output.stdout_line_contains("Using external address for Version messages")?;
+
+    // Make sure the command was killed.
+    output.assert_was_killed()?;
+
+    Ok(())
 }

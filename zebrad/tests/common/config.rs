@@ -119,6 +119,12 @@ pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {
     Ok(config)
 }
 
+pub fn external_address_test_config(network: &Network) -> Result<ZebradConfig> {
+    let mut config = default_test_config(network)?;
+    config.network.external_addr = Some("127.0.0.1:0".parse()?);
+    Ok(config)
+}
+
 pub fn testdir() -> Result<TempDir> {
     tempfile::Builder::new()
         .prefix("zebrad_tests")
