@@ -96,7 +96,7 @@ where
     // checkpoint verified. The state queues and block write task make sure that blocks are
     // committed in strict height order. But this function is only called on semantically
     // verified blocks, so there will be at least 1 million blocks in the state when it is
-    // called. So this error should never happen.
+    // called. So this error should never happen on Mainnet or the default Testnet.
     #[cfg(not(test))]
     if relevant_chain.is_empty() {
         return Err(ValidateContextError::NotReadyToBeCommitted);

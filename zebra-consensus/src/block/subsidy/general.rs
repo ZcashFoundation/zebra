@@ -87,7 +87,7 @@ pub fn block_subsidy(height: Height, network: &Network) -> Result<Amount<NonNega
 
     // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
     //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
-    if height < SLOW_START_SHIFT && !network.disable_pow() {
+    if height < SLOW_START_INTERVAL && !network.disable_pow() {
         unreachable!(
             "unsupported block height {height:?}: callers should handle blocks below {SLOW_START_INTERVAL:?}",
         )
