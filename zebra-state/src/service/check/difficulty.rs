@@ -336,7 +336,7 @@ impl AdjustedDifficulty {
     pub(crate) fn median_time(mut median_block_span_times: Vec<DateTime<Utc>>) -> DateTime<Utc> {
         median_block_span_times.sort_unstable();
 
-        // > median(𝑆) := sorted(𝑆)ceiling((length(𝑆)+1)/2)
+        // > median(𝑆) := sorted(𝑆)_{ceiling((length(𝑆)+1)/2)}
         // <https://zips.z.cash/protocol/protocol.pdf>, section 7.7.3, Difficulty Adjustment (p. 132)
         let median_idx = (POW_MEDIAN_BLOCK_SPAN / 2).min(median_block_span_times.len() / 2);
         median_block_span_times[median_idx]
