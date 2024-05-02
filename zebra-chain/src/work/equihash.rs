@@ -69,11 +69,12 @@ impl Solution {
     /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
     #[allow(clippy::unwrap_in_result)]
     pub fn check(&self, header: &Header) -> Result<(), Error> {
+        // TODO:
+        // - Add Equihash parameters field to `testnet::Parameters`
+        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters - rename to `Other`
+        let n = 200;
+        let k = 9;
         let nonce = &header.nonce;
-        let (solution, n, k) = match self {
-            Solution::Common(solution) => (solution.as_slice(), 200, 9),
-            Solution::Regtest(solution) => (solution.as_slice(), 48, 5),
-        };
 
         let mut input = Vec::new();
         header
@@ -84,7 +85,7 @@ impl Solution {
         // This data is kept constant during solver runs, so the verifier API takes it separately.
         let input = &input[0..Solution::INPUT_LENGTH];
 
-        equihash::is_valid_solution(n, k, input, nonce.as_ref(), solution)?;
+        equihash::is_valid_solution(n, k, input, nonce.as_ref(), self.value())?;
 
         Ok(())
     }

@@ -82,10 +82,11 @@ use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_consensus::router::BackgroundTaskHandles;
+use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -177,7 +178,7 @@ impl StartCmd {
             .await;
 
         info!("initializing syncer");
-        let (syncer, sync_status) = ChainSync::new(
+        let (mut syncer, sync_status) = ChainSync::new(
             &config,
             max_checkpoint_height,
             peer_set.clone(),
@@ -300,7 +301,28 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
+        let syncer_task_handle = if config.network.network.is_regtest() {
+            if !syncer
+                .state_contains(config.network.network.genesis_hash())
+                .await?
+            {
+                let genesis_hash = block_verifier_router
+                    .clone()
+                    .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                    .await
+                    .expect("should validate Regtest genesis block");
+
+                assert_eq!(
+                    genesis_hash,
+                    config.network.network.genesis_hash(),
+                    "validated block hash should match network genesis hash"
+                )
+            }
+
+            tokio::spawn(std::future::pending().in_current_span())
+        } else {
+            tokio::spawn(syncer.sync().in_current_span())
+        };
 
         #[cfg(feature = "shielded-scan")]
         // Spawn never ending scan task only if we have keys to scan for.

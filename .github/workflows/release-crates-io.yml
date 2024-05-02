@@ -70,7 +70,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.4.0
 
       - name: Checkout git repository
-        uses: actions/checkout@v4.1.2
+        uses: actions/checkout@v4.1.4
         with:
           persist-credentials: false
 
