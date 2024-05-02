@@ -3148,7 +3148,7 @@ fn external_address() -> Result<()> {
     output.stdout_line_contains("Starting zebrad")?;
 
     // Make sure we are using external address for Version messages.
-    output.stdout_line_contains("Using external address for Version messages")?;
+    output.stdout_line_contains("using external address for Version messages")?;
 
     // Make sure the command was killed.
     output.assert_was_killed()?;

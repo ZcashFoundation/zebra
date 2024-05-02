@@ -76,8 +76,8 @@ pub struct Config {
     ///
     /// Zebra bind to `listen_addr` but this can be an internal address if the node
     /// is behind a firewall, load balancer or NAT. This field can be used to
-    /// advertise a different address to peers making possible to receive inbound
-    /// connections and contribute to the P2P network.
+    /// advertise a different address to peers making it possible to receive inbound
+    /// connections and contribute to the P2P network from behind a firewall, load balancer, or NAT.
     pub external_addr: Option<SocketAddr>,
 
     /// The network to connect to.
@@ -754,20 +754,19 @@ impl<'de> Deserialize<'de> for Config {
             },
         }?;
 
-        let mut external_socket_addr = None;
-
-        if let Some(address) = &external_addr {
-            let external_addr = match address.parse::<SocketAddr>() {
-                Ok(socket) => Ok(socket),
+        let external_socket_addr = if let Some(address) = &external_addr {
+            match address.parse::<SocketAddr>() {
+                Ok(socket) => Ok(Some(socket)),
                 Err(_) => match address.parse::<IpAddr>() {
-                    Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
+                    Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
                     Err(err) => Err(de::Error::custom(format!(
                         "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
                     ))),
                 },
-            }?;
-            external_socket_addr = Some(external_addr)
-        }
+            }?
+        } else {
+            None
+        };
 
         let [max_connections_per_ip, peerset_initial_target_size] = [
             ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 

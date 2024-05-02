@@ -655,10 +655,10 @@ where
                 .get_transient_addr()
                 .expect("non-Isolated connections have a remote addr");
 
-            // If we have an external address let's use it, else use the listen address.
+            // Include the configured external address in our version message, if any, otherwise, include our listen address.
             let advertise_addr = match config.external_addr {
                 Some(external_addr) => {
-                    info!(?their_addr, ?config.listen_addr, "Using external address for Version messages");
+                    info!(?their_addr, ?config.listen_addr, "using external address for Version messages");
                     external_addr
                 }
                 None => config.listen_addr,
