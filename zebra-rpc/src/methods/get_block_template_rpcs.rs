@@ -638,8 +638,12 @@ where
                 //
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-                check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
-
+                // TODO:
+                // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
+                // - Check the field in `sync_status` so it applies to the mempool as well.
+                if !network.disable_pow() {
+                    check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
+                }
                 // TODO: return an error if we have no peers, like `zcashd` does,
                 //       and add a developer config that mines regardless of how many peers we have.
                 // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880

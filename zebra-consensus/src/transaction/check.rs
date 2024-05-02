@@ -356,7 +356,6 @@ pub fn coinbase_expiry_height(
 ) -> Result<(), TransactionError> {
     let expiry_height = coinbase.expiry_height();
 
-    // TODO: replace `if let` with `expect` after NU5 mainnet activation
     if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
         // # Consensus
         //

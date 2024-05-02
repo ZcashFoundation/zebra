@@ -72,15 +72,6 @@ Heartwood = 903_800
 Canopy = 1_028_500
 NU5 = 1_842_420
 
-[network.regtest_activation_heights]
-BeforeOverwinter = 1
-Overwinter = 207_500
-Sapling = 280_000
-Blossom = 584_000
-Heartwood = 903_800
-Canopy = 1_028_500
-NU5 = 1_842_420
-
 [rpc]
 debug_force_finished_sync = false
 parallel_cpu_threads = 0
