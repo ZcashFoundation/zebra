@@ -238,9 +238,7 @@ impl Config {
             Network::Testnet(params) if params.is_default_testnet() => {
                 self.initial_testnet_peers.clone()
             }
-            // TODO: Check if the network is an incompatible custom testnet (_not_ Regtest), then panic if `initial_testnet_peers`
-            //       contains any of the default testnet peers, or return `initial_testnet_peers` otherwise. See:
-            //       <https://github.com/ZcashFoundation/zebra/pull/7924#discussion_r1385881828>
+            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_default_testnet()` (#8361)
             Network::Testnet(_params) => IndexSet::new(),
         }
     }
@@ -649,7 +647,6 @@ impl<'de> Deserialize<'de> for Config {
             external_addr: Option<String>,
             network: NetworkKind,
             testnet_parameters: Option<DTestnetParameters>,
-            regtest_activation_heights: ConfiguredActivationHeights,
             initial_mainnet_peers: IndexSet<String>,
             initial_testnet_peers: IndexSet<String>,
             cache_dir: CacheDir,
@@ -667,7 +664,6 @@ impl<'de> Deserialize<'de> for Config {
                     external_addr: None,
                     network: Default::default(),
                     testnet_parameters: None,
-                    regtest_activation_heights: ConfiguredActivationHeights::default(),
                     initial_mainnet_peers: config.initial_mainnet_peers,
                     initial_testnet_peers: config.initial_testnet_peers,
                     cache_dir: config.cache_dir,
@@ -683,7 +679,6 @@ impl<'de> Deserialize<'de> for Config {
             external_addr,
             network: network_kind,
             testnet_parameters,
-            regtest_activation_heights,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -712,7 +707,7 @@ impl<'de> Deserialize<'de> for Config {
         let network = match (network_kind, testnet_parameters) {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, _) => Network::new_regtest(regtest_activation_heights),
+            (NetworkKind::Regtest, _) => Network::new_regtest(),
             (
                 NetworkKind::Testnet,
                 Some(DTestnetParameters {

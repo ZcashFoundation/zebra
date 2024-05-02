@@ -596,7 +596,7 @@ pub fn next_median_time_past(
 fn best_relevant_chain(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-) -> Result<[Arc<Block>; POW_MEDIAN_BLOCK_SPAN], BoxError> {
+) -> Result<Vec<Arc<Block>>, BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
@@ -607,9 +607,10 @@ fn best_relevant_chain(
         .into_iter()
         .take(POW_MEDIAN_BLOCK_SPAN)
         .collect();
-    let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
-        "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
-    })?;
+
+    if best_relevant_chain.is_empty() {
+        return Err("missing genesis block, wait until it is committed".into());
+    };
 
     let state_tip_after_queries =
         read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
@@ -628,9 +629,7 @@ fn best_relevant_chain(
 /// The `relevant_chain` has blocks in reverse height order.
 ///
 /// See [`next_median_time_past()`] for details.
-pub(crate) fn calculate_median_time_past(
-    relevant_chain: [Arc<Block>; POW_MEDIAN_BLOCK_SPAN],
-) -> DateTime32 {
+pub(crate) fn calculate_median_time_past(relevant_chain: Vec<Arc<Block>>) -> DateTime32 {
     let relevant_data: Vec<DateTime<Utc>> = relevant_chain
         .iter()
         .map(|block| block.header.time)
@@ -640,11 +639,7 @@ pub(crate) fn calculate_median_time_past(
     // > preceding PoWMedianBlockSpan blocks (or all preceding blocks if there are fewer than
     // > PoWMedianBlockSpan). The median-time-past of a genesis block is not defined.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past = AdjustedDifficulty::median_time(
-        relevant_data
-            .try_into()
-            .expect("always has the correct length due to function argument type"),
-    );
+    let median_time_past = AdjustedDifficulty::median_time(relevant_data);
 
     DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
 }

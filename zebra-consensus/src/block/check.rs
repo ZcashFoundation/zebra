@@ -157,10 +157,18 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    if height < SLOW_START_INTERVAL {
+    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
+    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
+    let slow_start_interval = if network.disable_pow() {
+        Height(0)
+    } else {
+        SLOW_START_INTERVAL
+    };
+
+    if height < slow_start_interval {
         unreachable!(
             "unsupported block height: callers should handle blocks below {:?}",
-            SLOW_START_INTERVAL
+            slow_start_interval
         )
     } else if halving_div.count_ones() != 1 {
         unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")

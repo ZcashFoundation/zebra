@@ -3108,7 +3108,7 @@ async fn scan_task_commands() -> Result<()> {
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
+    let network = Network::new_regtest();
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,
@@ -3153,5 +3153,16 @@ fn external_address() -> Result<()> {
     // Make sure the command was killed.
     output.assert_was_killed()?;
 
+    Ok(())
+}
+
+/// Test successful `getblocktemplate` and `submitblock` RPC calls on Regtest on Canopy.
+///
+/// See [`common::regtest::submit_blocks`] for more information.
+// TODO: Test this with an NU5 activation height too once config can be serialized.
+#[tokio::test]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn regtest_submit_blocks() -> Result<()> {
+    common::regtest::submit_blocks_test().await?;
     Ok(())
 }

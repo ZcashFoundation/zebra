@@ -402,14 +402,10 @@ impl NetworkUpgrade {
             ),
         ]
         .into_iter()
-        .map(move |(upgrade, spacing_seconds)| {
-            let activation_height = upgrade
-                .activation_height(network)
-                .expect("missing activation height for target spacing change");
-
+        .filter_map(move |(upgrade, spacing_seconds)| {
+            let activation_height = upgrade.activation_height(network)?;
             let target_spacing = Duration::seconds(spacing_seconds);
-
-            (activation_height, target_spacing)
+            Some((activation_height, target_spacing))
         })
     }
 
@@ -490,6 +486,32 @@ impl NetworkUpgrade {
             .iter()
             .find(|id| id.1 == ConsensusBranchId(branch_id))
             .map(|nu| nu.0)
+    }
+}
+
+impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
+    fn from(nu: zcash_protocol::consensus::NetworkUpgrade) -> Self {
+        match nu {
+            zcash_protocol::consensus::NetworkUpgrade::Overwinter => Self::Overwinter,
+            zcash_protocol::consensus::NetworkUpgrade::Sapling => Self::Sapling,
+            zcash_protocol::consensus::NetworkUpgrade::Blossom => Self::Blossom,
+            zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
+            zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
+            zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
+        }
+    }
+}
+
+impl From<zcash_primitives::consensus::NetworkUpgrade> for NetworkUpgrade {
+    fn from(value: zcash_primitives::consensus::NetworkUpgrade) -> Self {
+        match value {
+            zcash_primitives::consensus::NetworkUpgrade::Overwinter => NetworkUpgrade::Overwinter,
+            zcash_primitives::consensus::NetworkUpgrade::Sapling => NetworkUpgrade::Sapling,
+            zcash_primitives::consensus::NetworkUpgrade::Blossom => NetworkUpgrade::Blossom,
+            zcash_primitives::consensus::NetworkUpgrade::Heartwood => NetworkUpgrade::Heartwood,
+            zcash_primitives::consensus::NetworkUpgrade::Canopy => NetworkUpgrade::Canopy,
+            zcash_primitives::consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
+        }
     }
 }
 
