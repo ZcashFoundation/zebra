@@ -699,7 +699,7 @@ impl ParameterDifficulty for Network {
             /* 2^243 - 1 */
             Network::Mainnet => (U256::one() << 243) - 1,
             /* 2^251 - 1 */
-            // TODO: Add a `target_difficulty_limit` field to `testnet::Parameters` to return here.
+            // TODO: Add a `target_difficulty_limit` field to `testnet::Parameters` to return here. (`U256::from_big_endian(&[0x0f].repeat(8))` for Regtest)
             Network::Testnet(_params) => (U256::one() << 251) - 1,
         };
 

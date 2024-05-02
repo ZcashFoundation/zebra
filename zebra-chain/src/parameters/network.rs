@@ -9,8 +9,6 @@ use crate::{
     parameters::NetworkUpgrade,
 };
 
-use self::testnet::ConfiguredActivationHeights;
-
 pub mod testnet;
 
 #[cfg(test)]
@@ -169,8 +167,8 @@ impl Network {
     }
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
-    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
-        Self::new_configured_testnet(testnet::Parameters::new_regtest(activation_heights))
+    pub fn new_regtest() -> Self {
+        Self::new_configured_testnet(testnet::Parameters::new_regtest())
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.
@@ -203,14 +201,13 @@ impl Network {
     pub fn kind(&self) -> NetworkKind {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
-            // TODO: Return `NetworkKind::Regtest` if the parameters match the default Regtest params
+            Network::Testnet(params) if params.is_regtest() => NetworkKind::Regtest,
             Network::Testnet(_) => NetworkKind::Testnet,
         }
     }
 
     /// Returns an iterator over [`Network`] variants.
     pub fn iter() -> impl Iterator<Item = Self> {
-        // TODO: Use default values of `Testnet` variant when adding fields for #7845.
         [Self::Mainnet, Self::new_default_testnet()].into_iter()
     }
 
@@ -244,6 +241,12 @@ impl Network {
     /// Mandatory checkpoints are a Zebra-specific feature.
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
+    ///
+    /// ZIP-212 grace period is only applied to default networks.
+    // TODO:
+    // - Support constructing pre-Canopy coinbase tx and block templates and return `Height::MAX` instead of panicking
+    //   when Canopy activation height is `None` (#8434)
+    // - Add semantic block validation during the ZIP-212 grace period and update this method to always apply the ZIP-212 grace period
     pub fn mandatory_checkpoint_height(&self) -> Height {
         // Currently this is after the ZIP-212 grace period.
         //
@@ -253,8 +256,19 @@ impl Network {
             .activation_height(self)
             .expect("Canopy activation height must be present for both networks");
 
-        (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
-            .expect("ZIP-212 grace period ends at a valid block height")
+        let is_a_default_network = match self {
+            Network::Mainnet => true,
+            Network::Testnet(params) => params.is_default_testnet(),
+        };
+
+        if is_a_default_network {
+            (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
+                .expect("ZIP-212 grace period ends at a valid block height")
+        } else {
+            canopy_activation
+                .previous()
+                .expect("Canopy activation must be above Genesis height")
+        }
     }
 
     /// Return the network name as defined in

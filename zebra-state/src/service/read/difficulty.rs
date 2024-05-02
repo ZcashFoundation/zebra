@@ -152,15 +152,7 @@ pub fn solution_rate(
 fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-) -> Result<
-    (
-        Height,
-        block::Hash,
-        [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
-        Arc<HistoryTree>,
-    ),
-    BoxError,
-> {
+) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
@@ -171,9 +163,10 @@ fn best_relevant_chain_and_history_tree(
         .into_iter()
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
-    let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
-        "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
-    })?;
+
+    if best_relevant_chain.is_empty() {
+        return Err("missing genesis block, wait until it is committed".into());
+    };
 
     let history_tree = history_tree(
         non_finalized_state.best_chain(),
@@ -206,7 +199,7 @@ fn best_relevant_chain_and_history_tree(
 ///
 /// See [`get_block_template_chain_info()`] for details.
 fn difficulty_time_and_history_tree(
-    relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+    relevant_chain: Vec<Arc<Block>>,
     tip_height: Height,
     tip_hash: block::Hash,
     network: &Network,
@@ -223,10 +216,11 @@ fn difficulty_time_and_history_tree(
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let median_time_past = calculate_median_time_past(
-        relevant_chain[0..POW_MEDIAN_BLOCK_SPAN]
-            .to_vec()
-            .try_into()
-            .expect("slice is correct size"),
+        relevant_chain
+            .iter()
+            .take(POW_MEDIAN_BLOCK_SPAN)
+            .cloned()
+            .collect(),
     );
 
     let min_time = median_time_past
@@ -307,9 +301,13 @@ fn adjust_difficulty_and_time_for_testnet(
         .try_into()
         .expect("valid blocks have in-range times");
 
-    let minimum_difficulty_spacing =
+    let Some(minimum_difficulty_spacing) =
         NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
-            .expect("just checked testnet, and the RPC returns an error for low heights");
+    else {
+        // Returns early if the testnet minimum difficulty consensus rule is not active
+        return;
+    };
+
     let minimum_difficulty_spacing: Duration32 = minimum_difficulty_spacing
         .try_into()
         .expect("small positive values are in-range");

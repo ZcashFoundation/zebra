@@ -310,7 +310,7 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    pub fn new_regtest(activation_heights: ConfiguredActivationHeights) -> Self {
+    pub fn new_regtest() -> Self {
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
@@ -323,7 +323,10 @@ impl Parameters {
                 )
                 // Removes default Testnet activation heights if not configured,
                 // most network upgrades are disabled by default for Regtest in zcashd
-                .with_activation_heights(activation_heights)
+                .with_activation_heights(ConfiguredActivationHeights {
+                    nu5: Some(1),
+                    ..Default::default()
+                })
                 .finish()
         }
     }
@@ -344,7 +347,7 @@ impl Parameters {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
-        } = Self::new_regtest(ConfiguredActivationHeights::default());
+        } = Self::new_regtest();
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash
