@@ -6,10 +6,8 @@
 
 mod proofs;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 mod address;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub use address::Address;
 
 #[cfg(feature = "shielded-scan")]

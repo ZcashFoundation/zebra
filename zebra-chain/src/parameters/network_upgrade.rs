@@ -493,6 +493,32 @@ impl NetworkUpgrade {
     }
 }
 
+impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
+    fn from(nu: zcash_protocol::consensus::NetworkUpgrade) -> Self {
+        match nu {
+            zcash_protocol::consensus::NetworkUpgrade::Overwinter => Self::Overwinter,
+            zcash_protocol::consensus::NetworkUpgrade::Sapling => Self::Sapling,
+            zcash_protocol::consensus::NetworkUpgrade::Blossom => Self::Blossom,
+            zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
+            zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
+            zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
+        }
+    }
+}
+
+impl From<zcash_primitives::consensus::NetworkUpgrade> for NetworkUpgrade {
+    fn from(value: zcash_primitives::consensus::NetworkUpgrade) -> Self {
+        match value {
+            zcash_primitives::consensus::NetworkUpgrade::Overwinter => NetworkUpgrade::Overwinter,
+            zcash_primitives::consensus::NetworkUpgrade::Sapling => NetworkUpgrade::Sapling,
+            zcash_primitives::consensus::NetworkUpgrade::Blossom => NetworkUpgrade::Blossom,
+            zcash_primitives::consensus::NetworkUpgrade::Heartwood => NetworkUpgrade::Heartwood,
+            zcash_primitives::consensus::NetworkUpgrade::Canopy => NetworkUpgrade::Canopy,
+            zcash_primitives::consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
+        }
+    }
+}
+
 impl ConsensusBranchId {
     /// The value used by `zcashd` RPCs for missing consensus branch IDs.
     ///
