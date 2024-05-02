@@ -25,12 +25,20 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
         .activation_height(network)
         .expect("blossom activation height should be available");
 
-    if height < SLOW_START_SHIFT {
+    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
+    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
+    let slow_start_shift = if network.disable_pow() {
+        Height(0)
+    } else {
+        SLOW_START_SHIFT
+    };
+
+    if height < slow_start_shift {
         unreachable!(
-            "unsupported block height {height:?}: checkpoints should handle blocks below {SLOW_START_SHIFT:?}",
+            "unsupported block height {height:?}: checkpoints should handle blocks below {slow_start_shift:?}",
         )
     } else if height < blossom_height {
-        let pre_blossom_height = height - SLOW_START_SHIFT;
+        let pre_blossom_height = height - slow_start_shift;
         let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL;
 
         let halving_div = 1u64
@@ -43,7 +51,7 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
 
         Some(halving_div)
     } else {
-        let pre_blossom_height = blossom_height - SLOW_START_SHIFT;
+        let pre_blossom_height = blossom_height - slow_start_shift;
         let scaled_pre_blossom_height =
             pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
 
@@ -77,7 +85,9 @@ pub fn block_subsidy(height: Height, network: &Network) -> Result<Amount<NonNega
         return Ok(Amount::zero());
     };
 
-    if height < SLOW_START_INTERVAL {
+    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
+    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
+    if height < SLOW_START_INTERVAL && !network.disable_pow() {
         unreachable!(
             "unsupported block height {height:?}: callers should handle blocks below {SLOW_START_INTERVAL:?}",
         )

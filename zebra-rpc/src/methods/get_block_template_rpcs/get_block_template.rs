@@ -10,11 +10,11 @@ use zebra_chain::{
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        Block, ChainHistoryBlockTxAuthCommitmentHash, Height,
+        Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
@@ -284,7 +284,7 @@ where
 /// in the `getblocktemplate` RPC.
 pub fn generate_coinbase_and_roots(
     network: &Network,
-    height: Height,
+    block_template_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: &[VerifiedUnminedTx],
     history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
@@ -295,7 +295,7 @@ pub fn generate_coinbase_and_roots(
     let miner_fee = calculate_miner_fee(mempool_txs);
     let coinbase_txn = generate_coinbase_transaction(
         network,
-        height,
+        block_template_height,
         miner_address,
         miner_fee,
         like_zcashd,
@@ -305,7 +305,15 @@ pub fn generate_coinbase_and_roots(
     // Calculate block default roots
     //
     // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-    let default_roots = calculate_default_root_hashes(&coinbase_txn, mempool_txs, history_tree);
+    let chain_history_root = history_tree
+        .hash()
+        .or_else(|| {
+            (NetworkUpgrade::Heartwood.activation_height(network) == Some(block_template_height))
+                .then_some([0; 32].into())
+        })
+        .expect("history tree can't be empty");
+    let default_roots =
+        calculate_default_root_hashes(&coinbase_txn, mempool_txs, chain_history_root);
 
     let coinbase_txn = TransactionTemplate::from_coinbase(&coinbase_txn, miner_fee);
 
@@ -434,16 +442,18 @@ fn combine_coinbase_outputs(
 pub fn calculate_default_root_hashes(
     coinbase_txn: &UnminedTx,
     mempool_txs: &[VerifiedUnminedTx],
-    history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    chain_history_root: ChainHistoryMmrRootHash,
 ) -> DefaultRoots {
     let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_txn, mempool_txs);
 
-    let chain_history_root = history_tree.hash().expect("history tree can't be empty");
-
-    let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-        &chain_history_root,
-        &auth_data_root,
-    );
+    let block_commitments_hash = if chain_history_root == [0; 32].into() {
+        [0; 32].into()
+    } else {
+        ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &chain_history_root,
+            &auth_data_root,
+        )
+    };
 
     DefaultRoots {
         merkle_root,
