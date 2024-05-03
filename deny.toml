@@ -60,9 +60,6 @@ skip-tree = [
     # wait for h2 and tower to upgrade
     { name = "indexmap", version = "=1.9.3" },
 
-    # wait for rocksdb to upgrade
-    { name = "bindgen", version = "=0.65.1" },
-
     # wait for tracing and many other crates to upgrade
     # this duplicate dependency currently only exists in testing builds
     { name = "regex-syntax", version = "=0.6.29" },
@@ -86,6 +83,11 @@ skip-tree = [
 
     # ECC crates
 
+    # wait for zcash_client_backend
+    { name = "orchard", version = "=0.6.0" },
+    { name = "zcash_primitives", version = "=0.13.0" },
+    { name = "zcash_proofs", version = "=0.13.0" },
+
     # wait for hdwallet to upgrade
     { name = "ring", version = "=0.16.20" },
 
@@ -102,9 +104,6 @@ skip-tree = [
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
-
-    # wait for prost to upgrade
-    {name = "itertools", version = "=0.11.0" },
 
     # Test-only dependencies
 
