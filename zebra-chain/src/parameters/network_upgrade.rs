@@ -280,6 +280,19 @@ impl Network {
 }
 
 impl NetworkUpgrade {
+    /// Returns the current network upgrade and its activation height for `network` and `height`.
+    pub fn current_with_activation_height(
+        network: &Network,
+        height: block::Height,
+    ) -> (NetworkUpgrade, block::Height) {
+        network
+            .activation_list()
+            .range(..=height)
+            .map(|(&h, &nu)| (nu, h))
+            .next_back()
+            .expect("every height has a current network upgrade")
+    }
+
     /// Returns the current network upgrade for `network` and `height`.
     pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
         network
