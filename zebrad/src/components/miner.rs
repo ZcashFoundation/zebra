@@ -20,6 +20,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
+    parameters::NetworkUpgrade,
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
@@ -290,8 +291,9 @@ where
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters.long_poll_id = Some(template.long_poll_id);
 
-        let block = proposal_block_from_template(&template, TimeSource::CurTime)
-            .expect("unexpected invalid block template");
+        let block =
+            proposal_block_from_template(&template, TimeSource::CurTime, NetworkUpgrade::Nu5)
+                .expect("unexpected invalid block template");
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {

@@ -119,7 +119,7 @@ impl Commitment {
             // on Regtest for heights above height 0, it returns NU5, and it's possible for the current network upgrade
             // to be NU5 (or Canopy, or any network upgrade above Heartwood) at the Heartwood activation height.
             // TODO: Check Canopy too once Zebra can construct Canopy block templates.
-            Heartwood | Nu5 if Some(height) == Heartwood.activation_height(network) => {
+            Heartwood | Canopy | Nu5 if Some(height) == Heartwood.activation_height(network) => {
                 if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
                 } else {
