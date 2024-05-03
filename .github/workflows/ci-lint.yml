@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@v4.1.4
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v3.0.0
@@ -151,7 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.4
       - name: actionlint
-        uses: reviewdog/action-actionlint@v1.44.0
+        uses: reviewdog/action-actionlint@v1.45.0
         with:
           level: warning
           fail_on_error: false
