@@ -113,8 +113,8 @@ tracing = "0.1.39"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.198", features = ["serde_derive", "rc"] }
-serde_with = "3.7.0"
+serde = { version = "1.0.200", features = ["serde_derive", "rc"] }
+serde_with = "3.8.1"
 serde-big-array = "0.5.1"
 
 # Processing
