@@ -428,9 +428,11 @@ impl HistoryTree {
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
     ) -> Result<Self, HistoryTreeError> {
-        let heartwood_height = NetworkUpgrade::Heartwood
-            .activation_height(network)
-            .expect("Heartwood height is known");
+        let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) else {
+            // Return early if there is no Heartwood activation height.
+            return Ok(HistoryTree(None));
+        };
+
         match block
             .coinbase_height()
             .expect("must have height")

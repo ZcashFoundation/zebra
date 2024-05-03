@@ -109,12 +109,11 @@ lazy_static! {
         let mut hash_map = HashMap::new();
         hash_map.insert(NetworkKind::Mainnet, Height(1_046_400)..Height(2_726_400));
         hash_map.insert(NetworkKind::Testnet, Height(1_028_500)..Height(2_796_000));
+        hash_map.insert(NetworkKind::Regtest, Height(1_028_500)..Height(2_796_000));
         hash_map
     };
 
     /// Convenient storage for all addresses, for all receivers and networks
-    // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
-    //       There are no funding stream addresses on Regtest in zcashd, zebrad should do the same for compatibility.
     pub static ref FUNDING_STREAM_ADDRESSES: HashMap<NetworkKind, HashMap<FundingStreamReceiver, Vec<String>>> = {
         let mut addresses_by_network = HashMap::with_capacity(2);
 
@@ -131,6 +130,16 @@ lazy_static! {
         testnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
         testnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
         addresses_by_network.insert(NetworkKind::Testnet, testnet_addresses);
+
+
+        // Regtest addresses
+        // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
+        //       There are no funding stream addresses on Regtest in zcashd, zebrad should do the same for compatibility.
+        let mut regtest_addresses = HashMap::with_capacity(3);
+        regtest_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        regtest_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        regtest_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
+        addresses_by_network.insert(NetworkKind::Testnet, regtest_addresses);
 
         addresses_by_network
     };

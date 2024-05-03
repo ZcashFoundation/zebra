@@ -19,11 +19,21 @@ updates:
         ecc:
           patterns:
             # deliberately include zcash_script (even though it is maintained by ZF)
-            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
+            - "zcash_*
+            - "orchard"
+            - "halo2*"
+            - "incrementalmerkletree"
+            - "bridgetree"
+            - "equihash"
         prod:
           dependency-type: "production"
           exclude-patterns:
-            - "zcash_*|orchard|halo2*|incrementalmerkletree|bridgetree|equihash"
+            - "zcash_*
+            - "orchard"
+            - "halo2*"
+            - "incrementalmerkletree"
+            - "bridgetree"
+            - "equihash"
         dev:
           dependency-type: "development"
   # Devops section
