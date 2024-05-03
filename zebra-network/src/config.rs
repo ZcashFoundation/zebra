@@ -72,6 +72,14 @@ pub struct Config {
     /// their address books.
     pub listen_addr: SocketAddr,
 
+    /// The external address of this node if any.
+    ///
+    /// Zebra bind to `listen_addr` but this can be an internal address if the node
+    /// is behind a firewall, load balancer or NAT. This field can be used to
+    /// advertise a different address to peers making it possible to receive inbound
+    /// connections and contribute to the P2P network from behind a firewall, load balancer, or NAT.
+    pub external_addr: Option<SocketAddr>,
+
     /// The network to connect to.
     pub network: Network,
 
@@ -601,6 +609,7 @@ impl Default for Config {
             listen_addr: "0.0.0.0:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
+            external_addr: None,
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
@@ -635,6 +644,7 @@ impl<'de> Deserialize<'de> for Config {
         #[serde(deny_unknown_fields, default)]
         struct DConfig {
             listen_addr: String,
+            external_addr: Option<String>,
             network: NetworkKind,
             testnet_parameters: Option<DTestnetParameters>,
             initial_mainnet_peers: IndexSet<String>,
@@ -651,6 +661,7 @@ impl<'de> Deserialize<'de> for Config {
                 let config = Config::default();
                 Self {
                     listen_addr: "0.0.0.0".to_string(),
+                    external_addr: None,
                     network: Default::default(),
                     testnet_parameters: None,
                     initial_mainnet_peers: config.initial_mainnet_peers,
@@ -665,6 +676,7 @@ impl<'de> Deserialize<'de> for Config {
 
         let DConfig {
             listen_addr,
+            external_addr,
             network: network_kind,
             testnet_parameters,
             initial_mainnet_peers,
@@ -737,6 +749,20 @@ impl<'de> Deserialize<'de> for Config {
             },
         }?;
 
+        let external_socket_addr = if let Some(address) = &external_addr {
+            match address.parse::<SocketAddr>() {
+                Ok(socket) => Ok(Some(socket)),
+                Err(_) => match address.parse::<IpAddr>() {
+                    Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
+                    Err(err) => Err(de::Error::custom(format!(
+                        "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                    ))),
+                },
+            }?
+        } else {
+            None
+        };
+
         let [max_connections_per_ip, peerset_initial_target_size] = [
             ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 
             // If we want Zebra to operate with no network,
@@ -756,6 +782,7 @@ impl<'de> Deserialize<'de> for Config {
 
         Ok(Config {
             listen_addr: canonical_socket_addr(listen_addr),
+            external_addr: external_socket_addr,
             network,
             initial_mainnet_peers,
             initial_testnet_peers,

@@ -654,7 +654,17 @@ where
             let their_addr = connected_addr
                 .get_transient_addr()
                 .expect("non-Isolated connections have a remote addr");
-            (their_addr, our_services, config.listen_addr)
+
+            // Include the configured external address in our version message, if any, otherwise, include our listen address.
+            let advertise_addr = match config.external_addr {
+                Some(external_addr) => {
+                    info!(?their_addr, ?config.listen_addr, "using external address for Version messages");
+                    external_addr
+                }
+                None => config.listen_addr,
+            };
+
+            (their_addr, our_services, advertise_addr)
         }
     };
 
