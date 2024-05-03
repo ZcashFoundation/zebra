@@ -19,7 +19,7 @@ updates:
         ecc:
           patterns:
             # deliberately include zcash_script (even though it is maintained by ZF)
-            - "zcash_*
+            - "zcash_*"
             - "orchard"
             - "halo2*"
             - "incrementalmerkletree"
@@ -28,7 +28,7 @@ updates:
         prod:
           dependency-type: "production"
           exclude-patterns:
-            - "zcash_*
+            - "zcash_*"
             - "orchard"
             - "halo2*"
             - "incrementalmerkletree"
