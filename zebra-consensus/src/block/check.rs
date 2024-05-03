@@ -15,7 +15,7 @@ use zebra_chain::{
     },
 };
 
-use crate::{error::*, parameters::SLOW_START_INTERVAL};
+use crate::error::*;
 
 use super::subsidy;
 
@@ -162,7 +162,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
     let slow_start_interval = if network.disable_pow() {
         Height(0)
     } else {
-        SLOW_START_INTERVAL
+        network.slow_start_interval()
     };
 
     if height < slow_start_interval {
