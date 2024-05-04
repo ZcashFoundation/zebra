@@ -132,7 +132,7 @@ impl Solution {
     #[cfg(feature = "internal-miner")]
     #[allow(clippy::unwrap_in_result)]
     pub fn solve<F>(
-        mut _header: Header,
+        mut header: Header,
         mut _cancel_fn: F,
     ) -> Result<AtLeastOne<Header>, SolverCancelled>
     where
@@ -141,8 +141,8 @@ impl Solution {
         // TODO: Function code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
         // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/src/work/equihash.rs#L115-L166
         // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-
-        Err(SolverCancelled)
+        header.solution = Solution::for_proposal();
+        Ok(AtLeastOne::from_one(header))
     }
 
     // TODO: Some methods were removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
