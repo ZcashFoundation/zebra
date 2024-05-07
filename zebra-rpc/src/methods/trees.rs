@@ -3,7 +3,6 @@
 use zebra_chain::{
     block::Hash,
     block::Height,
-    sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
@@ -53,8 +52,7 @@ pub struct GetTreestate {
     time: u32,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "Treestate::is_empty")]
-    sapling: Treestate<sapling::tree::SerializedTree>,
+    sapling: Treestate<Vec<u8>>,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
     orchard: Treestate<Vec<u8>>,
@@ -66,7 +64,7 @@ impl GetTreestate {
         hash: Hash,
         height: Height,
         time: u32,
-        sapling: sapling::tree::SerializedTree,
+        sapling: Vec<u8>,
         orchard: Vec<u8>,
     ) -> Self {
         Self {
@@ -95,7 +93,7 @@ impl Default for GetTreestate {
             time: 0,
             sapling: Treestate {
                 commitments: Commitments {
-                    final_state: sapling::tree::SerializedTree::default(),
+                    final_state: vec![],
                 },
             },
             orchard: Treestate {
@@ -129,11 +127,4 @@ struct Commitments<Tree: AsRef<[u8]>> {
     #[serde(with = "hex")]
     #[serde(rename = "finalState")]
     final_state: Tree,
-}
-
-impl<Tree: AsRef<[u8]>> Treestate<Tree> {
-    /// Returns `true` if there's no serialized commitment tree.
-    fn is_empty(&self) -> bool {
-        self.commitments.final_state.as_ref().is_empty()
-    }
 }

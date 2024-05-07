@@ -22,7 +22,6 @@ use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    sapling,
     serialization::{SerializationError, ZcashDeserialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -1176,17 +1175,17 @@ where
                 .expect("Timestamps of valid blocks always fit into u32.");
 
             let sapling = match sapling_response {
-                zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
-                    sapling::tree::SerializedTree::from(maybe_tree)
+                zebra_state::ReadResponse::SaplingTree(tree) => {
+                    tree.map_or(vec![], |t| t.to_rpc_bytes())
                 }
-                _ => unreachable!("unmatched response to a sapling tree request"),
+                _ => unreachable!("unmatched response to a Sapling tree request"),
             };
 
             let orchard = match orchard_response {
                 zebra_state::ReadResponse::OrchardTree(tree) => {
                     tree.map_or(vec![], |t| t.to_rpc_bytes())
                 }
-                _ => unreachable!("unmatched response to an orchard tree request"),
+                _ => unreachable!("unmatched response to an Orchard tree request"),
             };
 
             Ok(GetTreestate::from_parts(
