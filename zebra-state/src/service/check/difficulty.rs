@@ -295,15 +295,23 @@ impl AdjustedDifficulty {
     fn median_timespan(&self) -> Duration {
         let newer_median = self.median_time_past();
 
-        let older_times: Vec<_> = self
-            .relevant_times
-            .iter()
-            .rev()
-            .cloned()
-            .take(POW_MEDIAN_BLOCK_SPAN)
-            .collect();
+        // MedianTime(height : N) := median([ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to max(0, height − 1) ])
+        let older_median = if self.relevant_times.len() > POW_AVERAGING_WINDOW {
+            let older_times: Vec<_> = self
+                .relevant_times
+                .iter()
+                .skip(POW_AVERAGING_WINDOW)
+                .cloned()
+                .take(POW_MEDIAN_BLOCK_SPAN)
+                .collect();
 
-        let older_median = AdjustedDifficulty::median_time(older_times);
+            AdjustedDifficulty::median_time(older_times)
+        } else {
+            self.relevant_times
+                .last()
+                .cloned()
+                .expect("there must be a Genesis block")
+        };
 
         // `ActualTimespan` in the Zcash specification
         newer_median - older_median
