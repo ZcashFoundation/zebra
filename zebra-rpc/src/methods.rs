@@ -1099,14 +1099,17 @@ where
                     data: None,
                 })?;
 
+            // TODO: Return early if we're below Sapling AH.
+
             // # Concurrency
             //
-            // For consistency, this lookup must be performed first, then all the other
-            // lookups must be based on the hash.
-
+            // For consistency, this lookup must be performed first, then all the other lookups must
+            // be based on the hash.
+            //
             // Fetch the block referenced by [`hash_or_height`] from the state.
-            // TODO: If this RPC is called a lot, just get the block header,
-            // rather than the whole block.
+            //
+            // TODO: If this RPC is called a lot, just get the block header, rather than the whole
+            // block.
             let block_request = zebra_state::ReadRequest::Block(hash_or_height);
             let block_response = state
                 .ready()
@@ -1118,10 +1121,9 @@ where
                     data: None,
                 })?;
 
-            // The block hash, height, and time are all required fields in the
-            // RPC response. For this reason, we throw an error early if the
-            // state didn't return the requested block so that we prevent
-            // further state queries.
+            // The block hash, height, and time are all required fields in the RPC response. For
+            // this reason, we throw an error early if the state didn't return the requested block
+            // so that we prevent further state queries.
             let block = match block_response {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
