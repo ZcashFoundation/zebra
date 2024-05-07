@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-06
 
-In this release we introduce Regtest functionality to Zebra and restored Windows support. Also adjusted our Zebra release interval from 2 weeks to 4 weeks approximately.
+In this release we introduce Regtest functionality to Zebra and restored Windows support. Also adjusted our Zebra release interval from 2 weeks to 6 weeks approximately.
 
 ### Added
 
@@ -17,7 +17,7 @@ In this release we introduce Regtest functionality to Zebra and restored Windows
 
 ### Changed
 
-- Adjust estimated release interval to once every 4 weeks and the end of support from 16 to 20 weeks ([#8429](https://github.com/ZcashFoundation/zebra/pull/8429))
+- Adjust estimated release interval to once every 6 weeks and the end of support from 16 to 20 weeks ([#8429](https://github.com/ZcashFoundation/zebra/pull/8429))
 
 ### Fixed
 
