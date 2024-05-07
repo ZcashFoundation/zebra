@@ -1,6 +1,6 @@
 [package]
 name = "zebra-scan"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Shielded transaction scanner for the Zcash blockchain"
 license = "MIT OR Apache-2.0"
@@ -54,10 +54,10 @@ futures = "0.3.30"
 zcash_client_backend = "0.10.0-rc.1"
 zcash_primitives = "0.13.0"
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.36", features = ["shielded-scan"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.36", features = ["shielded-scan"] }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.36", features = ["shielded-scan"] }
-zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.3" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["shielded-scan"] }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37", features = ["shielded-scan"] }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.37", features = ["shielded-scan"] }
+zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.4" }
 
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
 
@@ -72,7 +72,7 @@ jubjub = { version = "0.10.0", optional = true }
 rand = { version = "0.8.5", optional = true }
 zcash_note_encryption = { version = "0.4.0", optional = true }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.36", optional = true }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.37", optional = true }
 
 [dev-dependencies]
 insta = { version = "1.38.0", features = ["ron", "redactions"] }
@@ -87,5 +87,5 @@ jubjub = "0.10.0"
 rand = "0.8.5"
 zcash_note_encryption = "0.4.0"
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.36", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.36" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.37" }
