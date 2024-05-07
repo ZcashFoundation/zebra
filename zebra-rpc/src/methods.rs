@@ -50,6 +50,8 @@ pub mod get_block_template_rpcs;
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
+use self::trees::GetTreestate;
+
 #[cfg(test)]
 mod tests;
 
@@ -1133,12 +1135,11 @@ where
             };
 
             let hash = hash_or_height.hash().unwrap_or_else(|| block.hash());
-            let hash_or_height = hash.into();
 
-            // Fetch the Sapling & Orchard treestates referenced by
-            // [`hash_or_height`] from the state.
+            // Fetch the Sapling & Orchard treestates referenced by [`hash_or_height`] from the
+            // state.
 
-            let sapling_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let sapling_request = zebra_state::ReadRequest::SaplingTree(hash.into());
             let sapling_response = state
                 .ready()
                 .and_then(|service| service.call(sapling_request))
@@ -1149,7 +1150,9 @@ where
                     data: None,
                 })?;
 
-            let orchard_request = zebra_state::ReadRequest::OrchardTree(hash_or_height);
+            // TODO: Don't make the Orchard request if we're below NU5 AH.
+
+            let orchard_request = zebra_state::ReadRequest::OrchardTree(hash.into());
             let orchard_response = state
                 .ready()
                 .and_then(|service| service.call(orchard_request))
@@ -1170,35 +1173,23 @@ where
             let time = u32::try_from(block.header.time.timestamp())
                 .expect("Timestamps of valid blocks always fit into u32.");
 
-            let sapling_tree = match sapling_response {
+            let sapling = match sapling_response {
                 zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
                     sapling::tree::SerializedTree::from(maybe_tree)
                 }
                 _ => unreachable!("unmatched response to a sapling tree request"),
             };
 
-            let orchard_tree = match orchard_response {
+            let orchard = match orchard_response {
                 zebra_state::ReadResponse::OrchardTree(tree) => {
                     tree.map_or(vec![], |t| t.to_rpc_bytes())
                 }
                 _ => unreachable!("unmatched response to an orchard tree request"),
             };
 
-            Ok(GetTreestate {
-                hash,
-                height,
-                time,
-                sapling: Treestate {
-                    commitments: Commitments {
-                        final_state: sapling_tree,
-                    },
-                },
-                orchard: Treestate {
-                    commitments: Commitments {
-                        final_state: orchard_tree,
-                    },
-                },
-            })
+            Ok(GetTreestate::from_parts(
+                hash, height, time, sapling, orchard,
+            ))
         }
         .boxed()
     }
@@ -1656,84 +1647,6 @@ pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
 impl Default for GetBlockHash {
     fn default() -> Self {
         GetBlockHash(block::Hash([0; 32]))
-    }
-}
-
-/// Response to a `z_gettreestate` RPC request.
-///
-/// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
-/// corresponding [`block::Hash`], [`Height`], and block time.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct GetTreestate {
-    /// The block hash corresponding to the treestate, hex-encoded.
-    #[serde(with = "hex")]
-    hash: block::Hash,
-
-    /// The block height corresponding to the treestate, numeric.
-    height: Height,
-
-    /// Unix time when the block corresponding to the treestate was mined,
-    /// numeric.
-    ///
-    /// UTC seconds since the Unix 1970-01-01 epoch.
-    time: u32,
-
-    /// A treestate containing a Sapling note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "Treestate::is_empty")]
-    sapling: Treestate<sapling::tree::SerializedTree>,
-
-    /// A treestate containing an Orchard note commitment tree, hex-encoded.
-    orchard: Treestate<Vec<u8>>,
-}
-
-impl Default for GetTreestate {
-    fn default() -> Self {
-        GetTreestate {
-            hash: block::Hash([0; 32]),
-            height: Height(0),
-            time: 0,
-            sapling: Treestate {
-                commitments: Commitments {
-                    final_state: sapling::tree::SerializedTree::default(),
-                },
-            },
-            orchard: Treestate {
-                commitments: Commitments {
-                    final_state: vec![],
-                },
-            },
-        }
-    }
-}
-
-/// A treestate that is included in the [`z_gettreestate`][1] RPC response.
-///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Treestate<Tree: AsRef<[u8]>> {
-    /// Contains an Orchard or Sapling serialized note commitment tree,
-    /// hex-encoded.
-    commitments: Commitments<Tree>,
-}
-
-/// A wrapper that contains either an Orchard or Sapling note commitment tree.
-///
-/// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
-/// contains the field `finalRoot`. Zebra does *not* use this field.
-///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Commitments<Tree: AsRef<[u8]>> {
-    /// Orchard or Sapling serialized note commitment tree, hex-encoded.
-    #[serde(with = "hex")]
-    #[serde(rename = "finalState")]
-    final_state: Tree,
-}
-
-impl<Tree: AsRef<[u8]>> Treestate<Tree> {
-    /// Returns `true` if there's no serialized commitment tree.
-    fn is_empty(&self) -> bool {
-        self.commitments.final_state.as_ref().is_empty()
     }
 }
 
