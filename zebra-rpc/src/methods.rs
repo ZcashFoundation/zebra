@@ -21,7 +21,6 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
-    orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
     serialization::{SerializationError, ZcashDeserialize},
@@ -1179,8 +1178,8 @@ where
             };
 
             let orchard_tree = match orchard_response {
-                zebra_state::ReadResponse::OrchardTree(maybe_tree) => {
-                    orchard::tree::SerializedTree::from(maybe_tree)
+                zebra_state::ReadResponse::OrchardTree(tree) => {
+                    tree.map_or(vec![], |t| t.to_rpc_bytes())
                 }
                 _ => unreachable!("unmatched response to an orchard tree request"),
             };
@@ -1684,8 +1683,7 @@ pub struct GetTreestate {
     sapling: Treestate<sapling::tree::SerializedTree>,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "Treestate::is_empty")]
-    orchard: Treestate<orchard::tree::SerializedTree>,
+    orchard: Treestate<Vec<u8>>,
 }
 
 impl Default for GetTreestate {
@@ -1701,7 +1699,7 @@ impl Default for GetTreestate {
             },
             orchard: Treestate {
                 commitments: Commitments {
-                    final_state: orchard::tree::SerializedTree::default(),
+                    final_state: vec![],
                 },
             },
         }

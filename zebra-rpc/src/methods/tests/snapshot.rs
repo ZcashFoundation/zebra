@@ -11,7 +11,7 @@ use insta::dynamic_redaction;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::Block, chain_tip::mock::MockChainTip, parameters::Network::Mainnet,
+    block::Block, chain_tip::mock::MockChainTip, orchard, parameters::Network::Mainnet,
     serialization::ZcashDeserializeInto, subtree::NoteCommitmentSubtreeData,
 };
 use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
