@@ -5,6 +5,32 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
+
+In this release we introduce Regtest functionality to Zebra and restored Windows support. Also adjusted our Zebra release interval from 2 weeks to 6 weeks approximately.
+
+### Added
+
+- Preparing for upstream `zcash_client_backend` API changes ([#8425](https://github.com/ZcashFoundation/zebra/pull/8425))
+- Regtest support ([#8383](https://github.com/ZcashFoundation/zebra/pull/8383), [#8421](https://github.com/ZcashFoundation/zebra/pull/8421), [#8368](https://github.com/ZcashFoundation/zebra/pull/8368), [#8413](https://github.com/ZcashFoundation/zebra/pull/8413), [#8474](https://github.com/ZcashFoundation/zebra/pull/8474), [#8475](https://github.com/ZcashFoundation/zebra/pull/8475))
+- Allow Zebra users to contribute to the P2P network even if behind NAT or firewall ([#8488](https://github.com/ZcashFoundation/zebra/pull/8488))
+
+### Changed
+
+- Adjust estimated release interval to once every 6 weeks and the end of support from 16 to 20 weeks ([#8429](https://github.com/ZcashFoundation/zebra/pull/8429))
+
+### Fixed
+
+- Bump zcash script v0.1.15 and restore Windows support ([#8393](https://github.com/ZcashFoundation/zebra/pull/8393))
+- Avoid possibly returning data from different blocks in `z_get_treestate` RPC method ([#8460](https://github.com/ZcashFoundation/zebra/pull/8460))
+- Zebra panics with all features and no elasticsearch server available ([#8409](https://github.com/ZcashFoundation/zebra/pull/8409))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @oxarbitrage and @upbqdn
+
+
 ## [Zebra 1.6.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.1) - 2024-04-15
 
 This release adds an OpenAPI specification for Zebra's RPC methods and startup logs about Zebra's storage usage and other database information. 
