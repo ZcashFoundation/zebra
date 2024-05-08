@@ -238,7 +238,7 @@ impl ParametersBuilder {
         self
     }
 
-    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    /// Sets the slow start interval to be used in the [`Parameters`] being built.
     pub fn with_slow_start_interval(mut self, slow_start_interval: Height) -> Self {
         self.slow_start_interval = slow_start_interval;
         self
