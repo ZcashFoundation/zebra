@@ -118,11 +118,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -406,11 +406,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -713,11 +713,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4

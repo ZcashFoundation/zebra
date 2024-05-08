@@ -94,10 +94,10 @@ jobs:
             rust: beta
 
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v3.0.0
@@ -183,10 +183,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
@@ -205,10 +205,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v3.0.0
@@ -248,10 +248,10 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@v1
@@ -269,10 +269,10 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v4.1.4
+        uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust

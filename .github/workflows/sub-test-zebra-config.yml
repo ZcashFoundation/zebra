@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest-m
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v4.1.5
         with:
           persist-credentials: false
 
@@ -47,7 +47,7 @@ jobs:
         with:
           short-length: 7
 
-      - uses: r7kamura/rust-problem-matchers@v1.4.0
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Run ${{ inputs.test_id }} test
         run: |
