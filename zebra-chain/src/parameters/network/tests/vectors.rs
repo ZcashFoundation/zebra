@@ -135,14 +135,16 @@ fn activates_network_upgrades_correctly() {
 
     let expected_default_regtest_activation_heights = &[
         (Height(0), NetworkUpgrade::Genesis),
-        (Height(1), NetworkUpgrade::Nu5),
+        (Height(1), NetworkUpgrade::Canopy),
+        // TODO: Remove this once the testnet parameters are being serialized.
+        (Height(100), NetworkUpgrade::Nu5),
     ];
 
     for (network, expected_activation_heights) in [
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(),
+            Network::new_regtest(None),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -193,7 +195,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest().to_string(),
+        Network::new_regtest(None).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );
@@ -238,6 +240,7 @@ fn check_configured_sapling_hrps() {
         .expect_err("should panic when setting Sapling HRPs that are too long or contain non-alphanumeric characters (except '-')");
     }
 
+    // Restore the regular panic hook for any unexpected panics
     drop(std::panic::take_hook());
 
     // Check that Sapling HRPs can contain lowercase ascii characters and dashes.
@@ -317,6 +320,7 @@ fn check_network_name() {
         .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
     }
 
+    // Restore the regular panic hook for any unexpected panics
     drop(std::panic::take_hook());
 
     // Checks that network names are displayed correctly

@@ -11,7 +11,10 @@ use color_eyre::eyre::{eyre, Context, Result};
 
 use futures::FutureExt;
 
-use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
+use zebra_chain::{
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
+};
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::get_block_template_rpcs::{
     get_block_template::{
@@ -214,8 +217,12 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
             // Propose a new block with an empty solution and nonce field
 
             let raw_proposal_block = hex::encode(
-                proposal_block_from_template(&response_json_result, time_source)?
-                    .zcash_serialize_to_vec()?,
+                proposal_block_from_template(
+                    &response_json_result,
+                    time_source,
+                    NetworkUpgrade::Nu5,
+                )?
+                .zcash_serialize_to_vec()?,
             );
             let template = response_json_result.clone();
 
