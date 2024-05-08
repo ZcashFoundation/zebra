@@ -6,8 +6,9 @@ use zcash_primitives::constants as zp_constants;
 use crate::{
     block::{self, Height},
     parameters::{
-        network_upgrade::TESTNET_ACTIVATION_HEIGHTS, Network, NetworkUpgrade,
-        NETWORK_UPGRADES_IN_ORDER,
+        constants::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
+        network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
+        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
 };
 
@@ -76,6 +77,8 @@ pub struct ParametersBuilder {
     hrp_sapling_extended_full_viewing_key: String,
     /// Sapling payment address human-readable prefix for this network
     hrp_sapling_payment_address: String,
+    /// Slow start interval for this network
+    slow_start_interval: Height,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -98,6 +101,7 @@ impl Default for ParametersBuilder {
             genesis_hash: TESTNET_GENESIS_HASH
                 .parse()
                 .expect("hard-coded hash parses"),
+            slow_start_interval: SLOW_START_INTERVAL,
             disable_pow: false,
         }
     }
@@ -237,6 +241,12 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the slow start interval to be used in the [`Parameters`] being built.
+    pub fn with_slow_start_interval(mut self, slow_start_interval: Height) -> Self {
+        self.slow_start_interval = slow_start_interval;
+        self
+    }
+
     /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
     pub fn with_disable_pow(mut self, disable_pow: bool) -> Self {
         self.disable_pow = disable_pow;
@@ -252,6 +262,7 @@ impl ParametersBuilder {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            slow_start_interval,
             disable_pow,
         } = self;
         Parameters {
@@ -261,6 +272,8 @@ impl ParametersBuilder {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            slow_start_interval,
+            slow_start_shift: Height(slow_start_interval.0 / 2),
             disable_pow,
         }
     }
@@ -290,6 +303,10 @@ pub struct Parameters {
     hrp_sapling_extended_full_viewing_key: String,
     /// Sapling payment address human-readable prefix for this network
     hrp_sapling_payment_address: String,
+    /// Slow start interval for this network
+    slow_start_interval: Height,
+    /// Slow start shift for this network, always half the slow start interval
+    slow_start_shift: Height,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -322,6 +339,7 @@ impl Parameters {
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
                 .with_disable_pow(true)
+                .with_slow_start_interval(Height::MIN)
                 .with_sapling_hrps(
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
                     zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -353,6 +371,8 @@ impl Parameters {
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
+            slow_start_interval,
+            slow_start_shift,
             disable_pow,
         } = Self::new_regtest(None);
 
@@ -361,6 +381,8 @@ impl Parameters {
             && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
+            && self.slow_start_interval == slow_start_interval
+            && self.slow_start_shift == slow_start_shift
             && self.disable_pow == disable_pow
     }
 
@@ -394,8 +416,47 @@ impl Parameters {
         &self.hrp_sapling_payment_address
     }
 
+    /// Returns slow start interval for this network
+    pub fn slow_start_interval(&self) -> Height {
+        self.slow_start_interval
+    }
+
+    /// Returns slow start shift for this network
+    pub fn slow_start_shift(&self) -> Height {
+        self.slow_start_shift
+    }
+
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         self.disable_pow
+    }
+}
+
+impl Network {
+    /// Returns true if proof-of-work validation should be disabled for this network
+    pub fn disable_pow(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.disable_pow()
+        } else {
+            false
+        }
+    }
+
+    /// Returns slow start interval for this network
+    pub fn slow_start_interval(&self) -> Height {
+        if let Self::Testnet(params) = self {
+            params.slow_start_interval()
+        } else {
+            SLOW_START_INTERVAL
+        }
+    }
+
+    /// Returns slow start shift for this network
+    pub fn slow_start_shift(&self) -> Height {
+        if let Self::Testnet(params) = self {
+            params.slow_start_shift()
+        } else {
+            SLOW_START_SHIFT
+        }
     }
 }
