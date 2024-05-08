@@ -11,6 +11,11 @@ use crate::{
     },
 };
 
+/// The Regtest NU5 activation height in tests
+// TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
+#[cfg(any(test, feature = "proptest-impl"))]
+pub const REGTEST_NU5_ACTIVATION_HEIGHT: u32 = 100;
+
 /// Reserved network names that should not be allowed for configured Testnets.
 pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
     "Mainnet",
@@ -175,9 +180,7 @@ impl ParametersBuilder {
     pub fn with_activation_heights(
         mut self,
         ConfiguredActivationHeights {
-            // TODO: Find out if `BeforeOverwinter` is required at Height(1), allow for
-            //       configuring its activation height if it's not required to be at Height(1)
-            before_overwinter: _,
+            before_overwinter,
             overwinter,
             sapling,
             blossom,
@@ -192,9 +195,10 @@ impl ParametersBuilder {
         //
         // These must be in order so that later network upgrades overwrite prior ones
         // if multiple network upgrades are configured with the same activation height.
-        let activation_heights: BTreeMap<_, _> = overwinter
+        let activation_heights: BTreeMap<_, _> = before_overwinter
             .into_iter()
-            .map(|h| (h, Overwinter))
+            .map(|h| (h, BeforeOverwinter))
+            .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
             .chain(sapling.into_iter().map(|h| (h, Sapling)))
             .chain(blossom.into_iter().map(|h| (h, Blossom)))
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
@@ -227,8 +231,7 @@ impl ParametersBuilder {
         // # Correctness
         //
         // Height(0) must be reserved for the `NetworkUpgrade::Genesis`.
-        // TODO: Find out if `BeforeOverwinter` must always be active at Height(1), remove it here if it's not required.
-        self.activation_heights.split_off(&Height(2));
+        self.activation_heights.split_off(&Height(1));
         self.activation_heights.extend(activation_heights);
 
         self
@@ -310,7 +313,10 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    pub fn new_regtest() -> Self {
+    pub fn new_regtest(nu5_activation_height: Option<u32>) -> Self {
+        #[cfg(any(test, feature = "proptest-impl"))]
+        let nu5_activation_height = nu5_activation_height.or(Some(100));
+
         Self {
             network_name: "Regtest".to_string(),
             ..Self::build()
@@ -324,7 +330,8 @@ impl Parameters {
                 // Removes default Testnet activation heights if not configured,
                 // most network upgrades are disabled by default for Regtest in zcashd
                 .with_activation_heights(ConfiguredActivationHeights {
-                    nu5: Some(1),
+                    canopy: Some(1),
+                    nu5: nu5_activation_height,
                     ..Default::default()
                 })
                 .finish()
@@ -347,7 +354,7 @@ impl Parameters {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             disable_pow,
-        } = Self::new_regtest();
+        } = Self::new_regtest(None);
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash

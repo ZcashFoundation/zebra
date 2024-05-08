@@ -707,7 +707,13 @@ impl<'de> Deserialize<'de> for Config {
         let network = match (network_kind, testnet_parameters) {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, _) => Network::new_regtest(),
+            (NetworkKind::Regtest, testnet_parameters) => {
+                let nu5_activation_height = testnet_parameters
+                    .and_then(|params| params.activation_heights)
+                    .and_then(|activation_height| activation_height.nu5);
+
+                Network::new_regtest(nu5_activation_height)
+            }
             (
                 NetworkKind::Testnet,
                 Some(DTestnetParameters {

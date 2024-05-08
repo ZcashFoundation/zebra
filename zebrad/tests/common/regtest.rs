@@ -8,7 +8,10 @@ use std::{net::SocketAddr, time::Duration};
 use color_eyre::eyre::{Context, Result};
 use tracing::*;
 
-use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
+use zebra_chain::{
+    parameters::{testnet::REGTEST_NU5_ACTIVATION_HEIGHT, Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
+};
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::get_block_template_rpcs::get_block_template::{
     proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
@@ -27,7 +30,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
     info!("starting regtest submit_blocks test");
 
-    let network = Network::new_regtest();
+    let network = Network::new_regtest(None);
     let mut config = random_known_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
     let rpc_address = config.rpc.listen_addr.unwrap();
@@ -58,14 +61,20 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
-    for _ in 0..NUM_BLOCKS_TO_SUBMIT {
+    for height in 1..=NUM_BLOCKS_TO_SUBMIT {
         let block_template: GetBlockTemplate = client
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
+        let network_upgrade = if height < REGTEST_NU5_ACTIVATION_HEIGHT.try_into().unwrap() {
+            NetworkUpgrade::Canopy
+        } else {
+            NetworkUpgrade::Nu5
+        };
+
         let block_data = hex::encode(
-            proposal_block_from_template(&block_template, TimeSource::default())?
+            proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?
                 .zcash_serialize_to_vec()?,
         );
 
@@ -75,7 +84,14 @@ async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
 
         let was_submission_successful = submit_block_response.contains(r#""result":null"#);
 
-        info!(was_submission_successful, "submitted block");
+        if height % 40 == 0 {
+            info!(
+                was_submission_successful,
+                ?block_template,
+                ?network_upgrade,
+                "submitted block"
+            );
+        }
 
         // Check that the block was validated and committed.
         assert!(
