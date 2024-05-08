@@ -20,7 +20,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{parameters::SLOW_START_SHIFT, transaction};
+use crate::transaction;
 
 use super::*;
 
@@ -470,7 +470,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
     let block_iter = network.block_iter();
 
     for (&height, block) in block_iter {
-        if Height(height) > SLOW_START_SHIFT {
+        if Height(height) > network.slow_start_shift() {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
 
             // fake the miner fee to a big amount
