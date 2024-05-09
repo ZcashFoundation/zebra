@@ -68,7 +68,7 @@ Zebra is tested with the latest `stable` Rust version. Earlier versions are not
 supported or tested. Any Zebra release can start depending on new features in the
 latest stable Rust.
 
-Around every 4 weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
+Around every 6 weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
 
 Below are quick summaries for installing the dependencies on your machine.
 
@@ -184,8 +184,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 - Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
-
-- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; `zcash_script` has recently been updated to compile with MSVC, we're now waiting on a `zcash_script` release and dependency update, see the issue for details.
 
 - Experimental Tor support is disabled until Zebra upgrades to the latest `arti-client`. This happened due to a Rust dependency conflict ([#5492](https://github.com/ZcashFoundation/zebra/issues/5492)) and is still an issue due to [another dependency conflict](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648).
 

@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.41-beta.12"
+version = "0.2.41-beta.13"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -27,7 +27,7 @@ futures-core = "0.3.28"
 pin-project = "1.1.5"
 rayon = "1.10.0"
 tokio = { version = "1.37.0", features = ["time", "sync", "tracing", "macros"] }
-tokio-util = "0.7.10"
+tokio-util = "0.7.11"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
 tracing = "0.1.39"
 tracing-futures = "0.2.5"
@@ -43,7 +43,7 @@ rand = "0.8.5"
 
 tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.4"
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.12" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.13" }
 tower-test = "0.4.0"
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.36" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.37" }

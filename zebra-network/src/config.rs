@@ -745,7 +745,7 @@ impl<'de> Deserialize<'de> for Config {
             }
         };
 
-        let listen_addr = match listen_addr.parse::<SocketAddr>() {
+        let listen_addr = match listen_addr.parse::<SocketAddr>().or_else(|_| format!("{listen_addr}:{}", network.default_port()).parse()) {
             Ok(socket) => Ok(socket),
             Err(_) => match listen_addr.parse::<IpAddr>() {
                 Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
@@ -756,7 +756,7 @@ impl<'de> Deserialize<'de> for Config {
         }?;
 
         let external_socket_addr = if let Some(address) = &external_addr {
-            match address.parse::<SocketAddr>() {
+            match address.parse::<SocketAddr>().or_else(|_| format!("{address}:{}", network.default_port()).parse()) {
                 Ok(socket) => Ok(Some(socket)),
                 Err(_) => match address.parse::<IpAddr>() {
                     Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),

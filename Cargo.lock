@@ -1696,7 +1696,7 @@ dependencies = [
  "indexmap 2.2.6",
  "slab",
  "tokio",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "tracing",
 ]
 
@@ -1715,7 +1715,7 @@ dependencies = [
  "indexmap 2.2.6",
  "slab",
  "tokio",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "tracing",
 ]
 
@@ -3695,7 +3695,7 @@ dependencies = [
  "system-configuration",
  "tokio",
  "tokio-rustls",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -4669,7 +4669,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
 ]
 
 [[package]]
@@ -4701,16 +4701,15 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.10"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419f34732d9eb6ee4c3578b7989078579b7f039cbbb9ca2c4da015749371e15"
+checksum = "9cf6b47b3771c49ac75ad09a6162f53ad4b8088b76ac60e8ec1455b31a189fe1"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
  "pin-project-lite",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4875,7 +4874,7 @@ dependencies = [
  "rand 0.8.5",
  "slab",
  "tokio",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4883,7 +4882,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41-beta.12"
+version = "0.2.41-beta.13"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4895,7 +4894,7 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tokio-test",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "tower",
  "tower-fallback",
  "tower-test",
@@ -4906,7 +4905,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.41-beta.12"
+version = "0.2.41-beta.13"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -5987,7 +5986,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "bitflags 2.5.0",
  "bitflags-serde-legacy",
@@ -6050,7 +6049,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6096,7 +6095,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-grpc"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "color-eyre",
  "futures-util",
@@ -6118,7 +6117,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "bitflags 2.5.0",
  "byteorder",
@@ -6147,7 +6146,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.10",
+ "tokio-util 0.7.11",
  "toml 0.8.12",
  "tower",
  "tracing",
@@ -6159,7 +6158,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "color-eyre",
  "jsonrpc-core",
@@ -6172,7 +6171,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "chrono",
  "futures",
@@ -6203,7 +6202,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-scan"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "bls12_381",
  "chrono",
@@ -6235,7 +6234,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "displaydoc",
  "hex",
@@ -6248,7 +6247,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "bincode",
  "chrono",
@@ -6293,7 +6292,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "color-eyre",
  "futures",
@@ -6321,7 +6320,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.36"
+version = "1.0.0-beta.37"
 dependencies = [
  "color-eyre",
  "hex",
@@ -6350,7 +6349,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "abscissa_core",
  "atty",
