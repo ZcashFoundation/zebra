@@ -100,7 +100,7 @@ pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32:
 /// [section 7.7.2]: https://zips.z.cash/protocol/protocol.pdf#difficulty
 //
 // TODO: Use NonZeroU256, when available
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ExpandedDifficulty(U256);
 
 /// A 128-bit unsigned "Work" value.
@@ -698,9 +698,8 @@ impl ParameterDifficulty for Network {
         let limit: U256 = match self {
             /* 2^243 - 1 */
             Network::Mainnet => (U256::one() << 243) - 1,
-            /* 2^251 - 1 */
-            // TODO: Add a `target_difficulty_limit` field to `testnet::Parameters` to return here. (`U256::from_big_endian(&[0x0f].repeat(8))` for Regtest)
-            Network::Testnet(_params) => (U256::one() << 251) - 1,
+            /* 2^251 - 1 for the default testnet */
+            Network::Testnet(params) => return params.target_difficulty_limit(),
         };
 
         // `zcashd` converts the PoWLimit into a compact representation before
