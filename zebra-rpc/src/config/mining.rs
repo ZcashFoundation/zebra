@@ -32,10 +32,12 @@ pub struct Config {
 
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
-    /// This experimental feature is only supported on testnet.
-    /// Mainnet miners should use a mining pool with GPUs or ASICs designed for efficient mining.
+    /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
+    /// for a valid Proof of Work.
     ///
     /// The internal miner is off by default.
+    // TODO: Restore equihash solver and recommend that Mainnet miners should use a mining pool with
+    //       GPUs or ASICs designed for efficient mining.
     #[cfg(feature = "internal-miner")]
     pub internal_miner: bool,
 }
