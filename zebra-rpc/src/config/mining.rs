@@ -29,6 +29,17 @@ pub struct Config {
     ///
     /// This developer-only config is not supported for general use.
     pub debug_like_zcashd: bool,
+
+    /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
+    ///
+    /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
+    /// for a valid Proof of Work.
+    ///
+    /// The internal miner is off by default.
+    // TODO: Restore equihash solver and recommend that Mainnet miners should use a mining pool with
+    //       GPUs or ASICs designed for efficient mining.
+    #[cfg(feature = "internal-miner")]
+    pub internal_miner: bool,
 }
 
 impl Default for Config {
@@ -42,6 +53,8 @@ impl Default for Config {
             // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
             // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L61-L66
             // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
+            #[cfg(feature = "internal-miner")]
+            internal_miner: false,
         }
     }
 }
@@ -61,6 +74,6 @@ impl Config {
         // TODO: Changed to return always false so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
         // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
         // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-        false
+        self.internal_miner
     }
 }

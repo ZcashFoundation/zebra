@@ -359,7 +359,7 @@ impl StartCmd {
                 address_book,
             );
 
-            crate::components::miner::spawn_init(&config.mining, rpc)
+            crate::components::miner::spawn_init(&config.network.network, &config.mining, rpc)
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };

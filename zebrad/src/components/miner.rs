@@ -16,11 +16,11 @@ use tower::Service;
 use tracing::{Instrument, Span};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
-    parameters::NetworkUpgrade,
+    parameters::{Network, NetworkUpgrade},
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
@@ -61,6 +61,7 @@ pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 ///
 /// See [`run_mining_solver()`] for more details.
 pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+    network: &Network,
     config: &Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> JoinHandle<Result<(), Report>>
@@ -94,10 +95,11 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    let network = network.clone();
     let config = config.clone();
 
     // TODO: spawn an entirely new executor here, so mining is isolated from higher priority tasks.
-    tokio::spawn(init(config, rpc).in_current_span())
+    tokio::spawn(init(network, config, rpc).in_current_span())
 }
 
 /// Initialize the miner based on its config.
@@ -107,6 +109,7 @@ where
 ///
 /// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+    network: Network,
     _config: Config,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
 ) -> Result<(), Report>
@@ -163,7 +166,7 @@ where
     let mut abort_handles = Vec::new();
 
     let template_generator = tokio::task::spawn(
-        generate_block_templates(rpc.clone(), template_sender).in_current_span(),
+        generate_block_templates(network, rpc.clone(), template_sender).in_current_span(),
     );
     abort_handles.push(template_generator.abort_handle());
     let template_generator = template_generator.wait_for_panics();
@@ -217,6 +220,7 @@ pub async fn generate_block_templates<
     SyncStatus,
     AddressBook,
 >(
+    network: Network,
     rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
@@ -260,11 +264,11 @@ where
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
-        let template = rpc.get_block_template(Some(parameters.clone())).await;
+        let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
-            debug!(
+            info!(
                 ?BLOCK_TEMPLATE_WAIT_TIME,
                 "waiting for a valid block template",
             );
@@ -291,9 +295,12 @@ where
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters.long_poll_id = Some(template.long_poll_id);
 
-        let block =
-            proposal_block_from_template(&template, TimeSource::CurTime, NetworkUpgrade::Nu5)
-                .expect("unexpected invalid block template");
+        let block = proposal_block_from_template(
+            &template,
+            TimeSource::CurTime,
+            NetworkUpgrade::current(&network, Height(template.height)),
+        )
+        .expect("unexpected invalid block template");
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
