@@ -18,6 +18,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
+use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
@@ -1087,6 +1088,7 @@ where
     // - create a function that handles block hashes or heights, and use it in `get_block()`
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
         let mut state = self.state.clone();
+        let network = self.network.clone();
 
         async move {
             // Convert the [`hash_or_height`] string into an actual hash or height.
@@ -1135,58 +1137,56 @@ where
                 _ => unreachable!("unmatched response to a block request"),
             };
 
-            let hash = hash_or_height.hash().unwrap_or_else(|| block.hash());
+            let height = hash_or_height
+                .height_or_else(|_| block.coinbase_height())
+                .expect("block height");
 
-            // Fetch the Sapling & Orchard treestates referenced by [`hash_or_height`] from the
-            // state.
+            let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
+            let sapling = if network.is_nu_active(sapling_nu, height.into()) {
+                match state
+                    .ready()
+                    .and_then(|service| {
+                        service.call(zebra_state::ReadRequest::SaplingTree(height.into()))
+                    })
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })? {
+                    zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
+                    _ => unreachable!("unmatched response to a Sapling tree request"),
+                }
+            } else {
+                None
+            };
 
-            let sapling_request = zebra_state::ReadRequest::SaplingTree(hash.into());
-            let sapling_response = state
-                .ready()
-                .and_then(|service| service.call(sapling_request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+            let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
+            let orchard = if network.is_nu_active(orchard_nu, height.into()) {
+                match state
+                    .ready()
+                    .and_then(|service| {
+                        service.call(zebra_state::ReadRequest::OrchardTree(height.into()))
+                    })
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })? {
+                    zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
+                    _ => unreachable!("unmatched response to an Orchard tree request"),
+                }
+            } else {
+                None
+            };
 
-            // TODO: Don't make the Orchard request if we're below NU5 AH.
-
-            let orchard_request = zebra_state::ReadRequest::OrchardTree(hash.into());
-            let orchard_response = state
-                .ready()
-                .and_then(|service| service.call(orchard_request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            // We've got all the data we need for the RPC response, so we
-            // assemble the response.
-
-            let height = block
-                .coinbase_height()
-                .expect("verified blocks have a valid height");
+            let hash = hash_or_height
+                .hash_or_else(|_| Some(block.hash()))
+                .expect("block hash");
 
             let time = u32::try_from(block.header.time.timestamp())
                 .expect("Timestamps of valid blocks always fit into u32.");
-
-            let sapling = match sapling_response {
-                zebra_state::ReadResponse::SaplingTree(tree) => {
-                    tree.map_or(vec![], |t| t.to_rpc_bytes())
-                }
-                _ => unreachable!("unmatched response to a Sapling tree request"),
-            };
-
-            let orchard = match orchard_response {
-                zebra_state::ReadResponse::OrchardTree(tree) => {
-                    tree.map_or(vec![], |t| t.to_rpc_bytes())
-                }
-                _ => unreachable!("unmatched response to an Orchard tree request"),
-            };
 
             Ok(GetTreestate::from_parts(
                 hash, height, time, sapling, orchard,

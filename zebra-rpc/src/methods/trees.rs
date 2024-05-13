@@ -52,10 +52,12 @@ pub struct GetTreestate {
     time: u32,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
-    sapling: Treestate<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sapling: Option<Treestate<Vec<u8>>>,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
-    orchard: Treestate<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    orchard: Option<Treestate<Vec<u8>>>,
 }
 
 impl GetTreestate {
@@ -64,43 +66,22 @@ impl GetTreestate {
         hash: Hash,
         height: Height,
         time: u32,
-        sapling: Vec<u8>,
-        orchard: Vec<u8>,
+        sapling: Option<Vec<u8>>,
+        orchard: Option<Vec<u8>>,
     ) -> Self {
+        let sapling = sapling.map(|tree| Treestate {
+            commitments: Commitments { final_state: tree },
+        });
+        let orchard = orchard.map(|tree| Treestate {
+            commitments: Commitments { final_state: tree },
+        });
+
         Self {
             hash,
             height,
             time,
-            sapling: Treestate {
-                commitments: Commitments {
-                    final_state: sapling,
-                },
-            },
-            orchard: Treestate {
-                commitments: Commitments {
-                    final_state: orchard,
-                },
-            },
-        }
-    }
-}
-
-impl Default for GetTreestate {
-    fn default() -> Self {
-        GetTreestate {
-            hash: Hash([0; 32]),
-            height: Height(0),
-            time: 0,
-            sapling: Treestate {
-                commitments: Commitments {
-                    final_state: vec![],
-                },
-            },
-            orchard: Treestate {
-                commitments: Commitments {
-                    final_state: vec![],
-                },
-            },
+            sapling,
+            orchard,
         }
     }
 }
