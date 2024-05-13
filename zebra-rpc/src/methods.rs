@@ -23,7 +23,7 @@ use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{SerializationError, ZcashDeserialize},
+    serialization::ZcashDeserialize,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
@@ -505,30 +505,18 @@ where
         let (tip_height, tip_hash) = self
             .latest_chain_tip
             .best_tip_height_and_hash()
-            .ok_or_else(|| Error {
-                code: ErrorCode::ServerError(0),
-                message: "No Chain tip available yet".to_string(),
-                data: None,
-            })?;
+            .ok_or(to_error("No Chain tip available yet"))?;
 
         // `estimated_height` field
-        let current_block_time =
-            self.latest_chain_tip
-                .best_tip_block_time()
-                .ok_or_else(|| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No Chain tip available yet".to_string(),
-                    data: None,
-                })?;
+        let current_block_time = self
+            .latest_chain_tip
+            .best_tip_block_time()
+            .ok_or(to_error("No Chain tip available yet"))?;
 
         let zebra_estimated_height = self
             .latest_chain_tip
             .estimate_network_chain_tip_height(network, Utc::now())
-            .ok_or_else(|| Error {
-                code: ErrorCode::ServerError(0),
-                message: "No Chain tip available yet".to_string(),
-                data: None,
-            })?;
+            .ok_or(to_error("No Chain tip available yet"))?;
 
         let mut estimated_height =
             if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
@@ -607,11 +595,7 @@ where
             let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
-            let response = state.oneshot(request).await.map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
+            let response = state.oneshot(request).await.map_err(to_error)?;
 
             match response {
                 zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
@@ -648,11 +632,7 @@ where
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
 
-            let response = mempool.oneshot(request).await.map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
+            let response = mempool.oneshot(request).await.map_err(to_error)?;
 
             let queue_results = match response {
                 mempool::Response::Queued(results) => results,
@@ -667,14 +647,10 @@ where
 
             tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
 
-            match &queue_results[0] {
-                Ok(()) => Ok(SentTransactionHash(transaction_hash)),
-                Err(error) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                }),
-            }
+            queue_results[0]
+                .as_ref()
+                .map(|_| SentTransactionHash(transaction_hash))
+                .map_err(to_error)
         }
         .boxed()
     }
@@ -695,14 +671,7 @@ where
         let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
-            let hash_or_height: HashOrHeight =
-                hash_or_height
-                    .parse()
-                    .map_err(|error: SerializationError| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
+            let hash_or_height: HashOrHeight = hash_or_height.parse().map_err(to_error)?;
 
             if verbosity == 0 {
                 // # Performance
@@ -714,11 +683,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
+                    .map_err(to_error)?;
 
                 match response {
                     zebra_state::ReadResponse::Block(Some(block)) => {
@@ -762,11 +727,7 @@ where
                             .ready()
                             .and_then(|service| service.call(request))
                             .await
-                            .map_err(|error| Error {
-                                code: ErrorCode::ServerError(0),
-                                message: error.to_string(),
-                                data: None,
-                            })?;
+                            .map_err(to_error)?;
 
                         match response {
                             zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
@@ -948,11 +909,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
 
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1031,11 +988,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
 
             match response {
                 mempool::Response::Transactions(unmined_transactions) => {
@@ -1053,11 +1006,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
 
             match response {
                 zebra_state::ReadResponse::Transaction(Some(MinedTx {
@@ -1070,11 +1019,9 @@ where
                     confirmations,
                     verbose,
                 )),
-                zebra_state::ReadResponse::Transaction(None) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "Transaction not found".to_string(),
-                    data: None,
-                }),
+                zebra_state::ReadResponse::Transaction(None) => {
+                    Err(to_error("Transaction not found"))
+                }
                 _ => unreachable!("unmatched response to a transaction request"),
             }
         }
@@ -1092,22 +1039,14 @@ where
 
         async move {
             // Convert the [`hash_or_height`] string into an actual hash or height.
-            let hash_or_height = hash_or_height
-                .parse()
-                .map_err(|error: SerializationError| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+            let hash_or_height = hash_or_height.parse().map_err(to_error)?;
 
-            // TODO: Return early if we're below Sapling AH.
-
+            // Fetch the block referenced by [`hash_or_height`] from the state.
+            //
             // # Concurrency
             //
             // For consistency, this lookup must be performed first, then all the other lookups must
             // be based on the hash.
-            //
-            // Fetch the block referenced by [`hash_or_height`] from the state.
             //
             // TODO: If this RPC is called a lot, just get the block header, rather than the whole
             // block.
@@ -1116,15 +1055,11 @@ where
                 .ready()
                 .and_then(|service| service.call(block_request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
 
-            // The block hash, height, and time are all required fields in the RPC response. For
-            // this reason, we throw an error early if the state didn't return the requested block
-            // so that we prevent further state queries.
+            // The block hash, height, and time are all required fields in the RPC response, so we
+            // return an error early if the state didn't return the requested block to prevent
+            // further state queries.
             let block = match block_response {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
@@ -1149,11 +1084,8 @@ where
                         service.call(zebra_state::ReadRequest::SaplingTree(height.into()))
                     })
                     .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })? {
+                    .map_err(to_error)?
+                {
                     zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to a Sapling tree request"),
                 }
@@ -1169,11 +1101,8 @@ where
                         service.call(zebra_state::ReadRequest::OrchardTree(height.into()))
                     })
                     .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })? {
+                    .map_err(to_error)?
+                {
                     zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to an Orchard tree request"),
                 }
@@ -1212,11 +1141,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
+                    .map_err(to_error)?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
@@ -1242,11 +1167,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
+                    .map_err(to_error)?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
@@ -1307,11 +1228,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
@@ -1359,11 +1276,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_err(to_error)?;
             let utxos = match response {
                 zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
@@ -1413,11 +1326,9 @@ pub fn best_chain_tip_height<Tip>(latest_chain_tip: &Tip) -> Result<Height>
 where
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    latest_chain_tip.best_tip_height().ok_or(Error {
-        code: ErrorCode::ServerError(0),
-        message: "No blocks in state".to_string(),
-        data: None,
-    })
+    latest_chain_tip
+        .best_tip_height()
+        .ok_or(to_error("No blocks in state"))
 }
 
 /// Response to a `getinfo` RPC request.
@@ -1848,5 +1759,14 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
         };
 
         Ok(Height(sanitized_height))
+    }
+}
+
+/// Turns anything implementing [`ToString`] into [`Error`].
+fn to_error(err: impl ToString) -> Error {
+    Error {
+        code: ErrorCode::ServerError(0),
+        message: err.to_string(),
+        data: None,
     }
 }
