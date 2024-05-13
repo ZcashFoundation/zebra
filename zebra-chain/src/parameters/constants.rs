@@ -15,3 +15,13 @@ pub const SLOW_START_INTERVAL: Height = Height(20_000);
 ///
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
+
+/// Magic numbers used to identify different Zcash networks.
+pub mod magics {
+    use crate::parameters::network::magic::Magic;
+
+    /// The production mainnet.
+    pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
+    /// The testnet.
+    pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
+}
