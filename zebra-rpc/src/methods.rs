@@ -1045,17 +1045,12 @@ where
             //
             // TODO: If this RPC is called a lot, just get the block header, rather than the whole
             // block.
-            let block_request = zebra_state::ReadRequest::Block(hash_or_height);
-            let block_response = state
+            let block = match state
                 .ready()
-                .and_then(|service| service.call(block_request))
+                .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
                 .await
-                .map_err(to_error)?;
-
-            // The block hash, height, and time are all required fields in the RPC response, so we
-            // return an error early if the state didn't return the requested block to prevent
-            // further state queries.
-            let block = match block_response {
+                .map_err(to_error)?
+            {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
                     return Err(Error {
@@ -1067,9 +1062,16 @@ where
                 _ => unreachable!("unmatched response to a block request"),
             };
 
+            let hash = hash_or_height
+                .hash_or_else(|_| Some(block.hash()))
+                .expect("block hash");
+
             let height = hash_or_height
                 .height_or_else(|_| block.coinbase_height())
                 .expect("block height");
+
+            let time = u32::try_from(block.header.time.timestamp())
+                .expect("Timestamps of valid blocks always fit into u32.");
 
             let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
             let sapling = if network.is_nu_active(sapling_nu, height.into()) {
@@ -1104,13 +1106,6 @@ where
             } else {
                 None
             };
-
-            let hash = hash_or_height
-                .hash_or_else(|_| Some(block.hash()))
-                .expect("block hash");
-
-            let time = u32::try_from(block.header.time.timestamp())
-                .expect("Timestamps of valid blocks always fit into u32.");
 
             Ok(GetTreestate::from_parts(
                 hash, height, time, sapling, orchard,
