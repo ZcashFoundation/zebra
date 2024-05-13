@@ -1028,11 +1028,6 @@ where
         .boxed()
     }
 
-    // TODO:
-    // - use a generic error constructor (#5548)
-    // - use `height_from_signed_int()` to handle negative heights
-    //   (this might be better in the state request, because it needs the state height)
-    // - create a function that handles block hashes or heights, and use it in `get_block()`
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
         let mut state = self.state.clone();
         let network = self.network.clone();
