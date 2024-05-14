@@ -3,13 +3,14 @@
 //! This test will get block templates via the `getblocktemplate` RPC method and submit them as new blocks
 //! via the `submitblock` RPC method on Regtest.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{Context, Result};
 use tracing::*;
 
 use zebra_chain::{
     parameters::{testnet::REGTEST_NU5_ACTIVATION_HEIGHT, Network, NetworkUpgrade},
+    primitives::byte_array::increment_big_endian,
     serialization::ZcashSerialize,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -44,7 +45,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     info!("attempting to submit blocks");
-    submit_blocks(rpc_address).await?;
+    submit_blocks(network, rpc_address).await?;
 
     zebrad.kill(false)?;
 
@@ -58,7 +59,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 }
 
 /// Get block templates and submit blocks
-async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
+async fn submit_blocks(network: Network, rpc_address: SocketAddr) -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
     for height in 1..=NUM_BLOCKS_TO_SUBMIT {
@@ -73,10 +74,20 @@ async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
             NetworkUpgrade::Nu5
         };
 
-        let block_data = hex::encode(
-            proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?
-                .zcash_serialize_to_vec()?,
-        );
+        let mut block =
+            proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?;
+        let height = block
+            .coinbase_height()
+            .expect("should have a coinbase height");
+
+        while !network.disable_pow()
+            && zebra_consensus::difficulty_is_valid(&block.header, &network, &height, &block.hash())
+                .is_err()
+        {
+            increment_big_endian(Arc::make_mut(&mut block.header).nonce.as_mut());
+        }
+
+        let block_data = hex::encode(block.zcash_serialize_to_vec()?);
 
         let submit_block_response = client
             .text_from_call("submitblock", format!(r#"["{block_data}"]"#))
@@ -84,7 +95,7 @@ async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
 
         let was_submission_successful = submit_block_response.contains(r#""result":null"#);
 
-        if height % 40 == 0 {
+        if height.0 % 40 == 0 {
             info!(
                 was_submission_successful,
                 ?block_template,

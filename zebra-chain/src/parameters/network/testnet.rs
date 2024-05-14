@@ -10,6 +10,7 @@ use crate::{
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
+    work::difficulty::{ExpandedDifficulty, U256},
 };
 
 /// The Regtest NU5 activation height in tests
@@ -63,7 +64,7 @@ pub struct ConfiguredActivationHeights {
 }
 
 /// Builder for the [`Parameters`] struct.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ParametersBuilder {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
@@ -79,6 +80,8 @@ pub struct ParametersBuilder {
     hrp_sapling_payment_address: String,
     /// Slow start interval for this network
     slow_start_interval: Height,
+    /// Target difficulty limit for this network
+    target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -102,6 +105,10 @@ impl Default for ParametersBuilder {
                 .parse()
                 .expect("hard-coded hash parses"),
             slow_start_interval: SLOW_START_INTERVAL,
+            target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
+                .to_compact()
+                .to_expanded()
+                .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
         }
     }
@@ -247,6 +254,16 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
+    // TODO: Accept a hex-encoded String instead?
+    pub fn with_target_difficulty_limit(mut self, target_difficulty_limit: U256) -> Self {
+        self.target_difficulty_limit = ExpandedDifficulty::from(target_difficulty_limit)
+            .to_compact()
+            .to_expanded()
+            .expect("difficulty limits are valid expanded values");
+        self
+    }
+
     /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
     pub fn with_disable_pow(mut self, disable_pow: bool) -> Self {
         self.disable_pow = disable_pow;
@@ -263,6 +280,7 @@ impl ParametersBuilder {
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             slow_start_interval,
+            target_difficulty_limit,
             disable_pow,
         } = self;
         Parameters {
@@ -274,6 +292,7 @@ impl ParametersBuilder {
             hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
+            target_difficulty_limit,
             disable_pow,
         }
     }
@@ -285,7 +304,7 @@ impl ParametersBuilder {
 }
 
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Parameters {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
@@ -307,6 +326,8 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
+    /// Target difficulty limit for this network
+    target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -338,6 +359,7 @@ impl Parameters {
             network_name: "Regtest".to_string(),
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
+                .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
                 .with_disable_pow(true)
                 .with_slow_start_interval(Height::MIN)
                 .with_sapling_hrps(
@@ -373,6 +395,7 @@ impl Parameters {
             hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift,
+            target_difficulty_limit,
             disable_pow,
         } = Self::new_regtest(None);
 
@@ -383,6 +406,7 @@ impl Parameters {
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
 
@@ -424,6 +448,11 @@ impl Parameters {
     /// Returns slow start shift for this network
     pub fn slow_start_shift(&self) -> Height {
         self.slow_start_shift
+    }
+
+    /// Returns the target difficulty limit for this network
+    pub fn target_difficulty_limit(&self) -> ExpandedDifficulty {
+        self.target_difficulty_limit
     }
 
     /// Returns true if proof-of-work validation should be disabled for this network
