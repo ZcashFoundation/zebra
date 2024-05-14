@@ -33,7 +33,7 @@ pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Heigh
 
 /// A convenience wrapper that efficiently stores unspent transparent outputs,
 /// and the corresponding transaction IDs.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AddressUtxos {
     /// A set of unspent transparent outputs.
     utxos: BTreeMap<OutputLocation, transparent::Output>,

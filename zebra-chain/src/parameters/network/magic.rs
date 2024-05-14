@@ -23,8 +23,7 @@ impl Network {
     pub fn magic(&self) -> Magic {
         match self {
             Network::Mainnet => magics::MAINNET,
-            // TODO: Move `Magic` struct definition to `zebra-chain`, add it as a field in `testnet::Parameters`, and return it here.
-            Network::Testnet(_params) => magics::TESTNET,
+            Network::Testnet(params) => params.network_magic(),
         }
     }
 }
