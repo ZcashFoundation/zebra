@@ -316,7 +316,7 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = if config.network.network.is_regtest() {
+        let syncer_task_handle = if is_regtest {
             if !syncer
                 .state_contains(config.network.network.genesis_hash())
                 .await?
