@@ -46,7 +46,7 @@ pub mod router;
 pub mod transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use block::check::difficulty_threshold_is_valid;
+pub use block::check::difficulty_is_valid;
 
 pub use block::{
     subsidy::{

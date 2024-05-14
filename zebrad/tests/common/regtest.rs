@@ -80,13 +80,9 @@ async fn submit_blocks(network: Network, rpc_address: SocketAddr) -> Result<()> 
             .coinbase_height()
             .expect("should have a coinbase height");
 
-        while zebra_consensus::difficulty_threshold_is_valid(
-            &block.header,
-            &network,
-            &height,
-            &block.hash(),
-        )
-        .is_err()
+        while !network.disable_pow()
+            && zebra_consensus::difficulty_is_valid(&block.header, &network, &height, &block.hash())
+                .is_err()
         {
             increment_big_endian(Arc::make_mut(&mut block.header).nonce.as_mut());
         }
