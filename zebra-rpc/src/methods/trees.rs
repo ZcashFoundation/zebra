@@ -34,8 +34,8 @@ pub struct GetSubtrees {
 
 /// Response to a `z_gettreestate` RPC request.
 ///
-/// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
-/// corresponding [`block::Hash`], [`Height`], and block time.
+/// Contains the hex-encoded Sapling & Orchard note commitment trees, and their corresponding
+/// [`struct@Hash`], [`Height`], and block time.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, Default)]
 pub struct GetTreestate {
     /// The block hash corresponding to the treestate, hex-encoded.
