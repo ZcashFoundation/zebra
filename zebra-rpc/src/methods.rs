@@ -1078,7 +1078,7 @@ where
                 match state
                     .ready()
                     .and_then(|service| {
-                        service.call(zebra_state::ReadRequest::SaplingTree(height.into()))
+                        service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
                     })
                     .await
                     .map_err(to_error)?
@@ -1095,7 +1095,7 @@ where
                 match state
                     .ready()
                     .and_then(|service| {
-                        service.call(zebra_state::ReadRequest::OrchardTree(height.into()))
+                        service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
                     })
                     .await
                     .map_err(to_error)?
