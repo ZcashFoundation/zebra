@@ -59,6 +59,9 @@ peerset_initial_target_size = 25
 [network.testnet_parameters]
 network_name = "ConfiguredTestnet_1"
 network_magic = [0, 0, 0, 0]
+slow_start_interval = 0
+target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+disable_pow = true
 
 [network.testnet_parameters.activation_heights]
 BeforeOverwinter = 1

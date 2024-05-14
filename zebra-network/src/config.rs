@@ -774,7 +774,7 @@ impl<'de> Deserialize<'de> for Config {
                         )
                         .map_err(|err| {
                             de::Error::custom(format!(
-                                "hex-encoded target difficulty limit is too long: {err:?}"
+                                "hex-encoded target difficulty must be 64 chars: {err:?}"
                             ))
                         })?,
                     ));
