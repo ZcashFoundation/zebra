@@ -41,6 +41,7 @@ mod proptest {
 
         assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
         assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
+        assert_eq!(format!("{:?}", magics::REGTEST), "Magic(\"aae83f5f\")");
     }
 
     proptest! {
