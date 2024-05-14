@@ -62,10 +62,10 @@ mset = "0.1.1"
 regex = "1.10.4"
 rlimit = "0.10.1"
 rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
-semver = "1.0.22"
-serde = { version = "1.0.198", features = ["serde_derive"] }
+semver = "1.0.23"
+serde = { version = "1.0.201", features = ["serde_derive"] }
 tempfile = "3.10.1"
-thiserror = "1.0.59"
+thiserror = "1.0.60"
 
 rayon = "1.10.0"
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "sync", "tracing"] }
@@ -75,7 +75,7 @@ tracing = "0.1.39"
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.116", package = "serde_json", optional = true }
+serde_json = { version = "1.0.117", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["async-error"] }
 
