@@ -68,6 +68,22 @@ pub type BatchVerifyingKey = VerifyingKey<Bls12>;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = PreparedVerifyingKey<Bls12>;
 
+lazy_static::lazy_static! {
+    /// The Sapling Groth16 verifying key for spends.
+    pub static ref SAPLING_SPEND_VERIFYING_KEY: std::sync::OnceLock<crate::groth16::VerifyingKey<Bls12>> = {
+        let cell = std::sync::OnceLock::new();
+        let _ = cell.set(GROTH16_PARAMETERS.sapling.spend.verifying_key().inner().clone());
+        cell
+    };
+
+     /// The Sapling Groth16 verifying key for outputs.
+    pub static ref SAPLING_OUTPUT_VERIFYING_KEY: std::sync::OnceLock<crate::groth16::VerifyingKey<Bls12>> = {
+        let cell = std::sync::OnceLock::new();
+        let _ = cell.set(GROTH16_PARAMETERS.sapling.output.verifying_key().inner().clone());
+        cell
+    };
+}
+
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
 /// This service transparently batches contemporaneous proof verifications,
@@ -84,7 +100,11 @@ pub static SPEND_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
+            Verifier::new(
+                SAPLING_SPEND_VERIFYING_KEY
+                    .get()
+                    .expect("Sapling verifying key for spends was set above"),
+            ),
             super::MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -102,7 +122,10 @@ pub static SPEND_VERIFIER: Lazy<
             (|item: Item| {
                 Verifier::verify_single_spawning(
                     item,
-                    &GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key,
+                    &GROTH16_PARAMETERS
+                        .sapling
+                        .spend_prepared_verifying_key
+                        .inner(),
                 )
                 .boxed()
             }) as fn(_) -> _,
@@ -126,7 +149,11 @@ pub static OUTPUT_VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
+            Verifier::new(
+                SAPLING_OUTPUT_VERIFYING_KEY
+                    .get()
+                    .expect("Sapling verifying key for outputs was set above"),
+            ),
             super::MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -139,7 +166,10 @@ pub static OUTPUT_VERIFIER: Lazy<
             (|item: Item| {
                 Verifier::verify_single_spawning(
                     item,
-                    &GROTH16_PARAMETERS.sapling.output_prepared_verifying_key,
+                    &GROTH16_PARAMETERS
+                        .sapling
+                        .output_prepared_verifying_key
+                        .inner(),
                 )
                 .boxed()
             }) as fn(_) -> _,

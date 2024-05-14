@@ -25,11 +25,11 @@ pub struct Groth16Parameters {
 
 /// Groth16 Zero-Knowledge Proof spend and output parameters for the Sapling circuit.
 pub struct SaplingParameters {
-    pub spend: groth16::Parameters<Bls12>,
-    pub spend_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
+    pub spend: sapling::circuit::SpendParameters,
+    pub spend_prepared_verifying_key: sapling::circuit::PreparedSpendVerifyingKey,
 
-    pub output: groth16::Parameters<Bls12>,
-    pub output_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
+    pub output: sapling::circuit::OutputParameters,
+    pub output_prepared_verifying_key: sapling::circuit::PreparedOutputVerifyingKey,
 }
 
 /// Groth16 Zero-Knowledge Proof spend parameters for the Sprout circuit.

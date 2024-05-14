@@ -59,8 +59,9 @@ tracing = "0.1.39"
 tracing-futures = "0.2.5"
 
 orchard = "0.6.0"
+sapling = { package = "sapling-crypto", git = "https://github.com/oxarbitrage/sapling-crypto", branch = "add-verifying-key-methods" }
 
-zcash_proofs = { version = "0.13.0-rc.1", features = ["multicore" ] }
+zcash_proofs = { package = "zcash_proofs", git = "https://github.com/oxarbitrage/librustzcash", branch = "use-custom-sapling" }
 wagyu-zcash-parameters = "0.2.0"
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.13" }
