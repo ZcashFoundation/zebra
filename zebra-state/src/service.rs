@@ -387,7 +387,7 @@ impl StateService {
 
         let read_service = ReadStateService::new(
             &finalized_state,
-            block_write_task,
+            Some(block_write_task),
             non_finalized_state_receiver,
         );
 
@@ -828,14 +828,14 @@ impl ReadStateService {
     /// and a watch channel for updating the shared recent non-finalized chain.
     pub(crate) fn new(
         finalized_state: &FinalizedState,
-        block_write_task: Arc<std::thread::JoinHandle<()>>,
+        block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
         non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
             non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
-            block_write_task: Some(block_write_task),
+            block_write_task,
         };
 
         tracing::debug!("created new read-only state service");
@@ -1943,6 +1943,42 @@ pub fn init(
         latest_chain_tip,
         chain_tip_change,
     )
+}
+
+/// Initialize a read state service from the provided [`Config`].
+/// Returns a read-only state service,
+///
+/// Each `network` has its own separate on-disk database.
+///
+/// To share access to the state, clone the returned [`ReadStateService`].
+pub fn init_read_only(
+    config: Config,
+    network: &Network,
+    non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
+) -> ReadStateService {
+    #[cfg(feature = "elasticsearch")]
+    let finalized_state = {
+        let conn_pool = SingleNodeConnectionPool::new(
+            Url::parse(config.elasticsearch_url.as_str())
+                .expect("configured elasticsearch url is invalid"),
+        );
+        let transport = TransportBuilder::new(conn_pool)
+            .cert_validation(CertificateValidation::None)
+            .auth(Basic(
+                config.clone().elasticsearch_username,
+                config.clone().elasticsearch_password,
+            ))
+            .build()
+            .expect("elasticsearch transport builder should not fail");
+        let elastic_db = Some(Elasticsearch::new(transport));
+
+        FinalizedState::new_with_debug(&config, network, true, elastic_db, true)
+    };
+
+    #[cfg(not(feature = "elasticsearch"))]
+    let finalized_state = { FinalizedState::new_with_debug(&config, network, true, true) };
+
+    ReadStateService::new(&finalized_state, None, non_finalized_state_receiver)
 }
 
 /// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
