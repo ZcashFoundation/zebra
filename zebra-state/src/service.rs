@@ -1954,8 +1954,15 @@ pub fn init(
 pub fn init_read_only(
     config: Config,
     network: &Network,
-    non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
-) -> ReadStateService {
+) -> (
+    NonFinalizedState,
+    tokio::sync::watch::Sender<NonFinalizedState>,
+    ReadStateService,
+) {
+    let non_finalized_state = NonFinalizedState::new(network);
+    let (non_finalized_state_sender, non_finalized_state_receiver) =
+        tokio::sync::watch::channel(non_finalized_state.clone());
+
     #[cfg(feature = "elasticsearch")]
     let finalized_state = {
         let conn_pool = SingleNodeConnectionPool::new(
@@ -1978,7 +1985,11 @@ pub fn init_read_only(
     #[cfg(not(feature = "elasticsearch"))]
     let finalized_state = { FinalizedState::new_with_debug(&config, network, true, true) };
 
-    ReadStateService::new(&finalized_state, None, non_finalized_state_receiver)
+    (
+        non_finalized_state,
+        non_finalized_state_sender,
+        ReadStateService::new(&finalized_state, None, non_finalized_state_receiver),
+    )
 }
 
 /// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.

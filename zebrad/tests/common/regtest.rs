@@ -44,7 +44,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     info!("attempting to submit blocks");
-    submit_blocks(rpc_address).await?;
+    submit_blocks(rpc_address, NUM_BLOCKS_TO_SUBMIT, None).await?;
 
     zebrad.kill(false)?;
 
@@ -58,10 +58,14 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 }
 
 /// Get block templates and submit blocks
-async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
+pub async fn submit_blocks(
+    rpc_address: SocketAddr,
+    num_blocks: usize,
+    delay_per_block: Option<Duration>,
+) -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
-    for height in 1..=NUM_BLOCKS_TO_SUBMIT {
+    for height in 1..=num_blocks {
         let block_template: GetBlockTemplate = client
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
@@ -98,6 +102,10 @@ async fn submit_blocks(rpc_address: SocketAddr) -> Result<()> {
             submit_block_response.contains(r#""result":null"#),
             "unexpected response from submitblock RPC, should be null, was: {submit_block_response}"
         );
+
+        if let Some(delay) = delay_per_block {
+            tokio::time::sleep(delay).await
+        }
     }
 
     Ok(())

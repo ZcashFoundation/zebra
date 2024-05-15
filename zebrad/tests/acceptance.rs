@@ -3166,3 +3166,12 @@ async fn regtest_submit_blocks() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
     Ok(())
 }
+
+/// Test using the standalone ReadStateService.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn read_state_has_non_finalized_best_chain() -> Result<()> {
+    common::read_state::has_non_finalized_best_chain().await?;
+    Ok(())
+}
