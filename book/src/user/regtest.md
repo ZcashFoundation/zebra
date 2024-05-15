@@ -30,6 +30,12 @@ ephemeral = true
 listen_addr = "0.0.0.0:18232"
 ```
 
+Zebra should now include the Regtest network name in its logs, for example:
+
+```console
+2024-05-15T21:33:57.044156Z  INFO {zebrad="01633af" net="Regtest"}: zebrad::commands::start: initializing mempool
+```
+
 There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
@@ -45,6 +51,10 @@ Compile Zebra with `cargo build --features "internal-miner"` and add `internal_m
 internal_miner = true
 ```
 
+Zebra should now mine blocks on Regtest when it starts.
+
+To confirm that it's working, look for `successfully mined a new block` messages in the logs, or that the tip height is increasing.
+
 ## Using RPC methods directly
 
 Blocks could also be mined outside of Zebra and submitted via Zebra's RPC methods. This requires enabling the RPC server in the configuration by providing a `listen_addr` field:
@@ -56,6 +66,36 @@ listen_addr = "0.0.0.0:18232"
 
 With Proof of Work disabled on Regtest, block templates can be converted directly into blocks with the `proposal_block_from_template()` function in the `zebra-chain` crate, serialized, hex-encoded, and then submitted via the `submitblock` RPC method.
 
-When Proof of Work validation is enabled for Regtest with a low target difficulty and easy Equihash parameters, Zebra may have a `network.testnet_parameters.disable_pow` field in its configuration so that this would continue working.
+The `submitblock` RPC method should return `{ "result": null }` for successful block submissions.
 
-See the `regtest_submit_blocks()` acceptance test as an example for using Zebra's RPC methods to submit blocks on Regtest.
+For example:
+
+```rust
+let client = RpcRequestClient::new(rpc_address);
+
+let block_template: GetBlockTemplate = client
+    .json_result_from_call("getblocktemplate", "[]".to_string())
+    .await
+    .expect("response should be success output with a serialized `GetBlockTemplate`");
+
+let network_upgrade = if block_template.height < NU5_ACTIVATION_HEIGHT {
+    NetworkUpgrade::Canopy
+} else {
+    NetworkUpgrade::Nu5
+};
+
+let block_data = hex::encode(
+    proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?
+        .zcash_serialize_to_vec()?,
+);
+
+let submit_block_response = client
+    .text_from_call("submitblock", format!(r#"["{block_data}"]"#))
+    .await?;
+
+let was_submission_successful = submit_block_response.contains(r#""result":null"#);
+```
+
+See the `regtest_submit_blocks()` acceptance test as a more detailed example for using Zebra's RPC methods to submit blocks on Regtest.
+
+When Proof of Work validation is enabled for Regtest with a low target difficulty and easy Equihash parameters, Zebra may have a `network.testnet_parameters.disable_pow` field in its configuration so that this would continue working.
