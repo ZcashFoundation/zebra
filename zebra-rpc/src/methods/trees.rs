@@ -36,7 +36,7 @@ pub struct GetSubtrees {
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees, and their corresponding
 /// [`struct@Hash`], [`Height`], and block time.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetTreestate {
     /// The block hash corresponding to the treestate, hex-encoded.
     #[serde(with = "hex")]
@@ -82,6 +82,18 @@ impl GetTreestate {
             time,
             sapling,
             orchard,
+        }
+    }
+}
+
+impl Default for GetTreestate {
+    fn default() -> Self {
+        Self {
+            hash: Hash([0; 32]),
+            height: Height::MIN,
+            time: Default::default(),
+            sapling: Default::default(),
+            orchard: Default::default(),
         }
     }
 }
