@@ -768,16 +768,11 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 if let Some(target_difficulty_limit) = target_difficulty_limit {
-                    params_builder = params_builder.with_target_difficulty_limit(U256::from(
-                        <[u8; 32]>::try_from(
-                            hex::decode(target_difficulty_limit).map_err(de::Error::custom)?,
-                        )
-                        .map_err(|err| {
-                            de::Error::custom(format!(
-                                "hex-encoded target difficulty must be 64 chars: {err:?}"
-                            ))
-                        })?,
-                    ));
+                    params_builder = params_builder.with_target_difficulty_limit(
+                        target_difficulty_limit
+                            .parse::<U256>()
+                            .map_err(de::Error::custom)?,
+                    );
                 }
 
                 if let Some(disable_pow) = disable_pow {
