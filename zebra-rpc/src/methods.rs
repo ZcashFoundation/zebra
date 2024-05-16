@@ -505,7 +505,7 @@ where
         let (tip_height, tip_hash) = self
             .latest_chain_tip
             .best_tip_height_and_hash()
-            .ok_or(to_error("No Chain tip available yet"))?;
+            .ok_or_server_error("No Chain tip available yet")?;
 
         // `estimated_height` field
         let current_block_time = self
