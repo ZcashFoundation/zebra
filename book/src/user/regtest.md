@@ -44,14 +44,14 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 
 Zebra can mine blocks on the Regtest network when compiled with the experimental `internal-miner` compilation feature and configured to enable to internal miner.
 
-Compile Zebra with `cargo build --features "internal-miner"` and add `internal_miner = true` in the mining section of its configuration to use the internal miner with Regtest:
+Add `internal_miner = true` in the mining section of its configuration and compile Zebra with `cargo build --features "internal-miner"` (or `cargo run --features "internal-miner"` to compile and start Zebra) to use the internal miner with Regtest:
 
 ```toml
 [mining]
 internal_miner = true
 ```
 
-Zebra should now mine blocks on Regtest when it starts.
+Zebra should now mine blocks on Regtest when it starts after a short delay (of around 30 seconds).
 
 To confirm that it's working, look for `successfully mined a new block` messages in the logs, or that the tip height is increasing.
 
