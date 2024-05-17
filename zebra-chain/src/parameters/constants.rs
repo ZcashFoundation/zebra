@@ -24,6 +24,6 @@ pub mod magics {
     pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
     /// The testnet.
     pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
-    /// The regtest.
+    /// The regtest, see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L716-L719>
     pub const REGTEST: Magic = Magic([0xaa, 0xe8, 0x3f, 0x5f]);
 }
