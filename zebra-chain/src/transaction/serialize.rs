@@ -292,7 +292,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // This rule is also implemented in
         // [`zebra_state::service::check::anchor`] and
-        // [`zebra_chain::Spend`].
+        // [`zebra_chain::sapling::Spend`].
         //
         // The "anchor encoding for v5 transactions" is implemented here.
         let transfers = match shared_anchor {
