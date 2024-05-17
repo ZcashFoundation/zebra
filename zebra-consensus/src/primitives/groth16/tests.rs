@@ -73,7 +73,7 @@ async fn verify_sapling_groth16() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
     let mut spend_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(SAPLING_SPEND_VERIFYING_KEY.get().unwrap()),
+            Verifier::new(&SAPLING_SPEND_VERIFYING_KEY),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -93,7 +93,7 @@ async fn verify_sapling_groth16() {
     );
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(SAPLING_OUTPUT_VERIFYING_KEY.get().unwrap()),
+            Verifier::new(&SAPLING_OUTPUT_VERIFYING_KEY),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -193,7 +193,7 @@ async fn correctly_err_on_invalid_output_proof() {
     // Also, since we expect these to fail, we don't want to slow down the communal verifiers.
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(SAPLING_SPEND_VERIFYING_KEY.get().unwrap()),
+            Verifier::new(&SAPLING_SPEND_VERIFYING_KEY),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
