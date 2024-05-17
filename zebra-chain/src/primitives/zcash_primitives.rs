@@ -205,12 +205,12 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
     }
 }
 
-/// Convert a Zebra Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zp_tx::components::Amount {
+/// Convert a Zebra non-negative Amount into a librustzcash one.
+impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
     type Error = ();
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zp_tx::components::Amount::from_u64(amount.into())
+        zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())
     }
 }
 
@@ -261,10 +261,10 @@ pub(crate) fn sighash(
                 index: input_index,
                 script_code: &script,
                 script_pubkey: &script,
-                value: zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64_le_bytes(
-                    output.value.to_bytes(),
-                )
-                .expect("amount was previously validated"),
+                value: output
+                    .value
+                    .try_into()
+                    .expect("amount was previously validated"),
             }
         }
         None => zp_tx::sighash::SignableInput::Shielded,
