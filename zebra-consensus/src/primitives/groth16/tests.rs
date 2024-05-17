@@ -73,41 +73,27 @@ async fn verify_sapling_groth16() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
     let mut spend_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&SAPLING_SPEND_VERIFYING_KEY),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(
-                    item.verify_single(
-                        &GROTH16_PARAMETERS
-                            .sapling
-                            .spend_prepared_verifying_key
-                            .inner(),
-                    ),
-                )
+                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key))
             }) as fn(_) -> _,
         ),
     );
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&SAPLING_OUTPUT_VERIFYING_KEY),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(
-                    item.verify_single(
-                        &GROTH16_PARAMETERS
-                            .sapling
-                            .output_prepared_verifying_key
-                            .inner(),
-                    ),
-                )
+                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
             }) as fn(_) -> _,
         ),
     );
@@ -193,21 +179,14 @@ async fn correctly_err_on_invalid_output_proof() {
     // Also, since we expect these to fail, we don't want to slow down the communal verifiers.
     let mut output_verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&SAPLING_SPEND_VERIFYING_KEY),
+            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
             (|item: Item| {
-                ready(
-                    item.verify_single(
-                        &GROTH16_PARAMETERS
-                            .sapling
-                            .output_prepared_verifying_key
-                            .inner(),
-                    ),
-                )
+                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
             }) as fn(_) -> _,
         ),
     );
