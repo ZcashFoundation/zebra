@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::*;
-use crate::sapling::SharedAnchor;
+use crate::sapling::{Output, SharedAnchor, Spend};
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -134,17 +134,14 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
         let (spend_prefixes, spend_proofs_sigs): (Vec<_>, Vec<_>) = self
             .spends()
             .cloned()
-            .map(sapling::Spend::<SharedAnchor>::into_v5_parts)
+            .map(Spend::<SharedAnchor>::into_v5_parts)
             .map(|(prefix, proof, sig)| (prefix, (proof, sig)))
             .unzip();
         let (spend_proofs, spend_sigs) = spend_proofs_sigs.into_iter().unzip();
 
         // Collect arrays for Outputs
-        let (output_prefixes, output_proofs): (Vec<_>, _) = self
-            .outputs()
-            .cloned()
-            .map(sapling::Output::into_v5_parts)
-            .unzip();
+        let (output_prefixes, output_proofs): (Vec<_>, _) =
+            self.outputs().cloned().map(Output::into_v5_parts).unzip();
 
         // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         spend_prefixes.zcash_serialize(&mut writer)?;
@@ -272,16 +269,14 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             .into_iter()
             .zip(spend_proofs)
             .zip(spend_sigs)
-            .map(|((prefix, proof), sig)| {
-                sapling::Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig)
-            })
+            .map(|((prefix, proof), sig)| Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig))
             .collect();
 
         // Create shielded outputs from deserialized parts
         let outputs = output_prefixes
             .into_iter()
             .zip(output_proofs)
-            .map(|(prefix, proof)| sapling::Output::from_v5_parts(prefix, proof))
+            .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
             .collect();
 
         // Create transfers
@@ -297,7 +292,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // This rule is also implemented in
         // [`zebra_state::service::check::anchor`] and
-        // [`zebra_chain::sapling::spend`].
+        // [`zebra_chain::Spend`].
         //
         // The "anchor encoding for v5 transactions" is implemented here.
         let transfers = match shared_anchor {
@@ -828,7 +823,7 @@ impl ZcashDeserialize for Transaction {
                 let shielded_outputs =
                     Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut limited_reader)?
                         .into_iter()
-                        .map(sapling::Output::from_v4)
+                        .map(Output::from_v4)
                         .collect();
 
                 // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
