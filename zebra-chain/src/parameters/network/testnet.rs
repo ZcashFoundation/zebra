@@ -105,6 +105,15 @@ impl Default for ParametersBuilder {
                 .parse()
                 .expect("hard-coded hash parses"),
             slow_start_interval: SLOW_START_INTERVAL,
+            // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
+            // <https://zips.z.cash/protocol/protocol.pdf>
+            //
+            // `zcashd` converts the PoWLimit into a compact representation before
+            // using it to perform difficulty filter checks.
+            //
+            // The Zcash specification converts to compact for the default difficulty
+            // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
+            // ZIP 208 don't specify this conversion either.) See #1277 for details.
             target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
                 .to_compact()
                 .to_expanded()
@@ -359,6 +368,7 @@ impl Parameters {
             network_name: "Regtest".to_string(),
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
+                // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
                 .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
                 .with_disable_pow(true)
                 .with_slow_start_interval(Height::MIN)

@@ -696,9 +696,10 @@ impl ParameterDifficulty for Network {
     /// See [`ParameterDifficulty::target_difficulty_limit`]
     fn target_difficulty_limit(&self) -> ExpandedDifficulty {
         let limit: U256 = match self {
-            /* 2^243 - 1 */
+            // Mainnet PoWLimit is defined as `2^243 - 1` on page 73 of the protocol specification:
+            // <https://zips.z.cash/protocol/protocol.pdf>
             Network::Mainnet => (U256::one() << 243) - 1,
-            /* 2^251 - 1 for the default testnet */
+            // 2^251 - 1 for the default testnet, see `testnet::ParametersBuilder::default`()
             Network::Testnet(params) => return params.target_difficulty_limit(),
         };
 
