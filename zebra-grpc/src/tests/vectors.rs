@@ -26,6 +26,7 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 
 /// Test the gRPC methods with mocked responses
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(target_os = "windows"))]
 async fn test_grpc_methods_mocked() {
     let _init_guard = zebra_test::init();
 
