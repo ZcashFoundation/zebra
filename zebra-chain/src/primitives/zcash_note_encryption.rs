@@ -22,12 +22,18 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 
     let null_sapling_ovk = sapling::keys::OutgoingViewingKey([0u8; 32]);
 
+    let zip_212_enforcement = if network_upgrade >= NetworkUpgrade::Canopy {
+        sapling::note_encryption::Zip212Enforcement::On
+    } else {
+        sapling::note_encryption::Zip212Enforcement::Off
+    };
+
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
             let recovery = sapling::note_encryption::try_sapling_output_recovery(
                 &null_sapling_ovk,
                 output,
-                sapling::note_encryption::Zip212Enforcement::GracePeriod,
+                zip_212_enforcement,
             );
             if recovery.is_none() {
                 return false;
