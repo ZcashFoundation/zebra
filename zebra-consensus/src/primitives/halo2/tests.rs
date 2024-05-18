@@ -7,7 +7,7 @@ use tower::ServiceExt;
 
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use orchard::{
-    builder::Builder,
+    builder::{Builder, BundleType},
     bundle::Flags,
     circuit::ProvingKey,
     keys::{FullViewingKey, Scope, SpendingKey},
@@ -32,8 +32,6 @@ fn generate_test_vectors() {
     let sk = SpendingKey::from_bytes([7; 32]).unwrap();
     let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
 
-    let enable_spends = true;
-    let enable_outputs = true;
     let flags =
         zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
 
@@ -43,17 +41,20 @@ fn generate_test_vectors() {
     let shielded_data: Vec<zebra_chain::orchard::ShieldedData> = (1..=4)
         .map(|num_recipients| {
             let mut builder = Builder::new(
-                Flags::from_parts(enable_spends, enable_outputs),
+                BundleType::Transactional {
+                    flags: Flags::from_byte(flags.bits()).unwrap(),
+                    bundle_required: true,
+                },
                 Anchor::from_bytes(anchor_bytes).unwrap(),
             );
 
             for _ in 0..num_recipients {
                 builder
-                    .add_recipient(None, recipient, NoteValue::from_raw(note_value), None)
+                    .add_output(None, recipient, NoteValue::from_raw(note_value), None)
                     .unwrap();
             }
 
-            let bundle: Bundle<_, i64> = builder.build(rng).unwrap();
+            let bundle: Bundle<_, i64> = builder.build(rng).unwrap().unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)
