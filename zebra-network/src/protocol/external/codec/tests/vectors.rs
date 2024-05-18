@@ -587,3 +587,23 @@ fn reject_command_and_reason_size_limits() {
         };
     }
 }
+
+/// Check that the version test vector deserialization fails when there's a network magic mismatch.
+#[test]
+fn message_with_wrong_network_magic_returns_error() {
+    let _init_guard = zebra_test::init();
+    let mut codec = Codec::builder().finish();
+    let mut bytes = BytesMut::new();
+
+    codec
+        .encode(VERSION_TEST_VECTOR.clone(), &mut bytes)
+        .expect("encoding should succeed");
+
+    let mut codec = Codec::builder()
+        .for_network(&Network::new_default_testnet())
+        .finish();
+
+    codec
+        .decode(&mut bytes)
+        .expect_err("decoding message with mismatching network magic should return an error");
+}
