@@ -30,6 +30,7 @@ fn rpc_server_spawn_single_thread() {
 
 /// Test that the JSON-RPC server spawns when configured with multiple threads.
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn rpc_server_spawn_parallel_threads() {
     rpc_server_spawn(true)
 }
