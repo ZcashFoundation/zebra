@@ -177,8 +177,8 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock", "s
 humantime-serde = "1.1.1"
 indexmap = "2.2.6"
 lazy_static = "1.4.0"
-semver = "1.0.22"
-serde = { version = "1.0.198", features = ["serde_derive"] }
+semver = "1.0.23"
+serde = { version = "1.0.201", features = ["serde_derive"] }
 toml = "0.8.11"
 
 futures = "0.3.30"
@@ -193,7 +193,7 @@ color-eyre = { version = "0.6.3", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.59"
+thiserror = "1.0.60"
 
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tracing-appender = "0.2.3"
@@ -261,7 +261,7 @@ regex = "1.10.4"
 insta = { version = "1.38.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.116", features = ["preserve_order"] }
+serde_json = { version = "1.0.117", features = ["preserve_order"] }
 tempfile = "3.10.1"
 
 hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}

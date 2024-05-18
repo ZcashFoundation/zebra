@@ -33,7 +33,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **20 weeks** but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **16 weeks** but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
