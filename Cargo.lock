@@ -6046,7 +6046,7 @@ dependencies = [
  "metrics 0.22.3",
  "num-integer",
  "once_cell",
- "orchard 0.6.0",
+ "orchard 0.7.1",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",

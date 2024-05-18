@@ -422,15 +422,6 @@ lazy_static! {
 /// [6.1.3.3  Efficient Resource Usage] <https://tools.ietf.org/rfcmarkup?doc=1123#page-77>
 pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Magic numbers used to identify different Zcash networks.
-pub mod magics {
-    use super::*;
-    /// The production mainnet.
-    pub const MAINNET: Magic = Magic([0x24, 0xe9, 0x27, 0x64]);
-    /// The testnet.
-    pub const TESTNET: Magic = Magic([0xfa, 0x1a, 0xf9, 0xbf]);
-}
-
 #[cfg(test)]
 mod tests {
     use zebra_chain::parameters::POST_BLOSSOM_POW_TARGET_SPACING;
