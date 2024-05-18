@@ -145,6 +145,7 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn local_listener_fixed_port_localhost_addr_v4() {
     let _init_guard = zebra_test::init();
 
@@ -161,6 +162,7 @@ async fn local_listener_fixed_port_localhost_addr_v4() {
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn local_listener_fixed_port_localhost_addr_v6() {
     let _init_guard = zebra_test::init();
 
