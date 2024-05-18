@@ -1,5 +1,9 @@
 //! Copied from `zcash_proofs` v1.14.0 with minor modifications to the `parse_parameters` function (renamed to `parse_sapling_parameters`).
-
+//!
+//! Sapling related constants: <https://github.com/zcash/librustzcash/blob/zcash_proofs-0.14.0/zcash_proofs/src/lib.rs#L52-L58>
+//! Parse parameters: <https://github.com/zcash/librustzcash/blob/zcash_proofs-0.14.0/zcash_proofs/src/lib.rs#L353>
+//! Hash reader: <https://github.com/zcash/librustzcash/blob/zcash_proofs-0.14.0/zcash_proofs/src/hashreader.rs#L10>
+//! Verify hash: <https://github.com/zcash/librustzcash/blob/zcash_proofs-0.14.0/zcash_proofs/src/lib.rs#L472>
 use std::{
     fmt::Write,
     io::{self, Read},
