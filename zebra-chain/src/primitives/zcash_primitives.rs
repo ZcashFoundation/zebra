@@ -33,10 +33,10 @@ impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
-                zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64_le_bytes(
-                    prevout.value.to_bytes(),
-                )
-                .expect("will not fail since it was previously validated")
+                prevout
+                    .value
+                    .try_into()
+                    .expect("will not fail since it was previously validated")
             })
             .collect()
     }
