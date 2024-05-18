@@ -3,6 +3,10 @@
 use bellman::groth16;
 use bls12_381::Bls12;
 
+mod parse_parameters;
+
+use parse_parameters::parse_sapling_parameters;
+
 lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
@@ -25,11 +29,11 @@ pub struct Groth16Parameters {
 
 /// Groth16 Zero-Knowledge Proof spend and output parameters for the Sapling circuit.
 pub struct SaplingParameters {
-    pub spend: sapling::circuit::SpendParameters,
-    pub spend_prepared_verifying_key: sapling::circuit::PreparedSpendVerifyingKey,
+    pub spend: groth16::Parameters<Bls12>,
+    pub spend_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 
-    pub output: sapling::circuit::OutputParameters,
-    pub output_prepared_verifying_key: sapling::circuit::PreparedOutputVerifyingKey,
+    pub output: groth16::Parameters<Bls12>,
+    pub output_prepared_verifying_key: groth16::PreparedVerifyingKey<Bls12>,
 }
 
 /// Groth16 Zero-Knowledge Proof spend parameters for the Sprout circuit.
@@ -53,19 +57,10 @@ impl Groth16Parameters {
             wagyu_zcash_parameters::load_sapling_parameters();
         let sprout_vk_bytes = include_bytes!("sprout-groth16.vk");
 
-        let sapling_parameters = zcash_proofs::parse_parameters(
+        let sapling = parse_sapling_parameters(
             sapling_spend_bytes.as_slice(),
             sapling_output_bytes.as_slice(),
-            // This API expects the full sprout parameter file, not just the verifying key.
-            None,
         );
-
-        let sapling = SaplingParameters {
-            spend: sapling_parameters.spend_params,
-            spend_prepared_verifying_key: sapling_parameters.spend_vk,
-            output: sapling_parameters.output_params,
-            output_prepared_verifying_key: sapling_parameters.output_vk,
-        };
 
         let sprout_vk = groth16::VerifyingKey::<Bls12>::read(&sprout_vk_bytes[..])
             .expect("should be able to parse Sprout verification key");
