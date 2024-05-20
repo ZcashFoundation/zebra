@@ -107,40 +107,46 @@ async fn test_z_get_treestate() {
     );
 
     // Request the treestate by a hash.
-    let rsp = rpc
+    let tree_state = rpc
         .z_get_treestate(blocks[0].hash().to_string())
         .await
         .expect("genesis treestate = no treestate");
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_by_hash", rsp));
+    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_by_hash", tree_state));
 
     // Request the treestate by a hash for a block which is not in the state.
-    let rsp = rpc.z_get_treestate(block::Hash([0; 32]).to_string()).await;
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_by_non_existent_hash", rsp));
+    let tree_state = rpc.z_get_treestate(block::Hash([0; 32]).to_string()).await;
+    settings
+        .bind(|| insta::assert_json_snapshot!("z_get_treestate_by_non_existent_hash", tree_state));
 
     // Request the treestate before Sapling activation.
-    let rsp = rpc
+    let tree_state = rpc
         .z_get_treestate((SAPLING_ACTIVATION_HEIGHT - 1).to_string())
         .await
         .expect("no Sapling treestate and no Orchard treestate");
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_no_treestate", rsp));
+    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_no_treestate", tree_state));
 
     // Request the treestate at Sapling activation.
-    let rsp = rpc
+    let tree_state = rpc
         .z_get_treestate(SAPLING_ACTIVATION_HEIGHT.to_string())
         .await
         .expect("empty Sapling treestate and no Orchard treestate");
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_empty_Sapling_treestate", rsp));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("z_get_treestate_empty_Sapling_treestate", tree_state)
+    });
 
     // Request the treestate for an invalid height.
-    let rsp = rpc
+    let tree_state = rpc
         .z_get_treestate(EXCESSIVE_BLOCK_HEIGHT.to_string())
         .await;
-    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate_excessive_block_height", rsp));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("z_get_treestate_excessive_block_height", tree_state)
+    });
 
     // Request the treestate for an unparsable hash or height.
-    let rsp = rpc.z_get_treestate("Do you even shield?".to_string()).await;
-    settings
-        .bind(|| insta::assert_json_snapshot!("z_get_treestate_unparsable_hash_or_height", rsp));
+    let tree_state = rpc.z_get_treestate("Do you even shield?".to_string()).await;
+    settings.bind(|| {
+        insta::assert_json_snapshot!("z_get_treestate_unparsable_hash_or_height", tree_state)
+    });
 
     // TODO:
     // 1. Request a non-empty Sapling treestate.
