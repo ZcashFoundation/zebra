@@ -48,7 +48,7 @@ dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.12.1"
+itertools = "0.13.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.46"
 ordered-map = "0.4.2"
@@ -56,9 +56,9 @@ pin-project = "1.1.5"
 rand = "0.8.5"
 rayon = "1.10.0"
 regex = "1.10.4"
-serde = { version = "1.0.201", features = ["serde_derive"] }
+serde = { version = "1.0.202", features = ["serde_derive"] }
 tempfile = "3.10.1"
-thiserror = "1.0.60"
+thiserror = "1.0.61"
 
 futures = "0.3.30"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
@@ -91,7 +91,7 @@ proptest-derive = "0.4.0"
 
 static_assertions = "1.1.0"
 tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
-toml = "0.8.11"
+toml = "0.8.13"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
