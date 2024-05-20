@@ -14,9 +14,12 @@ use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Span;
 
-use zebra_chain::parameters::{
-    testnet::{self, ConfiguredActivationHeights},
-    Magic, Network, NetworkKind,
+use zebra_chain::{
+    parameters::{
+        testnet::{self, ConfiguredActivationHeights},
+        Magic, Network, NetworkKind,
+    },
+    work::difficulty::U256,
 };
 
 use crate::{
@@ -235,10 +238,8 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
         match &self.network {
             Network::Mainnet => self.initial_mainnet_peers.clone(),
-            Network::Testnet(params) if params.is_default_testnet() => {
-                self.initial_testnet_peers.clone()
-            }
-            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_default_testnet()` (#8361)
+            Network::Testnet(params) if !params.is_regtest() => self.initial_testnet_peers.clone(),
+            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_regtest()` (#8361)
             Network::Testnet(_params) => IndexSet::new(),
         }
     }
@@ -250,6 +251,11 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
+        // Return early if network is regtest in case there are somehow any entries in the peer cache
+        if self.network.is_regtest() {
+            return HashSet::new();
+        }
+
         // TODO: do DNS and disk in parallel if startup speed becomes important
         let dns_peers =
             Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
@@ -636,8 +642,11 @@ impl<'de> Deserialize<'de> for Config {
     {
         #[derive(Deserialize)]
         struct DTestnetParameters {
-            network_magic: Option<[u8; 4]>,
             network_name: Option<String>,
+            network_magic: Option<[u8; 4]>,
+            slow_start_interval: Option<u32>,
+            target_difficulty_limit: Option<String>,
+            disable_pow: Option<bool>,
             activation_heights: Option<ConfiguredActivationHeights>,
         }
 
@@ -720,12 +729,19 @@ impl<'de> Deserialize<'de> for Config {
                 Some(DTestnetParameters {
                     network_name,
                     network_magic,
+                    slow_start_interval,
+                    target_difficulty_limit,
+                    disable_pow,
                     activation_heights,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
-                let should_avoid_default_peers =
-                    network_magic.is_some() || activation_heights.is_some();
+                // TODO: allow default peers when fields match default testnet values?
+                let should_avoid_default_peers = network_magic.is_some()
+                    || slow_start_interval.is_some()
+                    || target_difficulty_limit.is_some()
+                    || disable_pow == Some(true)
+                    || activation_heights.is_some();
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
                 // peers while activation heights or a custom network magic is configured.
@@ -743,6 +759,24 @@ impl<'de> Deserialize<'de> for Config {
 
                 if let Some(network_magic) = network_magic {
                     params_builder = params_builder.with_network_magic(Magic(network_magic));
+                }
+
+                if let Some(slow_start_interval) = slow_start_interval {
+                    params_builder = params_builder.with_slow_start_interval(
+                        slow_start_interval.try_into().map_err(de::Error::custom)?,
+                    );
+                }
+
+                if let Some(target_difficulty_limit) = target_difficulty_limit {
+                    params_builder = params_builder.with_target_difficulty_limit(
+                        target_difficulty_limit
+                            .parse::<U256>()
+                            .map_err(de::Error::custom)?,
+                    );
+                }
+
+                if let Some(disable_pow) = disable_pow {
+                    params_builder = params_builder.with_disable_pow(disable_pow);
                 }
 
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.

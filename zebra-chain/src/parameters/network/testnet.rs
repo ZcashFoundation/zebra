@@ -284,8 +284,12 @@ impl ParametersBuilder {
 
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
-    pub fn with_target_difficulty_limit(mut self, target_difficulty_limit: U256) -> Self {
-        self.target_difficulty_limit = ExpandedDifficulty::from(target_difficulty_limit)
+    pub fn with_target_difficulty_limit(
+        mut self,
+        target_difficulty_limit: impl Into<ExpandedDifficulty>,
+    ) -> Self {
+        self.target_difficulty_limit = target_difficulty_limit
+            .into()
             .to_compact()
             .to_expanded()
             .expect("difficulty limits are valid expanded values");
