@@ -873,11 +873,7 @@ where
         self.latest_chain_tip
             .best_tip_hash()
             .map(GetBlockHash)
-            .ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "No blocks in state".to_string(),
-                data: None,
-            })
+            .ok_or_server_error("No blocks in state")
     }
 
     // TODO: use a generic error constructor (#5548)
