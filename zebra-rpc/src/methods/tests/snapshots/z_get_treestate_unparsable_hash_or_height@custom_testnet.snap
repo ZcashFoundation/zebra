@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: treestate
+---
+{
+  "Err": {
+    "code": 0,
+    "message": "parse error: could not convert the input string to a hash or height"
+  }
+}

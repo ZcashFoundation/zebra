@@ -1,6 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-expression: tree_state
+expression: treestate
 ---
 {
   "Err": {

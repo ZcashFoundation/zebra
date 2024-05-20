@@ -6,7 +6,7 @@ use quote::ToTokens;
 use serde::Serialize;
 use syn::LitStr;
 
-use zebra_rpc::methods::*;
+use zebra_rpc::methods::{trees::GetTreestate, *};
 
 // The API server
 const SERVER: &str = "http://localhost:8232";
