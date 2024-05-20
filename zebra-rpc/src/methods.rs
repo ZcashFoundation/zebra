@@ -1041,8 +1041,7 @@ where
             // For consistency, this lookup must be performed first, then all the other lookups must
             // be based on the hash.
             //
-            // TODO: If this RPC is called a lot, just get the block header, rather than the whole
-            // block.
+            // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
             let block = match state
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
@@ -1066,7 +1065,7 @@ where
 
             let height = hash_or_height
                 .height_or_else(|_| block.coinbase_height())
-                .expect("block height");
+                .expect("verified blocks have a coinbase height");
 
             let time = u32::try_from(block.header.time.timestamp())
                 .expect("Timestamps of valid blocks always fit into u32.");
