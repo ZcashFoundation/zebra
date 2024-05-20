@@ -18,7 +18,7 @@ use zcash_primitives::consensus::{BlockHeight, BranchId};
 use zcash_primitives::transaction::Transaction;
 use zcash_primitives::zip32::AccountId;
 
-use zebra_scan::scan::sapling_key_to_scan_block_keys;
+use zebra_scan::scan::scanning_key;
 use zebra_scan::{storage::Storage, Config};
 
 /// Prints the memos of transactions from Zebra's scanning results storage.
@@ -47,7 +47,7 @@ pub fn main() {
     let mut prev_memo = "".to_owned();
 
     for (key, _) in storage.sapling_keys_last_heights().iter() {
-        let dfvk = sapling_key_to_scan_block_keys(key, &network)
+        let dfvk = scanning_key(key, &network)
             .expect("Scanning key from the storage should be valid")
             .0
             .into_iter()

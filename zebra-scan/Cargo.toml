@@ -53,6 +53,8 @@ futures = "0.3.30"
 
 zcash_client_backend = "0.12.0"
 zcash_primitives = "0.13.0"
+sapling-crypto = "0.1.0"
+zcash_address = "0.3.0"
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["shielded-scan"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37", features = ["shielded-scan"] }
