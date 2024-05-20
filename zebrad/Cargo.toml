@@ -178,8 +178,8 @@ humantime-serde = "1.1.1"
 indexmap = "2.2.6"
 lazy_static = "1.4.0"
 semver = "1.0.23"
-serde = { version = "1.0.201", features = ["serde_derive"] }
-toml = "0.8.11"
+serde = { version = "1.0.202", features = ["serde_derive"] }
+toml = "0.8.13"
 
 futures = "0.3.30"
 rayon = "1.10.0"
@@ -193,7 +193,7 @@ color-eyre = { version = "0.6.3", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.60"
+thiserror = "1.0.61"
 
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tracing-appender = "0.2.3"
@@ -258,7 +258,7 @@ hex-literal = "0.4.1"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
 regex = "1.10.4"
-insta = { version = "1.38.0", features = ["json"] }
+insta = { version = "1.39.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.117", features = ["preserve_order"] }
@@ -271,7 +271,7 @@ tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.15"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.12.4"
+prost = "0.12.6"
 tonic = "0.11.0"
 
 proptest = "1.4.0"
