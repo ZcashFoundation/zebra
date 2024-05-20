@@ -33,7 +33,7 @@ use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, Transactio
 
 use crate::{
     constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
-    methods::trees::{GetSubtrees, SubtreeRpcData},
+    methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
     queue::Queue,
 };
 
@@ -49,8 +49,6 @@ pub mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
-
-use self::trees::GetTreestate;
 
 #[cfg(test)]
 mod tests;
