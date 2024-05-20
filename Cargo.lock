@@ -6191,7 +6191,7 @@ dependencies = [
  "tower",
  "tracing",
  "zcash_address",
- "zcash_primitives 0.13.0",
+ "zcash_primitives 0.14.0",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
