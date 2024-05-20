@@ -217,7 +217,7 @@ impl ToHex for Node {
     }
 }
 
-/// Required to serialize [`NoteCommitmentTree`]s in a format compatible with `zcashd`.
+/// Required to serialize [`NoteCommitmentTree`]s in a format matching `zcashd`.
 ///
 /// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
 /// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
@@ -615,7 +615,7 @@ impl NoteCommitmentTree {
         assert_eq!(self.to_rpc_bytes(), other.to_rpc_bytes());
     }
 
-    /// Serializes [`Self`] to a format compatible with `zcashd`'s RPCs.
+    /// Serializes [`Self`] to a format matching `zcashd`'s RPCs.
     pub fn to_rpc_bytes(&self) -> Vec<u8> {
         // Convert the tree from [`Frontier`](bridgetree::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
