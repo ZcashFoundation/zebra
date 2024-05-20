@@ -656,7 +656,6 @@ where
     // TODO:
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
-    // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
     fn get_block(
         &self,
         hash_or_height: String,
